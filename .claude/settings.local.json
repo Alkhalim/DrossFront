@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"D:/Dokumente/Gamedesign/DrossFront/DrossFront/\" log --oneline -5)"
+    ]
+  }
+}
