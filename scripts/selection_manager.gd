@@ -24,8 +24,12 @@ var _build_ghost: MeshInstance3D = null
 var _selected_building: Building = null
 
 
+var _audio: AudioManager = null
+
+
 func _ready() -> void:
 	_camera = get_viewport().get_camera_3d()
+	_audio = get_tree().current_scene.get_node_or_null("AudioManager") as AudioManager
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -50,7 +54,10 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 			_is_dragging = false
 
 	elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-		_command_move(event.position)
+		if _selected_building:
+			_set_rally_point(event.position)
+		else:
+			_command_move(event.position)
 		get_viewport().set_input_as_handled()
 
 
@@ -178,6 +185,8 @@ func _finish_box_select(event: InputEventMouseButton) -> void:
 func _command_move(screen_pos: Vector2) -> void:
 	if _selected_units.is_empty():
 		return
+	if _audio:
+		_audio.play_command()
 
 	var ground_pos := _raycast_ground(screen_pos)
 	if ground_pos == Vector3.INF:
@@ -212,6 +221,8 @@ func _add_to_selection(unit: Unit) -> void:
 		return
 	_selected_units.append(unit)
 	unit.select()
+	if _audio:
+		_audio.play_select()
 
 
 func _remove_from_selection(unit: Unit) -> void:
@@ -318,16 +329,68 @@ func _select_building(building: Building) -> void:
 		_selected_building.deselect_building()
 	_selected_building = building
 	_selected_building.select_building()
+	if _audio:
+		_audio.play_select()
+
+	# Show existing rally point if set
+	if building.rally_point != Vector3.ZERO:
+		if not _rally_marker:
+			_set_rally_point_visual(building.rally_point)
+		else:
+			_rally_marker.visible = true
+			_rally_marker.global_position = building.rally_point + Vector3(0, 0.75, 0)
 
 
 func _deselect_building() -> void:
 	if _selected_building:
 		_selected_building.deselect_building()
 	_selected_building = null
+	_hide_rally_marker()
+
+
+func _set_rally_point_visual(pos: Vector3) -> void:
+	if not _rally_marker:
+		_rally_marker = MeshInstance3D.new()
+		var cyl := CylinderMesh.new()
+		cyl.top_radius = 0.3
+		cyl.bottom_radius = 0.6
+		cyl.height = 1.5
+		_rally_marker.mesh = cyl
+
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(0.2, 0.8, 0.2, 0.8)
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.emission_enabled = true
+		mat.emission = Color(0.2, 0.8, 0.2, 1.0)
+		mat.emission_energy_multiplier = 1.5
+		_rally_marker.set_surface_override_material(0, mat)
+
+		get_tree().current_scene.add_child(_rally_marker)
+
+	_rally_marker.visible = true
+	_rally_marker.global_position = pos + Vector3(0, 0.75, 0)
 
 
 func get_selected_building() -> Building:
 	return _selected_building
+
+
+## --- Rally Point ---
+
+var _rally_marker: MeshInstance3D = null
+
+
+func _set_rally_point(screen_pos: Vector2) -> void:
+	var ground_pos := _raycast_ground(screen_pos)
+	if ground_pos == Vector3.INF:
+		return
+	_selected_building.rally_point = ground_pos
+	_set_rally_point_visual(ground_pos)
+
+
+func _hide_rally_marker() -> void:
+	if _rally_marker:
+		_rally_marker.visible = false
 
 
 ## Queue a unit at the selected building. Index maps to producible_units array.
@@ -350,6 +413,8 @@ func queue_unit_at_building(index: int) -> void:
 	resource_mgr.spend(unit_stats.cost_salvage, unit_stats.cost_fuel)
 	resource_mgr.add_population(unit_stats.population)
 	_selected_building.queue_unit(unit_stats)
+	if _audio:
+		_audio.play_production_started()
 
 
 ## --- Build Placement Mode ---
@@ -431,6 +496,8 @@ func _confirm_build_placement(screen_pos: Vector2) -> void:
 	var building: Building = builder.place_building(_build_stats, ground_pos, resource_mgr)
 
 	if building:
+		if _audio:
+			_audio.play_building_placed()
 		cancel_build_placement()
 	else:
 		# Not enough resources — keep placement mode active

@@ -79,6 +79,9 @@ func _finish_construction() -> void:
 	_construction_progress = stats.build_time
 	construction_complete.emit()
 	_apply_placeholder_shape()
+	var audio: AudioManager = get_tree().current_scene.get_node_or_null("AudioManager") as AudioManager
+	if audio:
+		audio.play_construction_complete()
 
 
 func get_power_efficiency() -> float:
@@ -129,6 +132,9 @@ func _spawn_unit(unit_stats: UnitStatResource) -> void:
 	unit.global_position = spawn_pos
 	unit.command_move(rally_point)
 	unit_produced.emit(unit_scene, spawn_pos)
+	var audio: AudioManager = get_tree().current_scene.get_node_or_null("AudioManager") as AudioManager
+	if audio:
+		audio.play_production_complete()
 
 
 func get_queue_size() -> int:

@@ -6,8 +6,9 @@ var _resource_manager: ResourceManager = null
 var _selection_manager: SelectionManager = null
 
 ## Track what we're showing to avoid rebuilding buttons every frame.
-var _last_selected_building: Building = null
-var _last_selected_unit_count: int = -1
+var _last_building_id: int = -1
+var _last_unit_ids: Array[int] = []
+var _showing_build_buttons: bool = false
 
 @onready var _salvage_label: Label = $TopBar/SalvageLabel as Label
 @onready var _fuel_label: Label = $TopBar/FuelLabel as Label
@@ -57,35 +58,40 @@ func _update_selection_display() -> void:
 		return
 
 	var building: Building = _selection_manager.get_selected_building()
-	var unit_count: int = _selection_manager.get_selected_units().size()
+	var units: Array[Unit] = _selection_manager.get_selected_units()
 
 	if building and building.stats:
-		_show_building_panel(building)
-	elif unit_count > 0:
-		_show_unit_panel()
+		_bottom_panel.visible = true
+		_update_building_panel(building)
+	elif not units.is_empty():
+		_bottom_panel.visible = true
+		_update_unit_panel(units)
 	else:
 		_bottom_panel.visible = false
-		_last_selected_building = null
-		_last_selected_unit_count = -1
+		_last_building_id = -1
+		_last_unit_ids.clear()
+		_showing_build_buttons = false
 
 
-func _show_building_panel(building: Building) -> void:
-	_bottom_panel.visible = true
+func _update_building_panel(building: Building) -> void:
+	var bid: int = building.get_instance_id()
 
-	# Rebuild buttons only when selection changes
-	if building != _last_selected_building:
-		_last_selected_building = building
-		_last_selected_unit_count = -1
-		_rebuild_building_buttons(building)
+	# Only rebuild buttons when selection changes
+	if bid != _last_building_id:
+		_last_building_id = bid
+		_last_unit_ids.clear()
+		_showing_build_buttons = false
+		_rebuild_production_buttons(building)
 
-	# Update dynamic info every frame
+	# Update dynamic text every frame
 	_name_label.text = building.stats.building_name
-	_stats_label.text = "HP: %d / %d" % [building.current_hp, building.stats.hp]
 
+	var stats_text: String = "HP: %d / %d" % [building.current_hp, building.stats.hp]
 	if building.stats.power_production > 0:
-		_stats_label.text += "  |  Power: +%d" % building.stats.power_production
+		stats_text += "  |  Power: +%d" % building.stats.power_production
 	elif building.stats.power_consumption > 0:
-		_stats_label.text += "  |  Power: -%d" % building.stats.power_consumption
+		stats_text += "  |  Power: -%d" % building.stats.power_consumption
+	_stats_label.text = stats_text
 
 	if building.get_queue_size() > 0:
 		_queue_label.text = "Queue: %d  |  Progress: %d%%" % [
@@ -96,13 +102,11 @@ func _show_building_panel(building: Building) -> void:
 		_queue_label.text = ""
 
 
-func _rebuild_building_buttons(building: Building) -> void:
-	# Clear old buttons
-	for child: Node in _button_grid.get_children():
-		child.queue_free()
+func _rebuild_production_buttons(building: Building) -> void:
+	_clear_buttons()
 
 	if building.stats.producible_units.is_empty():
-		_action_label.text = ""
+		_action_label.text = "No production"
 		return
 
 	_action_label.text = "Train Units:"
@@ -114,11 +118,9 @@ func _rebuild_building_buttons(building: Building) -> void:
 
 		var btn := Button.new()
 		btn.custom_minimum_size = Vector2(75, 36)
-
 		var cost_text: String = "%dS" % unit_stat.cost_salvage
 		if unit_stat.cost_fuel > 0:
 			cost_text += " %dF" % unit_stat.cost_fuel
-
 		btn.text = "[%s] %s\n%s" % [hotkey, unit_stat.unit_name, cost_text]
 		btn.pressed.connect(_on_production_button.bind(i))
 		_button_grid.add_child(btn)
@@ -129,18 +131,40 @@ func _on_production_button(index: int) -> void:
 		_selection_manager.queue_unit_at_building(index)
 
 
-func _show_unit_panel() -> void:
-	_bottom_panel.visible = true
-	_last_selected_building = null
+func _update_unit_panel(units: Array[Unit]) -> void:
+	# Check if selection actually changed
+	var current_ids: Array[int] = []
+	for unit: Unit in units:
+		current_ids.append(unit.get_instance_id())
 
-	var units: Array[Unit] = _selection_manager.get_selected_units()
+	var selection_changed: bool = current_ids.size() != _last_unit_ids.size()
+	if not selection_changed:
+		for i: int in current_ids.size():
+			if current_ids[i] != _last_unit_ids[i]:
+				selection_changed = true
+				break
 
-	if units.size() != _last_selected_unit_count:
-		_last_selected_unit_count = units.size()
-		# Clear production buttons
-		for child: Node in _button_grid.get_children():
-			child.queue_free()
+	if selection_changed:
+		_last_unit_ids = current_ids
+		_last_building_id = -1
+		_showing_build_buttons = false
 
+		# Check if any selected unit is an engineer
+		var has_builder: bool = false
+		for unit: Unit in units:
+			if unit.get_builder():
+				has_builder = true
+				break
+
+		if has_builder and not _showing_build_buttons:
+			_showing_build_buttons = true
+			_rebuild_build_buttons()
+		elif not has_builder:
+			_showing_build_buttons = false
+			_clear_buttons()
+			_action_label.text = ""
+
+	# Update text every frame
 	_queue_label.text = ""
 
 	if units.size() == 1:
@@ -148,19 +172,15 @@ func _show_unit_panel() -> void:
 		if unit.stats:
 			_name_label.text = unit.stats.unit_name
 			_stats_label.text = "%s  |  Speed: %s  |  Armor: %s" % [
-				unit.stats.unit_class,
-				unit.stats.speed_tier,
-				unit.stats.armor_class
+				str(unit.stats.unit_class),
+				str(unit.stats.speed_tier),
+				str(unit.stats.armor_class)
 			]
 			if unit.get_builder():
 				_action_label.text = "Build: [1-6] Place structure"
-				_rebuild_build_buttons()
-			else:
-				_action_label.text = ""
 		else:
 			_name_label.text = "Unit"
 			_stats_label.text = ""
-			_action_label.text = ""
 	else:
 		var counts: Dictionary = {}
 		for unit: Unit in units:
@@ -176,26 +196,13 @@ func _show_unit_panel() -> void:
 		_name_label.text = "%d units selected" % units.size()
 		_stats_label.text = ", ".join(parts)
 
-		# Check if any selected unit is an engineer
-		var has_builder: bool = false
-		for unit: Unit in units:
-			if unit.get_builder():
-				has_builder = true
-				break
-		if has_builder:
-			_action_label.text = "Build: [1-6] Place structure"
-			_rebuild_build_buttons()
-		else:
-			_action_label.text = ""
-
 
 func _rebuild_build_buttons() -> void:
-	for child: Node in _button_grid.get_children():
-		child.queue_free()
-
+	_clear_buttons()
 	if not _selection_manager:
 		return
 
+	_action_label.text = "Build:"
 	var buildable: Array[BuildingStatResource] = _selection_manager.get_buildable_stats()
 	for i: int in buildable.size():
 		var bstat: BuildingStatResource = buildable[i]
@@ -207,5 +214,13 @@ func _rebuild_build_buttons() -> void:
 
 
 func _on_build_button(index: int) -> void:
-	if _selection_manager and index < _selection_manager.get_buildable_stats().size():
-		_selection_manager.start_build_placement(_selection_manager.get_buildable_stats()[index])
+	if not _selection_manager:
+		return
+	var buildable: Array[BuildingStatResource] = _selection_manager.get_buildable_stats()
+	if index < buildable.size():
+		_selection_manager.start_build_placement(buildable[index])
+
+
+func _clear_buttons() -> void:
+	for child: Node in _button_grid.get_children():
+		child.queue_free()

@@ -1,4 +1,4 @@
-[gd_scene load_steps=19 format=3]
+[gd_scene load_steps=20 format=3]
 
 [ext_resource type="Script" path="res://scripts/rts_camera.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/unit.tscn" id="2"]
@@ -14,6 +14,7 @@
 [ext_resource type="Script" path="res://scripts/test_arena_controller.gd" id="12"]
 [ext_resource type="PackedScene" path="res://ui/hud.tscn" id="13"]
 [ext_resource type="Script" path="res://scripts/wreck_spawner.gd" id="14"]
+[ext_resource type="Script" path="res://scripts/audio_manager.gd" id="15"]
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
 size = Vector2(200, 200)
@@ -100,6 +101,9 @@ stats = ExtResource("11")
 
 [node name="WreckSpawner" type="Node" parent="."]
 script = ExtResource("14")
+
+[node name="AudioManager" type="Node" parent="."]
+script = ExtResource("15")
 
 [node name="SelectionManager" type="Node" parent="."]
 script = ExtResource("7")
