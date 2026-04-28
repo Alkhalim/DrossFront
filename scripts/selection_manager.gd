@@ -419,6 +419,8 @@ func get_buildable_stats() -> Array[BuildingStatResource]:
 
 
 func _add_to_selection(unit: Unit) -> void:
+	if not is_instance_valid(unit) or unit.owner_id != 0:
+		return
 	if unit in _selected_units:
 		return
 	_selected_units.append(unit)
@@ -429,12 +431,14 @@ func _add_to_selection(unit: Unit) -> void:
 
 func _remove_from_selection(unit: Unit) -> void:
 	_selected_units.erase(unit)
-	unit.deselect()
+	if is_instance_valid(unit):
+		unit.deselect()
 
 
 func _clear_selection() -> void:
 	for unit: Unit in _selected_units:
-		unit.deselect()
+		if is_instance_valid(unit):
+			unit.deselect()
 	_selected_units.clear()
 
 
