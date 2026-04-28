@@ -36,6 +36,12 @@ func _ready() -> void:
 		rally_point = global_position + Vector3(0, 0, stats.footprint_size.z + 2.0)
 		_apply_placeholder_shape()
 
+		# Add specialized components based on building type
+		if stats.building_id == &"salvage_yard":
+			var yard := SalvageYardComponent.new()
+			yard.name = "SalvageYardComponent"
+			add_child(yard)
+
 
 func _apply_placeholder_shape() -> void:
 	if not stats:

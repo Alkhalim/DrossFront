@@ -59,16 +59,7 @@ func place_building(building_stats: BuildingStatResource, position: Vector3, res
 	resource_mgr.spend(building_stats.cost_salvage, 0)
 
 	var building_scene: PackedScene = load("res://scenes/building.tscn") as PackedScene
-	var building: Building
-
-	if building_stats.building_id == &"salvage_yard":
-		# Instantiate base scene then replace script for specialized behavior
-		var node: Node = building_scene.instantiate()
-		node.set_script(load("res://scripts/salvage_yard_building.gd"))
-		building = node as Building
-	else:
-		building = building_scene.instantiate() as Building
-
+	var building: Building = building_scene.instantiate() as Building
 	building.stats = building_stats
 	building.resource_manager = resource_mgr
 	building.global_position = position

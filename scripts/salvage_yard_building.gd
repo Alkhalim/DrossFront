@@ -1,21 +1,21 @@
-class_name SalvageYardBuilding
-extends Building
-## Salvage Yard extension. Spawns autonomous workers that harvest wrecks.
+class_name SalvageYardComponent
+extends Node
+## Attaches to a Building node. Spawns autonomous workers that harvest wrecks.
 
-## Seconds between worker spawns.
 const WORKER_SPAWN_INTERVAL: float = 15.0
-
-## Maximum workers this yard supports.
 const MAX_WORKERS: int = 3
 
 var _spawn_timer: float = 0.0
 var _workers: Array[SalvageWorker] = []
+var _building: Building = null
+
+
+func _ready() -> void:
+	_building = get_parent() as Building
 
 
 func _process(delta: float) -> void:
-	super._process(delta)
-
-	if not is_constructed:
+	if not _building or not _building.is_constructed:
 		return
 
 	# Clean up dead worker references
@@ -28,7 +28,7 @@ func _process(delta: float) -> void:
 	if _workers.size() >= MAX_WORKERS:
 		return
 
-	var efficiency: float = get_power_efficiency()
+	var efficiency: float = _building.get_power_efficiency()
 	_spawn_timer += delta * efficiency
 
 	if _spawn_timer >= WORKER_SPAWN_INTERVAL:
@@ -38,11 +38,11 @@ func _process(delta: float) -> void:
 
 func _spawn_worker() -> void:
 	var worker := SalvageWorker.new()
-	worker.home_yard = self
-	worker.resource_manager = resource_manager
+	worker.home_yard = _building
+	worker.resource_manager = _building.resource_manager
 
 	var spawn_offset := Vector3(randf_range(-2.0, 2.0), 0, randf_range(-2.0, 2.0))
-	worker.global_position = global_position + spawn_offset
+	worker.global_position = _building.global_position + spawn_offset
 
 	get_tree().current_scene.add_child(worker)
 	_workers.append(worker)
