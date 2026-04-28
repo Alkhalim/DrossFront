@@ -91,7 +91,7 @@ func get_power_efficiency() -> float:
 func queue_unit(unit_stats: UnitStatResource) -> bool:
 	if not is_constructed:
 		return false
-	if not unit_stats in stats.producible_units:
+	if not (unit_stats in stats.producible_units):
 		return false
 	_build_queue.append(unit_stats)
 	return true
@@ -118,7 +118,11 @@ func _spawn_unit(unit_stats: UnitStatResource) -> void:
 	var unit: Unit = unit_scene.instantiate() as Unit
 	unit.stats = unit_stats
 
-	var spawn_pos: Vector3 = _spawn_marker.global_position if _spawn_marker else global_position
+	var spawn_pos: Vector3
+	if _spawn_marker:
+		spawn_pos = _spawn_marker.global_position
+	else:
+		spawn_pos = global_position
 	spawn_pos += Vector3(randf_range(-1.0, 1.0), 0, randf_range(-1.0, 1.0))
 
 	get_tree().current_scene.get_node("Units").add_child(unit)

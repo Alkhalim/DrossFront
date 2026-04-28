@@ -57,7 +57,7 @@ func _update_selection_display() -> void:
 		return
 
 	var building: Building = _selection_manager.get_selected_building()
-	var unit_count: int = _selection_manager._selected_units.size()
+	var unit_count: int = _selection_manager.get_selected_units().size()
 
 	if building and building.stats:
 		_show_building_panel(building)
@@ -133,7 +133,7 @@ func _show_unit_panel() -> void:
 	_bottom_panel.visible = true
 	_last_selected_building = null
 
-	var units: Array[Unit] = _selection_manager._selected_units
+	var units: Array[Unit] = _selection_manager.get_selected_units()
 
 	if units.size() != _last_selected_unit_count:
 		_last_selected_unit_count = units.size()
@@ -196,7 +196,7 @@ func _rebuild_build_buttons() -> void:
 	if not _selection_manager:
 		return
 
-	var buildable: Array[BuildingStatResource] = _selection_manager._buildable_stats
+	var buildable: Array[BuildingStatResource] = _selection_manager.get_buildable_stats()
 	for i: int in buildable.size():
 		var bstat: BuildingStatResource = buildable[i]
 		var btn := Button.new()
@@ -207,5 +207,5 @@ func _rebuild_build_buttons() -> void:
 
 
 func _on_build_button(index: int) -> void:
-	if _selection_manager and index < _selection_manager._buildable_stats.size():
-		_selection_manager.start_build_placement(_selection_manager._buildable_stats[index])
+	if _selection_manager and index < _selection_manager.get_buildable_stats().size():
+		_selection_manager.start_build_placement(_selection_manager.get_buildable_stats()[index])

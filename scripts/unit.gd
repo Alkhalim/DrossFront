@@ -59,6 +59,10 @@ func stop() -> void:
 	velocity = Vector3.ZERO
 
 
+var _stuck_timer: float = 0.0
+var _last_position: Vector3 = Vector3.ZERO
+
+
 func _physics_process(delta: float) -> void:
 	if move_target == Vector3.INF:
 		return
@@ -69,18 +73,34 @@ func _physics_process(delta: float) -> void:
 
 	if distance < ARRIVE_THRESHOLD:
 		stop()
+		_stuck_timer = 0.0
 		arrived.emit()
 		return
 
 	var direction := to_target / distance
 	velocity = direction * _move_speed
 
-	# Face movement direction
-	if direction.length_squared() > 0.001:
-		var look_target := global_position + direction
-		look_at(look_target, Vector3.UP)
-
 	move_and_slide()
+
+	# Detect if stuck against a wall — if barely moved, steer around
+	var moved := global_position.distance_to(_last_position)
+	if moved < _move_speed * delta * 0.1 and distance > ARRIVE_THRESHOLD * 2.0:
+		_stuck_timer += delta
+		if _stuck_timer > 0.15:
+			# Steer perpendicular to try to go around the obstacle
+			var perp := Vector3(-direction.z, 0, direction.x)
+			velocity = perp * _move_speed
+			move_and_slide()
+	else:
+		_stuck_timer = 0.0
+
+	_last_position = global_position
+
+	# Face movement direction
+	var face_dir := velocity.normalized()
+	face_dir.y = 0.0
+	if face_dir.length_squared() > 0.001:
+		look_at(global_position + face_dir, Vector3.UP)
 
 
 func select() -> void:
@@ -120,7 +140,7 @@ func _apply_placeholder_shape() -> void:
 		cyl.bottom_radius = radius
 		cyl.height = height
 		mesh_node.mesh = cyl
-		mesh_node.surface_material_override[0] = mat
+		mesh_node.set_surface_override_material(0, mat)
 		mesh_node.position.y = height / 2.0
 
 		var col_shape := CylinderShape3D.new()
@@ -138,7 +158,7 @@ func _apply_placeholder_shape() -> void:
 		var box := BoxMesh.new()
 		box.size = box_size
 		mesh_node.mesh = box
-		mesh_node.surface_material_override[0] = mat
+		mesh_node.set_surface_override_material(0, mat)
 		mesh_node.position.y = box_size.y / 2.0
 
 		var col_shape := BoxShape3D.new()

@@ -132,7 +132,7 @@ func _click_select(event: InputEventMouseButton) -> void:
 	else:
 		# Try selecting a building
 		var building := _find_building_at(event.position)
-		if building and building.is_constructed:
+		if building:
 			if not shift:
 				_clear_selection()
 			_select_building(building)
@@ -199,6 +199,14 @@ func _command_move(screen_pos: Vector2) -> void:
 		_selected_units[i].command_move(ground_pos + offset)
 
 
+func get_selected_units() -> Array[Unit]:
+	return _selected_units
+
+
+func get_buildable_stats() -> Array[BuildingStatResource]:
+	return _buildable_stats
+
+
 func _add_to_selection(unit: Unit) -> void:
 	if unit in _selected_units:
 		return
@@ -256,50 +264,53 @@ func _raycast_ground(screen_pos: Vector2) -> Vector3:
 ## --- Building Selection ---
 
 func _find_building_at(screen_pos: Vector2) -> Building:
-	## Project each building's footprint corners to screen space and check if
-	## the click falls within. No raycasts — pure screen-space math.
+	## Find a building under the click by checking screen-space distance.
+	## Uses the same unproject_position method proven to work for unit selection.
 	var nearest: Building = null
 	var nearest_dist: float = INF
 
+	# Try typed group first, fall back to checking all StaticBody3D children
 	var buildings: Array[Node] = get_tree().get_nodes_in_group("buildings")
+
+	# Fallback: if no nodes in group, scan scene children directly
+	if buildings.is_empty():
+		var scene: Node = get_tree().current_scene
+		for child: Node in scene.get_children():
+			if child.has_method("get_queue_size"):
+				buildings.append(child)
+
 	for node: Node in buildings:
-		var building: Building = node as Building
-		if not building or not building.stats:
+		# Accept any node that has the building interface
+		if not node.has_method("get_queue_size"):
+			continue
+		if not ("stats" in node) or node.get("stats") == null:
 			continue
 
-		if _is_screen_pos_in_building(screen_pos, building):
-			var screen_center := _camera.unproject_position(building.global_position)
-			var dist: float = screen_pos.distance_to(screen_center)
-			if dist < nearest_dist:
-				nearest_dist = dist
-				nearest = building
+		var bstats: BuildingStatResource = node.get("stats") as BuildingStatResource
+		if not bstats:
+			continue
+
+		# Project building center to screen space
+		var screen_center: Vector2 = _camera.unproject_position(node.global_position)
+
+		# Compute pixel-space radius from the building's footprint
+		var half_size: float = maxf(bstats.footprint_size.x, bstats.footprint_size.z) * 0.5
+		var screen_edge: Vector2 = _camera.unproject_position(
+			node.global_position + Vector3(half_size, 0, 0)
+		)
+		var pixel_radius: float = absf(screen_edge.x - screen_center.x) * 1.2
+
+		var dist: float = screen_pos.distance_to(screen_center)
+		if dist <= pixel_radius and dist < nearest_dist:
+			nearest_dist = dist
+			nearest = node as Building
+			# If typed cast fails, try duck-typing approach
+			if not nearest:
+				# Node has building interface but isn't typed as Building
+				# This means building.gd failed to load — flag it
+				print_debug("Building script not loaded on node: ", node.name)
 
 	return nearest
-
-
-func _is_screen_pos_in_building(screen_pos: Vector2, building: Building) -> bool:
-	## Check if a screen position falls within a building's projected footprint.
-	var half_x: float = building.stats.footprint_size.x * 0.5
-	var half_z: float = building.stats.footprint_size.z * 0.5
-	var bpos: Vector3 = building.global_position
-
-	# Project the four ground-level corners of the footprint to screen space
-	var corners: Array[Vector2] = [
-		_camera.unproject_position(bpos + Vector3(-half_x, 0, -half_z)),
-		_camera.unproject_position(bpos + Vector3(half_x, 0, -half_z)),
-		_camera.unproject_position(bpos + Vector3(half_x, 0, half_z)),
-		_camera.unproject_position(bpos + Vector3(-half_x, 0, half_z)),
-	]
-
-	# Build a screen-space bounding rect from the corners
-	var min_pt: Vector2 = corners[0]
-	var max_pt: Vector2 = corners[0]
-	for i: int in range(1, 4):
-		min_pt = Vector2(minf(min_pt.x, corners[i].x), minf(min_pt.y, corners[i].y))
-		max_pt = Vector2(maxf(max_pt.x, corners[i].x), maxf(max_pt.y, corners[i].y))
-
-	var screen_rect := Rect2(min_pt, max_pt - min_pt)
-	return screen_rect.has_point(screen_pos)
 
 
 func _select_building(building: Building) -> void:
