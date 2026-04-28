@@ -52,7 +52,7 @@ func _apply_placeholder_shape() -> void:
 	if not is_constructed:
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		mat.albedo_color.a = 0.5
-	_mesh.surface_material_override[0] = mat
+	_mesh.set_surface_override_material(0, mat)
 
 	var col_shape := BoxShape3D.new()
 	col_shape.size = stats.footprint_size
@@ -136,6 +136,41 @@ func get_build_progress_percent() -> float:
 		return 0.0
 	var current_unit: UnitStatResource = _build_queue[0]
 	return _build_progress / current_unit.build_time
+
+
+var _is_selected: bool = false
+
+
+func select_building() -> void:
+	if _is_selected:
+		return
+	_is_selected = true
+	_update_selection_visual()
+
+
+func deselect_building() -> void:
+	if not _is_selected:
+		return
+	_is_selected = false
+	_update_selection_visual()
+
+
+func _update_selection_visual() -> void:
+	if not _mesh or not stats:
+		return
+	var mat := StandardMaterial3D.new()
+	mat.roughness = 0.9
+	if _is_selected:
+		mat.albedo_color = Color(stats.placeholder_color.r + 0.15, stats.placeholder_color.g + 0.2, stats.placeholder_color.b + 0.1)
+		mat.emission_enabled = true
+		mat.emission = Color(0.2, 0.9, 0.2)
+		mat.emission_energy_multiplier = 0.3
+	else:
+		mat.albedo_color = stats.placeholder_color
+		if not is_constructed:
+			mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			mat.albedo_color.a = 0.5
+	_mesh.set_surface_override_material(0, mat)
 
 
 func take_damage(amount: int) -> void:

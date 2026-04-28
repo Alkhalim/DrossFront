@@ -131,7 +131,7 @@ func _click_select(event: InputEventMouseButton) -> void:
 			_add_to_selection(unit)
 	else:
 		# Try selecting a building
-		var building := _raycast_building(event.position)
+		var building := _find_building_at(event.position)
 		if building and building.is_constructed:
 			if not shift:
 				_clear_selection()
@@ -148,8 +148,9 @@ func _finish_box_select(event: InputEventMouseButton) -> void:
 
 	if not event.shift_pressed:
 		_clear_selection()
+		_deselect_building()
 
-	# Check all units against the screen-space rectangle
+	# Check units against the screen-space rectangle
 	var units := get_tree().get_nodes_in_group("units")
 	for node: Node in units:
 		var unit := node as Unit
@@ -158,6 +159,18 @@ func _finish_box_select(event: InputEventMouseButton) -> void:
 		var screen_pos := _camera.unproject_position(unit.global_position)
 		if rect.has_point(screen_pos):
 			_add_to_selection(unit)
+
+	# If no units were selected, check for a building in the box
+	if _selected_units.is_empty():
+		var buildings := get_tree().get_nodes_in_group("buildings")
+		for node: Node in buildings:
+			var building: Building = node as Building
+			if not building or not building.is_constructed:
+				continue
+			var screen_pos := _camera.unproject_position(building.global_position)
+			if rect.has_point(screen_pos):
+				_select_building(building)
+				break
 
 	get_viewport().set_input_as_handled()
 
@@ -242,32 +255,63 @@ func _raycast_ground(screen_pos: Vector2) -> Vector3:
 
 ## --- Building Selection ---
 
-func _raycast_building(screen_pos: Vector2) -> Building:
-	var from := _camera.project_ray_origin(screen_pos)
-	var dir := _camera.project_ray_normal(screen_pos)
+func _find_building_at(screen_pos: Vector2) -> Building:
+	## Project each building's footprint corners to screen space and check if
+	## the click falls within. No raycasts — pure screen-space math.
+	var nearest: Building = null
+	var nearest_dist: float = INF
 
-	var space := get_viewport().world_3d.direct_space_state
-	var query := PhysicsRayQueryParameters3D.create(from, from + dir * 500.0, BUILDING_LAYER)
-	var result := space.intersect_ray(query)
+	var buildings: Array[Node] = get_tree().get_nodes_in_group("buildings")
+	for node: Node in buildings:
+		var building: Building = node as Building
+		if not building or not building.stats:
+			continue
 
-	if result.is_empty():
-		return null
+		if _is_screen_pos_in_building(screen_pos, building):
+			var screen_center := _camera.unproject_position(building.global_position)
+			var dist: float = screen_pos.distance_to(screen_center)
+			if dist < nearest_dist:
+				nearest_dist = dist
+				nearest = building
 
-	var collider: Object = result["collider"]
-	if collider is Building:
-		return collider as Building
-	if collider is Node:
-		var parent: Node = (collider as Node).get_parent()
-		if parent is Building:
-			return parent as Building
-	return null
+	return nearest
+
+
+func _is_screen_pos_in_building(screen_pos: Vector2, building: Building) -> bool:
+	## Check if a screen position falls within a building's projected footprint.
+	var half_x: float = building.stats.footprint_size.x * 0.5
+	var half_z: float = building.stats.footprint_size.z * 0.5
+	var bpos: Vector3 = building.global_position
+
+	# Project the four ground-level corners of the footprint to screen space
+	var corners: Array[Vector2] = [
+		_camera.unproject_position(bpos + Vector3(-half_x, 0, -half_z)),
+		_camera.unproject_position(bpos + Vector3(half_x, 0, -half_z)),
+		_camera.unproject_position(bpos + Vector3(half_x, 0, half_z)),
+		_camera.unproject_position(bpos + Vector3(-half_x, 0, half_z)),
+	]
+
+	# Build a screen-space bounding rect from the corners
+	var min_pt: Vector2 = corners[0]
+	var max_pt: Vector2 = corners[0]
+	for i: int in range(1, 4):
+		min_pt = Vector2(minf(min_pt.x, corners[i].x), minf(min_pt.y, corners[i].y))
+		max_pt = Vector2(maxf(max_pt.x, corners[i].x), maxf(max_pt.y, corners[i].y))
+
+	var screen_rect := Rect2(min_pt, max_pt - min_pt)
+	return screen_rect.has_point(screen_pos)
 
 
 func _select_building(building: Building) -> void:
+	if _selected_building and _selected_building != building:
+		_selected_building.deselect_building()
 	_selected_building = building
+	_selected_building.select_building()
 
 
 func _deselect_building() -> void:
+	if _selected_building:
+		_selected_building.deselect_building()
 	_selected_building = null
 
 
@@ -313,7 +357,7 @@ func start_build_placement(bstat: BuildingStatResource) -> void:
 	var mat := StandardMaterial3D.new()
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.albedo_color = Color(0.2, 0.8, 0.2, 0.3)
-	_build_ghost.surface_material_override[0] = mat
+	_build_ghost.set_surface_override_material(0, mat)
 
 	get_tree().current_scene.add_child(_build_ghost)
 

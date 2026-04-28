@@ -13,6 +13,7 @@ func _ready() -> void:
 	if hq:
 		hq.is_constructed = true
 		hq.resource_manager = resource_manager
+		hq._apply_placeholder_shape()
 
 	# Wire resource manager to all existing buildings
 	var buildings: Array[Node] = get_tree().get_nodes_in_group("buildings")
