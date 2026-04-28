@@ -420,6 +420,10 @@ func queue_unit_at_building(index: int) -> void:
 ## --- Build Placement Mode ---
 
 func start_build_placement(bstat: BuildingStatResource) -> void:
+	# Cancel any existing placement first
+	if _build_mode:
+		cancel_build_placement()
+
 	_build_mode = true
 	_build_stats = bstat
 
@@ -452,12 +456,15 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 		var ground_pos := _raycast_ground(motion.position)
 		if ground_pos != Vector3.INF and _build_ghost:
 			_build_ghost.global_position = Vector3(ground_pos.x, _build_stats.footprint_size.y / 2.0, ground_pos.z)
-		get_viewport().set_input_as_handled()
 
 	elif event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
 		if mb.pressed:
 			if mb.button_index == MOUSE_BUTTON_LEFT:
+				# Don't place if click was over a GUI element
+				var gui_control: Control = get_viewport().gui_get_hovered_control()
+				if gui_control:
+					return
 				_confirm_build_placement(mb.position)
 				get_viewport().set_input_as_handled()
 			elif mb.button_index == MOUSE_BUTTON_RIGHT:
