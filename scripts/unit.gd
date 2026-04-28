@@ -472,3 +472,12 @@ func get_builder() -> Node:
 
 func get_combat() -> Node:
 	return get_node_or_null("CombatComponent")
+
+
+func get_member_positions() -> Array[Vector3]:
+	var positions: Array[Vector3] = []
+	for i: int in _member_meshes.size():
+		var member: Node3D = _member_meshes[i]
+		if is_instance_valid(member) and member.visible:
+			positions.append(member.global_position)
+	return positions

@@ -48,11 +48,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		_handle_mouse_button(event as InputEventMouseButton)
 
 
+var _pending_double_click: bool = false
+
+
 func _handle_mouse_button(event: InputEventMouseButton) -> void:
 	if event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			_drag_start = event.position
 			_is_dragging = false
+			_pending_double_click = event.double_click
 		else:
 			# Mouse released
 			if _is_dragging:
@@ -73,7 +77,12 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 			if enemy:
 				_command_attack(enemy)
 			else:
-				_command_move(event.position)
+				# Check if right-clicking a friendly under-construction building → assist
+				var friendly_building := _find_building_at(event.position)
+				if friendly_building and not friendly_building.is_constructed:
+					_command_assist_build(friendly_building)
+				else:
+					_command_move(event.position)
 		get_viewport().set_input_as_handled()
 
 
@@ -159,7 +168,8 @@ func _handle_build_hotkey(key: InputEventKey) -> void:
 func _click_select(event: InputEventMouseButton) -> void:
 	var unit := _raycast_unit(event.position)
 	var shift := event.shift_pressed
-	var is_double: bool = event.double_click
+	var is_double: bool = _pending_double_click
+	_pending_double_click = false
 
 	# Only select player-owned units
 	if unit and unit.owner_id != 0:
@@ -252,6 +262,15 @@ func _command_move(screen_pos: Vector2) -> void:
 			(row - (cols - 1) / 2.0) * spacing
 		)
 		_selected_units[i].command_move(ground_pos + offset)
+
+
+func _command_assist_build(building: Building) -> void:
+	for unit: Unit in _selected_units:
+		var builder: Node = unit.get_builder()
+		if builder and builder.has_method("start_building"):
+			builder.start_building(building)
+	if _audio:
+		_audio.play_command()
 
 
 func _command_attack(target: Node3D) -> void:

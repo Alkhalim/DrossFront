@@ -41,14 +41,18 @@ func _physics_process(delta: float) -> void:
 	elif _current_target and not _is_valid_target(_current_target):
 		_current_target = null
 
-	# Don't auto-acquire targets while executing a move order
-	if not _current_target and not unit_has_move_order and _search_timer <= 0.0:
+	# Auto-acquire targets: allowed when idle, or during attack-move
+	var can_auto_target: bool = not unit_has_move_order or attack_move_target != Vector3.INF
+	if not _current_target and can_auto_target and _search_timer <= 0.0:
 		_search_timer = SEARCH_INTERVAL
 		_current_target = _find_nearest_enemy()
 
 	if not _current_target:
-		if attack_move_target != Vector3.INF and _unit.get("move_target") == Vector3.INF:
-			_unit.command_move(attack_move_target)
+		# If attack-move and arrived, stay put and keep scanning
+		if attack_move_target != Vector3.INF:
+			if _unit.get("move_target") == Vector3.INF:
+				# Arrived at attack-move destination — keep scanning
+				pass
 		return
 
 	var dist: float = _unit.global_position.distance_to(_current_target.global_position)
@@ -91,7 +95,14 @@ func command_attack_move(pos: Vector3) -> void:
 	attack_move_target = pos
 	forced_target = null
 	_current_target = null
-	_unit.command_move(pos)
+	# Move without clearing combat state (bypass command_move's clear_target)
+	_unit.move_target = pos
+	_unit.move_target.y = _unit.global_position.y
+	_unit.has_move_order = true
+	if _unit.has_method("_nav_agent") or "_nav_agent" in _unit:
+		var nav: NavigationAgent3D = _unit.get("_nav_agent") as NavigationAgent3D
+		if nav:
+			nav.target_position = pos
 
 
 ## --- Target Acquisition ---
@@ -200,20 +211,28 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 		_unit.global_position, _current_target
 	)
 
-	# Final damage: base × role × direction × accuracy × (1 - armor)
-	var damage_per_shot: float = float(base_damage) * role_mod * dir_mod * accuracy * (1.0 - armor_reduction)
-	var total_damage: int = maxi(int(damage_per_shot * float(shots)), 1)
+	# Per-member damage
+	var damage_per_member: float = float(base_damage) * role_mod * dir_mod * accuracy * (1.0 - armor_reduction)
+	var per_member_dmg: int = maxi(int(damage_per_member), 1)
 
-	_current_target.take_damage(total_damage)
-
-	# Spawn projectile visual
+	# Fire one projectile per alive squad member
 	var proj_script: GDScript = load("res://scripts/projectile.gd") as GDScript
-	if proj_script:
-		var proj: Node3D = proj_script.create(_unit.global_position, _current_target.global_position, weapon.role_tag, weapon.rof_tier)
-		get_tree().current_scene.add_child(proj)
+	var member_positions: Array[Vector3] = []
+	if _unit.has_method("get_member_positions"):
+		member_positions = _unit.get_member_positions()
 
-	# Muzzle flash
-	_spawn_muzzle_flash()
+	for i: int in shots:
+		_current_target.take_damage(per_member_dmg)
+
+		if proj_script:
+			var fire_pos: Vector3 = _unit.global_position
+			if i < member_positions.size():
+				fire_pos = member_positions[i]
+			var proj: Node3D = proj_script.create(fire_pos, _current_target.global_position, weapon.role_tag, weapon.rof_tier)
+			get_tree().current_scene.add_child(proj)
+
+	# Muzzle flash on each member
+	_spawn_squad_muzzle_flash()
 
 	# Sound
 	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
@@ -221,28 +240,39 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 		audio.play_weapon_fire()
 
 
-func _spawn_muzzle_flash() -> void:
-	var flash := MeshInstance3D.new()
-	var sphere := SphereMesh.new()
-	sphere.radius = 0.25
-	sphere.height = 0.5
-	flash.mesh = sphere
-
-	var forward: Vector3 = -_unit.global_basis.z.normalized()
-	flash.global_position = _unit.global_position + forward * 0.8 + Vector3(0, 1.2, 0)
-
+func _spawn_squad_muzzle_flash() -> void:
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(1.0, 0.8, 0.2, 0.9)
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.emission_enabled = true
 	mat.emission = Color(1.0, 0.7, 0.1, 1.0)
 	mat.emission_energy_multiplier = 6.0
-	flash.set_surface_override_material(0, mat)
 
+	var positions: Array[Vector3] = []
+	if _unit.has_method("get_member_positions"):
+		positions = _unit.get_member_positions()
+
+	if positions.is_empty():
+		_create_flash_at(_unit.global_position + Vector3(0, 1.2, 0), mat)
+		return
+
+	var forward: Vector3 = -_unit.global_basis.z.normalized()
+	for pos: Vector3 in positions:
+		_create_flash_at(pos + forward * 0.5 + Vector3(0, 0.8, 0), mat)
+
+
+func _create_flash_at(pos: Vector3, mat: StandardMaterial3D) -> void:
+	var flash := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.15
+	sphere.height = 0.3
+	flash.mesh = sphere
+	flash.global_position = pos
+	flash.set_surface_override_material(0, mat)
 	get_tree().current_scene.add_child(flash)
 
 	var timer := Timer.new()
-	timer.wait_time = 0.08
+	timer.wait_time = 0.07
 	timer.one_shot = true
 	timer.autostart = true
 	timer.timeout.connect(flash.queue_free)
