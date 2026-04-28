@@ -120,11 +120,12 @@ func _process_economy() -> void:
 
 
 func _process_army() -> void:
-	# Queue at basic foundry
-	_try_queue_at(_foundry)
+	# Queue at basic foundry (validate not destroyed)
+	if is_instance_valid(_foundry):
+		_try_queue_at(_foundry)
 
 	# Queue at advanced foundry if available
-	if _wave_count >= 2:
+	if _wave_count >= 2 and is_instance_valid(_adv_foundry):
 		_try_queue_at(_adv_foundry)
 
 	var wave_size: int = INITIAL_WAVE_SIZE + _wave_count * 2
