@@ -20,6 +20,9 @@ var _showing_build_buttons: bool = false
 @onready var _action_label: Label = $BottomPanel/HBox/ActionSection/ActionLabel as Label
 @onready var _button_grid: GridContainer = $BottomPanel/HBox/ActionSection/ButtonGrid as GridContainer
 @onready var _bottom_panel: PanelContainer = $BottomPanel as PanelContainer
+@onready var _timer_label: Label = $TopBar/MatchTimerLabel as Label
+
+var _match_time: float = 0.0
 
 
 func _ready() -> void:
@@ -29,7 +32,8 @@ func _ready() -> void:
 	_bottom_panel.visible = false
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_match_time += delta
 	_update_resource_display()
 	_update_selection_display()
 
@@ -50,6 +54,12 @@ func _update_resource_display() -> void:
 		eff_str
 	]
 	_pop_label.text = "Pop: %d / %d" % [_resource_manager.population, ResourceManager.POPULATION_CAP]
+
+	# Match timer
+	if _timer_label:
+		var mins: int = int(_match_time) / 60
+		var secs: int = int(_match_time) % 60
+		_timer_label.text = "%d:%02d" % [mins, secs]
 
 
 func _update_selection_display() -> void:

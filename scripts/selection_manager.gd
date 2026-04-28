@@ -26,6 +26,9 @@ var _selected_building: Building = null
 ## Attack-move mode: next right-click issues attack-move instead of move.
 var _attack_move_mode: bool = false
 
+## Control groups: index 0-9 maps to arrays of unit instance IDs.
+var _control_groups: Array[Array] = []
+
 
 var _audio: AudioManager = null
 
@@ -33,6 +36,8 @@ var _audio: AudioManager = null
 func _ready() -> void:
 	_camera = get_viewport().get_camera_3d()
 	_audio = get_tree().current_scene.get_node_or_null("AudioManager") as AudioManager
+	for i: int in 10:
+		_control_groups.append([])
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -98,6 +103,19 @@ func _input(event: InputEvent) -> void:
 				_attack_move_mode = true
 				get_viewport().set_input_as_handled()
 				return
+
+			# Control groups: Ctrl+0-9 = assign, 0-9 = recall
+			var group_index: int = _key_to_group_index(key.keycode)
+			if group_index >= 0:
+				if key.ctrl_pressed:
+					_assign_control_group(group_index)
+					get_viewport().set_input_as_handled()
+					return
+				elif not _selected_building:
+					_recall_control_group(group_index)
+					get_viewport().set_input_as_handled()
+					return
+
 			_handle_build_hotkey(key)
 
 
@@ -334,6 +352,43 @@ func _select_all_buildings_of_type(building_id: StringName) -> void:
 			if building:
 				_select_building(building)
 			break
+
+
+## --- Control Groups ---
+
+func _key_to_group_index(keycode: int) -> int:
+	match keycode:
+		KEY_0: return 0
+		KEY_1: return 1
+		KEY_2: return 2
+		KEY_3: return 3
+		KEY_4: return 4
+		KEY_5: return 5
+		KEY_6: return 6
+		KEY_7: return 7
+		KEY_8: return 8
+		KEY_9: return 9
+	return -1
+
+
+func _assign_control_group(index: int) -> void:
+	_control_groups[index] = []
+	for unit: Unit in _selected_units:
+		_control_groups[index].append(unit.get_instance_id())
+	if _audio:
+		_audio.play_select()
+
+
+func _recall_control_group(index: int) -> void:
+	_clear_selection()
+	_deselect_building()
+	var ids: Array = _control_groups[index]
+	for uid: int in ids:
+		var obj: Object = instance_from_id(uid)
+		if obj and obj is Unit:
+			var unit: Unit = obj as Unit
+			if is_instance_valid(unit) and unit.alive_count > 0:
+				_add_to_selection(unit)
 
 
 func get_selected_units() -> Array[Unit]:

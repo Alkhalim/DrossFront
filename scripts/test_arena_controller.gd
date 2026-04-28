@@ -8,10 +8,31 @@ extends Node3D
 
 
 func _ready() -> void:
+	_setup_navigation()
 	_setup_player()
 	_setup_ai()
 	_setup_fuel_deposits()
 	_setup_buildable_buildings()
+
+
+func _setup_navigation() -> void:
+	# Create a flat navigation region covering the arena
+	var nav_region := NavigationRegion3D.new()
+	nav_region.name = "NavigationRegion"
+
+	var nav_mesh := NavigationMesh.new()
+	# Define a large flat walkable area
+	nav_mesh.vertices = PackedVector3Array([
+		Vector3(-100, 0, -100),
+		Vector3(100, 0, -100),
+		Vector3(100, 0, 100),
+		Vector3(-100, 0, 100),
+	])
+	nav_mesh.add_polygon(PackedInt32Array([0, 1, 2]))
+	nav_mesh.add_polygon(PackedInt32Array([0, 2, 3]))
+
+	nav_region.navigation_mesh = nav_mesh
+	add_child(nav_region)
 
 
 func _setup_player() -> void:

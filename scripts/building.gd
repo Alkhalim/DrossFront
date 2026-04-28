@@ -47,6 +47,7 @@ func _ready() -> void:
 		current_hp = stats.hp
 		rally_point = global_position + Vector3(0, 0, stats.footprint_size.z + 2.0)
 		_apply_placeholder_shape()
+		_add_nav_obstacle()
 
 		# Add specialized components based on building type
 		if stats.building_id == &"salvage_yard":
@@ -54,6 +55,28 @@ func _ready() -> void:
 			var yard: Node = script.new()
 			yard.name = "SalvageYardComponent"
 			add_child(yard)
+		elif stats.building_id == &"gun_emplacement":
+			var turret_script: GDScript = load("res://scripts/turret_component.gd") as GDScript
+			var turret: Node = turret_script.new()
+			turret.name = "TurretComponent"
+			add_child(turret)
+
+
+func _add_nav_obstacle() -> void:
+	var obstacle := NavigationObstacle3D.new()
+	obstacle.name = "NavObstacle"
+	# Create a rectangular obstacle matching the building footprint
+	var half_x: float = stats.footprint_size.x * 0.6
+	var half_z: float = stats.footprint_size.z * 0.6
+	obstacle.vertices = PackedVector3Array([
+		Vector3(-half_x, 0, -half_z),
+		Vector3(half_x, 0, -half_z),
+		Vector3(half_x, 0, half_z),
+		Vector3(-half_x, 0, half_z),
+	])
+	obstacle.avoidance_enabled = true
+	obstacle.radius = maxf(half_x, half_z)
+	add_child(obstacle)
 
 
 func _apply_placeholder_shape() -> void:
