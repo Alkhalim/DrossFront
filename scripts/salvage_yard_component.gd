@@ -7,15 +7,15 @@ const MAX_WORKERS: int = 3
 
 var _spawn_timer: float = 0.0
 var _workers: Array[SalvageWorker] = []
-var _building: Building = null
+var _building: Node = null
 
 
 func _ready() -> void:
-	_building = get_parent() as Building
+	_building = get_parent()
 
 
 func _process(delta: float) -> void:
-	if not _building or not _building.is_constructed:
+	if not _building or not _building.get("is_constructed"):
 		return
 
 	# Clean up dead worker references
@@ -28,7 +28,9 @@ func _process(delta: float) -> void:
 	if _workers.size() >= MAX_WORKERS:
 		return
 
-	var efficiency: float = _building.get_power_efficiency()
+	var efficiency: float = 1.0
+	if _building.has_method("get_power_efficiency"):
+		efficiency = _building.get_power_efficiency()
 	_spawn_timer += delta * efficiency
 
 	if _spawn_timer >= WORKER_SPAWN_INTERVAL:
@@ -39,7 +41,7 @@ func _process(delta: float) -> void:
 func _spawn_worker() -> void:
 	var worker := SalvageWorker.new()
 	worker.home_yard = _building
-	worker.resource_manager = _building.resource_manager
+	worker.resource_manager = _building.get("resource_manager")
 
 	var spawn_offset := Vector3(randf_range(-2.0, 2.0), 0, randf_range(-2.0, 2.0))
 	worker.global_position = _building.global_position + spawn_offset

@@ -28,6 +28,9 @@ var resource_manager: Node = null
 @onready var _collision: CollisionShape3D = $CollisionShape3D as CollisionShape3D
 @onready var _spawn_marker: Marker3D = $SpawnPoint as Marker3D
 
+var _progress_bar: MeshInstance3D = null
+var _progress_mat: StandardMaterial3D = null
+
 
 func _ready() -> void:
 	add_to_group("buildings")
@@ -71,14 +74,22 @@ func begin_construction() -> void:
 	_construction_progress = 0.0
 	is_constructed = false
 	_apply_placeholder_shape()
+	_create_progress_bar()
 
 
 func advance_construction(amount: float) -> void:
 	if is_constructed:
 		return
 	_construction_progress += amount
+	_update_progress_bar()
 	if _construction_progress >= stats.build_time:
 		_finish_construction()
+
+
+func get_construction_percent() -> float:
+	if not stats or stats.build_time <= 0.0:
+		return 1.0
+	return clampf(_construction_progress / stats.build_time, 0.0, 1.0)
 
 
 func _finish_construction() -> void:
@@ -86,6 +97,49 @@ func _finish_construction() -> void:
 	_construction_progress = stats.build_time
 	construction_complete.emit()
 	_apply_placeholder_shape()
+	_remove_progress_bar()
+
+
+func _create_progress_bar() -> void:
+	if _progress_bar:
+		return
+
+	_progress_bar = MeshInstance3D.new()
+	var bar_mesh := BoxMesh.new()
+	bar_mesh.size = Vector3(stats.footprint_size.x, 0.2, 0.4)
+	_progress_bar.mesh = bar_mesh
+
+	_progress_mat = StandardMaterial3D.new()
+	_progress_mat.albedo_color = Color(0.1, 0.8, 0.1, 0.9)
+	_progress_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_progress_mat.emission_enabled = true
+	_progress_mat.emission = Color(0.1, 0.8, 0.1, 1.0)
+	_progress_mat.emission_energy_multiplier = 1.0
+	_progress_bar.set_surface_override_material(0, _progress_mat)
+
+	_progress_bar.position = Vector3(0, stats.footprint_size.y + 0.5, 0)
+	_progress_bar.scale.x = 0.01
+	add_child(_progress_bar)
+
+
+func _update_progress_bar() -> void:
+	if not _progress_bar:
+		return
+	var pct: float = get_construction_percent()
+	_progress_bar.scale.x = maxf(pct, 0.01)
+
+	# Shift color from red to green as progress increases
+	var r: float = 1.0 - pct
+	var g: float = pct
+	_progress_mat.albedo_color = Color(r, g, 0.1, 0.9)
+	_progress_mat.emission = Color(r, g, 0.1, 1.0)
+
+
+func _remove_progress_bar() -> void:
+	if _progress_bar:
+		_progress_bar.queue_free()
+		_progress_bar = null
+		_progress_mat = null
 	var audio: AudioManager = get_tree().current_scene.get_node_or_null("AudioManager") as AudioManager
 	if audio:
 		audio.play_construction_complete()

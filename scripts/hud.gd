@@ -84,6 +84,12 @@ func _update_building_panel(building: Building) -> void:
 		_rebuild_production_buttons(building)
 
 	# Update dynamic text every frame
+	if not building.is_constructed:
+		_name_label.text = "%s (Under Construction)" % building.stats.building_name
+		_stats_label.text = "Construction: %d%%" % int(building.get_construction_percent() * 100.0)
+		_queue_label.text = ""
+		return
+
 	_name_label.text = building.stats.building_name
 
 	var stats_text: String = "HP: %d / %d" % [building.current_hp, building.stats.hp]
