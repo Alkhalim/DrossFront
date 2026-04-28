@@ -1,0 +1,32 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_pistol"]
+script = ExtResource("2")
+weapon_name = "Light Pistol Gun"
+role_tag = &"AP"
+damage_tier = &"very_low"
+range_tier = &"short"
+rof_tier = &"slow"
+
+[resource]
+script = ExtResource("1")
+unit_name = "Ratchet"
+unit_class = &"engineer"
+hp_total = 720
+hp_per_unit = 180
+armor_class = &"light"
+speed_tier = &"moderate"
+sight_tier = &"medium"
+squad_size = 4
+population = 4
+cost_salvage = 60
+cost_fuel = 0
+build_time = 15.0
+built_at = &"headquarters"
+primary_weapon = SubResource("weapon_pistol")
+special_description = "Builds structures. Repairs at 8 HP/sec. Can manually salvage neutral structures."
+can_build = true
+repair_rate = 8.0

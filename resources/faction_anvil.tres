@@ -1,6 +1,10 @@
-[gd_resource type="Resource" script_class="FactionResource" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="FactionResource" load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://scripts/faction_resource.gd" id="1"]
+[ext_resource type="Resource" path="res://resources/units/anvil_ratchet.tres" id="2"]
+[ext_resource type="Resource" path="res://resources/units/anvil_rook.tres" id="3"]
+[ext_resource type="Resource" path="res://resources/units/anvil_hound.tres" id="4"]
+[ext_resource type="Resource" path="res://resources/units/anvil_bulwark.tres" id="5"]
 
 [resource]
 script = ExtResource("1")
@@ -13,3 +17,7 @@ mechanic_id = &"fortification"
 mechanic_display_name = "Fortification"
 mechanic_description = "All Anvil structures and Salvage Yard workers gain increased durability. Basic Generators receive +20% HP. The longer Anvil holds ground, the harder it becomes to dislodge."
 faction_power_building_name = "Iron Citadel"
+engineer_stats = ExtResource("2")
+light_mech_stats = ExtResource("3")
+medium_mech_stats = ExtResource("4")
+heavy_mech_stats = ExtResource("5")

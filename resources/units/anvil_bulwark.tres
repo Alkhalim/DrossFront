@@ -1,0 +1,42 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_rotary_cannon"]
+script = ExtResource("2")
+weapon_name = "Rotary AP Autocannon"
+role_tag = &"AP"
+damage_tier = &"high"
+range_tier = &"long"
+rof_tier = &"fast"
+
+[sub_resource type="Resource" id="weapon_missile_pod"]
+script = ExtResource("2")
+weapon_name = "Shoulder AT Missile Pod"
+role_tag = &"AA"
+damage_tier = &"high"
+range_tier = &"medium"
+rof_tier = &"slow"
+
+[resource]
+script = ExtResource("1")
+unit_name = "Bulwark"
+unit_class = &"heavy"
+hp_total = 2800
+hp_per_unit = 1400
+armor_class = &"heavy"
+speed_tier = &"slow"
+sight_tier = &"medium"
+squad_size = 2
+population = 16
+cost_salvage = 650
+cost_fuel = 70
+build_time = 55.0
+built_at = &"advanced_foundry"
+primary_weapon = SubResource("weapon_rotary_cannon")
+secondary_weapon = SubResource("weapon_missile_pod")
+squad_strength_bonus = 0.20
+special_description = "Squad strength bonus +20% accuracy. Heavy chassis can knock down lighter mechs in melee."
+branch_a_name = "Siegebreaker"
+branch_b_name = "Ironwall"

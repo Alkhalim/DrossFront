@@ -1,0 +1,33 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_twin_mg"]
+script = ExtResource("2")
+weapon_name = "Twin Shoulder MGs"
+role_tag = &"AP"
+damage_tier = &"low"
+range_tier = &"medium"
+rof_tier = &"fast"
+
+[resource]
+script = ExtResource("1")
+unit_name = "Rook"
+unit_class = &"light"
+hp_total = 1280
+hp_per_unit = 320
+armor_class = &"light"
+speed_tier = &"fast"
+sight_tier = &"long"
+squad_size = 4
+population = 8
+cost_salvage = 180
+cost_fuel = 0
+build_time = 22.0
+built_at = &"basic_foundry"
+primary_weapon = SubResource("weapon_twin_mg")
+squad_strength_bonus = 0.12
+special_description = "Squad strength bonus +12% accuracy at full strength."
+branch_a_name = "Spotter"
+branch_b_name = "Sapper"
