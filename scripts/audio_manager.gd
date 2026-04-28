@@ -48,6 +48,12 @@ func play_construction_complete() -> void:
 func play_error() -> void:
 	_play_tone(90.0, 0.2, -6.0, 0.0)
 
+func play_weapon_fire() -> void:
+	_play_noise_burst(0.04, -14.0)
+
+func play_unit_destroyed() -> void:
+	_play_tone(65.0, 0.35, -4.0, 2.0)
+
 
 ## --- Generators ---
 

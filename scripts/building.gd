@@ -8,6 +8,7 @@ signal construction_complete
 
 @export var stats: BuildingStatResource
 @export var owner_faction: FactionResource
+@export var owner_id: int = 0
 
 ## Set during placement by the builder.
 var is_constructed: bool = false
@@ -37,6 +38,7 @@ var _bar_width: float = 0.0
 
 func _ready() -> void:
 	add_to_group("buildings")
+	add_to_group("owner_%d" % owner_id)
 	if stats:
 		current_hp = stats.hp
 		rally_point = global_position + Vector3(0, 0, stats.footprint_size.z + 2.0)
@@ -60,7 +62,15 @@ func _apply_placeholder_shape() -> void:
 	_mesh.position.y = stats.footprint_size.y / 2.0
 
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = stats.placeholder_color
+	var base_color: Color = stats.placeholder_color
+	if owner_id != 0:
+		base_color = Color(
+			minf(base_color.r + 0.25, 1.0),
+			maxf(base_color.g - 0.15, 0.0),
+			maxf(base_color.b - 0.15, 0.0),
+			base_color.a
+		)
+	mat.albedo_color = base_color
 	mat.roughness = 0.9
 	if not is_constructed:
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -227,6 +237,7 @@ func _spawn_unit(unit_stats: UnitStatResource) -> void:
 	var unit_scene: PackedScene = load("res://scenes/unit.tscn") as PackedScene
 	var unit: Unit = unit_scene.instantiate() as Unit
 	unit.stats = unit_stats
+	unit.owner_id = owner_id
 
 	var spawn_pos: Vector3
 	if _spawn_marker:
@@ -294,5 +305,21 @@ func take_damage(amount: int) -> void:
 	current_hp -= amount
 	if current_hp <= 0:
 		current_hp = 0
+		_spawn_building_wreck()
 		destroyed.emit()
 		queue_free()
+
+
+func _spawn_building_wreck() -> void:
+	if not stats or stats.cost_salvage <= 0:
+		return
+	var wreck := Wreck.new()
+	wreck.salvage_value = int(stats.cost_salvage * 0.35)
+	wreck.salvage_remaining = wreck.salvage_value
+	wreck.wreck_size = Vector3(
+		stats.footprint_size.x * 0.8,
+		stats.footprint_size.y * 0.3,
+		stats.footprint_size.z * 0.8
+	)
+	wreck.global_position = global_position
+	get_tree().current_scene.add_child(wreck)

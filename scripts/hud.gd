@@ -187,9 +187,12 @@ func _update_unit_panel(units: Array[Unit]) -> void:
 		var unit: Unit = units[0]
 		if unit.stats:
 			_name_label.text = unit.stats.unit_name
-			_stats_label.text = "%s  |  Speed: %s  |  Armor: %s" % [
+			_stats_label.text = "%s  |  HP: %d/%d  |  Squad: %d/%d  |  Armor: %s" % [
 				str(unit.stats.unit_class),
-				str(unit.stats.speed_tier),
+				unit.get_total_hp(),
+				unit.stats.hp_total,
+				unit.alive_count,
+				unit.stats.squad_size,
 				str(unit.stats.armor_class)
 			]
 			if unit.get_builder():

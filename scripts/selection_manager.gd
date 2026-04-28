@@ -23,6 +23,9 @@ var _build_ghost: MeshInstance3D = null
 ## Currently selected building (if any).
 var _selected_building: Building = null
 
+## Attack-move mode: next right-click issues attack-move instead of move.
+var _attack_move_mode: bool = false
+
 
 var _audio: AudioManager = null
 
@@ -56,8 +59,16 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 	elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
 		if _selected_building:
 			_set_rally_point(event.position)
+		elif _attack_move_mode:
+			_command_attack_move(event.position)
+			_attack_move_mode = false
 		else:
-			_command_move(event.position)
+			# Check if right-clicking an enemy → attack command
+			var enemy := _find_enemy_at(event.position)
+			if enemy:
+				_command_attack(enemy)
+			else:
+				_command_move(event.position)
 		get_viewport().set_input_as_handled()
 
 
@@ -78,10 +89,15 @@ func _input(event: InputEvent) -> void:
 			if dist > 5.0:
 				_is_dragging = true
 
-	# Build hotkeys when an engineer is selected
+	# Key handlers
 	if event is InputEventKey and not _build_mode:
 		var key: InputEventKey = event as InputEventKey
 		if key.pressed and not key.echo:
+			# A key = attack-move mode
+			if key.keycode == KEY_A and not _selected_units.is_empty():
+				_attack_move_mode = true
+				get_viewport().set_input_as_handled()
+				return
 			_handle_build_hotkey(key)
 
 
@@ -125,6 +141,10 @@ func _handle_build_hotkey(key: InputEventKey) -> void:
 func _click_select(event: InputEventMouseButton) -> void:
 	var unit := _raycast_unit(event.position)
 	var shift := event.shift_pressed
+
+	# Only select player-owned units
+	if unit and unit.owner_id != 0:
+		unit = null
 
 	if unit:
 		_deselect_building()
@@ -206,6 +226,67 @@ func _command_move(screen_pos: Vector2) -> void:
 			(row - (cols - 1) / 2.0) * spacing
 		)
 		_selected_units[i].command_move(ground_pos + offset)
+
+
+func _command_attack(target: Node3D) -> void:
+	if _selected_units.is_empty():
+		return
+	if _audio:
+		_audio.play_command()
+	for unit: Unit in _selected_units:
+		var combat: Node = unit.get_combat()
+		if combat and combat.has_method("set_target"):
+			combat.set_target(target)
+		else:
+			# Non-combat units just move toward the target
+			unit.command_move(target.global_position)
+
+
+func _command_attack_move(screen_pos: Vector2) -> void:
+	if _selected_units.is_empty():
+		return
+	if _audio:
+		_audio.play_command()
+	var ground_pos := _raycast_ground(screen_pos)
+	if ground_pos == Vector3.INF:
+		return
+	for unit: Unit in _selected_units:
+		var combat: Node = unit.get_combat()
+		if combat and combat.has_method("command_attack_move"):
+			combat.command_attack_move(ground_pos)
+		else:
+			unit.command_move(ground_pos)
+
+
+func _find_enemy_at(screen_pos: Vector2) -> Node3D:
+	## Check if an enemy unit or building is under the click.
+	var unit := _raycast_unit(screen_pos)
+	if unit and unit.owner_id != 0:
+		return unit
+
+	# Check enemy buildings via screen projection
+	var buildings: Array[Node] = get_tree().get_nodes_in_group("buildings")
+	for node: Node in buildings:
+		if not ("owner_id" in node):
+			continue
+		var bowner: int = node.get("owner_id")
+		if bowner == 0:
+			continue
+		if not ("stats" in node) or node.get("stats") == null:
+			continue
+		var bstats: BuildingStatResource = node.get("stats") as BuildingStatResource
+		if not bstats:
+			continue
+		var screen_center: Vector2 = _camera.unproject_position(node.global_position)
+		var half_size: float = maxf(bstats.footprint_size.x, bstats.footprint_size.z) * 0.5
+		var screen_edge: Vector2 = _camera.unproject_position(
+			node.global_position + Vector3(half_size, 0, 0)
+		)
+		var pixel_radius: float = absf(screen_edge.x - screen_center.x) * 1.2
+		if screen_pos.distance_to(screen_center) <= pixel_radius:
+			return node as Node3D
+
+	return null
 
 
 func get_selected_units() -> Array[Unit]:
