@@ -99,7 +99,17 @@ func _update_building_panel(building: Building) -> void:
 		stats_text += "  |  Power: -%d" % building.stats.power_consumption
 	_stats_label.text = stats_text
 
-	if building.get_queue_size() > 0:
+	# Salvage yard: show worker info
+	var yard: Node = building.get_node_or_null("SalvageYardComponent")
+	if yard and yard.has_method("get_worker_count"):
+		var count: int = yard.get_worker_count()
+		var max_w: int = yard.get_max_workers()
+		var spawn_pct: float = yard.get_spawn_progress()
+		var queue_text: String = "Workers: %d / %d" % [count, max_w]
+		if count < max_w:
+			queue_text += "  |  Next worker: %d%%" % int(spawn_pct * 100.0)
+		_queue_label.text = queue_text
+	elif building.get_queue_size() > 0:
 		_queue_label.text = "Queue: %d  |  Progress: %d%%" % [
 			building.get_queue_size(),
 			int(building.get_build_progress_percent() * 100.0)

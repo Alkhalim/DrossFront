@@ -327,8 +327,10 @@ func _find_building_at(screen_pos: Vector2) -> Building:
 func _select_building(building: Building) -> void:
 	if _selected_building and _selected_building != building:
 		_selected_building.deselect_building()
+		_hide_yard_range(_selected_building)
 	_selected_building = building
 	_selected_building.select_building()
+	_show_yard_range(building)
 	if _audio:
 		_audio.play_select()
 
@@ -344,8 +346,21 @@ func _select_building(building: Building) -> void:
 func _deselect_building() -> void:
 	if _selected_building:
 		_selected_building.deselect_building()
+		_hide_yard_range(_selected_building)
 	_selected_building = null
 	_hide_rally_marker()
+
+
+func _show_yard_range(building: Building) -> void:
+	var yard: Node = building.get_node_or_null("SalvageYardComponent")
+	if yard and yard.has_method("show_range"):
+		yard.show_range()
+
+
+func _hide_yard_range(building: Building) -> void:
+	var yard: Node = building.get_node_or_null("SalvageYardComponent")
+	if yard and yard.has_method("hide_range"):
+		yard.hide_range()
 
 
 func _set_rally_point_visual(pos: Vector3) -> void:

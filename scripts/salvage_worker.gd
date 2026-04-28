@@ -13,6 +13,7 @@ const ARRIVE_THRESHOLD: float = 1.5
 var state: State = State.IDLE
 var home_yard: Node3D = null
 var resource_manager: ResourceManager = null
+var search_radius: float = 30.0
 
 var _target_wreck: Wreck = null
 var _carried_salvage: int = 0
@@ -67,12 +68,16 @@ func _find_wreck() -> void:
 	if wrecks.is_empty():
 		return
 
-	# Find nearest wreck
+	# Find nearest wreck within search radius of home yard
 	var nearest: Wreck = null
 	var nearest_dist: float = INF
+	var search_origin: Vector3 = home_yard.global_position if is_instance_valid(home_yard) else global_position
 	for node: Node in wrecks:
 		var wreck: Wreck = node as Wreck
 		if not wreck:
+			continue
+		var dist_to_yard: float = search_origin.distance_to(wreck.global_position)
+		if dist_to_yard > search_radius:
 			continue
 		var dist: float = global_position.distance_to(wreck.global_position)
 		if dist < nearest_dist:

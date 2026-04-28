@@ -28,8 +28,11 @@ var resource_manager: Node = null
 @onready var _collision: CollisionShape3D = $CollisionShape3D as CollisionShape3D
 @onready var _spawn_marker: Marker3D = $SpawnPoint as Marker3D
 
+var _progress_bg: MeshInstance3D = null
 var _progress_bar: MeshInstance3D = null
 var _progress_mat: StandardMaterial3D = null
+var _progress_label: Label3D = null
+var _bar_width: float = 0.0
 
 
 func _ready() -> void:
@@ -104,42 +107,85 @@ func _create_progress_bar() -> void:
 	if _progress_bar:
 		return
 
+	_bar_width = stats.footprint_size.x
+	var bar_y: float = stats.footprint_size.y + 0.5
+	var half_w: float = _bar_width * 0.5
+
+	# Dark background bar (full width)
+	_progress_bg = MeshInstance3D.new()
+	var bg_mesh := BoxMesh.new()
+	bg_mesh.size = Vector3(_bar_width, 0.2, 0.4)
+	_progress_bg.mesh = bg_mesh
+	var bg_mat := StandardMaterial3D.new()
+	bg_mat.albedo_color = Color(0.15, 0.15, 0.15, 0.8)
+	bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_progress_bg.set_surface_override_material(0, bg_mat)
+	_progress_bg.position = Vector3(0, bar_y, 0)
+	add_child(_progress_bg)
+
+	# Fill bar (grows left to right)
 	_progress_bar = MeshInstance3D.new()
 	var bar_mesh := BoxMesh.new()
-	bar_mesh.size = Vector3(stats.footprint_size.x, 0.2, 0.4)
+	bar_mesh.size = Vector3(1.0, 0.25, 0.45)
 	_progress_bar.mesh = bar_mesh
 
 	_progress_mat = StandardMaterial3D.new()
-	_progress_mat.albedo_color = Color(0.1, 0.8, 0.1, 0.9)
+	_progress_mat.albedo_color = Color(1.0, 0.2, 0.1, 0.9)
 	_progress_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_progress_mat.emission_enabled = true
-	_progress_mat.emission = Color(0.1, 0.8, 0.1, 1.0)
+	_progress_mat.emission = Color(1.0, 0.2, 0.1, 1.0)
 	_progress_mat.emission_energy_multiplier = 1.0
 	_progress_bar.set_surface_override_material(0, _progress_mat)
 
-	_progress_bar.position = Vector3(0, stats.footprint_size.y + 0.5, 0)
+	# Start at left edge
+	_progress_bar.position = Vector3(-half_w, bar_y, 0)
 	_progress_bar.scale.x = 0.01
 	add_child(_progress_bar)
+
+	# Percentage label
+	_progress_label = Label3D.new()
+	_progress_label.text = "0%"
+	_progress_label.font_size = 48
+	_progress_label.pixel_size = 0.02
+	_progress_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_progress_label.position = Vector3(0, bar_y + 0.6, 0)
+	_progress_label.modulate = Color(1.0, 1.0, 1.0, 1.0)
+	add_child(_progress_label)
 
 
 func _update_progress_bar() -> void:
 	if not _progress_bar:
 		return
 	var pct: float = get_construction_percent()
-	_progress_bar.scale.x = maxf(pct, 0.01)
+	var fill_width: float = _bar_width * pct
+	var half_w: float = _bar_width * 0.5
 
-	# Shift color from red to green as progress increases
+	# Scale the bar mesh and position it so it grows from the left edge
+	_progress_bar.scale.x = maxf(fill_width, 0.01)
+	_progress_bar.position.x = -half_w + fill_width * 0.5
+
+	# Shift color from red to green
 	var r: float = 1.0 - pct
 	var g: float = pct
 	_progress_mat.albedo_color = Color(r, g, 0.1, 0.9)
 	_progress_mat.emission = Color(r, g, 0.1, 1.0)
 
+	# Update label
+	if _progress_label:
+		_progress_label.text = "%d%%" % int(pct * 100.0)
+
 
 func _remove_progress_bar() -> void:
+	if _progress_bg:
+		_progress_bg.queue_free()
+		_progress_bg = null
 	if _progress_bar:
 		_progress_bar.queue_free()
 		_progress_bar = null
 		_progress_mat = null
+	if _progress_label:
+		_progress_label.queue_free()
+		_progress_label = null
 	var audio: AudioManager = get_tree().current_scene.get_node_or_null("AudioManager") as AudioManager
 	if audio:
 		audio.play_construction_complete()
