@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+[ext_resource type="Resource" path="res://resources/units/anvil_rook.tres" id="2"]
+[ext_resource type="Resource" path="res://resources/units/anvil_hound.tres" id="3"]
+
+[resource]
+script = ExtResource("1")
+building_name = "Basic Foundry"
+building_id = &"basic_foundry"
+hp = 1500
+cost_salvage = 250
+build_time = 40.0
+power_consumption = 10
+power_production = 0
+producible_units = [ExtResource("2"), ExtResource("3")]
+footprint_size = Vector3(5, 3.5, 5)
+placeholder_color = Color(0.35, 0.3, 0.28)

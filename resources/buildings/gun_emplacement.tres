@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+building_name = "Gun Emplacement"
+building_id = &"gun_emplacement"
+hp = 600
+cost_salvage = 150
+build_time = 20.0
+power_consumption = 3
+power_production = 0
+footprint_size = Vector3(3, 2.5, 3)
+placeholder_color = Color(0.3, 0.3, 0.3)

@@ -28,10 +28,25 @@ var is_selected: bool = false
 var _move_speed: float = 8.0
 
 
+## Placeholder shape/size per unit class for visual differentiation.
+const CLASS_SHAPES: Dictionary = {
+	&"engineer": { "type": "cylinder", "radius": 0.4, "height": 1.2, "color": Color(0.45, 0.42, 0.3) },
+	&"light": { "type": "box", "size": Vector3(0.7, 1.8, 0.7), "color": Color(0.3, 0.32, 0.38) },
+	&"medium": { "type": "box", "size": Vector3(1.2, 2.0, 1.2), "color": Color(0.35, 0.35, 0.38) },
+	&"heavy": { "type": "box", "size": Vector3(1.6, 2.4, 1.6), "color": Color(0.4, 0.38, 0.35) },
+	&"apex": { "type": "box", "size": Vector3(2.0, 3.0, 2.0), "color": Color(0.45, 0.4, 0.35) },
+}
+
+
 func _ready() -> void:
 	add_to_group("units")
 	if stats:
 		_move_speed = SPEED_MAP.get(stats.speed_tier, 8.0)
+		_apply_placeholder_shape()
+		if stats.can_build:
+			var builder := BuilderComponent.new()
+			builder.name = "BuilderComponent"
+			add_child(builder)
 
 
 func command_move(target: Vector3) -> void:
@@ -84,7 +99,63 @@ func deselect() -> void:
 	_update_selection_visual(false)
 
 
+func _apply_placeholder_shape() -> void:
+	var shape_data: Dictionary = CLASS_SHAPES.get(stats.unit_class, CLASS_SHAPES[&"medium"])
+
+	var mesh_node: MeshInstance3D = $MeshInstance3D as MeshInstance3D
+	var col_node: CollisionShape3D = $CollisionShape3D as CollisionShape3D
+	var ring_node: MeshInstance3D = $SelectionRing as MeshInstance3D
+
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = shape_data["color"] as Color
+	mat.roughness = 0.8
+
+	var shape_type: String = shape_data["type"]
+	if shape_type == "cylinder":
+		var radius: float = shape_data["radius"]
+		var height: float = shape_data["height"]
+
+		var cyl := CylinderMesh.new()
+		cyl.top_radius = radius
+		cyl.bottom_radius = radius
+		cyl.height = height
+		mesh_node.mesh = cyl
+		mesh_node.surface_material_override[0] = mat
+		mesh_node.position.y = height / 2.0
+
+		var col_shape := CylinderShape3D.new()
+		col_shape.radius = radius
+		col_shape.height = height
+		col_node.shape = col_shape
+		col_node.position.y = height / 2.0
+
+		# Scale selection ring to match
+		var ring_scale: float = radius * 2.5
+		ring_node.scale = Vector3(ring_scale, 1.0, ring_scale)
+	else:
+		var box_size: Vector3 = shape_data["size"] as Vector3
+
+		var box := BoxMesh.new()
+		box.size = box_size
+		mesh_node.mesh = box
+		mesh_node.surface_material_override[0] = mat
+		mesh_node.position.y = box_size.y / 2.0
+
+		var col_shape := BoxShape3D.new()
+		col_shape.size = box_size
+		col_node.shape = col_shape
+		col_node.position.y = box_size.y / 2.0
+
+		# Scale selection ring to match unit width
+		var ring_scale: float = box_size.x * 1.2
+		ring_node.scale = Vector3(ring_scale, 1.0, ring_scale)
+
+
+func get_builder() -> BuilderComponent:
+	return get_node_or_null("BuilderComponent") as BuilderComponent
+
+
 func _update_selection_visual(show: bool) -> void:
-	var ring := get_node_or_null("SelectionRing")
+	var ring: Node3D = get_node_or_null("SelectionRing") as Node3D
 	if ring:
 		ring.visible = show

@@ -7,11 +7,21 @@ extends Node
 const UNIT_LAYER: int = 2
 ## Layer mask for raycast against ground (layer 1).
 const GROUND_LAYER: int = 1
+## Layer mask for raycast against buildings (layer 4).
+const BUILDING_LAYER: int = 4
 
 var _selected_units: Array[Unit] = []
 var _is_dragging: bool = false
 var _drag_start: Vector2 = Vector2.ZERO
 var _camera: Camera3D
+
+## Build placement state.
+var _build_mode: bool = false
+var _build_stats: BuildingStatResource = null
+var _build_ghost: MeshInstance3D = null
+
+## Currently selected building (if any).
+var _selected_building: Building = null
 
 
 func _ready() -> void:
@@ -19,11 +29,11 @@ func _ready() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _build_mode:
+		_handle_build_mode_input(event)
+		return
 	if event is InputEventMouseButton:
 		_handle_mouse_button(event as InputEventMouseButton)
-	elif event is InputEventMouseMotion and _is_dragging:
-		# Redraw box selection rectangle
-		queue_redraw()
 
 
 func _handle_mouse_button(event: InputEventMouseButton) -> void:
@@ -38,20 +48,71 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 			else:
 				_click_select(event)
 			_is_dragging = false
-			queue_redraw()
 
 	elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
 		_command_move(event.position)
 		get_viewport().set_input_as_handled()
 
 
+## Available buildings that engineers can construct.
+var _buildable_stats: Array[BuildingStatResource] = []
+
+
+func set_buildable_buildings(stats: Array[BuildingStatResource]) -> void:
+	_buildable_stats = stats
+
+
 func _input(event: InputEvent) -> void:
 	# Detect drag threshold
 	if event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		var motion := event as InputEventMouseMotion
 		if not _is_dragging:
-			var dist := (event.position - _drag_start).length()
+			var dist := (motion.position - _drag_start).length()
 			if dist > 5.0:
 				_is_dragging = true
+
+	# Build hotkeys when an engineer is selected
+	if event is InputEventKey and not _build_mode:
+		var key: InputEventKey = event as InputEventKey
+		if key.pressed and not key.echo:
+			_handle_build_hotkey(key)
+
+
+func _handle_build_hotkey(key: InputEventKey) -> void:
+	# Production hotkeys when a building is selected (Q, W, E for units 1-3)
+	if _selected_building and _selected_building.stats:
+		var prod_index: int = -1
+		match key.keycode:
+			KEY_Q: prod_index = 0
+			KEY_W: prod_index = 1
+			KEY_E: prod_index = 2
+		if prod_index >= 0:
+			queue_unit_at_building(prod_index)
+			get_viewport().set_input_as_handled()
+			return
+
+	# Build placement hotkeys when an engineer is selected (1-7)
+	var has_engineer: bool = false
+	for unit: Unit in _selected_units:
+		if unit.get_builder():
+			has_engineer = true
+			break
+	if not has_engineer:
+		return
+
+	var index: int = -1
+	match key.keycode:
+		KEY_1: index = 0
+		KEY_2: index = 1
+		KEY_3: index = 2
+		KEY_4: index = 3
+		KEY_5: index = 4
+		KEY_6: index = 5
+		KEY_7: index = 6
+
+	if index >= 0 and index < _buildable_stats.size():
+		start_build_placement(_buildable_stats[index])
+		get_viewport().set_input_as_handled()
 
 
 func _click_select(event: InputEventMouseButton) -> void:
@@ -59,6 +120,7 @@ func _click_select(event: InputEventMouseButton) -> void:
 	var shift := event.shift_pressed
 
 	if unit:
+		_deselect_building()
 		if shift:
 			if unit.is_selected:
 				_remove_from_selection(unit)
@@ -67,8 +129,16 @@ func _click_select(event: InputEventMouseButton) -> void:
 		else:
 			_clear_selection()
 			_add_to_selection(unit)
-	elif not shift:
-		_clear_selection()
+	else:
+		# Try selecting a building
+		var building := _raycast_building(event.position)
+		if building and building.is_constructed:
+			if not shift:
+				_clear_selection()
+			_select_building(building)
+		elif not shift:
+			_clear_selection()
+			_deselect_building()
 
 	get_viewport().set_input_as_handled()
 
@@ -102,7 +172,7 @@ func _command_move(screen_pos: Vector2) -> void:
 
 	# Simple formation: offset units in a grid around the target
 	var count := _selected_units.size()
-	var cols := ceili(sqrtf(float(count)))
+	var cols := ceili(sqrt(float(count)))
 	var spacing := 2.5
 
 	for i: int in count:
@@ -145,13 +215,14 @@ func _raycast_unit(screen_pos: Vector2) -> Unit:
 	if result.is_empty():
 		return null
 
-	var collider := result.collider
+	var collider: Object = result["collider"]
 	if collider is Unit:
-		return collider
+		return collider as Unit
 	# Walk up in case collider is a child
-	var parent := collider.get_parent()
-	if parent is Unit:
-		return parent
+	if collider is Node:
+		var parent: Node = (collider as Node).get_parent()
+		if parent is Unit:
+			return parent as Unit
 	return null
 
 
@@ -166,4 +237,146 @@ func _raycast_ground(screen_pos: Vector2) -> Vector3:
 	if result.is_empty():
 		return Vector3.INF
 
-	return result.position
+	return result["position"] as Vector3
+
+
+## --- Building Selection ---
+
+func _raycast_building(screen_pos: Vector2) -> Building:
+	var from := _camera.project_ray_origin(screen_pos)
+	var dir := _camera.project_ray_normal(screen_pos)
+
+	var space := get_viewport().world_3d.direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(from, from + dir * 500.0, BUILDING_LAYER)
+	var result := space.intersect_ray(query)
+
+	if result.is_empty():
+		return null
+
+	var collider: Object = result["collider"]
+	if collider is Building:
+		return collider as Building
+	if collider is Node:
+		var parent: Node = (collider as Node).get_parent()
+		if parent is Building:
+			return parent as Building
+	return null
+
+
+func _select_building(building: Building) -> void:
+	_selected_building = building
+
+
+func _deselect_building() -> void:
+	_selected_building = null
+
+
+func get_selected_building() -> Building:
+	return _selected_building
+
+
+## Queue a unit at the selected building. Index maps to producible_units array.
+func queue_unit_at_building(index: int) -> void:
+	if not _selected_building or not _selected_building.stats:
+		return
+	if index < 0 or index >= _selected_building.stats.producible_units.size():
+		return
+
+	var unit_stats: UnitStatResource = _selected_building.stats.producible_units[index]
+	var resource_mgr: ResourceManager = get_tree().current_scene.get_node("ResourceManager") as ResourceManager
+	if not resource_mgr:
+		return
+
+	if not resource_mgr.can_afford(unit_stats.cost_salvage, unit_stats.cost_fuel):
+		return
+	if not resource_mgr.has_population(unit_stats.population):
+		return
+
+	resource_mgr.spend(unit_stats.cost_salvage, unit_stats.cost_fuel)
+	resource_mgr.add_population(unit_stats.population)
+	_selected_building.queue_unit(unit_stats)
+
+
+## --- Build Placement Mode ---
+
+func start_build_placement(bstat: BuildingStatResource) -> void:
+	_build_mode = true
+	_build_stats = bstat
+
+	# Create ghost preview
+	_build_ghost = MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = bstat.footprint_size
+	_build_ghost.mesh = box
+	_build_ghost.position.y = bstat.footprint_size.y / 2.0
+
+	var mat := StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = Color(0.2, 0.8, 0.2, 0.3)
+	_build_ghost.surface_material_override[0] = mat
+
+	get_tree().current_scene.add_child(_build_ghost)
+
+
+func cancel_build_placement() -> void:
+	_build_mode = false
+	_build_stats = null
+	if _build_ghost and is_instance_valid(_build_ghost):
+		_build_ghost.queue_free()
+	_build_ghost = null
+
+
+func _handle_build_mode_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		var motion: InputEventMouseMotion = event as InputEventMouseMotion
+		var ground_pos := _raycast_ground(motion.position)
+		if ground_pos != Vector3.INF and _build_ghost:
+			_build_ghost.global_position = Vector3(ground_pos.x, _build_stats.footprint_size.y / 2.0, ground_pos.z)
+		get_viewport().set_input_as_handled()
+
+	elif event is InputEventMouseButton:
+		var mb: InputEventMouseButton = event as InputEventMouseButton
+		if mb.pressed:
+			if mb.button_index == MOUSE_BUTTON_LEFT:
+				_confirm_build_placement(mb.position)
+				get_viewport().set_input_as_handled()
+			elif mb.button_index == MOUSE_BUTTON_RIGHT:
+				cancel_build_placement()
+				get_viewport().set_input_as_handled()
+
+	elif event is InputEventKey:
+		var key: InputEventKey = event as InputEventKey
+		if key.pressed and key.keycode == KEY_ESCAPE:
+			cancel_build_placement()
+			get_viewport().set_input_as_handled()
+
+
+func _confirm_build_placement(screen_pos: Vector2) -> void:
+	var ground_pos := _raycast_ground(screen_pos)
+	if ground_pos == Vector3.INF:
+		return
+
+	var resource_mgr: ResourceManager = get_tree().current_scene.get_node("ResourceManager") as ResourceManager
+	if not resource_mgr:
+		cancel_build_placement()
+		return
+
+	# Find the first selected engineer
+	var builder_unit: Unit = null
+	for unit: Unit in _selected_units:
+		if unit.get_builder():
+			builder_unit = unit
+			break
+
+	if not builder_unit:
+		cancel_build_placement()
+		return
+
+	var builder: BuilderComponent = builder_unit.get_builder()
+	var building: Building = builder.place_building(_build_stats, ground_pos, resource_mgr)
+
+	if building:
+		cancel_build_placement()
+	else:
+		# Not enough resources — keep placement mode active
+		pass

@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+building_name = "Basic Generator"
+building_id = &"basic_generator"
+hp = 400
+cost_salvage = 180
+build_time = 30.0
+power_consumption = 0
+power_production = 30
+footprint_size = Vector3(3, 3, 3)
+placeholder_color = Color(0.25, 0.3, 0.4)

@@ -54,7 +54,7 @@ extends Resource
 ## References to unit stat resources. Populated as UnitStatResource is built.
 
 @export_group("Unit Roster")
-@export var engineer_stats: Resource
-@export var light_mech_stats: Resource
-@export var medium_mech_stats: Resource
-@export var heavy_mech_stats: Resource
+@export var engineer_stats: UnitStatResource
+@export var light_mech_stats: UnitStatResource
+@export var medium_mech_stats: UnitStatResource
+@export var heavy_mech_stats: UnitStatResource
