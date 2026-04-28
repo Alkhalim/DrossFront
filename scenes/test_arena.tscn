@@ -59,7 +59,7 @@ light_color = Color(0.6, 0.65, 0.75, 1)
 light_energy = 0.4
 
 [node name="RTSCamera" type="Camera3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 30, 0)
+transform = Transform3D(1, 0, 0, 0, 0.643, 0.766, 0, -0.766, 0.643, 0, 23, 19.3)
 projection = 1
 size = 40.0
 far = 200.0

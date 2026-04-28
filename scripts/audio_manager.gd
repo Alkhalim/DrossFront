@@ -28,31 +28,50 @@ func _get_free_player() -> AudioStreamPlayer:
 ## --- Public API ---
 
 func play_command() -> void:
-	_play_tone(220.0, 0.08, -8.0)
+	# Short metallic click
+	_play_tone(280.0, 0.06, -10.0, 1.5)
 
 func play_select() -> void:
-	_play_tone(330.0, 0.05, -12.0)
+	# Quick ping
+	_play_tone(400.0, 0.04, -14.0)
 
 func play_building_placed() -> void:
-	_play_tone(110.0, 0.15, -6.0, 0.3)
+	# Heavy industrial thud
+	_play_tone(80.0, 0.2, -4.0, 3.0)
 
 func play_production_started() -> void:
-	_play_noise_burst(0.06, -10.0)
+	# Mechanical clunk
+	_play_noise_burst(0.08, -8.0)
 
 func play_production_complete() -> void:
-	_play_two_tone(440.0, 550.0, 0.08, -8.0)
+	# Rising two-tone chime
+	_play_two_tone(380.0, 520.0, 0.1, -8.0)
 
 func play_construction_complete() -> void:
-	_play_two_tone(330.0, 440.0, 0.12, -6.0)
+	# Heavier completion tone
+	_play_two_tone(260.0, 400.0, 0.15, -6.0)
 
 func play_error() -> void:
-	_play_tone(90.0, 0.2, -6.0, 0.0)
+	# Low buzz
+	_play_tone(75.0, 0.25, -6.0, 0.0)
 
 func play_weapon_fire() -> void:
-	_play_noise_burst(0.04, -14.0)
+	# Sharp crack with slight pitch randomization
+	var pitch: float = randf_range(180.0, 260.0)
+	_play_noise_burst(0.035, -16.0)
+	_play_tone(pitch, 0.025, -18.0)
+
+func play_weapon_impact() -> void:
+	# Metallic thump
+	_play_tone(120.0, 0.06, -12.0, 5.0)
 
 func play_unit_destroyed() -> void:
-	_play_tone(65.0, 0.35, -4.0, 2.0)
+	# Deep rumbling explosion
+	_play_noise_burst(0.4, -4.0)
+	_play_tone(50.0, 0.5, -6.0, 4.0)
+
+func play_capture_complete() -> void:
+	_play_two_tone(350.0, 500.0, 0.12, -8.0)
 
 
 ## --- Generators ---

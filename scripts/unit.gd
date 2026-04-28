@@ -30,6 +30,9 @@ var move_target: Vector3 = Vector3.INF
 var is_selected: bool = false
 var _move_speed: float = 8.0
 
+## True when the unit has an active player-issued move command.
+var has_move_order: bool = false
+
 ## Per-member HP. Length = squad_size, each entry = that member's current HP.
 var member_hp: Array[int] = []
 var alive_count: int = 0
@@ -82,11 +85,17 @@ func _init_hp() -> void:
 func command_move(target: Vector3) -> void:
 	move_target = target
 	move_target.y = global_position.y
+	has_move_order = true
+	# Clear combat targets so the unit obeys the move
+	var combat: Node = get_combat()
+	if combat and combat.has_method("clear_target"):
+		combat.clear_target()
 
 
 func stop() -> void:
 	move_target = Vector3.INF
 	velocity = Vector3.ZERO
+	has_move_order = false
 
 
 func _physics_process(delta: float) -> void:
@@ -104,6 +113,7 @@ func _physics_process(delta: float) -> void:
 	var distance := to_target.length()
 
 	if distance < ARRIVE_THRESHOLD:
+		has_move_order = false
 		stop()
 		_stuck_timer = 0.0
 		arrived.emit()

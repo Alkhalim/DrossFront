@@ -33,18 +33,20 @@ func _physics_process(delta: float) -> void:
 	_secondary_cooldown -= delta
 	_search_timer -= delta
 
+	var unit_has_move_order: bool = _unit.get("has_move_order") as bool
+
 	# Use forced target if set, otherwise auto-acquire
 	if forced_target and _is_valid_target(forced_target):
 		_current_target = forced_target
 	elif _current_target and not _is_valid_target(_current_target):
 		_current_target = null
 
-	if not _current_target and _search_timer <= 0.0:
+	# Don't auto-acquire targets while executing a move order
+	if not _current_target and not unit_has_move_order and _search_timer <= 0.0:
 		_search_timer = SEARCH_INTERVAL
 		_current_target = _find_nearest_enemy()
 
 	if not _current_target:
-		# No target — continue attack-move if set
 		if attack_move_target != Vector3.INF and _unit.get("move_target") == Vector3.INF:
 			_unit.command_move(attack_move_target)
 		return
@@ -55,10 +57,8 @@ func _physics_process(delta: float) -> void:
 	var primary_range: float = CombatTables.get_range(primary.range_tier) if primary else 10.0
 
 	if dist <= primary_range:
-		# In range: stop moving (unless attack-moving past), face target, fire
-		if attack_move_target == Vector3.INF and forced_target:
-			_unit.stop()
-		elif attack_move_target == Vector3.INF:
+		# In range: only stop if we don't have an active move order
+		if not unit_has_move_order:
 			_unit.stop()
 
 		_face_target()
@@ -71,8 +71,8 @@ func _physics_process(delta: float) -> void:
 			if dist <= sec_range:
 				_fire_weapon(stats.secondary_weapon, false)
 	else:
-		# Out of range — move toward target if explicitly attacking
-		if forced_target:
+		# Out of range — move toward target only if explicitly attacking (not during move order)
+		if forced_target and not unit_has_move_order:
 			_unit.command_move(_current_target.global_position)
 
 
@@ -206,10 +206,47 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 
 	_current_target.take_damage(total_damage)
 
+	# Spawn projectile visual
+	var proj_script: GDScript = load("res://scripts/projectile.gd") as GDScript
+	if proj_script:
+		var proj: Node3D = proj_script.create(_unit.global_position, _current_target.global_position, weapon.role_tag)
+		get_tree().current_scene.add_child(proj)
+
+	# Muzzle flash
+	_spawn_muzzle_flash()
+
 	# Sound
 	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
 	if audio and audio.has_method("play_weapon_fire"):
 		audio.play_weapon_fire()
+
+
+func _spawn_muzzle_flash() -> void:
+	var flash := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.25
+	sphere.height = 0.5
+	flash.mesh = sphere
+
+	var forward: Vector3 = -_unit.global_basis.z.normalized()
+	flash.global_position = _unit.global_position + forward * 0.8 + Vector3(0, 1.2, 0)
+
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 0.8, 0.2, 0.9)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.7, 0.1, 1.0)
+	mat.emission_energy_multiplier = 6.0
+	flash.set_surface_override_material(0, mat)
+
+	get_tree().current_scene.add_child(flash)
+
+	var timer := Timer.new()
+	timer.wait_time = 0.08
+	timer.one_shot = true
+	timer.autostart = true
+	timer.timeout.connect(flash.queue_free)
+	flash.add_child(timer)
 
 
 func _get_target_armor() -> StringName:
