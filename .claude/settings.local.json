@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git -C \"D:/Dokumente/Gamedesign/DrossFront/DrossFront/\" log --oneline -5)"
+      "Bash(git -C \"D:/Dokumente/Gamedesign/DrossFront/DrossFront/\" log --oneline -5)",
+      "Bash(mkdir -p scenes scripts resources shared ui assets)",
+      "Bash(touch __TRACKED_VAR__/.gdkeep)",
+      "Bash(mv scripts/salvage_yard_building.gd scripts/salvage_yard_component.gd)",
+      "Bash(mv scripts/salvage_yard_building.gd.uid scripts/salvage_yard_component.gd.uid)"
     ]
   }
 }

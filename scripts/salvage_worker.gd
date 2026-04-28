@@ -35,7 +35,7 @@ func _ready() -> void:
 	mat.emission_enabled = true
 	mat.emission = Color(0.5, 0.45, 0.2)
 	mat.emission_energy_multiplier = 0.5
-	mesh.surface_material_override[0] = mat
+	mesh.set_surface_override_material(0, mat)
 	add_child(mesh)
 
 	var col := CollisionShape3D.new()

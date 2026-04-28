@@ -27,7 +27,7 @@ func _ready() -> void:
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(0.2, 0.18, 0.15)
 	mat.roughness = 1.0
-	mesh.surface_material_override[0] = mat
+	mesh.set_surface_override_material(0, mat)
 
 	add_child(mesh)
 
