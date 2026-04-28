@@ -12,4 +12,4 @@ build_time = 25.0
 power_consumption = 5
 power_production = 0
 footprint_size = Vector3(4, 2, 4)
-placeholder_color = Color(0.4, 0.38, 0.25)
+placeholder_color = Color(0.4, 0.38, 0.25, 1)

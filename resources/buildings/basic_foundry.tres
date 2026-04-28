@@ -15,4 +15,4 @@ power_consumption = 10
 power_production = 0
 producible_units = [ExtResource("2"), ExtResource("3")]
 footprint_size = Vector3(5, 3.5, 5)
-placeholder_color = Color(0.35, 0.3, 0.28)
+placeholder_color = Color(0.35, 0.3, 0.28, 1)
