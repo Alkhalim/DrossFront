@@ -71,10 +71,13 @@ func _ready() -> void:
 	# Navigation agent for pathfinding
 	_nav_agent = NavigationAgent3D.new()
 	_nav_agent.name = "NavAgent"
-	_nav_agent.path_desired_distance = 1.0
-	_nav_agent.target_desired_distance = 1.5
+	_nav_agent.path_desired_distance = 0.8
+	_nav_agent.target_desired_distance = 1.2
 	_nav_agent.avoidance_enabled = true
-	_nav_agent.radius = 1.0
+	_nav_agent.radius = 1.5
+	_nav_agent.neighbor_distance = 10.0
+	_nav_agent.max_neighbors = 8
+	_nav_agent.max_speed = 16.0
 	add_child(_nav_agent)
 
 	if stats:
@@ -224,10 +227,9 @@ func _build_hp_bar() -> void:
 	_hp_bar_fill.set_surface_override_material(0, fill_mat)
 	_hp_bar.add_child(_hp_bar_fill)
 
-	# Billboard — make HP bar always face camera
-	_hp_bar.set_meta("billboard", true)
-
+	# Top-level so it doesn't inherit unit rotation (prevents jitter)
 	add_child(_hp_bar)
+	_hp_bar.top_level = true
 	_update_hp_bar()
 
 
@@ -291,8 +293,15 @@ func _physics_process(delta: float) -> void:
 		_anim_time = 0.0
 		_reset_walk_bob()
 
-	# Make HP bar face camera
-	if _hp_bar:
+	# Position HP bar above unit (top_level so we set global_position)
+	if _hp_bar and is_instance_valid(_hp_bar):
+		var shape_data: Dictionary = CLASS_SHAPES.get(stats.unit_class, CLASS_SHAPES[&"medium"]) if stats else CLASS_SHAPES[&"medium"]
+		var bar_height: float = 2.5
+		if shape_data.has("body"):
+			var body: Vector3 = shape_data["body"] as Vector3
+			var head: Vector3 = shape_data["head"] as Vector3
+			bar_height = body.y + head.y + 0.5
+		_hp_bar.global_position = global_position + Vector3(0, bar_height, 0)
 		var cam: Camera3D = get_viewport().get_camera_3d()
 		if cam:
 			_hp_bar.global_rotation = cam.global_rotation
@@ -393,6 +402,8 @@ func get_squad_strength_ratio() -> float:
 
 func _die() -> void:
 	squad_destroyed.emit()
+	if _hp_bar and is_instance_valid(_hp_bar):
+		_hp_bar.queue_free()
 	var wreck: Node = Wreck.create_from_unit(stats, global_position)
 	get_tree().current_scene.add_child(wreck)
 

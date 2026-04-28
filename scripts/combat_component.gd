@@ -209,7 +209,7 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	# Spawn projectile visual
 	var proj_script: GDScript = load("res://scripts/projectile.gd") as GDScript
 	if proj_script:
-		var proj: Node3D = proj_script.create(_unit.global_position, _current_target.global_position, weapon.role_tag)
+		var proj: Node3D = proj_script.create(_unit.global_position, _current_target.global_position, weapon.role_tag, weapon.rof_tier)
 		get_tree().current_scene.add_child(proj)
 
 	# Muzzle flash

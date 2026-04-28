@@ -68,6 +68,8 @@ func _update_selection_display() -> void:
 		return
 
 	var building: Building = _selection_manager.get_selected_building()
+	if building and not is_instance_valid(building):
+		building = null
 	var units: Array[Unit] = _selection_manager.get_selected_units()
 
 	if building and building.stats:
@@ -216,6 +218,17 @@ func _on_branch_commit(base_stats: UnitStatResource, branch_stats: UnitStatResou
 
 
 func _update_unit_panel(units: Array[Unit]) -> void:
+	# Filter out freed units
+	var valid_units: Array[Unit] = []
+	for unit: Unit in units:
+		if is_instance_valid(unit) and unit.alive_count > 0:
+			valid_units.append(unit)
+	units = valid_units
+
+	if units.is_empty():
+		_bottom_panel.visible = false
+		return
+
 	# Check if selection actually changed
 	var current_ids: Array[int] = []
 	for unit: Unit in units:

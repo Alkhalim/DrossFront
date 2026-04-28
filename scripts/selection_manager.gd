@@ -62,7 +62,7 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 			_is_dragging = false
 
 	elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-		if _selected_building:
+		if _selected_building and _selected_building.stats and not _selected_building.stats.producible_units.is_empty():
 			_set_rally_point(event.position)
 		elif _attack_move_mode:
 			_command_attack_move(event.position)
@@ -517,13 +517,12 @@ func _select_building(building: Building) -> void:
 	if _audio:
 		_audio.play_select()
 
-	# Show existing rally point if set
-	if building.rally_point != Vector3.ZERO:
-		if not _rally_marker:
+	# Show rally point only for production buildings
+	if building.stats and not building.stats.producible_units.is_empty():
+		if building.rally_point != Vector3.ZERO:
 			_set_rally_point_visual(building.rally_point)
-		else:
-			_rally_marker.visible = true
-			_rally_marker.global_position = building.rally_point + Vector3(0, 0.75, 0)
+	else:
+		_hide_rally_marker()
 
 
 func _deselect_building() -> void:
