@@ -10,6 +10,7 @@ extends Node3D
 func _ready() -> void:
 	_setup_player()
 	_setup_ai()
+	_setup_fuel_deposits()
 	_setup_buildable_buildings()
 
 
@@ -84,6 +85,23 @@ func _spawn_ai_unit(unit_stats: UnitStatResource, pos: Vector3) -> void:
 	else:
 		add_child(unit)
 	unit.global_position = pos
+
+
+func _setup_fuel_deposits() -> void:
+	var deposit_script: GDScript = load("res://scripts/fuel_deposit.gd") as GDScript
+	if not deposit_script:
+		return
+
+	# Two deposits roughly equidistant from both HQs
+	var positions: Array[Vector3] = [
+		Vector3(25, 0, -30),
+		Vector3(-25, 0, -30),
+	]
+
+	for pos: Vector3 in positions:
+		var deposit: Node3D = deposit_script.new()
+		deposit.global_position = pos
+		add_child(deposit)
 
 
 func _setup_buildable_buildings() -> void:

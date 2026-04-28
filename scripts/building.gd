@@ -234,9 +234,17 @@ func _process(delta: float) -> void:
 
 
 func _spawn_unit(unit_stats: UnitStatResource) -> void:
+	# Check if a branch commit exists for this unit type → use upgraded stats
+	var actual_stats: UnitStatResource = unit_stats
+	var bcm: Node = get_tree().current_scene.get_node_or_null("BranchCommitManager")
+	if bcm and bcm.has_method("get_committed_stats"):
+		var committed: UnitStatResource = bcm.get_committed_stats(unit_stats.unit_name)
+		if committed:
+			actual_stats = committed
+
 	var unit_scene: PackedScene = load("res://scenes/unit.tscn") as PackedScene
 	var unit: Unit = unit_scene.instantiate() as Unit
-	unit.stats = unit_stats
+	unit.stats = actual_stats
 	unit.owner_id = owner_id
 
 	var spawn_pos: Vector3

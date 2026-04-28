@@ -1,4 +1,4 @@
-[gd_scene load_steps=20 format=3]
+[gd_scene load_steps=22 format=3]
 
 [ext_resource type="Script" path="res://scripts/rts_camera.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/unit.tscn" id="2"]
@@ -15,6 +15,8 @@
 [ext_resource type="PackedScene" path="res://ui/hud.tscn" id="13"]
 [ext_resource type="Script" path="res://scripts/wreck_spawner.gd" id="14"]
 [ext_resource type="Script" path="res://scripts/audio_manager.gd" id="15"]
+[ext_resource type="Script" path="res://scripts/branch_commit_manager.gd" id="16"]
+[ext_resource type="Script" path="res://scripts/match_manager.gd" id="17"]
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
 size = Vector2(200, 200)
@@ -104,6 +106,12 @@ script = ExtResource("14")
 
 [node name="AudioManager" type="Node" parent="."]
 script = ExtResource("15")
+
+[node name="BranchCommitManager" type="Node" parent="."]
+script = ExtResource("16")
+
+[node name="MatchManager" type="Node" parent="."]
+script = ExtResource("17")
 
 [node name="SelectionManager" type="Node" parent="."]
 script = ExtResource("7")

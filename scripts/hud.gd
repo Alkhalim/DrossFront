@@ -81,7 +81,10 @@ func _update_building_panel(building: Building) -> void:
 		_last_building_id = bid
 		_last_unit_ids.clear()
 		_showing_build_buttons = false
-		_rebuild_production_buttons(building)
+		if building.stats.building_id == &"basic_armory":
+			_rebuild_armory_buttons(building)
+		else:
+			_rebuild_production_buttons(building)
 
 	# Update dynamic text every frame
 	if not building.is_constructed:
@@ -109,6 +112,15 @@ func _update_building_panel(building: Building) -> void:
 		if count < max_w:
 			queue_text += "  |  Next worker: %d%%" % int(spawn_pct * 100.0)
 		_queue_label.text = queue_text
+	elif building.stats.building_id == &"basic_armory":
+		# Show branch commit progress
+		var bcm: Node = get_tree().current_scene.get_node_or_null("BranchCommitManager")
+		if bcm and bcm.has_method("is_committing") and bcm.is_committing():
+			var pct: float = bcm.get_commit_progress()
+			var bname: String = bcm.get_commit_branch_name()
+			_queue_label.text = "Committing %s: %d%%" % [bname, int(pct * 100.0)]
+		else:
+			_queue_label.text = ""
 	elif building.get_queue_size() > 0:
 		_queue_label.text = "Queue: %d  |  Progress: %d%%" % [
 			building.get_queue_size(),
@@ -145,6 +157,52 @@ func _rebuild_production_buttons(building: Building) -> void:
 func _on_production_button(index: int) -> void:
 	if _selection_manager:
 		_selection_manager.queue_unit_at_building(index)
+
+
+func _rebuild_armory_buttons(_building: Building) -> void:
+	_clear_buttons()
+
+	var bcm: Node = get_tree().current_scene.get_node_or_null("BranchCommitManager")
+	if not bcm:
+		_action_label.text = "No commit manager"
+		return
+
+	# Find units with available branches (Hound)
+	var hound_stats: UnitStatResource = load("res://resources/units/anvil_hound.tres") as UnitStatResource
+	if not hound_stats or not hound_stats.branch_a_stats:
+		_action_label.text = "No branches available"
+		return
+
+	if bcm.has_committed(hound_stats.unit_name):
+		var committed: UnitStatResource = bcm.get_committed_stats(hound_stats.unit_name)
+		_action_label.text = "Committed: %s" % committed.unit_name
+		return
+
+	if bcm.is_committing():
+		_action_label.text = "Commit in progress..."
+		return
+
+	_action_label.text = "Hound Branch Commit (irreversible):"
+
+	var btn_a := Button.new()
+	btn_a.custom_minimum_size = Vector2(110, 40)
+	btn_a.text = "[Q] %s\nRecon/Smoke" % hound_stats.branch_a_name
+	btn_a.pressed.connect(_on_branch_commit.bind(hound_stats, hound_stats.branch_a_stats, hound_stats.branch_a_name))
+	_button_grid.add_child(btn_a)
+
+	var btn_b := Button.new()
+	btn_b.custom_minimum_size = Vector2(110, 40)
+	btn_b.text = "[W] %s\nBrawler/HP++" % hound_stats.branch_b_name
+	btn_b.pressed.connect(_on_branch_commit.bind(hound_stats, hound_stats.branch_b_stats, hound_stats.branch_b_name))
+	_button_grid.add_child(btn_b)
+
+
+func _on_branch_commit(base_stats: UnitStatResource, branch_stats: UnitStatResource, branch_name: String) -> void:
+	var bcm: Node = get_tree().current_scene.get_node_or_null("BranchCommitManager")
+	if bcm and bcm.has_method("start_commit"):
+		bcm.start_commit(base_stats, branch_stats, branch_name)
+		# Force button rebuild on next frame
+		_last_building_id = -1
 
 
 func _update_unit_panel(units: Array[Unit]) -> void:
