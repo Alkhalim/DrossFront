@@ -38,7 +38,8 @@ func _ready() -> void:
 
 		# Add specialized components based on building type
 		if stats.building_id == &"salvage_yard":
-			var yard := SalvageYardComponent.new()
+			var script: GDScript = load("res://scripts/salvage_yard_component.gd") as GDScript
+			var yard: Node = script.new()
 			yard.name = "SalvageYardComponent"
 			add_child(yard)
 
