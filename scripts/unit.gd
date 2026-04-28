@@ -224,7 +224,6 @@ func _restore_material() -> void:
 
 
 func _apply_player_color() -> void:
-	# Remove old band if exists
 	if _color_band and is_instance_valid(_color_band):
 		_color_band.queue_free()
 		_color_band = null
@@ -233,30 +232,35 @@ func _apply_player_color() -> void:
 		return
 
 	var team_color: Color = PLAYER_COLOR if owner_id == 0 else ENEMY_COLOR
-
-	# Get unit height for positioning
 	var shape_data: Dictionary = CLASS_SHAPES.get(stats.unit_class, CLASS_SHAPES[&"medium"])
-	var band_y: float = 0.3
-	var band_width: float = 0.8
-	if shape_data.has("height"):
-		band_y = (shape_data["height"] as float) * 0.7
-		band_width = (shape_data["radius"] as float) * 2.2 if shape_data.has("radius") else 0.8
-	elif shape_data.has("size"):
-		var sz: Vector3 = shape_data["size"] as Vector3
-		band_y = sz.y * 0.7
-		band_width = sz.x * 1.05
 
+	# Create a slightly scaled-up copy of the unit's mesh as a colored shell
 	_color_band = MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = Vector3(band_width, 0.15, band_width)
-	_color_band.mesh = box
-	_color_band.position.y = band_y
+	var shape_type: String = shape_data["type"]
+
+	if shape_type == "cylinder":
+		var radius: float = shape_data["radius"]
+		var height: float = shape_data["height"]
+		var cyl := CylinderMesh.new()
+		cyl.top_radius = radius + 0.08
+		cyl.bottom_radius = radius + 0.08
+		cyl.height = height + 0.08
+		_color_band.mesh = cyl
+		_color_band.position.y = height / 2.0
+	else:
+		var sz: Vector3 = shape_data["size"] as Vector3
+		var shell := BoxMesh.new()
+		shell.size = sz + Vector3(0.15, 0.15, 0.15)
+		_color_band.mesh = shell
+		_color_band.position.y = sz.y / 2.0
 
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = team_color
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = Color(team_color.r, team_color.g, team_color.b, 0.35)
 	mat.emission_enabled = true
 	mat.emission = team_color
-	mat.emission_energy_multiplier = 1.5
+	mat.emission_energy_multiplier = 1.0
+	mat.cull_mode = BaseMaterial3D.CULL_FRONT
 	_color_band.set_surface_override_material(0, mat)
 
 	add_child(_color_band)

@@ -141,6 +141,7 @@ func _handle_build_hotkey(key: InputEventKey) -> void:
 func _click_select(event: InputEventMouseButton) -> void:
 	var unit := _raycast_unit(event.position)
 	var shift := event.shift_pressed
+	var is_double: bool = event.double_click
 
 	# Only select player-owned units
 	if unit and unit.owner_id != 0:
@@ -148,7 +149,10 @@ func _click_select(event: InputEventMouseButton) -> void:
 
 	if unit:
 		_deselect_building()
-		if shift:
+		if is_double and unit.stats:
+			# Double-click: select all on-screen units of same type
+			_select_all_of_type(unit.stats.unit_name)
+		elif shift:
 			if unit.is_selected:
 				_remove_from_selection(unit)
 			else:
@@ -160,9 +164,13 @@ func _click_select(event: InputEventMouseButton) -> void:
 		# Try selecting a building
 		var building := _find_building_at(event.position)
 		if building:
-			if not shift:
-				_clear_selection()
-			_select_building(building)
+			if is_double and building.stats:
+				# Double-click building: select all of same type on screen
+				_select_all_buildings_of_type(building.stats.building_id)
+			else:
+				if not shift:
+					_clear_selection()
+				_select_building(building)
 		elif not shift:
 			_clear_selection()
 			_deselect_building()
@@ -287,6 +295,45 @@ func _find_enemy_at(screen_pos: Vector2) -> Node3D:
 			return node as Node3D
 
 	return null
+
+
+func _select_all_of_type(unit_name: String) -> void:
+	_clear_selection()
+	_deselect_building()
+	var viewport_rect := get_viewport().get_visible_rect()
+	var all_units: Array[Node] = get_tree().get_nodes_in_group("units")
+	for node: Node in all_units:
+		var unit: Unit = node as Unit
+		if not unit or unit.owner_id != 0 or unit.alive_count <= 0:
+			continue
+		if not unit.stats or unit.stats.unit_name != unit_name:
+			continue
+		var screen_pos: Vector2 = _camera.unproject_position(unit.global_position)
+		if viewport_rect.has_point(screen_pos):
+			_add_to_selection(unit)
+
+
+func _select_all_buildings_of_type(building_id: StringName) -> void:
+	_clear_selection()
+	_deselect_building()
+	# For buildings we just select the first matching one
+	# (building selection is single-select in this prototype)
+	var viewport_rect := get_viewport().get_visible_rect()
+	var buildings: Array[Node] = get_tree().get_nodes_in_group("buildings")
+	for node: Node in buildings:
+		if not ("owner_id" in node) or node.get("owner_id") != 0:
+			continue
+		if not ("stats" in node) or node.get("stats") == null:
+			continue
+		var bstats: BuildingStatResource = node.get("stats") as BuildingStatResource
+		if not bstats or bstats.building_id != building_id:
+			continue
+		var screen_pos: Vector2 = _camera.unproject_position(node.global_position)
+		if viewport_rect.has_point(screen_pos):
+			var building: Building = node as Building
+			if building:
+				_select_building(building)
+			break
 
 
 func get_selected_units() -> Array[Unit]:

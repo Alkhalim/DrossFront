@@ -90,21 +90,20 @@ func _apply_team_ring() -> void:
 
 	var team_color: Color = PLAYER_COLOR if owner_id == 0 else ENEMY_COLOR
 
+	# Shell that conforms to the building shape
 	_team_ring = MeshInstance3D.new()
-	var torus := TorusMesh.new()
-	var ring_radius: float = maxf(stats.footprint_size.x, stats.footprint_size.z) * 0.55
-	torus.inner_radius = ring_radius - 0.2
-	torus.outer_radius = ring_radius
-	torus.rings = 24
-	torus.ring_segments = 12
-	_team_ring.mesh = torus
-	_team_ring.position.y = 0.1
+	var shell := BoxMesh.new()
+	shell.size = stats.footprint_size + Vector3(0.3, 0.3, 0.3)
+	_team_ring.mesh = shell
+	_team_ring.position.y = stats.footprint_size.y / 2.0
 
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = team_color
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = Color(team_color.r, team_color.g, team_color.b, 0.25)
 	mat.emission_enabled = true
 	mat.emission = team_color
-	mat.emission_energy_multiplier = 2.0
+	mat.emission_energy_multiplier = 0.8
+	mat.cull_mode = BaseMaterial3D.CULL_FRONT
 	_team_ring.set_surface_override_material(0, mat)
 
 	add_child(_team_ring)
