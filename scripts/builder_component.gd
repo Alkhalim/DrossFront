@@ -63,9 +63,10 @@ func place_building(building_stats: BuildingStatResource, position: Vector3, res
 	building.stats = building_stats
 	building.resource_manager = resource_mgr
 	building.global_position = position
-	building.begin_construction()
 
 	get_tree().current_scene.add_child(building)
+
+	building.begin_construction()
 
 	# Recalculate power when building finishes
 	building.construction_complete.connect(func() -> void: resource_mgr.update_power())
