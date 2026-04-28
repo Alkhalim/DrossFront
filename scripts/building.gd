@@ -29,6 +29,10 @@ var resource_manager: Node = null
 @onready var _collision: CollisionShape3D = $CollisionShape3D as CollisionShape3D
 @onready var _spawn_marker: Marker3D = $SpawnPoint as Marker3D
 
+const PLAYER_COLOR := Color(0.15, 0.45, 0.9, 1.0)
+const ENEMY_COLOR := Color(0.85, 0.2, 0.15, 1.0)
+var _team_ring: MeshInstance3D = null
+
 var _progress_bg: MeshInstance3D = null
 var _progress_bar: MeshInstance3D = null
 var _progress_mat: StandardMaterial3D = null
@@ -62,15 +66,7 @@ func _apply_placeholder_shape() -> void:
 	_mesh.position.y = stats.footprint_size.y / 2.0
 
 	var mat := StandardMaterial3D.new()
-	var base_color: Color = stats.placeholder_color
-	if owner_id != 0:
-		base_color = Color(
-			minf(base_color.r + 0.25, 1.0),
-			maxf(base_color.g - 0.15, 0.0),
-			maxf(base_color.b - 0.15, 0.0),
-			base_color.a
-		)
-	mat.albedo_color = base_color
+	mat.albedo_color = stats.placeholder_color
 	mat.roughness = 0.9
 	if not is_constructed:
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -81,6 +77,37 @@ func _apply_placeholder_shape() -> void:
 	col_shape.size = stats.footprint_size
 	_collision.shape = col_shape
 	_collision.position.y = stats.footprint_size.y / 2.0
+	_apply_team_ring()
+
+
+func _apply_team_ring() -> void:
+	if _team_ring and is_instance_valid(_team_ring):
+		_team_ring.queue_free()
+		_team_ring = null
+
+	if not stats:
+		return
+
+	var team_color: Color = PLAYER_COLOR if owner_id == 0 else ENEMY_COLOR
+
+	_team_ring = MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	var ring_radius: float = maxf(stats.footprint_size.x, stats.footprint_size.z) * 0.55
+	torus.inner_radius = ring_radius - 0.2
+	torus.outer_radius = ring_radius
+	torus.rings = 24
+	torus.ring_segments = 12
+	_team_ring.mesh = torus
+	_team_ring.position.y = 0.1
+
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = team_color
+	mat.emission_enabled = true
+	mat.emission = team_color
+	mat.emission_energy_multiplier = 2.0
+	_team_ring.set_surface_override_material(0, mat)
+
+	add_child(_team_ring)
 
 
 func begin_construction() -> void:

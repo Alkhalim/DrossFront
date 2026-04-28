@@ -45,6 +45,11 @@ const FLASH_DURATION: float = 0.12
 var _stuck_timer: float = 0.0
 var _last_position: Vector3 = Vector3.ZERO
 
+## Player color constants.
+const PLAYER_COLOR := Color(0.15, 0.45, 0.9, 1.0)
+const ENEMY_COLOR := Color(0.85, 0.2, 0.15, 1.0)
+var _color_band: MeshInstance3D = null
+
 ## Placeholder shape/size per unit class.
 const CLASS_SHAPES: Dictionary = {
 	&"engineer": { "type": "cylinder", "radius": 0.4, "height": 1.2, "color": Color(0.45, 0.42, 0.3) },
@@ -62,6 +67,7 @@ func _ready() -> void:
 		_move_speed = SPEED_MAP.get(stats.speed_tier, 8.0)
 		_init_hp()
 		_apply_placeholder_shape()
+		_apply_player_color()
 		if stats.can_build:
 			var builder := BuilderComponent.new()
 			builder.name = "BuilderComponent"
@@ -217,6 +223,45 @@ func _restore_material() -> void:
 	_apply_placeholder_shape()
 
 
+func _apply_player_color() -> void:
+	# Remove old band if exists
+	if _color_band and is_instance_valid(_color_band):
+		_color_band.queue_free()
+		_color_band = null
+
+	if not stats:
+		return
+
+	var team_color: Color = PLAYER_COLOR if owner_id == 0 else ENEMY_COLOR
+
+	# Get unit height for positioning
+	var shape_data: Dictionary = CLASS_SHAPES.get(stats.unit_class, CLASS_SHAPES[&"medium"])
+	var band_y: float = 0.3
+	var band_width: float = 0.8
+	if shape_data.has("height"):
+		band_y = (shape_data["height"] as float) * 0.7
+		band_width = (shape_data["radius"] as float) * 2.2 if shape_data.has("radius") else 0.8
+	elif shape_data.has("size"):
+		var sz: Vector3 = shape_data["size"] as Vector3
+		band_y = sz.y * 0.7
+		band_width = sz.x * 1.05
+
+	_color_band = MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = Vector3(band_width, 0.15, band_width)
+	_color_band.mesh = box
+	_color_band.position.y = band_y
+
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = team_color
+	mat.emission_enabled = true
+	mat.emission = team_color
+	mat.emission_energy_multiplier = 1.5
+	_color_band.set_surface_override_material(0, mat)
+
+	add_child(_color_band)
+
+
 ## --- Selection ---
 
 func select() -> void:
@@ -251,14 +296,6 @@ func _apply_placeholder_shape() -> void:
 
 	var mat := StandardMaterial3D.new()
 	var base_color: Color = shape_data["color"] as Color
-	# Tint enemy units red
-	if owner_id != 0:
-		base_color = Color(
-			minf(base_color.r + 0.25, 1.0),
-			maxf(base_color.g - 0.15, 0.0),
-			maxf(base_color.b - 0.15, 0.0),
-			1.0
-		)
 	mat.albedo_color = base_color
 	mat.roughness = 0.8
 

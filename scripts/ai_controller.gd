@@ -57,8 +57,14 @@ func _setup() -> void:
 		_state_timer = 0.0
 
 
+var _hq_destroyed: bool = false
+
+
 func _process(delta: float) -> void:
+	if _hq_destroyed:
+		return
 	if not _hq or not is_instance_valid(_hq):
+		_hq_destroyed = true
 		return
 
 	# AI passive income
@@ -89,16 +95,27 @@ func _process(delta: float) -> void:
 			_process_rebuild()
 
 
+var _generator_built: bool = false
+var _foundry_built: bool = false
+var _yard_built: bool = false
+
+
 func _process_economy() -> void:
-	# Place buildings if we don't have them
-	if not _generator or not is_instance_valid(_generator):
+	# Place buildings once — don't respawn destroyed buildings
+	if not _generator_built:
 		_generator = _place_ai_building("res://resources/buildings/basic_generator.tres", Vector3(5, 0, 3))
+		if _generator:
+			_generator_built = true
 
-	if not _foundry or not is_instance_valid(_foundry):
+	if not _foundry_built:
 		_foundry = _place_ai_building("res://resources/buildings/basic_foundry.tres", Vector3(-5, 0, 3))
+		if _foundry:
+			_foundry_built = true
 
-	if not _salvage_yard or not is_instance_valid(_salvage_yard):
+	if not _yard_built:
 		_salvage_yard = _place_ai_building("res://resources/buildings/salvage_yard.tres", Vector3(0, 0, 6))
+		if _salvage_yard:
+			_yard_built = true
 
 	if _state_timer >= ECONOMY_DURATION:
 		_state = AIState.ARMY
