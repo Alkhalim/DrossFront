@@ -92,13 +92,24 @@ func _world_to_map(world_pos: Vector3, map_size: Vector2, half_world: float) -> 
 	return Vector2(nx * map_size.x, nz * map_size.y)
 
 
+var _is_panning: bool = false
+
+
 func _gui_input(event: InputEvent) -> void:
-	# Click on minimap to move camera
+	# Click on minimap to move camera; drag to keep panning while LMB is held.
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
-		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
-			_click_minimap(mb.position)
+		if mb.button_index == MOUSE_BUTTON_LEFT:
+			if mb.pressed:
+				_is_panning = true
+				_click_minimap(mb.position)
+			else:
+				_is_panning = false
 			get_viewport().set_input_as_handled()
+	elif event is InputEventMouseMotion and _is_panning:
+		var motion: InputEventMouseMotion = event as InputEventMouseMotion
+		_click_minimap(motion.position)
+		get_viewport().set_input_as_handled()
 
 
 func _click_minimap(local_pos: Vector2) -> void:
@@ -108,7 +119,9 @@ func _click_minimap(local_pos: Vector2) -> void:
 	var world_z: float = (local_pos.y / map_size.y) * half_world * 2.0 - half_world
 
 	var cam: Camera3D = get_viewport().get_camera_3d()
-	if cam and cam.has_method("_ready"):
-		# Move camera pivot
-		cam.set("_target_pivot", Vector3(world_x, 0, world_z))
-		cam.set("_pivot", Vector3(world_x, 0, world_z))
+	if not cam:
+		return
+	# Set both pivots — _target_pivot drives the smooth lerp in RTSCamera
+	# and _pivot snaps the current position so clicks/drags feel responsive.
+	cam.set("_target_pivot", Vector3(world_x, 0, world_z))
+	cam.set("_pivot", Vector3(world_x, 0, world_z))

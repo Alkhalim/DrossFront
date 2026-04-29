@@ -75,11 +75,27 @@ func _ready() -> void:
 		_build_tutorial_overlay()
 
 
+## Tutorial state — tracked per step so the checklist can tick off as the
+## player does each thing. Polled in _process when the overlay is visible.
+const TUTORIAL_TASKS: Array[Dictionary] = [
+	{ "id": "select_unit",       "label": "Click on one of your units (blue) to select it" },
+	{ "id": "issue_move",        "label": "Right-click on empty ground to move the selected unit" },
+	{ "id": "box_select",        "label": "Drag a box around multiple units to select them all" },
+	{ "id": "attack_move",       "label": "Press A then right-click to issue an attack-move" },
+	{ "id": "build_something",   "label": "With an engineer selected, press 1-7 and click to place a building" },
+	{ "id": "train_unit",        "label": "Click your foundry and press Q/W to train a unit" },
+	{ "id": "kill_enemy",        "label": "Destroy any enemy unit" },
+]
+
+var _tutorial_task_labels: Array = []  # Labels for ticking off
+var _tutorial_progress: Dictionary = {}  # task_id → completed bool
+
+
 func _build_tutorial_overlay() -> void:
 	var overlay := PanelContainer.new()
 	overlay.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	overlay.position = Vector2(-260, 56)
-	overlay.custom_minimum_size = Vector2(520, 0)
+	overlay.position = Vector2(-280, 56)
+	overlay.custom_minimum_size = Vector2(560, 0)
 	overlay.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(overlay)
 
@@ -88,48 +104,138 @@ func _build_tutorial_overlay() -> void:
 	overlay.add_child(inner)
 
 	var title := Label.new()
-	title.text = "Welcome, Commander"
+	title.text = "Tutorial — complete the tasks below"
 	title.add_theme_font_size_override("font_size", 20)
 	title.add_theme_color_override("font_color", Color(0.95, 0.92, 0.78, 1.0))
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	inner.add_child(title)
 
-	var lines: PackedStringArray = PackedStringArray([
-		"Left click  — select unit / building",
-		"Left drag   — box-select multiple units",
-		"Shift+click — add to selection",
-		"Right click — move / attack / assist",
-		"A then RMB  — attack-move",
-		"WASD / edge — pan camera, mouse wheel zooms",
-		"Ctrl+0..9   — assign control group, 0..9 to recall",
-		"Q W E       — train units (basic foundry / armory)",
-		"1..7        — place buildings (with engineer selected)",
-		"ESC         — pause (resume + volume + main menu)",
-		"",
-		"Goal: destroy the enemy headquarters across the map.",
-	])
-	for line: String in lines:
+	# The task checklist — built once, updated each frame by _check_tutorial_progress.
+	_tutorial_task_labels.clear()
+	_tutorial_progress.clear()
+	for task: Dictionary in TUTORIAL_TASKS:
 		var lbl := Label.new()
-		lbl.text = line
+		lbl.text = "  ☐  %s" % task["label"]
 		lbl.add_theme_font_size_override("font_size", 14)
 		lbl.add_theme_color_override("font_color", Color(0.85, 0.9, 0.95, 1.0))
 		inner.add_child(lbl)
+		_tutorial_task_labels.append(lbl)
+		_tutorial_progress[task["id"]] = false
 
-	var hint := Label.new()
-	hint.text = "Press TAB or click Dismiss to close"
-	hint.add_theme_font_size_override("font_size", 12)
-	hint.add_theme_color_override("font_color", Color(0.7, 0.85, 0.95, 1.0))
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	inner.add_child(hint)
+	# Quick-reference controls under the checklist.
+	var sep := Control.new()
+	sep.custom_minimum_size = Vector2(0, 8)
+	inner.add_child(sep)
+	var ctrl_title := Label.new()
+	ctrl_title.text = "Controls"
+	ctrl_title.add_theme_font_size_override("font_size", 14)
+	ctrl_title.add_theme_color_override("font_color", Color(0.7, 0.85, 0.95, 1.0))
+	inner.add_child(ctrl_title)
+	for line: String in [
+		"  WASD / mouse edge — pan camera        Mouse wheel — zoom",
+		"  Ctrl+0..9 assign control group        0..9 recall group",
+		"  ESC pause / settings / main menu      TAB hide tutorial",
+	]:
+		var l := Label.new()
+		l.text = line
+		l.add_theme_font_size_override("font_size", 12)
+		l.add_theme_color_override("font_color", Color(0.7, 0.78, 0.85, 1.0))
+		inner.add_child(l)
 
 	var close_btn := Button.new()
 	close_btn.text = "Dismiss"
-	close_btn.custom_minimum_size = Vector2(120, 30)
+	close_btn.custom_minimum_size = Vector2(120, 28)
 	close_btn.pressed.connect(func() -> void: overlay.queue_free())
 	inner.add_child(close_btn)
 
 	# Cache so the TAB handler can free it.
 	set_meta("tutorial_overlay", overlay)
+
+
+func _check_tutorial_progress() -> void:
+	## Called from _process while the overlay is visible. Polls game state
+	## and ticks off completed tasks.
+	if not has_meta("tutorial_overlay"):
+		return
+	var overlay: Node = get_meta("tutorial_overlay")
+	if not is_instance_valid(overlay):
+		remove_meta("tutorial_overlay")
+		return
+	if not _selection_manager:
+		return
+
+	var units: Array[Unit] = _selection_manager.get_selected_units()
+
+	# Each task is independent — once done, stays done.
+	if not _tutorial_progress.get("select_unit", false) and units.size() >= 1:
+		_mark_task_done("select_unit")
+
+	if not _tutorial_progress.get("issue_move", false):
+		for u: Unit in units:
+			if is_instance_valid(u) and u.has_move_order:
+				_mark_task_done("issue_move")
+				break
+
+	if not _tutorial_progress.get("box_select", false) and units.size() >= 2:
+		_mark_task_done("box_select")
+
+	if not _tutorial_progress.get("attack_move", false):
+		for u: Unit in units:
+			if not is_instance_valid(u):
+				continue
+			var combat: Node = u.get_combat()
+			if combat and combat.get("attack_move_target") != Vector3.INF:
+				_mark_task_done("attack_move")
+				break
+
+	if not _tutorial_progress.get("build_something", false):
+		for node: Node in get_tree().get_nodes_in_group("buildings"):
+			if not is_instance_valid(node):
+				continue
+			if node.get("owner_id") == 0:
+				var bid: StringName = (node.get("stats") as Resource).get("building_id") if node.get("stats") else &""
+				# Headquarters spawns at game start so don't count it.
+				if bid != &"" and bid != &"headquarters":
+					_mark_task_done("build_something")
+					break
+
+	if not _tutorial_progress.get("train_unit", false):
+		for node: Node in get_tree().get_nodes_in_group("buildings"):
+			if not is_instance_valid(node):
+				continue
+			if node.get("owner_id") != 0:
+				continue
+			if node.has_method("get_queue_size") and node.get_queue_size() > 0:
+				_mark_task_done("train_unit")
+				break
+
+	if not _tutorial_progress.get("kill_enemy", false):
+		# Cheap proxy: any wreck with a salvage_value matching an AI unit.
+		# More directly, watch for a unit count drop on owner_id != 0 — but
+		# that requires storing previous counts. Use wreck-spawn instead.
+		# We can't easily distinguish wrecks here, so fall back to a simple
+		# "no enemy units alive that came from initial AI spawn" check —
+		# any wreck created during the match counts as a kill.
+		for w: Node in get_tree().get_nodes_in_group("wrecks"):
+			if is_instance_valid(w):
+				_mark_task_done("kill_enemy")
+				break
+
+
+func _mark_task_done(task_id: String) -> void:
+	if _tutorial_progress.get(task_id, false):
+		return
+	_tutorial_progress[task_id] = true
+	# Find the matching label and tick it.
+	for i: int in TUTORIAL_TASKS.size():
+		if TUTORIAL_TASKS[i].get("id") != task_id:
+			continue
+		if i < _tutorial_task_labels.size():
+			var lbl: Label = _tutorial_task_labels[i] as Label
+			if is_instance_valid(lbl):
+				lbl.text = "  ☑  %s" % TUTORIAL_TASKS[i].get("label")
+				lbl.add_theme_color_override("font_color", Color(0.55, 0.95, 0.55, 1.0))
+		break
 
 
 func _build_power_widget() -> void:
@@ -292,6 +398,7 @@ func _process(delta: float) -> void:
 	_update_resource_display()
 	_update_selection_display()
 	_update_button_affordability()
+	_check_tutorial_progress()
 
 
 ## --- Theme ---
