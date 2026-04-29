@@ -28,57 +28,91 @@ func _get_free_player() -> AudioStreamPlayer:
 
 ## --- Public API ---
 
+## All public sounds layer 2-4 generators per call AND randomize every input
+## (frequency, duration, filter cutoff, volume) so back-to-back triggers
+## never produce identical samples. Each generator goes to a separate
+## AudioStreamPlayer so layers actually mix instead of stomping each other.
+
 func play_command() -> void:
-	# Short metallic click with pitch wiggle so spam doesn't become identical.
-	_play_tone(280.0 + randf_range(-25.0, 25.0), 0.06, -10.0, 1.5)
+	# Two-layer click: a high tick + a quick low body pulse.
+	var pitch: float = randf_range(255.0, 320.0)
+	_play_tone(pitch, randf_range(0.05, 0.07), randf_range(-12.0, -9.0), randf_range(1.0, 2.5))
+	_play_tone(pitch * 0.45, randf_range(0.04, 0.06), randf_range(-15.0, -12.0))
 
 func play_select() -> void:
-	# Quick ping with pitch wiggle.
-	_play_tone(400.0 + randf_range(-30.0, 30.0), 0.04, -14.0)
+	# Two-layer ping: bright lead tone + a fifth above it for color.
+	var freq: float = randf_range(360.0, 460.0)
+	_play_tone(freq, randf_range(0.035, 0.05), randf_range(-15.0, -12.0))
+	if randf() < 0.6:
+		_play_tone(freq * randf_range(1.45, 1.55), randf_range(0.03, 0.045), randf_range(-19.0, -16.0))
 
 func play_building_placed() -> void:
-	# Heavy industrial thud + dirt-noise body.
-	_play_thump(70.0, 0.22, -4.0)
-	_play_filtered_noise(0.18, 1800.0, -10.0)
+	# Heavy industrial thud — pitched-down body + dirt-noise crack +
+	# low rumble tail.
+	_play_thump(randf_range(60.0, 82.0), randf_range(0.2, 0.26), randf_range(-5.0, -3.0))
+	_play_filtered_noise(randf_range(0.16, 0.22), randf_range(1500.0, 2200.0), randf_range(-12.0, -8.0))
+	_play_filtered_noise(randf_range(0.28, 0.4), randf_range(450.0, 700.0), randf_range(-14.0, -10.0))
 
 func play_production_started() -> void:
-	# Mechanical clunk: tight noise burst + a low click.
-	_play_filtered_noise(0.06, 2400.0, -10.0)
-	_play_tone(150.0, 0.05, -14.0, 2.0)
+	# Mechanical clunk: noise burst + low click + small high tick.
+	_play_filtered_noise(randf_range(0.05, 0.08), randf_range(2000.0, 2800.0), randf_range(-12.0, -8.0))
+	_play_tone(randf_range(140.0, 175.0), randf_range(0.04, 0.06), randf_range(-16.0, -12.0), randf_range(1.5, 3.0))
+	if randf() < 0.5:
+		_play_tone(randf_range(420.0, 520.0), 0.03, -19.0)
 
 func play_production_complete() -> void:
-	# Rising two-tone chime.
-	_play_two_tone(380.0, 520.0, 0.1, -8.0)
+	# Rising two-tone chime with a small noise puff for breath.
+	var base: float = randf_range(360.0, 410.0)
+	_play_two_tone(base, base * randf_range(1.32, 1.42), randf_range(0.09, 0.12), randf_range(-9.0, -6.0))
+	_play_filtered_noise(randf_range(0.04, 0.06), 3500.0, -18.0)
 
 func play_construction_complete() -> void:
-	# Heavier completion tone.
-	_play_two_tone(260.0, 400.0, 0.15, -6.0)
+	# Heavier completion tone — lower fundamental + a thump tail.
+	var base: float = randf_range(245.0, 285.0)
+	_play_two_tone(base, base * randf_range(1.45, 1.6), randf_range(0.13, 0.18), randf_range(-7.0, -5.0))
+	_play_thump(randf_range(80.0, 105.0), randf_range(0.18, 0.24), -10.0)
 
 func play_error() -> void:
-	# Low buzz.
-	_play_tone(75.0, 0.25, -6.0, 0.0)
+	# Low buzz with a slight detune wobble.
+	_play_tone(randf_range(70.0, 82.0), randf_range(0.22, 0.28), -6.0, randf_range(-2.0, 2.0))
+	_play_filtered_noise(0.18, 800.0, -16.0)
 
 func play_weapon_fire() -> void:
-	# Layered crack: filtered noise (HF detail) + low body thump (LF weight).
-	# Slight pitch randomization keeps rapid fire from feeling sample-locked.
-	var pitch: float = randf_range(190.0, 250.0)
-	_play_filtered_noise(0.045, 4500.0, -12.0)
-	_play_thump(pitch * 0.5, 0.06, -14.0)
+	# Layered crack: HF noise crack + body thump + occasional sizzle, all
+	# heavily randomized so a Rook MG burst sounds different on every shot.
+	var pitch: float = randf_range(180.0, 270.0)
+	var crack_dur: float = randf_range(0.035, 0.06)
+	var crack_cutoff: float = randf_range(3800.0, 5800.0)
+	_play_filtered_noise(crack_dur, crack_cutoff, randf_range(-14.0, -10.0))
+	_play_thump(pitch * 0.5, randf_range(0.05, 0.08), randf_range(-15.0, -12.0))
+	# About half the shots get a high-frequency sizzle on top for grit.
+	if randf() < 0.55:
+		_play_filtered_noise(randf_range(0.025, 0.05), randf_range(7000.0, 9500.0), randf_range(-22.0, -17.0))
+	# A tiny "shell case" tone lands occasionally for variety.
+	if randf() < 0.25:
+		_play_tone(randf_range(900.0, 1300.0), 0.02, -22.0)
 
 func play_weapon_impact() -> void:
-	# Metallic thump with random pitch + short noise spit.
-	var pitch: float = randf_range(110.0, 145.0)
-	_play_filtered_noise(0.04, 3200.0, -16.0)
-	_play_tone(pitch, 0.07, -14.0, 5.0)
+	# Metallic clang: noise crack + pitched ring + low body thump.
+	var pitch: float = randf_range(100.0, 165.0)
+	_play_filtered_noise(randf_range(0.03, 0.05), randf_range(2800.0, 3800.0), randf_range(-18.0, -14.0))
+	_play_tone(pitch, randf_range(0.06, 0.09), randf_range(-15.0, -12.0), randf_range(3.0, 8.0))
+	if randf() < 0.4:
+		_play_thump(pitch * 0.5, 0.08, -16.0)
 
 func play_unit_destroyed() -> void:
-	# Three-stage explosion: instant crack, body boom, low rumble tail.
-	_play_filtered_noise(0.08, 5000.0, -4.0)             # initial crack (HF)
-	_play_thump(55.0, 0.4, -4.0)                          # body boom (LF)
-	_play_filtered_noise(0.55, 700.0, -8.0)               # rumble tail (LP)
+	# Three-stage explosion with substantial randomization on each stage so
+	# back-to-back kills don't sound copy-pasted.
+	_play_filtered_noise(randf_range(0.06, 0.1), randf_range(4200.0, 5800.0), randf_range(-5.0, -2.0))   # crack
+	_play_thump(randf_range(45.0, 65.0), randf_range(0.35, 0.5), randf_range(-5.0, -3.0))                # body boom
+	_play_filtered_noise(randf_range(0.45, 0.7), randf_range(550.0, 850.0), randf_range(-10.0, -7.0))    # rumble tail
+	# A mid-frequency crack lands sometimes for added texture.
+	if randf() < 0.6:
+		_play_filtered_noise(randf_range(0.1, 0.18), randf_range(1400.0, 2200.0), -10.0)
 
 func play_capture_complete() -> void:
-	_play_two_tone(350.0, 500.0, 0.12, -8.0)
+	var base: float = randf_range(330.0, 380.0)
+	_play_two_tone(base, base * randf_range(1.4, 1.5), randf_range(0.1, 0.14), randf_range(-9.0, -7.0))
 
 
 ## --- Generator playback ---

@@ -55,7 +55,9 @@ static func create(from: Vector3, to: Vector3, role_tag: StringName, rof_tier: S
 			proj.speed = 999.0
 		_:
 			proj._create_bullet_mesh(color)
-			proj.speed = 55.0
+			# Faster bullets so the volley reads as actually shooting rather than
+			# floating across the field — important now that Rook fires bursts.
+			proj.speed = 95.0
 
 	return proj
 
