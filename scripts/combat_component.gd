@@ -386,6 +386,19 @@ func _create_flash_at(pos: Vector3, mat: StandardMaterial3D) -> void:
 	timer.timeout.connect(flash.queue_free)
 	flash.add_child(timer)
 
+	# Brief OmniLight3D so the muzzle flash actually casts light on the
+	# firing unit and nearby terrain. Owned independently from the mesh so
+	# its quick fade-out tween survives if the mesh gets freed first.
+	var light := OmniLight3D.new()
+	light.light_color = mat.emission if mat.emission_enabled else Color(1.0, 0.8, 0.3)
+	light.light_energy = 3.5
+	light.omni_range = 4.5
+	light.global_position = pos
+	get_tree().current_scene.add_child(light)
+	var ltween := light.create_tween()
+	ltween.tween_property(light, "light_energy", 0.0, 0.09).set_ease(Tween.EASE_OUT)
+	ltween.tween_callback(light.queue_free)
+
 
 func _get_target_armor() -> StringName:
 	if "stats" in _current_target:

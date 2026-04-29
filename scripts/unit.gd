@@ -49,6 +49,9 @@ var _build_spark_timer: float = 0.0
 ## so we can pop up the HP bar even if the unit is at full health.
 var hp_bar_hovered: bool = false
 
+## Timer for walking dust. Heavier mechs raise more dust per stride.
+var _dust_timer: float = 0.0
+
 ## Damage flash.
 var _flash_timer: float = 0.0
 const FLASH_DURATION: float = 0.12
@@ -1159,6 +1162,7 @@ func _physics_process(delta: float) -> void:
 	if velocity.length_squared() > 1.0:
 		_anim_time += delta * 8.0
 		_apply_walk_bob()
+		_tick_walking_dust(delta)
 	else:
 		_anim_time = 0.0
 		_reset_walk_bob()
@@ -1365,6 +1369,74 @@ func _request_camera_shake(amount: float) -> void:
 		cam.add_shake(amount)
 
 
+## --- Walking dust ---
+
+func _tick_walking_dust(delta: float) -> void:
+	## Spawn dust puffs at random member feet while moving. Heavier mechs
+	## (bigger torso width) raise more frequent and bigger puffs; lights and
+	## engineers barely scuff the ground.
+	if not stats:
+		return
+	var shape: Dictionary = CLASS_SHAPES.get(stats.unit_class, CLASS_SHAPES[&"medium"])
+	var torso_width: float = (shape["torso"] as Vector3).x
+	# Below this width we don't bother — Ratchets / Rooks would over-emit.
+	if torso_width < 0.5:
+		return
+	# Bigger mechs trigger faster: ~0.45 s for medium, down to ~0.18 s for apex.
+	var interval: float = clampf(0.65 / torso_width, 0.18, 0.7)
+	_dust_timer -= delta
+	if _dust_timer > 0.0:
+		return
+	_dust_timer = interval
+
+	# Pick a random alive member and spawn a puff at its foot world position.
+	var alive_indices: Array = []
+	for i: int in member_hp.size():
+		if member_hp[i] > 0:
+			alive_indices.append(i)
+	if alive_indices.is_empty():
+		return
+	var idx: int = alive_indices[randi() % alive_indices.size()]
+	var member: Node3D = _member_meshes[idx] if idx < _member_meshes.size() else null
+	if not is_instance_valid(member):
+		return
+
+	var foot_pos: Vector3 = member.global_position
+	foot_pos.y = 0.05
+
+	# Scale puff size with torso width.
+	var puff_radius: float = clampf(torso_width * 0.35, 0.18, 0.55)
+	_spawn_dust_puff(foot_pos, puff_radius)
+
+
+func _spawn_dust_puff(world_pos: Vector3, radius: float) -> void:
+	var scene: Node = get_tree().current_scene
+	if not scene:
+		return
+	var puff := MeshInstance3D.new()
+	var sph := SphereMesh.new()
+	sph.radius = radius
+	sph.height = radius * 1.4
+	puff.mesh = sph
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.55, 0.5, 0.42, 0.55)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	puff.set_surface_override_material(0, mat)
+	puff.global_position = world_pos + Vector3(randf_range(-0.2, 0.2), 0.05, randf_range(-0.2, 0.2))
+	scene.add_child(puff)
+
+	var lifetime: float = randf_range(0.55, 0.85)
+	var rise: float = randf_range(0.4, 0.7)
+	var grow: float = randf_range(1.4, 1.8)
+
+	var tween := puff.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(puff, "global_position", puff.global_position + Vector3(randf_range(-0.3, 0.3), rise, randf_range(-0.3, 0.3)), lifetime)
+	tween.tween_property(puff, "scale", Vector3(grow, grow, grow), lifetime)
+	tween.tween_property(mat, "albedo_color:a", 0.0, lifetime).set_ease(Tween.EASE_IN)
+	tween.chain().tween_callback(puff.queue_free)
+
+
 ## --- Build Animation ---
 
 func _animate_build_claw() -> void:
@@ -1510,6 +1582,19 @@ func _spawn_flash_at(world_pos: Vector3, color: Color, radius: float, lifetime: 
 	tween.tween_property(flash, "scale", Vector3(2.5, 2.5, 2.5), lifetime)
 	tween.tween_property(mat, "albedo_color:a", 0.0, lifetime)
 	tween.chain().tween_callback(flash.queue_free)
+
+	# Real OmniLight3D so the explosion bathes nearby geometry. Range scales
+	# with the flash radius (small radius = small flash on member death,
+	# bigger radius = full squad death explosion).
+	var light := OmniLight3D.new()
+	light.light_color = color
+	light.light_energy = 5.0
+	light.omni_range = radius * 6.0 + 2.0
+	light.global_position = world_pos
+	scene.add_child(light)
+	var ltween := light.create_tween()
+	ltween.tween_property(light, "light_energy", 0.0, lifetime).set_ease(Tween.EASE_OUT)
+	ltween.tween_callback(light.queue_free)
 
 
 ## --- HP and Damage ---
