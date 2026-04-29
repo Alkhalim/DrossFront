@@ -13,5 +13,5 @@ build_time = 42.0
 power_consumption = 25
 power_production = 0
 producible_units = [ExtResource("2")]
-footprint_size = Vector3(6, 4, 6)
+footprint_size = Vector3(7, 5.2, 5.5)
 placeholder_color = Color(0.38, 0.32, 0.28, 1)

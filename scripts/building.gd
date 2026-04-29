@@ -53,11 +53,17 @@ var _visual_root: Node3D = null
 ## Set by _detail_gun_emplacement; read by TurretComponent.
 var turret_pivot: Node3D = null
 
-## Damage-state visuals. Built lazily in take_damage when HP first crosses a
-## threshold; toggled visible/invisible as HP changes.
+## Damage-state visuals. The "smoke" node is just a container of spawn-point
+## markers — actual smoke is rising puffs spawned from _process. Fire is a
+## small cluster of independently-flickering embers + an orange OmniLight3D
+## that casts real light on the building.
 var _damage_smoke: Node3D = null
+var _damage_smoke_anchors: Array[Node3D] = []
+var _damage_smoke_timer: float = 0.0
 var _damage_fire: Node3D = null
-## Continuously-advancing time used to animate the smoke bob.
+var _damage_embers: Array = []  # Array of { mesh: MeshInstance3D, mat: StandardMaterial3D, base: float, phase: float }
+var _damage_fire_light: OmniLight3D = null
+## Continuously-advancing time used to animate damage VFX.
 var _damage_anim_time: float = 0.0
 
 ## Atmospheric idle animations — captured by detail builders if the type has
@@ -66,6 +72,9 @@ var _atmos_dish: Node3D = null                          # HQ radar — slow Y sp
 var _atmos_stack_tops: Array[Node3D] = []               # Foundry stack tips for smoke puffs
 var _atmos_generator_cap_mat: StandardMaterial3D = null # Pulsing reactor cap
 var _atmos_beacon_mat: StandardMaterial3D = null        # HQ beacon throbber
+var _atmos_beacon_light: OmniLight3D = null             # Real light source synced to the beacon
+var _atmos_generator_light: OmniLight3D = null          # Cyan reactor glow
+var _atmos_stack_lights: Array[OmniLight3D] = []        # Hot-orange stack-tip lights
 var _atmos_indicator_mats: Array = []                   # Foundry/armory front lights
 var _atmos_anim_time: float = 0.0
 var _atmos_smoke_timer: float = 0.0
@@ -240,6 +249,13 @@ func _detail_headquarters() -> void:
 	beacon.set_surface_override_material(0, beacon_mat)
 	_attach_visual(beacon)
 	_atmos_beacon_mat = beacon_mat
+	# Real light so the beacon throw casts on the spire and surrounding hull.
+	_atmos_beacon_light = OmniLight3D.new()
+	_atmos_beacon_light.light_color = Color(1.0, 0.45, 0.18)
+	_atmos_beacon_light.light_energy = 1.6
+	_atmos_beacon_light.omni_range = 4.5
+	_atmos_beacon_light.position = beacon.position
+	_attach_visual(_atmos_beacon_light)
 
 	# Lower flanking wings on each side, like fortified bunkers.
 	for side: int in 2:
@@ -314,6 +330,14 @@ func _detail_foundry(advanced: bool) -> void:
 	glow.position = Vector3(stack.position.x, fs.y + stack_cyl.height + 0.04, stack.position.z)
 	glow.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.45, 0.1), 3.0))
 	_attach_visual(glow)
+	# Hot-orange light at the stack tip — sells the molten interior.
+	var stack_light := OmniLight3D.new()
+	stack_light.light_color = Color(1.0, 0.5, 0.15)
+	stack_light.light_energy = 1.4
+	stack_light.omni_range = 3.0
+	stack_light.position = Vector3(stack.position.x, fs.y + stack_cyl.height + 0.1, stack.position.z)
+	_attach_visual(stack_light)
+	_atmos_stack_lights.append(stack_light)
 	# Marker at the stack tip — drives periodic smoke puffs.
 	var stack_top := Marker3D.new()
 	stack_top.position = Vector3(stack.position.x, fs.y + stack_cyl.height + 0.1, stack.position.z)
@@ -431,6 +455,13 @@ func _detail_generator() -> void:
 	cap.set_surface_override_material(0, cap_mat)
 	_attach_visual(cap)
 	_atmos_generator_cap_mat = cap_mat
+	# Cyan reactor light bathes the housing.
+	_atmos_generator_light = OmniLight3D.new()
+	_atmos_generator_light.light_color = Color(0.3, 0.85, 1.0)
+	_atmos_generator_light.light_energy = 2.0
+	_atmos_generator_light.omni_range = 5.5
+	_atmos_generator_light.position = cap.position
+	_attach_visual(_atmos_generator_light)
 
 	# Wider base flange around the bottom of the housing.
 	var flange := MeshInstance3D.new()
@@ -781,10 +812,20 @@ func _apply_placeholder_shape() -> void:
 	if not stats:
 		return
 
-	var box := BoxMesh.new()
-	box.size = stats.footprint_size
-	_mesh.mesh = box
-	_mesh.position.y = stats.footprint_size.y / 2.0
+	# Most buildings use a rectangular hull; the basic generator uses a
+	# squat cylinder so its silhouette doesn't read as "another box".
+	var fs: Vector3 = stats.footprint_size
+	if stats.building_id == &"basic_generator":
+		var cyl := CylinderMesh.new()
+		cyl.top_radius = fs.x * 0.5
+		cyl.bottom_radius = fs.x * 0.55
+		cyl.height = fs.y
+		_mesh.mesh = cyl
+	else:
+		var box := BoxMesh.new()
+		box.size = fs
+		_mesh.mesh = box
+	_mesh.position.y = fs.y / 2.0
 
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = stats.placeholder_color
@@ -830,13 +871,22 @@ func _apply_team_ring() -> void:
 	# angle. Replaces the old inverted-shell trick which only rendered on one
 	# face from the RTS camera angle.
 	_team_ring = MeshInstance3D.new()
-	var stripe := BoxMesh.new()
-	stripe.size = Vector3(
-		stats.footprint_size.x + 0.12,
-		stats.footprint_size.y * 0.14,
-		stats.footprint_size.z + 0.12
-	)
-	_team_ring.mesh = stripe
+	# Match the hull shape — cylinder body gets a cylindrical band so it
+	# wraps without weird edge clipping.
+	if stats.building_id == &"basic_generator":
+		var ring_cyl := CylinderMesh.new()
+		ring_cyl.top_radius = stats.footprint_size.x * 0.5 + 0.06
+		ring_cyl.bottom_radius = stats.footprint_size.x * 0.55 + 0.06
+		ring_cyl.height = stats.footprint_size.y * 0.14
+		_team_ring.mesh = ring_cyl
+	else:
+		var stripe := BoxMesh.new()
+		stripe.size = Vector3(
+			stats.footprint_size.x + 0.12,
+			stats.footprint_size.y * 0.14,
+			stats.footprint_size.z + 0.12
+		)
+		_team_ring.mesh = stripe
 	# Near the bottom of the hull — keeps the silhouette readable while leaving
 	# the upper detail layers (turrets, stacks, spires) free for their own band.
 	_team_ring.position.y = stats.footprint_size.y * 0.18
@@ -1076,13 +1126,34 @@ func queue_unit(unit_stats: UnitStatResource) -> bool:
 func _process(delta: float) -> void:
 	# Always-on damage VFX animation, even when nothing is in production.
 	_atmos_anim_time += delta
-	if _damage_smoke and _damage_smoke.visible:
+	# Damage smoke — spawn rising sphere puffs at random anchors. Soft,
+	# round, and they actually climb instead of bobbing in place.
+	if _damage_smoke and _damage_smoke.visible and not _damage_smoke_anchors.is_empty():
 		_damage_anim_time += delta
-		_damage_smoke.position.y = sin(_damage_anim_time * 1.4) * 0.12
-		_damage_smoke.rotation.y += delta * 0.2
+		_damage_smoke_timer -= delta
+		if _damage_smoke_timer <= 0.0:
+			_damage_smoke_timer = randf_range(0.18, 0.32)
+			var anchor: Node3D = _damage_smoke_anchors[randi() % _damage_smoke_anchors.size()]
+			if is_instance_valid(anchor):
+				_spawn_smoke_puff(anchor.global_position)
+
+	# Damage fire — each ember has its own phase + speed so the cluster
+	# crackles unevenly. Orange light source flickers with them.
 	if _damage_fire and _damage_fire.visible:
-		var pulse: float = 0.85 + 0.3 * sin(_damage_anim_time * 6.0)
-		_damage_fire.scale = Vector3(pulse, pulse, pulse)
+		var avg_brightness: float = 0.0
+		for entry: Dictionary in _damage_embers:
+			var mat: StandardMaterial3D = entry["mat"] as StandardMaterial3D
+			if not mat:
+				continue
+			var base: float = entry["base"] as float
+			var phase: float = entry["phase"] as float
+			var speed: float = entry["speed"] as float
+			var flicker: float = base * (0.55 + 0.35 * sin(_atmos_anim_time * speed + phase) + randf_range(-0.08, 0.08))
+			mat.emission_energy_multiplier = maxf(flicker, 0.4)
+			avg_brightness += flicker
+		if _damage_fire_light:
+			var n: int = maxi(_damage_embers.size(), 1)
+			_damage_fire_light.light_energy = clampf(avg_brightness / float(n), 1.5, 4.5)
 
 	# Atmospheric idle animations — only after construction completes; sunken
 	# / under-construction buildings stay still.
@@ -1263,10 +1334,18 @@ func _tick_atmospheric_animations(delta: float) -> void:
 	if _atmos_dish and is_instance_valid(_atmos_dish):
 		_atmos_dish.rotation.y += delta * 0.55  # slow sweep
 	if _atmos_beacon_mat:
-		_atmos_beacon_mat.emission_energy_multiplier = 1.6 + 1.2 * (0.5 + 0.5 * sin(_atmos_anim_time * 2.4))
+		var beacon_pulse: float = 1.6 + 1.2 * (0.5 + 0.5 * sin(_atmos_anim_time * 2.4))
+		_atmos_beacon_mat.emission_energy_multiplier = beacon_pulse
+		if _atmos_beacon_light:
+			# Map the same pulse to the light's energy so the cast light
+			# brightens with the beacon.
+			_atmos_beacon_light.light_energy = lerp(0.8, 2.6, (beacon_pulse - 1.6) / 1.2)
 	if _atmos_generator_cap_mat:
 		# Reactor pulse — mostly steady with a slight flicker.
-		_atmos_generator_cap_mat.emission_energy_multiplier = 1.7 + 0.5 * sin(_atmos_anim_time * 3.1) + randf_range(-0.06, 0.06)
+		var gen_pulse: float = 1.7 + 0.5 * sin(_atmos_anim_time * 3.1) + randf_range(-0.06, 0.06)
+		_atmos_generator_cap_mat.emission_energy_multiplier = gen_pulse
+		if _atmos_generator_light:
+			_atmos_generator_light.light_energy = lerp(1.4, 2.4, clampf((gen_pulse - 1.2) / 1.0, 0.0, 1.0))
 	for entry: Dictionary in _atmos_indicator_mats:
 		var lmat: StandardMaterial3D = entry["mat"] as StandardMaterial3D
 		if not lmat:
@@ -1319,55 +1398,56 @@ func _spawn_smoke_puff(world_pos: Vector3) -> void:
 
 
 func _build_damage_smoke() -> void:
+	## Container of Marker3D spawn points scattered across the roof. Actual
+	## smoke is rising sphere puffs spawned from _process via the same
+	## _spawn_smoke_puff helper used by the foundry smokestacks — rounder,
+	## softer, and rises naturally instead of bobbing in place.
 	if not stats:
 		return
 	_ensure_visual_root()
 	_damage_smoke = Node3D.new()
 	_damage_smoke.name = "DamageSmoke"
 	_visual_root.add_child(_damage_smoke)
+	_damage_smoke_anchors.clear()
 
 	var fs: Vector3 = stats.footprint_size
-	# Three thin dark plumes at offset positions so the column reads as a
-	# rolling smoke trail rather than a single cylinder.
+	# Three anchors offset across the roof so puffs come from different
+	# spots rather than a single column.
 	for i: int in 3:
-		var plume := MeshInstance3D.new()
-		var cyl := CylinderMesh.new()
-		cyl.top_radius = 0.18 + float(i) * 0.08
-		cyl.bottom_radius = 0.12 + float(i) * 0.05
-		cyl.height = 1.6 + float(i) * 0.5
-		plume.mesh = cyl
-		var ox: float = randf_range(-fs.x * 0.25, fs.x * 0.25)
-		var oz: float = randf_range(-fs.z * 0.25, fs.z * 0.25)
-		plume.position = Vector3(ox, fs.y + cyl.height * 0.5 + 0.2, oz)
-		var mat := StandardMaterial3D.new()
-		mat.albedo_color = Color(0.18, 0.18, 0.2, 0.65)
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.emission_enabled = true
-		mat.emission = Color(0.05, 0.05, 0.06)
-		mat.emission_energy_multiplier = 0.1
-		plume.set_surface_override_material(0, mat)
-		_damage_smoke.add_child(plume)
+		var anchor := Marker3D.new()
+		anchor.position = Vector3(
+			randf_range(-fs.x * 0.3, fs.x * 0.3),
+			fs.y + 0.15,
+			randf_range(-fs.z * 0.3, fs.z * 0.3)
+		)
+		_damage_smoke.add_child(anchor)
+		_damage_smoke_anchors.append(anchor)
 
 
 func _build_damage_fire() -> void:
+	## Cluster of small irregularly-flickering embers + an orange OmniLight3D
+	## so the building actually receives warm light when it's burning.
 	if not stats:
 		return
 	_ensure_visual_root()
 	_damage_fire = Node3D.new()
 	_damage_fire.name = "DamageFire"
 	_visual_root.add_child(_damage_fire)
+	_damage_embers.clear()
 
 	var fs: Vector3 = stats.footprint_size
-	# Bright emissive nubs scattered across the roof — flicker via _process.
-	for i: int in 5:
+	# Embers scattered across the upper deck, varied in size and height for
+	# an irregular silhouette.
+	for i: int in 7:
 		var ember := MeshInstance3D.new()
 		var sph := SphereMesh.new()
-		sph.radius = randf_range(0.12, 0.22)
-		sph.height = sph.radius * 2.0
+		var radius: float = randf_range(0.08, 0.18)
+		sph.radius = radius
+		sph.height = radius * 2.0
 		ember.mesh = sph
 		ember.position = Vector3(
 			randf_range(-fs.x * 0.35, fs.x * 0.35),
-			fs.y + randf_range(0.0, 0.3),
+			fs.y + randf_range(0.05, 0.25),
 			randf_range(-fs.z * 0.35, fs.z * 0.35)
 		)
 		var mat := StandardMaterial3D.new()
@@ -1377,6 +1457,23 @@ func _build_damage_fire() -> void:
 		mat.emission_energy_multiplier = 3.0
 		ember.set_surface_override_material(0, mat)
 		_damage_fire.add_child(ember)
+		# Each ember carries its own base energy and phase so they flicker
+		# independently rather than scaling as a uniform cluster.
+		_damage_embers.append({
+			"mesh": ember,
+			"mat": mat,
+			"base": randf_range(2.4, 3.6),
+			"phase": randf_range(0.0, TAU),
+			"speed": randf_range(7.0, 13.0),
+		})
+
+	# Real light source so the burning building actually casts orange glow.
+	_damage_fire_light = OmniLight3D.new()
+	_damage_fire_light.light_color = Color(1.0, 0.5, 0.18)
+	_damage_fire_light.light_energy = 2.5
+	_damage_fire_light.omni_range = maxf(fs.x, fs.z) * 1.6 + 2.0
+	_damage_fire_light.position = Vector3(0, fs.y + 0.4, 0)
+	_damage_fire.add_child(_damage_fire_light)
 
 
 func _spawn_building_wreck() -> void:
