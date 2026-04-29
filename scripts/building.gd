@@ -60,6 +60,16 @@ var _damage_fire: Node3D = null
 ## Continuously-advancing time used to animate the smoke bob.
 var _damage_anim_time: float = 0.0
 
+## Atmospheric idle animations — captured by detail builders if the type has
+## something worth animating. All are optional; nulls are skipped.
+var _atmos_dish: Node3D = null                          # HQ radar — slow Y spin
+var _atmos_stack_tops: Array[Node3D] = []               # Foundry stack tips for smoke puffs
+var _atmos_generator_cap_mat: StandardMaterial3D = null # Pulsing reactor cap
+var _atmos_beacon_mat: StandardMaterial3D = null        # HQ beacon throbber
+var _atmos_indicator_mats: Array = []                   # Foundry/armory front lights
+var _atmos_anim_time: float = 0.0
+var _atmos_smoke_timer: float = 0.0
+
 
 func _ready() -> void:
 	if is_ghost_preview:
@@ -208,7 +218,7 @@ func _detail_headquarters() -> void:
 	spire.set_surface_override_material(0, _detail_dark_metal_mat())
 	_attach_visual(spire)
 
-	# Radar dish on top of the spire.
+	# Radar dish on top of the spire — slowly rotates via _process.
 	var dish := MeshInstance3D.new()
 	var dish_sphere := SphereMesh.new()
 	dish_sphere.radius = fs.x * 0.18
@@ -217,16 +227,19 @@ func _detail_headquarters() -> void:
 	dish.position = Vector3(0, fs.y + sb.size.y + dish_sphere.height * 0.4, 0)
 	dish.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.3, 0.3, 0.32)))
 	_attach_visual(dish)
+	_atmos_dish = dish
 
-	# Beacon light on the spire.
+	# Beacon light on the spire — pulses via _process.
 	var beacon := MeshInstance3D.new()
 	var beacon_sphere := SphereMesh.new()
 	beacon_sphere.radius = 0.12
 	beacon_sphere.height = 0.24
 	beacon.mesh = beacon_sphere
 	beacon.position = Vector3(0, fs.y + sb.size.y + 0.45, 0)
-	beacon.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.4, 0.2), 2.5))
+	var beacon_mat: StandardMaterial3D = _detail_emissive_mat(Color(1.0, 0.4, 0.2), 2.5)
+	beacon.set_surface_override_material(0, beacon_mat)
 	_attach_visual(beacon)
+	_atmos_beacon_mat = beacon_mat
 
 	# Lower flanking wings on each side, like fortified bunkers.
 	for side: int in 2:
@@ -301,6 +314,11 @@ func _detail_foundry(advanced: bool) -> void:
 	glow.position = Vector3(stack.position.x, fs.y + stack_cyl.height + 0.04, stack.position.z)
 	glow.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.45, 0.1), 3.0))
 	_attach_visual(glow)
+	# Marker at the stack tip — drives periodic smoke puffs.
+	var stack_top := Marker3D.new()
+	stack_top.position = Vector3(stack.position.x, fs.y + stack_cyl.height + 0.1, stack.position.z)
+	_attach_visual(stack_top)
+	_atmos_stack_tops.append(stack_top)
 
 	# Intake vent on the front face.
 	var vent := MeshInstance3D.new()
@@ -322,6 +340,10 @@ func _detail_foundry(advanced: bool) -> void:
 		stack2.position = Vector3(-fs.x * 0.3, fs.y + stack2_cyl.height * 0.5, fs.z * 0.1)
 		stack2.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.15, 0.13, 0.12)))
 		_attach_visual(stack2)
+		var stack2_top := Marker3D.new()
+		stack2_top.position = Vector3(-fs.x * 0.3, fs.y + stack2_cyl.height + 0.08, fs.z * 0.1)
+		_attach_visual(stack2_top)
+		_atmos_stack_tops.append(stack2_top)
 
 	# Ore intake hopper — angled wedge on the left side.
 	var hopper := MeshInstance3D.new()
@@ -333,7 +355,7 @@ func _detail_foundry(advanced: bool) -> void:
 	hopper.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.2, 0.18)))
 	_attach_visual(hopper)
 
-	# Three indicator lights on the front face.
+	# Three indicator lights on the front face — pulse via _process for life.
 	for i: int in 3:
 		var light := MeshInstance3D.new()
 		var ls := SphereMesh.new()
@@ -342,8 +364,11 @@ func _detail_foundry(advanced: bool) -> void:
 		light.mesh = ls
 		light.position = Vector3((float(i) - 1.0) * 0.35, fs.y * 0.85, -fs.z * 0.5 - 0.06)
 		var lcolor: Color = Color(1.0, 0.6, 0.2) if i == 1 else Color(0.5, 0.95, 0.4)
-		light.set_surface_override_material(0, _detail_emissive_mat(lcolor, 1.8))
+		var lmat: StandardMaterial3D = _detail_emissive_mat(lcolor, 1.8)
+		light.set_surface_override_material(0, lmat)
 		_attach_visual(light)
+		# Cache with a phase offset so they don't all blink in sync.
+		_atmos_indicator_mats.append({ "mat": lmat, "phase": float(i) * 1.6, "base": 1.8 })
 
 	# Side panel ribs along both walls — heavy industrial look.
 	for side: int in 2:
@@ -394,7 +419,7 @@ func _detail_generator() -> void:
 		fin.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.22, 0.22)))
 		_attach_visual(fin)
 
-	# Glowing top cap.
+	# Glowing top cap — pulses via _process.
 	var cap := MeshInstance3D.new()
 	var cap_cyl := CylinderMesh.new()
 	cap_cyl.top_radius = fs.x * 0.22
@@ -402,8 +427,10 @@ func _detail_generator() -> void:
 	cap_cyl.height = 0.12
 	cap.mesh = cap_cyl
 	cap.position = Vector3(0, fs.y + core_cyl.height + cap_cyl.height * 0.5, 0)
-	cap.set_surface_override_material(0, _detail_emissive_mat(Color(0.3, 0.85, 1.0), 2.0))
+	var cap_mat: StandardMaterial3D = _detail_emissive_mat(Color(0.3, 0.85, 1.0), 2.0)
+	cap.set_surface_override_material(0, cap_mat)
 	_attach_visual(cap)
+	_atmos_generator_cap_mat = cap_mat
 
 	# Wider base flange around the bottom of the housing.
 	var flange := MeshInstance3D.new()
@@ -1048,16 +1075,19 @@ func queue_unit(unit_stats: UnitStatResource) -> bool:
 
 func _process(delta: float) -> void:
 	# Always-on damage VFX animation, even when nothing is in production.
+	_atmos_anim_time += delta
 	if _damage_smoke and _damage_smoke.visible:
 		_damage_anim_time += delta
-		# Slow vertical bob + very gentle Y rotation so the plumes read as
-		# rising smoke instead of static cylinders.
 		_damage_smoke.position.y = sin(_damage_anim_time * 1.4) * 0.12
 		_damage_smoke.rotation.y += delta * 0.2
 	if _damage_fire and _damage_fire.visible:
-		# Flicker: scale embers up and down a bit on a fast sin.
 		var pulse: float = 0.85 + 0.3 * sin(_damage_anim_time * 6.0)
 		_damage_fire.scale = Vector3(pulse, pulse, pulse)
+
+	# Atmospheric idle animations — only after construction completes; sunken
+	# / under-construction buildings stay still.
+	if is_constructed:
+		_tick_atmospheric_animations(delta)
 
 	if not is_constructed:
 		return
@@ -1224,6 +1254,68 @@ func _update_damage_state() -> void:
 		_build_damage_fire()
 	if _damage_fire:
 		_damage_fire.visible = critical
+
+
+func _tick_atmospheric_animations(delta: float) -> void:
+	## Drive the per-frame idle animations captured by the detail builders:
+	## radar dish spin, beacon throb, generator cap pulse, indicator flicker,
+	## and periodic smokestack puffs.
+	if _atmos_dish and is_instance_valid(_atmos_dish):
+		_atmos_dish.rotation.y += delta * 0.55  # slow sweep
+	if _atmos_beacon_mat:
+		_atmos_beacon_mat.emission_energy_multiplier = 1.6 + 1.2 * (0.5 + 0.5 * sin(_atmos_anim_time * 2.4))
+	if _atmos_generator_cap_mat:
+		# Reactor pulse — mostly steady with a slight flicker.
+		_atmos_generator_cap_mat.emission_energy_multiplier = 1.7 + 0.5 * sin(_atmos_anim_time * 3.1) + randf_range(-0.06, 0.06)
+	for entry: Dictionary in _atmos_indicator_mats:
+		var lmat: StandardMaterial3D = entry["mat"] as StandardMaterial3D
+		if not lmat:
+			continue
+		var ph: float = entry["phase"] as float
+		var base: float = entry["base"] as float
+		lmat.emission_energy_multiplier = base * (0.7 + 0.3 * sin(_atmos_anim_time * 1.8 + ph))
+
+	# Periodic smoke puff per stack so foundries feel alive.
+	if not _atmos_stack_tops.is_empty():
+		_atmos_smoke_timer -= delta
+		if _atmos_smoke_timer <= 0.0:
+			_atmos_smoke_timer = randf_range(0.7, 1.4)
+			for marker: Node3D in _atmos_stack_tops:
+				if is_instance_valid(marker):
+					_spawn_smoke_puff(marker.global_position)
+
+
+func _spawn_smoke_puff(world_pos: Vector3) -> void:
+	## Tiny dark sphere that drifts upward, expands, and fades — the rolling
+	## smoke at a foundry stack tip.
+	var scene: Node = get_tree().current_scene
+	if not scene:
+		return
+	var puff := MeshInstance3D.new()
+	var sph := SphereMesh.new()
+	sph.radius = randf_range(0.18, 0.28)
+	sph.height = sph.radius * 2.0
+	puff.mesh = sph
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.25, 0.22, 0.2, 0.65)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.emission_enabled = true
+	mat.emission = Color(0.05, 0.04, 0.04)
+	mat.emission_energy_multiplier = 0.05
+	puff.set_surface_override_material(0, mat)
+	puff.global_position = world_pos + Vector3(randf_range(-0.1, 0.1), 0.0, randf_range(-0.1, 0.1))
+	scene.add_child(puff)
+
+	var lifetime: float = randf_range(1.6, 2.4)
+	var rise: float = randf_range(2.5, 3.5)
+	var grow: float = randf_range(1.6, 2.2)
+
+	var tween := puff.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(puff, "global_position", puff.global_position + Vector3(randf_range(-0.4, 0.4), rise, randf_range(-0.4, 0.4)), lifetime)
+	tween.tween_property(puff, "scale", Vector3(grow, grow, grow), lifetime)
+	tween.tween_property(mat, "albedo_color:a", 0.0, lifetime).set_ease(Tween.EASE_IN)
+	tween.chain().tween_callback(puff.queue_free)
 
 
 func _build_damage_smoke() -> void:
