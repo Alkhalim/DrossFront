@@ -612,30 +612,66 @@ func _update_selection_display() -> void:
 
 func _update_crawler_panel(crawler: SalvageCrawler) -> void:
 	## Crawler bottom-panel readout — name, HP, worker count, harvest range,
-	## and an HP bar. No production buttons (Crawlers don't produce units).
-	_clear_buttons()
-	_action_label.text = ""
-	_queue_label.text = ""
-	_last_unit_ids.clear()
-	_last_building_id = -1
-	_showing_build_buttons = false
+	## state (anchored / deploying / mobile), HP bar, and an Anchor toggle
+	## button when the upgrade is researched.
+
+	# Rebuild buttons only when the action changes — keep state stable when
+	# selection is unchanged.
+	var current_action: String = _crawler_action_key(crawler)
+	var prev_action: String = str(get_meta("_crawler_action", ""))
+	if current_action != prev_action:
+		set_meta("_crawler_action", current_action)
+		_clear_buttons()
+		_action_label.text = ""
+		_queue_label.text = ""
+		_last_unit_ids.clear()
+		_last_building_id = -1
+		_showing_build_buttons = false
+		if crawler.can_toggle_anchor():
+			var btn := Button.new()
+			btn.custom_minimum_size = Vector2(150, 44)
+			match crawler.anchor_state:
+				SalvageCrawler.AnchorState.OFF:
+					btn.text = "Anchor"
+					btn.tooltip_text = "Deploy stationary mode (5s vulnerable):\n+50% armor, +25% workers, +25% range. Cannot move."
+				SalvageCrawler.AnchorState.DEPLOYING:
+					btn.text = "Deploying...\n%d%%" % int(crawler.get("_anchor_progress") * 100.0 / SalvageCrawler.ANCHOR_DEPLOY_TIME)
+					btn.disabled = true
+				SalvageCrawler.AnchorState.ANCHORED:
+					btn.text = "Undeploy"
+					btn.tooltip_text = "Retract Anchor Mode (5s vulnerable)."
+				SalvageCrawler.AnchorState.UNDEPLOYING:
+					btn.text = "Undeploying...\n%d%%" % int(crawler.get("_anchor_progress") * 100.0 / SalvageCrawler.ANCHOR_DEPLOY_TIME)
+					btn.disabled = true
+			btn.pressed.connect(crawler.toggle_anchor)
+			_button_grid.add_child(btn)
+			_action_label.text = "Anchor"
 
 	var max_hp: int = crawler.stats.hp_total if crawler.stats else 800
 	_name_label.text = "Salvage Crawler"
 	var yard: Node = crawler.get_node_or_null("SalvageYardComponent")
 	var worker_count: int = 0
 	var max_workers: int = 0
+	var harvest_radius: float = SalvageCrawler.HARVEST_RADIUS
 	if yard:
 		if yard.has_method("get_worker_count"):
 			worker_count = yard.get_worker_count()
 		if yard.has_method("get_max_workers"):
 			max_workers = yard.get_max_workers()
-	_stats_label.text = "Mobile harvester   HP %d / %d   Workers %d / %d   Harvest %dm" % [
+		if yard.has_method("get_collection_radius"):
+			harvest_radius = yard.get_collection_radius()
+	var state_label: String = "Mobile"
+	match crawler.anchor_state:
+		SalvageCrawler.AnchorState.DEPLOYING: state_label = "Deploying"
+		SalvageCrawler.AnchorState.ANCHORED: state_label = "Anchored (+50% armor)"
+		SalvageCrawler.AnchorState.UNDEPLOYING: state_label = "Undeploying"
+	_stats_label.text = "%s   HP %d / %d   Workers %d / %d   Harvest %dm" % [
+		state_label,
 		crawler.current_hp,
 		max_hp,
 		worker_count,
 		max_workers,
-		int(SalvageCrawler.HARVEST_RADIUS),
+		int(harvest_radius),
 	]
 
 	var hp_pct: float = float(crawler.current_hp) / float(maxi(max_hp, 1))
@@ -645,11 +681,26 @@ func _update_crawler_panel(crawler: SalvageCrawler) -> void:
 	_show_progress(hp_pct, hp_color)
 
 
+func _crawler_action_key(crawler: SalvageCrawler) -> String:
+	# A small key that captures whether the visible Anchor button needs to
+	# rebuild — based on can-toggle status + current state.
+	var can: bool = crawler.can_toggle_anchor()
+	return "%d|%d" % [int(can), crawler.anchor_state]
+
+
 func _update_building_panel(building: Building) -> void:
 	var bid: int = building.get_instance_id()
 
-	# Only rebuild buttons when selection changes
-	if bid != _last_building_id:
+	# Only rebuild buttons when selection changes — except for the armory
+	# while a research project is in flight, where we rebuild every frame
+	# so the percentage label stays live.
+	var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
+	var armory_in_progress: bool = (
+		building.stats.building_id == &"basic_armory"
+		and rm
+		and rm.is_in_progress()
+	)
+	if bid != _last_building_id or armory_in_progress:
 		_last_building_id = bid
 		_last_unit_ids.clear()
 		_showing_build_buttons = false
@@ -878,6 +929,44 @@ func _rebuild_armory_buttons(_building: Building) -> void:
 	btn_b.tooltip_text = _unit_tooltip(hound_stats.branch_b_stats)
 	btn_b.pressed.connect(_on_branch_commit.bind(hound_stats, hound_stats.branch_b_stats, hound_stats.branch_b_name))
 	_button_grid.add_child(btn_b)
+
+	# Anchor Mode research button (v3.3 §3.1) — researched here, applies to
+	# every present and future Crawler.
+	var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
+	if rm:
+		var anchor_btn := Button.new()
+		anchor_btn.custom_minimum_size = Vector2(160, 44)
+		if rm.is_researched(&"anchor_mode"):
+			anchor_btn.text = "Anchor Mode\nResearched"
+			anchor_btn.disabled = true
+		elif rm.is_in_progress() and rm.current_id == &"anchor_mode":
+			anchor_btn.text = "Anchor Mode\n%d%%" % int(rm.get_progress() * 100.0)
+			anchor_btn.disabled = true
+		else:
+			anchor_btn.text = "[E] Anchor Mode\n300S / 35F  50s"
+			anchor_btn.tooltip_text = (
+				"Crawlers gain a stationary Anchor command.\n"
+				+ "Anchored: +50% armor, +25% workers, +25% range.\n"
+				+ "5s deploy / 5s undeploy (vulnerable during)."
+			)
+			anchor_btn.pressed.connect(_on_research_anchor)
+		_button_grid.add_child(anchor_btn)
+
+
+func _on_research_anchor() -> void:
+	var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
+	if not rm or rm.is_researched(&"anchor_mode") or rm.is_in_progress():
+		return
+	if not _resource_manager:
+		return
+	if not _resource_manager.can_afford(300, 35):
+		if _audio:
+			_audio.play_error()
+		return
+	_resource_manager.spend(300, 35)
+	rm.start_research(&"anchor_mode", "Anchor Mode", 50.0)
+	# Force a panel rebuild so the button immediately reflects "in progress".
+	_last_building_id = -1
 
 
 func _on_branch_commit(base_stats: UnitStatResource, branch_stats: UnitStatResource, branch_name: String) -> void:

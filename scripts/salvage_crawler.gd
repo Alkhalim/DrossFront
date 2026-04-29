@@ -51,6 +51,20 @@ const CRUSH_RADIUS: float = 2.4
 const RELOCATION_DROP_DISTANCE: float = 10.0
 var _last_relocation_anchor: Vector3 = Vector3.INF
 
+## Anchor Mode state machine (v3.3 §3.1).
+enum AnchorState { OFF, DEPLOYING, ANCHORED, UNDEPLOYING }
+const ANCHOR_DEPLOY_TIME: float = 5.0
+const ANCHOR_ARMOR_BONUS: float = 0.5      # +50% damage reduction multiplier
+const ANCHOR_WORKER_BONUS: float = 0.25    # +25% effective workers (we add a worker slot)
+const ANCHOR_RANGE_BONUS: float = 0.25     # +25% harvest radius
+const _BASE_MAX_WORKERS: int = 4
+const _BASE_HARVEST_RADIUS: float = HARVEST_RADIUS
+
+var anchor_state: int = AnchorState.OFF
+var _anchor_progress: float = 0.0
+## Visual plating Node3D added when anchored (lazily built).
+var _anchor_plating: Node3D = null
+
 # Visual elements that we can toggle for selection highlight.
 var _hull: MeshInstance3D = null
 var _team_stripe: MeshInstance3D = null
@@ -257,6 +271,10 @@ func _make_metal(c: Color) -> StandardMaterial3D:
 ## --- Movement ---
 
 func command_move(target: Vector3, _clear_combat: bool = true) -> void:
+	# Anchored / deploying Crawlers can't move — the player has to undeploy
+	# first. We just no-op the command so the existing UI flow is harmless.
+	if anchor_state == AnchorState.ANCHORED or anchor_state == AnchorState.DEPLOYING:
+		return
 	move_target = Vector3(target.x, global_position.y, target.z)
 	has_move_order = true
 	if _nav_agent:
@@ -283,11 +301,17 @@ func _physics_process(delta: float) -> void:
 				_hp_bar.global_rotation = cam.global_rotation
 			_update_hp_bar_fill()
 
+	# Anchor Mode state machine — tick deploy/undeploy timers.
+	_tick_anchor_state(delta)
+
 	# Wreck crushing — periodic XZ-distance scan against the wrecks group.
+	# Disabled while fully anchored (Crawler isn't moving anyway, so any
+	# overlap with a wreck was resolved at deploy time).
 	_crush_timer -= delta
 	if _crush_timer <= 0.0:
 		_crush_timer = CRUSH_CHECK_INTERVAL
-		_check_wreck_crush()
+		if anchor_state != AnchorState.ANCHORED:
+			_check_wreck_crush()
 
 	# Relocation drop — when we've moved far enough since our last drop
 	# anchor, force any carrying workers to deposit where they stand.
@@ -346,6 +370,10 @@ func _update_hp_bar_fill() -> void:
 ## --- Combat compatibility ---
 
 func take_damage(amount: int, _attacker: Node3D = null) -> void:
+	# Anchored Crawler benefits from +50% armor: incoming damage halved.
+	# Deploying / undeploying don't get the bonus — vulnerable in transition.
+	if anchor_state == AnchorState.ANCHORED:
+		amount = maxi(int(round(float(amount) * (1.0 - ANCHOR_ARMOR_BONUS))), 1)
 	current_hp -= amount
 	if current_hp <= 0:
 		current_hp = 0
@@ -388,6 +416,128 @@ func get_combat() -> Node:
 
 func get_builder() -> Node:
 	return null  # Crawlers aren't engineers.
+
+
+## --- Anchor Mode (v3.3 §3.1) ---
+
+func can_toggle_anchor() -> bool:
+	## Anchor is researched at the Basic Armory. The HUD checks this flag
+	## before drawing the Anchor / Undeploy button.
+	var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
+	if rm and rm.has_method("is_researched"):
+		return rm.is_researched(&"anchor_mode")
+	return false
+
+
+func toggle_anchor() -> void:
+	## OFF → DEPLOYING → ANCHORED, or ANCHORED → UNDEPLOYING → OFF.
+	## Deploy/undeploy phases are vulnerable per v3.3 §3.1.
+	if not can_toggle_anchor():
+		return
+	match anchor_state:
+		AnchorState.OFF:
+			# Cannot deploy while moving — stop first.
+			stop()
+			anchor_state = AnchorState.DEPLOYING
+			_anchor_progress = 0.0
+			_set_anchor_visual(0.0)
+		AnchorState.ANCHORED:
+			anchor_state = AnchorState.UNDEPLOYING
+			_anchor_progress = 0.0
+		AnchorState.DEPLOYING, AnchorState.UNDEPLOYING:
+			# Mid-animation toggle just reverses direction.
+			anchor_state = AnchorState.OFF if anchor_state == AnchorState.DEPLOYING else AnchorState.ANCHORED
+
+
+func _tick_anchor_state(delta: float) -> void:
+	match anchor_state:
+		AnchorState.DEPLOYING:
+			_anchor_progress += delta
+			_set_anchor_visual(clampf(_anchor_progress / ANCHOR_DEPLOY_TIME, 0.0, 1.0))
+			if _anchor_progress >= ANCHOR_DEPLOY_TIME:
+				anchor_state = AnchorState.ANCHORED
+				_apply_anchor_bonuses()
+		AnchorState.UNDEPLOYING:
+			_anchor_progress += delta
+			_set_anchor_visual(1.0 - clampf(_anchor_progress / ANCHOR_DEPLOY_TIME, 0.0, 1.0))
+			if _anchor_progress >= ANCHOR_DEPLOY_TIME:
+				anchor_state = AnchorState.OFF
+				_remove_anchor_bonuses()
+
+
+func is_anchored() -> bool:
+	return anchor_state == AnchorState.ANCHORED
+
+
+func _apply_anchor_bonuses() -> void:
+	if _yard_component:
+		# +25% workers and +25% range. Workers come in integer slots so we
+		# round up; range is just a float scale.
+		var bonus_workers: int = int(ceil(float(_BASE_MAX_WORKERS) * (1.0 + ANCHOR_WORKER_BONUS)))
+		_yard_component.set("max_workers", bonus_workers)
+		_yard_component.set("harvest_radius", _BASE_HARVEST_RADIUS * (1.0 + ANCHOR_RANGE_BONUS))
+
+
+func _remove_anchor_bonuses() -> void:
+	if _yard_component:
+		_yard_component.set("max_workers", _BASE_MAX_WORKERS)
+		_yard_component.set("harvest_radius", _BASE_HARVEST_RADIUS)
+
+
+func _ensure_anchor_plating() -> void:
+	if _anchor_plating and is_instance_valid(_anchor_plating):
+		return
+	_anchor_plating = Node3D.new()
+	_anchor_plating.name = "AnchorPlating"
+	add_child(_anchor_plating)
+
+	# Side armor skirts that drop down + outboard support struts. Hidden
+	# at scale 0; we lerp scale to 1 during DEPLOYING.
+	var skirt_color: Color = Color(0.22, 0.2, 0.18)
+	for side: int in 2:
+		var sx: float = -2.05 if side == 0 else 2.05
+		var skirt := MeshInstance3D.new()
+		var sb := BoxMesh.new()
+		sb.size = Vector3(0.12, 0.55, 5.4)
+		skirt.mesh = sb
+		skirt.position = Vector3(sx, 0.3, 0)
+		skirt.set_surface_override_material(0, _make_metal(skirt_color))
+		_anchor_plating.add_child(skirt)
+		# Forward and aft support struts angled out from the chassis.
+		for fore: int in 2:
+			var sz: float = -2.4 if fore == 0 else 2.4
+			var strut := MeshInstance3D.new()
+			var stb := BoxMesh.new()
+			stb.size = Vector3(0.18, 0.12, 0.9)
+			strut.mesh = stb
+			strut.position = Vector3(sx + (0.5 if side == 1 else -0.5), 0.05, sz)
+			strut.rotation.z = -0.6 if side == 1 else 0.6
+			strut.set_surface_override_material(0, _make_metal(Color(0.18, 0.16, 0.14)))
+			_anchor_plating.add_child(strut)
+	# Roof reinforcement plate.
+	var roof := MeshInstance3D.new()
+	var rb := BoxMesh.new()
+	rb.size = Vector3(2.4, 0.18, 3.2)
+	roof.mesh = rb
+	roof.position = Vector3(0, 2.15, -0.4)
+	roof.set_surface_override_material(0, _make_metal(Color(0.34, 0.32, 0.28)))
+	_anchor_plating.add_child(roof)
+	_anchor_plating.scale = Vector3(0.001, 0.001, 0.001)
+
+
+func _set_anchor_visual(t: float) -> void:
+	## t in [0..1]: 0 = retracted, 1 = fully deployed.
+	_ensure_anchor_plating()
+	var s: float = lerp(0.001, 1.0, clampf(t, 0.0, 1.0))
+	_anchor_plating.scale = Vector3(s, s, s)
+
+
+## --- Movement override: anchored Crawlers cannot move ---
+
+func command_move_anchored_check(target: Vector3, clear_combat: bool = true) -> void:
+	if anchor_state == AnchorState.ANCHORED or anchor_state == AnchorState.DEPLOYING:
+		return  # Locked down.
+	command_move(target, clear_combat)
 
 
 ## --- Wreck crushing (v3.3 §1.3) ---

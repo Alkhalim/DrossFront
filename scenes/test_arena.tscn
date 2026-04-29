@@ -17,6 +17,7 @@
 [ext_resource type="Script" path="res://scripts/audio_manager.gd" id="15"]
 [ext_resource type="Script" path="res://scripts/branch_commit_manager.gd" id="16"]
 [ext_resource type="Script" path="res://scripts/match_manager.gd" id="17"]
+[ext_resource type="Script" path="res://scripts/research_manager.gd" id="18"]
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
 size = Vector2(200, 200)
@@ -112,6 +113,9 @@ script = ExtResource("16")
 
 [node name="MatchManager" type="Node" parent="."]
 script = ExtResource("17")
+
+[node name="ResearchManager" type="Node" parent="."]
+script = ExtResource("18")
 
 [node name="SelectionManager" type="Node" parent="."]
 script = ExtResource("7")
