@@ -32,10 +32,15 @@ func _process(delta: float) -> void:
 		add_salvage(trickle)
 
 
+## Power efficiency floors at 25% — buildings throttle but never fully stall.
+const POWER_EFFICIENCY_FLOOR: float = 0.25
+
+
 func get_power_efficiency() -> float:
 	if power_consumption <= 0 or power_production >= power_consumption:
 		return 1.0
-	return float(power_production) / float(power_consumption)
+	var ratio: float = float(power_production) / float(power_consumption)
+	return maxf(ratio, POWER_EFFICIENCY_FLOOR)
 
 
 func can_afford_salvage(amount: int) -> bool:

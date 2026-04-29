@@ -29,6 +29,7 @@ const ROF_MAP: Dictionary = {
 	&"slow": 2.0,
 	&"moderate": 1.0,
 	&"fast": 0.5,
+	&"rapid": 0.25,
 	&"volley": 0.3,
 	&"continuous": 0.15,
 }

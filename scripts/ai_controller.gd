@@ -179,12 +179,20 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 	if not bstats:
 		return
 
+	# Find a placement that doesn't overlap an existing building. Hard-coded
+	# offsets occasionally collide (e.g., generator + generator2), so we
+	# spiral outward from the desired position until something fits.
+	var desired: Vector3 = _hq.global_position + offset
+	var pos: Vector3 = _find_clear_placement(desired, bstats.footprint_size)
+	if pos == Vector3.INF:
+		return  # retry next tick once the area clears
+
 	var scene: PackedScene = load("res://scenes/building.tscn") as PackedScene
 	var building: Node = scene.instantiate()
 	building.set("stats", bstats)
 	building.set("owner_id", owner_id)
 	building.set("resource_manager", _ai_resource_manager)
-	building.global_position = _hq.global_position + offset
+	building.global_position = pos
 
 	get_tree().current_scene.add_child(building)
 	building.set("is_constructed", true)
@@ -201,6 +209,45 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 		"generator2": _generator2 = building
 		"salvage_yard": _salvage_yard = building
 		"turret": _turret = building
+
+
+func _find_clear_placement(desired: Vector3, footprint: Vector3) -> Vector3:
+	if _is_placement_clear(desired, footprint):
+		return desired
+	# Spiral search — expanding rings around the desired anchor.
+	for ring: int in range(1, 8):
+		for step: int in 12:
+			var ang: float = float(step) / 12.0 * TAU
+			var test_offset := Vector3(cos(ang), 0.0, sin(ang)) * float(ring) * 2.5
+			var pos: Vector3 = desired + test_offset
+			if _is_placement_clear(pos, footprint):
+				return pos
+	return Vector3.INF
+
+
+## Required clear gap between adjacent buildings — keeps AI bases from looking
+## visually packed even when AABBs technically don't overlap.
+const PLACEMENT_GAP: float = 0.8
+
+
+func _is_placement_clear(pos: Vector3, footprint: Vector3) -> bool:
+	## AABB-vs-AABB against every existing building, with a small spacing
+	## buffer so adjacent buildings don't touch edge-to-edge.
+	var half_x: float = footprint.x * 0.5
+	var half_z: float = footprint.z * 0.5
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var b: Building = node as Building
+		if not b or not b.stats:
+			continue
+		var their_hx: float = b.stats.footprint_size.x * 0.5
+		var their_hz: float = b.stats.footprint_size.z * 0.5
+		var dx: float = absf(b.global_position.x - pos.x)
+		var dz: float = absf(b.global_position.z - pos.z)
+		if dx < (half_x + their_hx + PLACEMENT_GAP) and dz < (half_z + their_hz + PLACEMENT_GAP):
+			return false
+	return true
 
 
 func _try_queue_at(foundry_node: Node) -> void:
