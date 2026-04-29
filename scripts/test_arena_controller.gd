@@ -21,12 +21,13 @@ func _setup_navigation() -> void:
 	nav_region.name = "NavigationRegion"
 
 	var nav_mesh := NavigationMesh.new()
-	# Define a large flat walkable area
+	# V2 Foundry-Belt scale: expanded to ±150 so the AI HQ (now at z=-120)
+	# and any forward Yards / Crawlers near it stay on a walkable area.
 	nav_mesh.vertices = PackedVector3Array([
-		Vector3(-100, 0, -100),
-		Vector3(100, 0, -100),
-		Vector3(100, 0, 100),
-		Vector3(-100, 0, 100),
+		Vector3(-150, 0, -150),
+		Vector3(150, 0, -150),
+		Vector3(150, 0, 150),
+		Vector3(-150, 0, 150),
 	])
 	nav_mesh.add_polygon(PackedInt32Array([0, 1, 2]))
 	nav_mesh.add_polygon(PackedInt32Array([0, 2, 3]))
@@ -71,7 +72,10 @@ func _setup_ai() -> void:
 	ai_hq.stats = hq_stats
 	ai_hq.owner_id = 1
 	ai_hq.resource_manager = ai_res
-	ai_hq.global_position = Vector3(0, 0, -60)
+	# V2 Foundry Belt scale — bases pushed further apart so the player can't
+	# rush into the AI's economy in 30 seconds. Old v1 separation was 60u;
+	# v2 target is roughly twice that.
+	ai_hq.global_position = Vector3(0, 0, -120)
 	add_child(ai_hq)
 	ai_hq.is_constructed = true
 	ai_hq._apply_placeholder_shape()
@@ -80,10 +84,10 @@ func _setup_ai() -> void:
 	var ratchet_stats: UnitStatResource = load("res://resources/units/anvil_ratchet.tres") as UnitStatResource
 	var rook_stats: UnitStatResource = load("res://resources/units/anvil_rook.tres") as UnitStatResource
 
-	_spawn_ai_unit(ratchet_stats, Vector3(-3, 0, -55))
-	_spawn_ai_unit(ratchet_stats, Vector3(3, 0, -55))
-	_spawn_ai_unit(rook_stats, Vector3(-2, 0, -52))
-	_spawn_ai_unit(rook_stats, Vector3(2, 0, -52))
+	_spawn_ai_unit(ratchet_stats, Vector3(-3, 0, -115))
+	_spawn_ai_unit(ratchet_stats, Vector3(3, 0, -115))
+	_spawn_ai_unit(rook_stats, Vector3(-2, 0, -112))
+	_spawn_ai_unit(rook_stats, Vector3(2, 0, -112))
 
 	# Create AI controller
 	var ai_script: GDScript = load("res://scripts/ai_controller.gd") as GDScript
@@ -113,10 +117,15 @@ func _setup_fuel_deposits() -> void:
 	if not deposit_script:
 		return
 
-	# Two deposits roughly equidistant from both HQs
+	# Foundry Belt 1v1 layout (per SCOPE_VERTICAL_SLICE_V2.md §"Map 1"):
+	# - 1 in each player's safe area (close to home)
+	# - 2 mid-map deposits (contested, central)
+	# Total 4 deposits at varied strategic distances.
 	var positions: Array[Vector3] = [
-		Vector3(25, 0, -30),
-		Vector3(-25, 0, -30),
+		Vector3(28, 0, -8),    # Player safe-side
+		Vector3(-28, 0, -112), # AI safe-side
+		Vector3(35, 0, -60),   # Mid-east (contested)
+		Vector3(-35, 0, -60),  # Mid-west (contested)
 	]
 
 	for pos: Vector3 in positions:

@@ -2,7 +2,7 @@ class_name Minimap
 extends Control
 ## Simple minimap showing unit/building positions as colored dots.
 
-const MAP_WORLD_SIZE: float = 120.0
+const MAP_WORLD_SIZE: float = 300.0
 const DOT_SIZE: float = 3.0
 const BUILDING_SIZE: float = 5.0
 const DEPOSIT_SIZE: float = 4.0

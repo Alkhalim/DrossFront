@@ -99,9 +99,10 @@ func _process(delta: float) -> void:
 		_target_pivot.x += input_dir.x * pan_speed * zoom_factor * delta
 		_target_pivot.z += input_dir.y * pan_speed * zoom_factor * delta
 
-	# Clamp to map bounds
-	_target_pivot.x = clampf(_target_pivot.x, -90.0, 90.0)
-	_target_pivot.z = clampf(_target_pivot.z, -90.0, 90.0)
+	# Clamp to map bounds — Foundry Belt scale (±140 keeps the camera just
+	# inside the navmesh's ±150 walkable area).
+	_target_pivot.x = clampf(_target_pivot.x, -140.0, 140.0)
+	_target_pivot.z = clampf(_target_pivot.z, -140.0, 140.0)
 
 	# Smooth interpolation — only position changes, rotation is fixed
 	_pivot = _pivot.lerp(_target_pivot, 10.0 * delta)

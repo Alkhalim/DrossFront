@@ -117,6 +117,8 @@ func _process(delta: float) -> void:
 func _process_economy() -> void:
 	# Replenish engineers if we're running low — they're built at the HQ.
 	_maintain_engineers()
+	# Queue and pilot a Crawler.
+	_maintain_crawlers()
 
 	# Phase 1: Basic buildings
 	_try_place("generator", "res://resources/buildings/basic_generator.tres", Vector3(5, 0, 3))
@@ -137,6 +139,10 @@ func _process_economy() -> void:
 
 
 func _process_army() -> void:
+	# Maintain economy in parallel with army production — engineers + Crawler
+	# keep working through the army-build state.
+	_maintain_engineers()
+	_maintain_crawlers()
 	# Queue at basic foundry (validate not destroyed)
 	if is_instance_valid(_foundry):
 		_try_queue_at(_foundry)
@@ -274,6 +280,92 @@ func _maintain_engineers() -> void:
 		return
 	_ai_resource_manager.spend(ratchet.cost_salvage, ratchet.cost_fuel)
 	_hq.queue_unit(ratchet)
+
+
+func _maintain_crawlers() -> void:
+	## Queue a Salvage Crawler at the HQ when the AI doesn't have one and has
+	## the salvage to afford it. Once the Crawler exists, command it toward
+	## the nearest wreck-rich zone so it stops parking next to its own HQ.
+	if not is_instance_valid(_hq) or not _hq.get("is_constructed"):
+		return
+	if not _ai_resource_manager:
+		return
+
+	# Count alive AI-owned Crawlers + any in queue.
+	var crawler_count: int = 0
+	for node: Node in get_tree().get_nodes_in_group("crawlers"):
+		if not is_instance_valid(node):
+			continue
+		if node.get("owner_id") == owner_id:
+			crawler_count += 1
+	if _hq.has_method("get_queue_unit_count"):
+		crawler_count += _hq.get_queue_unit_count(&"crawler")
+	if crawler_count >= 1:
+		# Already have / building one — keep an idle one moving to wrecks.
+		_command_idle_crawler_to_wreck()
+		return
+
+	var crawler_stats: UnitStatResource = load("res://resources/units/anvil_crawler.tres") as UnitStatResource
+	if not crawler_stats:
+		return
+	# Don't spam queue — wait for production to finish.
+	if _hq.has_method("get_queue_size") and _hq.get_queue_size() > 0:
+		return
+	var salvage: int = _ai_resource_manager.get("salvage")
+	if salvage < crawler_stats.cost_salvage:
+		return
+	# Reserve a healthy buffer above the Crawler cost so we don't bankrupt
+	# the rest of the economy on a single buy.
+	if salvage < crawler_stats.cost_salvage + 150:
+		return
+	_ai_resource_manager.spend(crawler_stats.cost_salvage, crawler_stats.cost_fuel)
+	_hq.queue_unit(crawler_stats)
+
+
+func _command_idle_crawler_to_wreck() -> void:
+	## For each AI Crawler with no live move order, point it at the nearest
+	## wreck. Crawlers harvest from their current position, so simply
+	## relocating them to dense salvage fields is the whole strategy.
+	for node: Node in get_tree().get_nodes_in_group("crawlers"):
+		if not is_instance_valid(node):
+			continue
+		if node.get("owner_id") != owner_id:
+			continue
+		# Skip if currently moving or anchored.
+		if node.get("has_move_order") == true:
+			continue
+		if node.has_method("is_anchored") and node.is_anchored():
+			continue
+		var nearest: Node3D = _find_nearest_wreck(node.global_position, 80.0)
+		if not nearest:
+			continue
+		# Move to a point a couple of units short of the wreck so workers
+		# spawn within harvesting radius without the Crawler crushing the
+		# whole pile on contact.
+		var dir: Vector3 = (nearest.global_position - node.global_position)
+		dir.y = 0.0
+		var dist: float = dir.length()
+		if dist < 6.0:
+			continue  # Already on it.
+		var target_pos: Vector3 = nearest.global_position - dir.normalized() * 4.0
+		if node.has_method("command_move"):
+			node.command_move(target_pos)
+
+
+func _find_nearest_wreck(from: Vector3, max_dist: float) -> Node3D:
+	var best: Node3D = null
+	var best_dist: float = max_dist
+	for node: Node in get_tree().get_nodes_in_group("wrecks"):
+		if not is_instance_valid(node):
+			continue
+		var n3: Node3D = node as Node3D
+		if not n3:
+			continue
+		var d: float = from.distance_to(n3.global_position)
+		if d < best_dist:
+			best_dist = d
+			best = n3
+	return best
 
 
 func _find_free_engineer() -> Node:
