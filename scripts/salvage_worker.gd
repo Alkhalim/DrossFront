@@ -157,6 +157,19 @@ func _die() -> void:
 	queue_free()
 
 
+func drop_carried_salvage() -> int:
+	## Returns the carried amount and clears it. Used by the Crawler when it
+	## relocates mid-trip — the worker drops the load where it stands and
+	## becomes idle, ready to dispatch from the Crawler's new position.
+	var amt: int = _carried_salvage
+	if amt <= 0:
+		return 0
+	_carried_salvage = 0
+	state = State.IDLE
+	_target_wreck = null
+	return amt
+
+
 ## --- AI state machine ---
 
 func _physics_process(delta: float) -> void:

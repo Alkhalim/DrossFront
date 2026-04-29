@@ -39,6 +39,18 @@ var _move_speed: float = 3.0          # set from stats.speed_tier in _ready
 var _nav_agent: NavigationAgent3D = null
 var _yard_component: Node = null
 
+## Wreck-crushing — runs at a low cadence so we don't hammer the wrecks group.
+const CRUSH_CHECK_INTERVAL: float = 0.25
+var _crush_timer: float = 0.0
+## Crawler's effective "treads" footprint — wrecks within this XZ distance
+## get crushed if they're small enough. Treads cover the chassis hull.
+const CRUSH_RADIUS: float = 2.4
+
+## Mid-trip salvage drop — when the Crawler relocates significantly, its
+## carrying workers drop their loads at their current positions per v3.3 §1.3.
+const RELOCATION_DROP_DISTANCE: float = 10.0
+var _last_relocation_anchor: Vector3 = Vector3.INF
+
 # Visual elements that we can toggle for selection highlight.
 var _hull: MeshInstance3D = null
 var _team_stripe: MeshInstance3D = null
@@ -74,12 +86,17 @@ func _ready() -> void:
 	_nav_agent.max_speed = _move_speed
 	add_child(_nav_agent)
 
-	# Worker management — reuse the existing SalvageYardComponent. It already
-	# spawns / tracks / cleans up workers and trickles passive salvage.
+	# Worker management — reuse the existing SalvageYardComponent with
+	# Crawler-spec overrides (per v3.3 §1.3): wider 45m harvest radius,
+	# 4 workers, 18s spawn cadence, 1 salvage/sec self-trickle.
 	var script: GDScript = load("res://scripts/salvage_yard_component.gd") as GDScript
 	if script:
 		_yard_component = script.new()
 		_yard_component.name = "SalvageYardComponent"
+		_yard_component.set("max_workers", 4)
+		_yard_component.set("harvest_radius", HARVEST_RADIUS)
+		_yard_component.set("worker_spawn_interval", 18.0)
+		_yard_component.set("self_trickle_per_sec", 1.0)
 		add_child(_yard_component)
 
 
@@ -266,6 +283,20 @@ func _physics_process(delta: float) -> void:
 				_hp_bar.global_rotation = cam.global_rotation
 			_update_hp_bar_fill()
 
+	# Wreck crushing — periodic XZ-distance scan against the wrecks group.
+	_crush_timer -= delta
+	if _crush_timer <= 0.0:
+		_crush_timer = CRUSH_CHECK_INTERVAL
+		_check_wreck_crush()
+
+	# Relocation drop — when we've moved far enough since our last drop
+	# anchor, force any carrying workers to deposit where they stand.
+	if _last_relocation_anchor == Vector3.INF:
+		_last_relocation_anchor = global_position
+	elif global_position.distance_to(_last_relocation_anchor) >= RELOCATION_DROP_DISTANCE:
+		_drop_carried_salvage_on_relocation()
+		_last_relocation_anchor = global_position
+
 	if move_target == Vector3.INF:
 		return
 
@@ -357,6 +388,114 @@ func get_combat() -> Node:
 
 func get_builder() -> Node:
 	return null  # Crawlers aren't engineers.
+
+
+## --- Wreck crushing (v3.3 §1.3) ---
+
+func _check_wreck_crush() -> void:
+	if not resource_manager:
+		return
+	for node: Node in get_tree().get_nodes_in_group("wrecks"):
+		if not is_instance_valid(node):
+			continue
+		var wreck: Wreck = node as Wreck
+		if not wreck:
+			continue
+		var dx: float = absf(wreck.global_position.x - global_position.x)
+		var dz: float = absf(wreck.global_position.z - global_position.z)
+		# Cheap XZ rectangle check matching the Crawler's hull.
+		if dx > CRUSH_RADIUS or dz > CRUSH_RADIUS:
+			continue
+		var max_extent: float = maxf(wreck.wreck_size.x, wreck.wreck_size.z)
+		if max_extent > CRUSH_MAX_WRECK_SIZE:
+			# Heavy / Apex wreck — too big to crush. The Wreck's StaticBody3D
+			# already physically blocks the Crawler from rolling through.
+			continue
+		_crush_wreck(wreck)
+
+
+func _crush_wreck(wreck: Wreck) -> void:
+	## Absorb a fraction of the wreck's remaining salvage and free it. Spawns
+	## a small dust burst as feedback.
+	var absorbed: int = int(round(float(wreck.salvage_remaining) * CRUSH_SALVAGE_FRAC))
+	if absorbed > 0 and resource_manager and resource_manager.has_method("add_salvage"):
+		resource_manager.add_salvage(absorbed)
+	_spawn_crush_burst(wreck.global_position, absorbed)
+	wreck.queue_free()
+
+
+func _spawn_crush_burst(world_pos: Vector3, salvage_gained: int) -> void:
+	var scene: Node = get_tree().current_scene
+	if not scene:
+		return
+	# Dust puff cluster.
+	for i: int in 6:
+		var puff := MeshInstance3D.new()
+		var sph := SphereMesh.new()
+		sph.radius = randf_range(0.18, 0.32)
+		sph.height = sph.radius * 1.6
+		puff.mesh = sph
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(0.55, 0.5, 0.42, 0.7)
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		puff.set_surface_override_material(0, mat)
+		puff.global_position = world_pos + Vector3(randf_range(-0.4, 0.4), 0.2, randf_range(-0.4, 0.4))
+		scene.add_child(puff)
+		var lifetime: float = randf_range(0.6, 0.9)
+		var rise: float = randf_range(0.4, 0.8)
+		var grow: float = randf_range(1.6, 2.0)
+		var tween := puff.create_tween()
+		tween.set_parallel(true)
+		tween.tween_property(puff, "global_position", puff.global_position + Vector3(randf_range(-0.4, 0.4), rise, randf_range(-0.4, 0.4)), lifetime)
+		tween.tween_property(puff, "scale", Vector3(grow, grow, grow), lifetime)
+		tween.tween_property(mat, "albedo_color:a", 0.0, lifetime).set_ease(Tween.EASE_IN)
+		tween.chain().tween_callback(puff.queue_free)
+	# Floating "+N" salvage popup so the player sees the bonus.
+	if salvage_gained <= 0:
+		return
+	var label := Label3D.new()
+	label.text = "+%d" % salvage_gained
+	label.font_size = 28
+	label.pixel_size = 0.012
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.no_depth_test = true
+	label.modulate = Color(0.95, 0.78, 0.32, 1.0)
+	label.outline_size = 8
+	label.outline_modulate = Color(0, 0, 0, 1)
+	label.global_position = world_pos + Vector3(0, 1.2, 0)
+	scene.add_child(label)
+	var ltween := label.create_tween()
+	ltween.set_parallel(true)
+	ltween.tween_property(label, "global_position", label.global_position + Vector3(0, 1.2, 0), 0.8)
+	ltween.tween_property(label, "modulate:a", 0.0, 0.8).set_ease(Tween.EASE_IN)
+	ltween.chain().tween_callback(label.queue_free)
+
+
+## --- Mid-trip salvage drop on relocation (v3.3 §1.3) ---
+
+func _drop_carried_salvage_on_relocation() -> void:
+	if not _yard_component:
+		return
+	var workers: Array = _yard_component.get("_workers") as Array
+	if not workers:
+		return
+	var scene: Node = get_tree().current_scene
+	for w: Node in workers:
+		if not is_instance_valid(w):
+			continue
+		if not w.has_method("drop_carried_salvage"):
+			continue
+		var amt: int = w.drop_carried_salvage() as int
+		if amt <= 0 or not scene:
+			continue
+		# Spawn a small recoverable wreck cache where the worker stood. Any
+		# worker can later harvest it normally.
+		var cache := Wreck.new()
+		cache.salvage_value = amt
+		cache.salvage_remaining = amt
+		cache.wreck_size = Vector3(0.6, 0.3, 0.6)
+		cache.position = (w as Node3D).global_position
+		scene.add_child(cache)
 
 
 func _speed_from_tier(tier: StringName) -> float:

@@ -5,11 +5,18 @@ extends Node
 ## Per v3.3 §1.2 spec: Yards are cheap, fragile, slow-spawning, max 2 workers,
 ## with a small self-trickle so an idle Yard still pays back something.
 const WORKER_SPAWN_INTERVAL: float = 24.0
-const MAX_WORKERS: int = 2
-## Workers search for wrecks within this radius of the yard.
 const COLLECTION_RADIUS: float = 30.0
 ## Passive salvage trickle independent of workers (per v3.3 §1.2).
 const SELF_TRICKLE_PER_SEC: float = 0.5
+
+## Worker pool size — defaults to the Yard spec (2). Crawlers raise this to 4.
+@export var max_workers: int = 2
+## Worker harvest radius. Defaults to Yard spec (30); Crawlers override to 45.
+@export var harvest_radius: float = COLLECTION_RADIUS
+## Worker spawn cadence. Defaults to Yard spec (24s); Crawlers override to 18s.
+@export var worker_spawn_interval: float = WORKER_SPAWN_INTERVAL
+## Self-trickle salvage/sec. Defaults to Yard 0.5; Crawlers override to 1.0.
+@export var self_trickle_per_sec: float = SELF_TRICKLE_PER_SEC
 
 var _trickle_accumulator: float = 0.0
 
@@ -52,7 +59,7 @@ func _process(delta: float) -> void:
 		var efficiency: float = 1.0
 		if _building.has_method("get_power_efficiency"):
 			efficiency = _building.get_power_efficiency()
-		_trickle_accumulator += SELF_TRICKLE_PER_SEC * efficiency * delta
+		_trickle_accumulator += self_trickle_per_sec * efficiency * delta
 		if _trickle_accumulator >= 1.0:
 			var amt: int = int(_trickle_accumulator)
 			_trickle_accumulator -= float(amt)
@@ -65,7 +72,7 @@ func _process(delta: float) -> void:
 			_workers.remove_at(i)
 		i -= 1
 
-	if _workers.size() >= MAX_WORKERS:
+	if _workers.size() >= max_workers:
 		_spawn_timer = 0.0
 		return
 
@@ -74,8 +81,8 @@ func _process(delta: float) -> void:
 		efficiency = _building.get_power_efficiency()
 	_spawn_timer += delta * efficiency
 
-	if _spawn_timer >= WORKER_SPAWN_INTERVAL:
-		_spawn_timer -= WORKER_SPAWN_INTERVAL
+	if _spawn_timer >= worker_spawn_interval:
+		_spawn_timer -= worker_spawn_interval
 		_spawn_worker()
 
 
@@ -83,7 +90,7 @@ func _spawn_worker() -> void:
 	var worker := SalvageWorker.new()
 	worker.home_yard = _building
 	worker.resource_manager = _building.get("resource_manager")
-	worker.search_radius = COLLECTION_RADIUS
+	worker.search_radius = harvest_radius
 	# Inherit the yard owner so workers belong to the right side and pick up
 	# the matching team-color stripe.
 	worker.owner_id = _building.get("owner_id") as int
@@ -101,17 +108,17 @@ func get_worker_count() -> int:
 
 
 func get_max_workers() -> int:
-	return MAX_WORKERS
+	return max_workers
 
 
 func get_spawn_progress() -> float:
-	if _workers.size() >= MAX_WORKERS:
+	if _workers.size() >= max_workers:
 		return 0.0
-	return clampf(_spawn_timer / WORKER_SPAWN_INTERVAL, 0.0, 1.0)
+	return clampf(_spawn_timer / worker_spawn_interval, 0.0, 1.0)
 
 
 func get_collection_radius() -> float:
-	return COLLECTION_RADIUS
+	return harvest_radius
 
 
 func show_range() -> void:

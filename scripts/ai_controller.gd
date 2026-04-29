@@ -336,7 +336,7 @@ func _find_clear_placement(desired: Vector3, footprint: Vector3) -> Vector3:
 
 ## Required clear gap between adjacent buildings — keeps AI bases from looking
 ## visually packed even when AABBs technically don't overlap.
-const PLACEMENT_GAP: float = 0.8
+const PLACEMENT_GAP: float = 1.8
 
 
 ## How far units / fuel deposits / wrecks must be from the placement footprint.

@@ -588,10 +588,16 @@ func _update_selection_display() -> void:
 	if building and not is_instance_valid(building):
 		building = null
 	var units: Array[Unit] = _selection_manager.get_selected_units()
+	var crawler: SalvageCrawler = _selection_manager.get_selected_crawler()
+	if crawler and not is_instance_valid(crawler):
+		crawler = null
 
 	if building and building.stats:
 		_bottom_panel.visible = true
 		_update_building_panel(building)
+	elif crawler:
+		_bottom_panel.visible = true
+		_update_crawler_panel(crawler)
 	elif not units.is_empty():
 		_bottom_panel.visible = true
 		_update_unit_panel(units)
@@ -602,6 +608,41 @@ func _update_selection_display() -> void:
 		_showing_build_buttons = false
 		if _progress_bar:
 			_progress_bar.visible = false
+
+
+func _update_crawler_panel(crawler: SalvageCrawler) -> void:
+	## Crawler bottom-panel readout — name, HP, worker count, harvest range,
+	## and an HP bar. No production buttons (Crawlers don't produce units).
+	_clear_buttons()
+	_action_label.text = ""
+	_queue_label.text = ""
+	_last_unit_ids.clear()
+	_last_building_id = -1
+	_showing_build_buttons = false
+
+	var max_hp: int = crawler.stats.hp_total if crawler.stats else 800
+	_name_label.text = "Salvage Crawler"
+	var yard: Node = crawler.get_node_or_null("SalvageYardComponent")
+	var worker_count: int = 0
+	var max_workers: int = 0
+	if yard:
+		if yard.has_method("get_worker_count"):
+			worker_count = yard.get_worker_count()
+		if yard.has_method("get_max_workers"):
+			max_workers = yard.get_max_workers()
+	_stats_label.text = "Mobile harvester   HP %d / %d   Workers %d / %d   Harvest %dm" % [
+		crawler.current_hp,
+		max_hp,
+		worker_count,
+		max_workers,
+		int(SalvageCrawler.HARVEST_RADIUS),
+	]
+
+	var hp_pct: float = float(crawler.current_hp) / float(maxi(max_hp, 1))
+	var hp_color: Color = Color(0.4, 0.95, 0.4, 0.95)
+	if hp_pct < 0.5: hp_color = Color(0.95, 0.78, 0.32, 0.95)
+	if hp_pct < 0.25: hp_color = Color(1.0, 0.4, 0.35, 0.95)
+	_show_progress(hp_pct, hp_color)
 
 
 func _update_building_panel(building: Building) -> void:

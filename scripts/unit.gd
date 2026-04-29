@@ -1122,6 +1122,29 @@ func _remove_member_visual(index: int) -> void:
 			member.visible = false
 			# Spawn flying debris at member's world position
 			_spawn_member_debris(member.global_position)
+			# A small salvage pile per dead squad member — partial cost
+			# refund for whoever clears it. Squad death spawns its own
+			# bigger wreck via _die(); this is just the per-member chunk.
+			_spawn_member_wreck(member.global_position)
+
+
+func _spawn_member_wreck(world_pos: Vector3) -> void:
+	if not stats:
+		return
+	# Each member is roughly 1/squad_size of the squad's value, and we yield
+	# the same ~30% of cost that the full-squad Wreck does.
+	var squad_size: int = maxi(stats.squad_size, 1)
+	var per_member_value: int = int(round(float(stats.cost_salvage) * 0.3 / float(squad_size)))
+	if per_member_value <= 0:
+		return
+	var wreck: Wreck = Wreck.new()
+	wreck.salvage_value = per_member_value
+	wreck.salvage_remaining = per_member_value
+	# Smaller wreck visual than the full-squad version. Always Light-class
+	# size so a Crawler can crush it.
+	wreck.wreck_size = Vector3(0.7, 0.3, 0.7)
+	wreck.position = world_pos
+	get_tree().current_scene.add_child(wreck)
 
 
 ## --- Movement ---
