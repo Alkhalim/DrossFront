@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+unit_name = "Salvage Crawler"
+unit_class = &"crawler"
+hp_total = 800
+hp_per_unit = 800
+armor_class = &"heavy"
+speed_tier = &"very_slow"
+sight_tier = &"medium"
+squad_size = 1
+population = 8
+cost_salvage = 380
+cost_fuel = 0
+build_time = 45.0
+built_at = &"headquarters"
+special_description = "Mobile salvage harvester. Spawns workers at its current position; harvests within 45m. Crushes light/medium wrecks for 25% salvage. Max 3 per player."
+is_crawler = true

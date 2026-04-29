@@ -62,6 +62,11 @@ extends Resource
 ## Repair rate in HP/sec (0 if cannot repair).
 @export var repair_rate: float = 0.0
 
+## When true, Building._spawn_unit instantiates res://scenes/salvage_crawler.tscn
+## instead of res://scenes/unit.tscn. The Crawler is a slow mobile harvester
+## (v2 spec §1.3) — produced at the HQ but mechanically distinct from a mech.
+@export var is_crawler: bool = false
+
 @export_group("Branch Upgrades")
 ## If this is a base unit, the two branch variant stats.
 @export var branch_a_stats: UnitStatResource

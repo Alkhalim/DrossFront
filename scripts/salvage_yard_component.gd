@@ -2,10 +2,16 @@ class_name SalvageYardComponent
 extends Node
 ## Attaches to a Building node. Spawns autonomous workers that harvest wrecks.
 
-const WORKER_SPAWN_INTERVAL: float = 15.0
-const MAX_WORKERS: int = 3
+## Per v3.3 §1.2 spec: Yards are cheap, fragile, slow-spawning, max 2 workers,
+## with a small self-trickle so an idle Yard still pays back something.
+const WORKER_SPAWN_INTERVAL: float = 24.0
+const MAX_WORKERS: int = 2
 ## Workers search for wrecks within this radius of the yard.
 const COLLECTION_RADIUS: float = 30.0
+## Passive salvage trickle independent of workers (per v3.3 §1.2).
+const SELF_TRICKLE_PER_SEC: float = 0.5
+
+var _trickle_accumulator: float = 0.0
 
 var _spawn_timer: float = 0.0
 var _workers: Array[SalvageWorker] = []
@@ -38,6 +44,19 @@ func _process(delta: float) -> void:
 	if not _initial_spawned:
 		_initial_spawned = true
 		_spawn_worker()
+
+	# Self-trickle — small passive income so an idle Yard still earns something.
+	# Power efficiency throttles it just like everything else powered.
+	var resource_mgr: Node = _building.get("resource_manager")
+	if resource_mgr and resource_mgr.has_method("add_salvage"):
+		var efficiency: float = 1.0
+		if _building.has_method("get_power_efficiency"):
+			efficiency = _building.get_power_efficiency()
+		_trickle_accumulator += SELF_TRICKLE_PER_SEC * efficiency * delta
+		if _trickle_accumulator >= 1.0:
+			var amt: int = int(_trickle_accumulator)
+			_trickle_accumulator -= float(amt)
+			resource_mgr.add_salvage(amt)
 
 	# Clean up dead worker references
 	var i: int = _workers.size() - 1

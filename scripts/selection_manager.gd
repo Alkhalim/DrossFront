@@ -11,6 +11,9 @@ const GROUND_LAYER: int = 1
 const BUILDING_LAYER: int = 4
 
 var _selected_units: Array[Unit] = []
+## Currently-selected Crawler (only one — Crawlers are individual units, not
+## squads). Independent from _selected_units because Crawlers aren't Units.
+var _selected_crawler: SalvageCrawler = null
 var _is_dragging: bool = false
 var _drag_start: Vector2 = Vector2.ZERO
 var _camera: Camera3D
@@ -93,7 +96,10 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 			_is_dragging = false
 
 	elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-		if _selected_building and _selected_building.stats and not _selected_building.stats.producible_units.is_empty():
+		if _selected_crawler and is_instance_valid(_selected_crawler):
+			# Crawler is selected — right-click moves it.
+			_command_crawler_move(event.position)
+		elif _selected_building and _selected_building.stats and not _selected_building.stats.producible_units.is_empty():
 			_set_rally_point(event.position)
 		elif _attack_move_mode:
 			_command_attack_move(event.position)
@@ -205,6 +211,7 @@ func _click_select(event: InputEventMouseButton) -> void:
 
 	if unit:
 		_deselect_building()
+		_deselect_crawler()
 		if is_double and unit.stats:
 			# Double-click: select all on-screen units of same type
 			_select_all_of_type(unit.stats.unit_name)
@@ -217,19 +224,28 @@ func _click_select(event: InputEventMouseButton) -> void:
 			_clear_selection()
 			_add_to_selection(unit)
 	else:
-		# Try selecting a building
-		var building := _find_building_at(event.position)
-		if building:
-			if is_double and building.stats:
-				# Double-click building: select all of same type on screen
-				_select_all_buildings_of_type(building.stats.building_id)
-			else:
-				if not shift:
-					_clear_selection()
-				_select_building(building)
-		elif not shift:
+		# Try selecting a Crawler — they live on the unit collision layer but
+		# aren't Unit instances, so they get their own selection slot.
+		var crawler := _raycast_crawler(event.position)
+		if crawler and crawler.owner_id == 0:
 			_clear_selection()
 			_deselect_building()
+			_select_crawler(crawler)
+		else:
+			# Try selecting a building
+			var building := _find_building_at(event.position)
+			if building:
+				_deselect_crawler()
+				if is_double and building.stats:
+					_select_all_buildings_of_type(building.stats.building_id)
+				else:
+					if not shift:
+						_clear_selection()
+					_select_building(building)
+			elif not shift:
+				_clear_selection()
+				_deselect_building()
+				_deselect_crawler()
 
 	get_viewport().set_input_as_handled()
 
@@ -478,6 +494,17 @@ func _clear_selection() -> void:
 	_selected_units.clear()
 
 
+func _command_crawler_move(screen_pos: Vector2) -> void:
+	if not _selected_crawler or not is_instance_valid(_selected_crawler):
+		return
+	var ground_pos := _raycast_ground(screen_pos)
+	if ground_pos == Vector3.INF:
+		return
+	_selected_crawler.command_move(ground_pos)
+	if _audio:
+		_audio.play_command()
+
+
 func _cancel_builder_tasks() -> void:
 	## Tell every selected engineer to drop its current build target so the
 	## subsequent move/attack command isn't immediately overridden by the
@@ -519,6 +546,26 @@ func _raycast_unit(screen_pos: Vector2) -> Unit:
 		var parent: Node = (collider as Node).get_parent()
 		if parent is Unit:
 			return parent as Unit
+	return null
+
+
+func _raycast_crawler(screen_pos: Vector2) -> SalvageCrawler:
+	## Same UNIT_LAYER ray, but returns a SalvageCrawler. Crawlers occupy the
+	## unit collision layer so their hitbox is clickable like a mech.
+	var from := _camera.project_ray_origin(screen_pos)
+	var dir := _camera.project_ray_normal(screen_pos)
+	var space := get_viewport().world_3d.direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(from, from + dir * 500.0, UNIT_LAYER)
+	var result := space.intersect_ray(query)
+	if result.is_empty():
+		return null
+	var collider: Object = result["collider"]
+	if collider is SalvageCrawler:
+		return collider as SalvageCrawler
+	if collider is Node:
+		var parent: Node = (collider as Node).get_parent()
+		if parent is SalvageCrawler:
+			return parent as SalvageCrawler
 	return null
 
 
@@ -653,6 +700,27 @@ func get_selected_building() -> Building:
 	return _selected_building
 
 
+func get_selected_crawler() -> SalvageCrawler:
+	return _selected_crawler
+
+
+func _select_crawler(crawler: SalvageCrawler) -> void:
+	if _selected_crawler == crawler:
+		return
+	if _selected_crawler and is_instance_valid(_selected_crawler):
+		_selected_crawler.deselect()
+	_selected_crawler = crawler
+	_selected_crawler.select()
+	if _audio:
+		_audio.play_select()
+
+
+func _deselect_crawler() -> void:
+	if _selected_crawler and is_instance_valid(_selected_crawler):
+		_selected_crawler.deselect()
+	_selected_crawler = null
+
+
 ## --- Rally Point ---
 
 var _rally_marker: MeshInstance3D = null
@@ -672,6 +740,10 @@ func _hide_rally_marker() -> void:
 
 
 ## Queue a unit at the selected building. Index maps to producible_units array.
+## Maximum Crawlers per player (v3.3 §1.3 spec).
+const CRAWLER_CAP: int = 3
+
+
 func queue_unit_at_building(index: int) -> void:
 	if not _selected_building or not _selected_building.stats:
 		return
@@ -681,6 +753,13 @@ func queue_unit_at_building(index: int) -> void:
 	var unit_stats: UnitStatResource = _selected_building.stats.producible_units[index]
 	var resource_mgr: ResourceManager = get_tree().current_scene.get_node("ResourceManager") as ResourceManager
 	if not resource_mgr:
+		return
+
+	# Crawler cap — never queue if the player is already at 3 Crawlers
+	# (or has 3 in flight, including ones still in production queue).
+	if unit_stats.is_crawler and _crawler_count_for_owner(0) >= CRAWLER_CAP:
+		if _audio:
+			_audio.play_error()
 		return
 
 	if not resource_mgr.can_afford(unit_stats.cost_salvage, unit_stats.cost_fuel):
@@ -693,6 +772,31 @@ func queue_unit_at_building(index: int) -> void:
 	_selected_building.queue_unit(unit_stats)
 	if _audio:
 		_audio.play_production_started()
+
+
+func _crawler_count_for_owner(owner_id: int) -> int:
+	## Count live + queued Crawlers belonging to the given owner.
+	var count: int = 0
+	for node: Node in get_tree().get_nodes_in_group("crawlers"):
+		if not is_instance_valid(node):
+			continue
+		if node.get("owner_id") == owner_id:
+			count += 1
+	# Also count any Crawler stats currently in the player's production queue.
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		if node.get("owner_id") != owner_id:
+			continue
+		if not node.has_method("get_queue_size"):
+			continue
+		var b: Building = node as Building
+		if not b:
+			continue
+		# Peek at the queue via a method we add below if it doesn't exist.
+		if b.has_method("get_queue_unit_count"):
+			count += b.get_queue_unit_count("crawler")
+	return count
 
 
 ## --- Build Placement Mode ---

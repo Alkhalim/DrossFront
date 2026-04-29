@@ -1184,10 +1184,20 @@ func _spawn_unit(unit_stats: UnitStatResource) -> void:
 		if committed:
 			actual_stats = committed
 
-	var unit_scene: PackedScene = load("res://scenes/unit.tscn") as PackedScene
-	var unit: Unit = unit_scene.instantiate() as Unit
-	unit.stats = actual_stats
-	unit.owner_id = owner_id
+	# Crawlers route through a dedicated scene; everything else uses the
+	# standard mech scene.
+	var scene_path: String = "res://scenes/unit.tscn"
+	var is_crawler: bool = false
+	if "is_crawler" in actual_stats and actual_stats.is_crawler:
+		scene_path = "res://scenes/salvage_crawler.tscn"
+		is_crawler = true
+
+	var unit_scene: PackedScene = load(scene_path) as PackedScene
+	var spawned: Node3D = unit_scene.instantiate() as Node3D
+	spawned.set("stats", actual_stats)
+	spawned.set("owner_id", owner_id)
+	if is_crawler:
+		spawned.set("resource_manager", resource_manager)
 
 	var spawn_pos: Vector3
 	if _spawn_marker:
@@ -1196,9 +1206,14 @@ func _spawn_unit(unit_stats: UnitStatResource) -> void:
 		spawn_pos = global_position
 	spawn_pos += Vector3(randf_range(-1.0, 1.0), 0, randf_range(-1.0, 1.0))
 
-	get_tree().current_scene.get_node("Units").add_child(unit)
-	unit.global_position = spawn_pos
-	unit.command_move(rally_point)
+	var units_node: Node = get_tree().current_scene.get_node_or_null("Units")
+	if units_node:
+		units_node.add_child(spawned)
+	else:
+		get_tree().current_scene.add_child(spawned)
+	spawned.global_position = spawn_pos
+	if spawned.has_method("command_move"):
+		spawned.command_move(rally_point)
 	unit_produced.emit(unit_scene, spawn_pos)
 	var audio: AudioManager = get_tree().current_scene.get_node_or_null("AudioManager") as AudioManager
 	if audio:
@@ -1207,6 +1222,16 @@ func _spawn_unit(unit_stats: UnitStatResource) -> void:
 
 func get_queue_size() -> int:
 	return _build_queue.size()
+
+
+func get_queue_unit_count(filter_class: StringName) -> int:
+	## Count queued units whose stats match a given unit_class. Used by the
+	## Crawler cap so the player can't sneak past it by stacking the queue.
+	var n: int = 0
+	for s: UnitStatResource in _build_queue:
+		if s and s.unit_class == filter_class:
+			n += 1
+	return n
 
 
 func get_build_progress_percent() -> float:

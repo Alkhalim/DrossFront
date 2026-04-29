@@ -6,10 +6,10 @@
 script = ExtResource("1")
 building_name = "Salvage Yard"
 building_id = &"salvage_yard"
-hp = 800
+hp = 250
 cost_salvage = 120
-build_time = 17.5
-power_consumption = 5
+build_time = 18.0
+power_consumption = 2
 power_production = 0
-footprint_size = Vector3(4, 2, 4)
+footprint_size = Vector3(3, 1.6, 3)
 placeholder_color = Color(0.4, 0.38, 0.25, 1)
