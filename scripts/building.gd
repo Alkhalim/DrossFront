@@ -53,6 +53,13 @@ var _visual_root: Node3D = null
 ## Set by _detail_gun_emplacement; read by TurretComponent.
 var turret_pivot: Node3D = null
 
+## Damage-state visuals. Built lazily in take_damage when HP first crosses a
+## threshold; toggled visible/invisible as HP changes.
+var _damage_smoke: Node3D = null
+var _damage_fire: Node3D = null
+## Continuously-advancing time used to animate the smoke bob.
+var _damage_anim_time: float = 0.0
+
 
 func _ready() -> void:
 	if is_ghost_preview:
@@ -1040,6 +1047,18 @@ func queue_unit(unit_stats: UnitStatResource) -> bool:
 
 
 func _process(delta: float) -> void:
+	# Always-on damage VFX animation, even when nothing is in production.
+	if _damage_smoke and _damage_smoke.visible:
+		_damage_anim_time += delta
+		# Slow vertical bob + very gentle Y rotation so the plumes read as
+		# rising smoke instead of static cylinders.
+		_damage_smoke.position.y = sin(_damage_anim_time * 1.4) * 0.12
+		_damage_smoke.rotation.y += delta * 0.2
+	if _damage_fire and _damage_fire.visible:
+		# Flicker: scale embers up and down a bit on a fast sin.
+		var pulse: float = 0.85 + 0.3 * sin(_damage_anim_time * 6.0)
+		_damage_fire.scale = Vector3(pulse, pulse, pulse)
+
 	if not is_constructed:
 		return
 	if _build_queue.is_empty():
@@ -1175,6 +1194,7 @@ func _restore_select_glow(node: Node) -> void:
 
 func take_damage(amount: int, _attacker: Node3D = null) -> void:
 	current_hp -= amount
+	_update_damage_state()
 	if current_hp <= 0:
 		current_hp = 0
 		_spawn_building_wreck()
@@ -1184,6 +1204,87 @@ func take_damage(amount: int, _attacker: Node3D = null) -> void:
 		if cam and cam.has_method("add_shake"):
 			cam.add_shake(0.55)
 		queue_free()
+
+
+func _update_damage_state() -> void:
+	## Show/hide smoke and fire based on the building's current HP ratio:
+	## damaged at 50%, critical at 25%.
+	if not stats:
+		return
+	var ratio: float = float(current_hp) / float(maxi(stats.hp, 1))
+	var damaged: bool = ratio < 0.5 and current_hp > 0
+	var critical: bool = ratio < 0.25 and current_hp > 0
+
+	if damaged and not _damage_smoke:
+		_build_damage_smoke()
+	if _damage_smoke:
+		_damage_smoke.visible = damaged
+
+	if critical and not _damage_fire:
+		_build_damage_fire()
+	if _damage_fire:
+		_damage_fire.visible = critical
+
+
+func _build_damage_smoke() -> void:
+	if not stats:
+		return
+	_ensure_visual_root()
+	_damage_smoke = Node3D.new()
+	_damage_smoke.name = "DamageSmoke"
+	_visual_root.add_child(_damage_smoke)
+
+	var fs: Vector3 = stats.footprint_size
+	# Three thin dark plumes at offset positions so the column reads as a
+	# rolling smoke trail rather than a single cylinder.
+	for i: int in 3:
+		var plume := MeshInstance3D.new()
+		var cyl := CylinderMesh.new()
+		cyl.top_radius = 0.18 + float(i) * 0.08
+		cyl.bottom_radius = 0.12 + float(i) * 0.05
+		cyl.height = 1.6 + float(i) * 0.5
+		plume.mesh = cyl
+		var ox: float = randf_range(-fs.x * 0.25, fs.x * 0.25)
+		var oz: float = randf_range(-fs.z * 0.25, fs.z * 0.25)
+		plume.position = Vector3(ox, fs.y + cyl.height * 0.5 + 0.2, oz)
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(0.18, 0.18, 0.2, 0.65)
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.emission_enabled = true
+		mat.emission = Color(0.05, 0.05, 0.06)
+		mat.emission_energy_multiplier = 0.1
+		plume.set_surface_override_material(0, mat)
+		_damage_smoke.add_child(plume)
+
+
+func _build_damage_fire() -> void:
+	if not stats:
+		return
+	_ensure_visual_root()
+	_damage_fire = Node3D.new()
+	_damage_fire.name = "DamageFire"
+	_visual_root.add_child(_damage_fire)
+
+	var fs: Vector3 = stats.footprint_size
+	# Bright emissive nubs scattered across the roof — flicker via _process.
+	for i: int in 5:
+		var ember := MeshInstance3D.new()
+		var sph := SphereMesh.new()
+		sph.radius = randf_range(0.12, 0.22)
+		sph.height = sph.radius * 2.0
+		ember.mesh = sph
+		ember.position = Vector3(
+			randf_range(-fs.x * 0.35, fs.x * 0.35),
+			fs.y + randf_range(0.0, 0.3),
+			randf_range(-fs.z * 0.35, fs.z * 0.35)
+		)
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(1.0, 0.45, 0.1, 1.0)
+		mat.emission_enabled = true
+		mat.emission = Color(1.0, 0.4, 0.05)
+		mat.emission_energy_multiplier = 3.0
+		ember.set_surface_override_material(0, mat)
+		_damage_fire.add_child(ember)
 
 
 func _spawn_building_wreck() -> void:
