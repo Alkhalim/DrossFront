@@ -115,6 +115,9 @@ func _process(delta: float) -> void:
 
 
 func _process_economy() -> void:
+	# Replenish engineers if we're running low — they're built at the HQ.
+	_maintain_engineers()
+
 	# Phase 1: Basic buildings
 	_try_place("generator", "res://resources/buildings/basic_generator.tres", Vector3(5, 0, 3))
 	_try_place("foundry", "res://resources/buildings/basic_foundry.tres", Vector3(-5, 0, 3))
@@ -159,6 +162,10 @@ func _process_attack() -> void:
 	for node: Node in _units:
 		if not is_instance_valid(node):
 			continue
+		# Engineers stay home — they need to keep building, not march on the
+		# enemy. Same rule the player follows by intuition.
+		if node.has_method("get_builder") and node.get_builder():
+			continue
 		if defender_count < DEFENDERS:
 			# Keep defenders near HQ
 			var dist_to_hq: float = node.global_position.distance_to(_hq.global_position)
@@ -195,27 +202,39 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 	var bstats: BuildingStatResource = load(stats_path) as BuildingStatResource
 	if not bstats:
 		return
+	# AI must afford the building, just like the player. _ai_resource_manager
+	# handles the spending inside builder.place_building.
+	if _ai_resource_manager and _ai_resource_manager.has_method("can_afford_salvage"):
+		if not _ai_resource_manager.can_afford_salvage(bstats.cost_salvage):
+			return
 
-	# Find a placement that doesn't overlap an existing building. Hard-coded
-	# offsets occasionally collide (e.g., generator + generator2), so we
-	# spiral outward from the desired position until something fits.
+	# AI now needs an engineer to build. If none are free, skip — the AI
+	# will retry next tick (or after producing more engineers).
+	var engineer: Node = _find_free_engineer()
+	if not engineer:
+		return
+
+	# Find a placement that doesn't overlap a building, unit, fuel deposit,
+	# or wreck. Hard-coded offsets occasionally collide; spiral outward from
+	# the desired position until something fits.
 	var desired: Vector3 = _hq.global_position + offset
 	var pos: Vector3 = _find_clear_placement(desired, bstats.footprint_size)
 	if pos == Vector3.INF:
 		return  # retry next tick once the area clears
 
-	var scene: PackedScene = load("res://scenes/building.tscn") as PackedScene
-	var building: Node = scene.instantiate()
-	building.set("stats", bstats)
-	building.set("owner_id", owner_id)
-	building.set("resource_manager", _ai_resource_manager)
-	building.global_position = pos
+	# Use the same path as the player: BuilderComponent.place_building spends
+	# resources, instantiates the building, calls begin_construction, and
+	# assigns this engineer as its builder.
+	var builder: Node = engineer.get_builder()
+	if not builder or not builder.has_method("place_building"):
+		return
+	builder.place_building(bstats, pos, _ai_resource_manager)
 
-	get_tree().current_scene.add_child(building)
-	building.set("is_constructed", true)
-	if building.has_method("_apply_placeholder_shape"):
-		building._apply_placeholder_shape()
-
+	# Find the building we just placed so we can hold a reference for
+	# production / state tracking.
+	var building: Node = _find_building_at(pos, bstats.footprint_size)
+	if not building:
+		return
 	_buildings_placed[key] = true
 
 	# Keep references for production
@@ -226,6 +245,74 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 		"generator2": _generator2 = building
 		"salvage_yard": _salvage_yard = building
 		"turret": _turret = building
+
+
+func _maintain_engineers() -> void:
+	## Keep at least one Ratchet engineer alive. Built at the HQ, just like
+	## the player builds them. Without this the AI permanently loses build
+	## capability if the player wipes out the starting engineers.
+	if not is_instance_valid(_hq) or not _hq.get("is_constructed"):
+		return
+	var engineer_count: int = 0
+	for node: Node in _units:
+		if not is_instance_valid(node):
+			continue
+		if node.has_method("get_builder") and node.get_builder():
+			engineer_count += 1
+	if engineer_count >= 1:
+		return
+	# Don't pile up Ratchets in the queue; only request one at a time.
+	if _hq.has_method("get_queue_size") and _hq.get_queue_size() > 0:
+		return
+	var ratchet: UnitStatResource = load("res://resources/units/anvil_ratchet.tres") as UnitStatResource
+	if not ratchet:
+		return
+	if not _ai_resource_manager:
+		return
+	var salvage: int = _ai_resource_manager.get("salvage")
+	if salvage < ratchet.cost_salvage:
+		return
+	_ai_resource_manager.spend(ratchet.cost_salvage, ratchet.cost_fuel)
+	_hq.queue_unit(ratchet)
+
+
+func _find_free_engineer() -> Node:
+	## Returns an idle AI engineer (Ratchet) — one with a builder component
+	## that isn't currently constructing or moving to a build site.
+	for node: Node in _units:
+		if not is_instance_valid(node):
+			continue
+		if node.get("owner_id") != owner_id:
+			continue
+		if "alive_count" in node and node.get("alive_count") <= 0:
+			continue
+		var builder: Node = node.get_builder() if node.has_method("get_builder") else null
+		if not builder:
+			continue
+		# Builder is busy if its target is a valid, unfinished building.
+		var target: Node = builder.get("_target_building")
+		if target and is_instance_valid(target) and not target.get("is_constructed"):
+			continue
+		return node
+	return null
+
+
+func _find_building_at(pos: Vector3, footprint: Vector3) -> Node:
+	## Find the freshly-placed building (matching position within the
+	## footprint half-extent) so _try_place can cache references.
+	var half_x: float = footprint.x * 0.5 + 0.5
+	var half_z: float = footprint.z * 0.5 + 0.5
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		if node.get("owner_id") != owner_id:
+			continue
+		var b: Node3D = node as Node3D
+		if not b:
+			continue
+		if absf(b.global_position.x - pos.x) < half_x and absf(b.global_position.z - pos.z) < half_z:
+			return node
+	return null
 
 
 func _find_clear_placement(desired: Vector3, footprint: Vector3) -> Vector3:
@@ -247,11 +334,19 @@ func _find_clear_placement(desired: Vector3, footprint: Vector3) -> Vector3:
 const PLACEMENT_GAP: float = 0.8
 
 
+## How far units / fuel deposits / wrecks must be from the placement footprint.
+const UNIT_PLACEMENT_MARGIN: float = 0.5
+
+
 func _is_placement_clear(pos: Vector3, footprint: Vector3) -> bool:
-	## AABB-vs-AABB against every existing building, with a small spacing
-	## buffer so adjacent buildings don't touch edge-to-edge.
+	## Same rules the player follows in SelectionManager — check against
+	## buildings (with PLACEMENT_GAP buffer), units, fuel deposits, and
+	## wrecks. Previously the AI only checked buildings, so it could happily
+	## drop a foundry on top of the player's units.
 	var half_x: float = footprint.x * 0.5
 	var half_z: float = footprint.z * 0.5
+
+	# Buildings (AABB-vs-AABB with spacing gap).
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(node):
 			continue
@@ -264,6 +359,33 @@ func _is_placement_clear(pos: Vector3, footprint: Vector3) -> bool:
 		var dz: float = absf(b.global_position.z - pos.z)
 		if dx < (half_x + their_hx + PLACEMENT_GAP) and dz < (half_z + their_hz + PLACEMENT_GAP):
 			return false
+
+	# Units — friendly OR enemy. The AI shouldn't be allowed to drop a
+	# foundry on top of player units mid-raid either.
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node):
+			continue
+		var u: Node3D = node as Node3D
+		if not u:
+			continue
+		var dx: float = absf(u.global_position.x - pos.x)
+		var dz: float = absf(u.global_position.z - pos.z)
+		if dx < (half_x + UNIT_PLACEMENT_MARGIN) and dz < (half_z + UNIT_PLACEMENT_MARGIN):
+			return false
+
+	# Fuel deposits and wrecks.
+	for group_name: String in ["fuel_deposits", "wrecks"]:
+		for node: Node in get_tree().get_nodes_in_group(group_name):
+			if not is_instance_valid(node):
+				continue
+			var f: Node3D = node as Node3D
+			if not f:
+				continue
+			var dx: float = absf(f.global_position.x - pos.x)
+			var dz: float = absf(f.global_position.z - pos.z)
+			if dx < (half_x + UNIT_PLACEMENT_MARGIN) and dz < (half_z + UNIT_PLACEMENT_MARGIN):
+				return false
+
 	return true
 
 
