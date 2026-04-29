@@ -302,19 +302,22 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	var damage_per_member: float = float(base_damage) * role_mod * dir_mod * accuracy * (1.0 - armor_reduction)
 	var per_member_dmg: int = maxi(int(damage_per_member), 1)
 
-	# Fire one projectile per alive squad member
+	# Fire one projectile per alive squad member, originating at the actual
+	# barrel tip (falls back to chest-height if the unit has no cannons).
 	var proj_script: GDScript = load("res://scripts/projectile.gd") as GDScript
-	var member_positions: Array[Vector3] = []
-	if _unit.has_method("get_member_positions"):
-		member_positions = _unit.get_member_positions()
+	var muzzle_positions: Array[Vector3] = []
+	if _unit.has_method("get_muzzle_positions"):
+		muzzle_positions = _unit.get_muzzle_positions()
+	if muzzle_positions.is_empty() and _unit.has_method("get_member_positions"):
+		muzzle_positions = _unit.get_member_positions()
 
 	for i: int in shots:
 		_current_target.take_damage(per_member_dmg, _unit)
 
 		if proj_script:
 			var fire_pos: Vector3 = _unit.global_position
-			if i < member_positions.size():
-				fire_pos = member_positions[i]
+			if i < muzzle_positions.size():
+				fire_pos = muzzle_positions[i]
 			var proj: Node3D = proj_script.create(fire_pos, _current_target.global_position, weapon.role_tag, weapon.rof_tier)
 			get_tree().current_scene.add_child(proj)
 
@@ -339,19 +342,18 @@ func _spawn_squad_muzzle_flash() -> void:
 	mat.emission = Color(1.0, 0.7, 0.1, 1.0)
 	mat.emission_energy_multiplier = 6.0
 
+	# Prefer real barrel-tip positions; fall back to chest-height if none.
 	var positions: Array[Vector3] = []
-	if _unit.has_method("get_member_positions"):
-		positions = _unit.get_member_positions()
+	if _unit.has_method("get_muzzle_positions"):
+		positions = _unit.get_muzzle_positions()
 
 	if positions.is_empty():
 		_create_flash_at(_unit.global_position + Vector3(0, 1.2, 0), mat)
 		return
 
-	# get_member_positions() now returns chest-height world positions, so we
-	# only need to push the flash forward to the muzzle.
-	var forward: Vector3 = -_unit.global_basis.z.normalized()
+	# Muzzle positions are already at the barrel tip — flash directly there.
 	for pos: Vector3 in positions:
-		_create_flash_at(pos + forward * 0.6, mat)
+		_create_flash_at(pos, mat)
 
 
 func _create_flash_at(pos: Vector3, mat: StandardMaterial3D) -> void:

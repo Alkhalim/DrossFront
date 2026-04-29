@@ -366,6 +366,10 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 	# applied as an additive offset (the Bulwark hull-mounted gun sits at the
 	# chassis front, not at z=0).
 	var cannon_rest_z: Array = []
+	# Parallel to `cannons` — distance from each pivot's origin to its barrel
+	# tip (always positive; we treat -Z as forward when looking up the muzzle
+	# point in get_muzzle_positions).
+	var cannon_muzzle_z: Array = []
 
 	if cannon_kind == "platform":
 		# Bulwark — tank-destroyer hull. Cannon is mounted in the center of
@@ -524,6 +528,8 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		shoulders.append(mantlet)
 		cannons.append(cannon_pivot)
 		cannon_rest_z.append(cannon_pivot.position.z)
+		# Bulwark muzzle sits at -barrel_len - 0.07 in pivot-local space.
+		cannon_muzzle_z.append(barrel_len + 0.07)
 	elif cannon_kind != "none":
 		# Sentinel-style mounts cannons at the cockpit (top of head); standard
 		# bipeds mount them on the torso shoulders.
@@ -602,6 +608,10 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 			shoulders.append(shoulder)
 			cannons.append(cannon_pivot)
 			cannon_rest_z.append(cannon_pivot.position.z)
+			# Shoulder cannons: barrel tip + muzzle ring at cannon_size.z + 0.02.
+			# Claw arms (engineers) put fingers at -size.z - 0.08, but they
+			# don't fire — using the same value is harmless.
+			cannon_muzzle_z.append(cannon_size.z + 0.05)
 
 			# Shoulder pauldron cap — small angled plate atop each shoulder.
 			var pauldron := MeshInstance3D.new()
@@ -656,6 +666,7 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		"shoulders": shoulders,
 		"cannons": cannons,
 		"cannon_rest_z": cannon_rest_z,
+		"cannon_muzzle_z": cannon_muzzle_z,
 		"torso": torso,
 		"head": head,
 		"mats": mats,
@@ -1681,4 +1692,38 @@ func get_member_positions() -> Array[Vector3]:
 		var member: Node3D = _member_meshes[i]
 		if is_instance_valid(member) and member.visible:
 			positions.append(member.global_position + Vector3(0, chest_offset, 0))
+	return positions
+
+
+func get_muzzle_positions() -> Array[Vector3]:
+	## World-space barrel-tip positions, one per alive squad member's primary
+	## cannon. Used by combat to spawn projectiles and muzzle flashes at the
+	## actual gun mouth instead of the unit's chest. Falls back to
+	## get_member_positions for members that lack a cannon.
+	var positions: Array[Vector3] = []
+	for i: int in _member_data.size():
+		if i >= member_hp.size() or member_hp[i] <= 0:
+			continue
+		var data: Dictionary = _member_data[i]
+		var member: Node3D = data["root"]
+		if not is_instance_valid(member) or not member.visible:
+			continue
+		var cannons: Array = data["cannons"] as Array
+		var muzzle_zs: Array = data.get("cannon_muzzle_z", []) as Array
+		if cannons.is_empty():
+			# No cannons (e.g., engineer's claw isn't tracked here) — fall back
+			# to a chest-forward point so projectiles still leave the body.
+			var chest: Vector3 = member.global_position + Vector3(0, _mech_total_height() * 0.55, 0)
+			var forward: Vector3 = -global_basis.z.normalized()
+			positions.append(chest + forward * 0.4)
+			continue
+		# Use the first cannon's barrel tip — alternates can come later if
+		# we want twin-cannon mechs to fire from each barrel in turn.
+		var pivot: Node3D = cannons[0]
+		if not is_instance_valid(pivot):
+			continue
+		var muzzle_z: float = 0.5
+		if muzzle_zs.size() > 0:
+			muzzle_z = muzzle_zs[0] as float
+		positions.append(pivot.global_transform * Vector3(0, 0, -muzzle_z))
 	return positions
