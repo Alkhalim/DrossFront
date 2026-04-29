@@ -18,6 +18,16 @@ var _target_size: float = 40.0
 ## Fixed camera offset from pivot (set once at startup).
 var _cam_offset: Vector3 = Vector3.ZERO
 
+## Trauma-style screen shake. Callers (Unit._die, Building destruction) push
+## an "amount" into _shake_trauma; we square it for nicer falloff.
+var _shake_trauma: float = 0.0
+const SHAKE_DECAY: float = 4.0
+const SHAKE_MAX_OFFSET: float = 0.6
+
+
+func add_shake(amount: float) -> void:
+	_shake_trauma = clampf(_shake_trauma + amount, 0.0, 1.0)
+
 ## Camera pitch angle in degrees (50 = good isometric view).
 const PITCH_DEG: float = 50.0
 
@@ -52,28 +62,35 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
+	# Only read input while the game window is focused. Without this the camera
+	# keeps scrolling whenever a stuck modifier or a mouse-near-edge state
+	# remains "pressed" after alt-tabbing away.
+	var window: Window = get_window()
+	var window_focused: bool = window != null and window.has_focus()
+
 	var input_dir := Vector2.ZERO
 
-	if Input.is_action_pressed("camera_pan_up"):
-		input_dir.y -= 1.0
-	if Input.is_action_pressed("camera_pan_down"):
-		input_dir.y += 1.0
-	if Input.is_action_pressed("camera_pan_left"):
-		input_dir.x -= 1.0
-	if Input.is_action_pressed("camera_pan_right"):
-		input_dir.x += 1.0
-
-	if edge_pan_enabled:
-		var mouse_pos := get_viewport().get_mouse_position()
-		var viewport_size := get_viewport().get_visible_rect().size
-		if mouse_pos.x < edge_pan_margin:
-			input_dir.x -= 1.0
-		elif mouse_pos.x > viewport_size.x - edge_pan_margin:
-			input_dir.x += 1.0
-		if mouse_pos.y < edge_pan_margin:
+	if window_focused:
+		if Input.is_action_pressed("camera_pan_up"):
 			input_dir.y -= 1.0
-		elif mouse_pos.y > viewport_size.y - edge_pan_margin:
+		if Input.is_action_pressed("camera_pan_down"):
 			input_dir.y += 1.0
+		if Input.is_action_pressed("camera_pan_left"):
+			input_dir.x -= 1.0
+		if Input.is_action_pressed("camera_pan_right"):
+			input_dir.x += 1.0
+
+		if edge_pan_enabled:
+			var mouse_pos := get_viewport().get_mouse_position()
+			var viewport_size := get_viewport().get_visible_rect().size
+			if mouse_pos.x < edge_pan_margin:
+				input_dir.x -= 1.0
+			elif mouse_pos.x > viewport_size.x - edge_pan_margin:
+				input_dir.x += 1.0
+			if mouse_pos.y < edge_pan_margin:
+				input_dir.y -= 1.0
+			elif mouse_pos.y > viewport_size.y - edge_pan_margin:
+				input_dir.y += 1.0
 
 	var zoom_factor := size / 40.0
 
@@ -90,3 +107,11 @@ func _process(delta: float) -> void:
 	_pivot = _pivot.lerp(_target_pivot, 10.0 * delta)
 	global_position = _pivot + _cam_offset
 	size = lerpf(size, _target_size, 10.0 * delta)
+
+	# Trauma-based screen shake. Squared trauma → snappier falloff.
+	if _shake_trauma > 0.0:
+		_shake_trauma = maxf(0.0, _shake_trauma - SHAKE_DECAY * delta)
+		var t: float = _shake_trauma * _shake_trauma
+		var ox: float = randf_range(-1.0, 1.0) * SHAKE_MAX_OFFSET * t
+		var oy: float = randf_range(-1.0, 1.0) * SHAKE_MAX_OFFSET * t
+		global_position += Vector3(ox, 0.0, oy)

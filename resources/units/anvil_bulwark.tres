@@ -5,11 +5,11 @@
 
 [sub_resource type="Resource" id="weapon_rotary_cannon"]
 script = ExtResource("2")
-weapon_name = "Rotary AP Autocannon"
+weapon_name = "Heavy AP Cannon"
 role_tag = &"AP"
-damage_tier = &"high"
+damage_tier = &"very_high"
 range_tier = &"long"
-rof_tier = &"fast"
+rof_tier = &"moderate"
 
 [sub_resource type="Resource" id="weapon_missile_pod"]
 script = ExtResource("2")
@@ -32,7 +32,7 @@ squad_size = 2
 population = 16
 cost_salvage = 650
 cost_fuel = 70
-build_time = 55.0
+build_time = 38.5
 built_at = &"advanced_foundry"
 primary_weapon = SubResource("weapon_rotary_cannon")
 secondary_weapon = SubResource("weapon_missile_pod")

@@ -2,11 +2,12 @@ class_name AudioManager
 extends Node
 ## Generates and plays simple procedural sound effects for prototyping.
 ## Industrial/mechanical tone — low frequencies, clicks, metallic.
-
-## Call these from anywhere via AudioManager reference on the scene root.
+##
+## Sounds are layered: a "shot" is a filtered-noise crack plus a low body thump,
+## an "explosion" is a three-stage crack → mid-rumble → low decay tail.
 
 var _players: Array[AudioStreamPlayer] = []
-const POOL_SIZE: int = 8
+const POOL_SIZE: int = 16
 const SAMPLE_RATE: int = 22050
 
 
@@ -28,56 +29,71 @@ func _get_free_player() -> AudioStreamPlayer:
 ## --- Public API ---
 
 func play_command() -> void:
-	# Short metallic click
-	_play_tone(280.0, 0.06, -10.0, 1.5)
+	# Short metallic click with pitch wiggle so spam doesn't become identical.
+	_play_tone(280.0 + randf_range(-25.0, 25.0), 0.06, -10.0, 1.5)
 
 func play_select() -> void:
-	# Quick ping
-	_play_tone(400.0, 0.04, -14.0)
+	# Quick ping with pitch wiggle.
+	_play_tone(400.0 + randf_range(-30.0, 30.0), 0.04, -14.0)
 
 func play_building_placed() -> void:
-	# Heavy industrial thud
-	_play_tone(80.0, 0.2, -4.0, 3.0)
+	# Heavy industrial thud + dirt-noise body.
+	_play_thump(70.0, 0.22, -4.0)
+	_play_filtered_noise(0.18, 1800.0, -10.0)
 
 func play_production_started() -> void:
-	# Mechanical clunk
-	_play_noise_burst(0.08, -8.0)
+	# Mechanical clunk: tight noise burst + a low click.
+	_play_filtered_noise(0.06, 2400.0, -10.0)
+	_play_tone(150.0, 0.05, -14.0, 2.0)
 
 func play_production_complete() -> void:
-	# Rising two-tone chime
+	# Rising two-tone chime.
 	_play_two_tone(380.0, 520.0, 0.1, -8.0)
 
 func play_construction_complete() -> void:
-	# Heavier completion tone
+	# Heavier completion tone.
 	_play_two_tone(260.0, 400.0, 0.15, -6.0)
 
 func play_error() -> void:
-	# Low buzz
+	# Low buzz.
 	_play_tone(75.0, 0.25, -6.0, 0.0)
 
 func play_weapon_fire() -> void:
-	# Sharp crack with slight pitch randomization
-	var pitch: float = randf_range(180.0, 260.0)
-	_play_noise_burst(0.035, -16.0)
-	_play_tone(pitch, 0.025, -18.0)
+	# Layered crack: filtered noise (HF detail) + low body thump (LF weight).
+	# Slight pitch randomization keeps rapid fire from feeling sample-locked.
+	var pitch: float = randf_range(190.0, 250.0)
+	_play_filtered_noise(0.045, 4500.0, -12.0)
+	_play_thump(pitch * 0.5, 0.06, -14.0)
 
 func play_weapon_impact() -> void:
-	# Metallic thump
-	_play_tone(120.0, 0.06, -12.0, 5.0)
+	# Metallic thump with random pitch + short noise spit.
+	var pitch: float = randf_range(110.0, 145.0)
+	_play_filtered_noise(0.04, 3200.0, -16.0)
+	_play_tone(pitch, 0.07, -14.0, 5.0)
 
 func play_unit_destroyed() -> void:
-	# Deep rumbling explosion
-	_play_noise_burst(0.4, -4.0)
-	_play_tone(50.0, 0.5, -6.0, 4.0)
+	# Three-stage explosion: instant crack, body boom, low rumble tail.
+	_play_filtered_noise(0.08, 5000.0, -4.0)             # initial crack (HF)
+	_play_thump(55.0, 0.4, -4.0)                          # body boom (LF)
+	_play_filtered_noise(0.55, 700.0, -8.0)               # rumble tail (LP)
 
 func play_capture_complete() -> void:
 	_play_two_tone(350.0, 500.0, 0.12, -8.0)
 
 
-## --- Generators ---
+## --- Generator playback ---
 
 func _play_tone(freq: float, duration: float, volume_db: float, detune: float = 0.0) -> void:
 	var stream := _generate_tone(freq + detune, duration)
+	var player := _get_free_player()
+	player.stream = stream
+	player.volume_db = volume_db
+	player.play()
+
+
+func _play_thump(freq: float, duration: float, volume_db: float) -> void:
+	# A "thump" is a tone that pitches down across its duration — gives weight.
+	var stream := _generate_pitched_tone(freq * 1.6, freq * 0.7, duration)
 	var player := _get_free_player()
 	player.stream = stream
 	player.volume_db = volume_db
@@ -92,13 +108,15 @@ func _play_two_tone(freq1: float, freq2: float, duration: float, volume_db: floa
 	player.play()
 
 
-func _play_noise_burst(duration: float, volume_db: float) -> void:
-	var stream := _generate_noise(duration)
+func _play_filtered_noise(duration: float, lowpass_hz: float, volume_db: float) -> void:
+	var stream := _generate_filtered_noise(duration, lowpass_hz)
 	var player := _get_free_player()
 	player.stream = stream
 	player.volume_db = volume_db
 	player.play()
 
+
+## --- Generators ---
 
 func _generate_tone(freq: float, duration: float) -> AudioStreamWAV:
 	var samples: int = int(SAMPLE_RATE * duration)
@@ -107,24 +125,41 @@ func _generate_tone(freq: float, duration: float) -> AudioStreamWAV:
 
 	for i: int in samples:
 		var t: float = float(i) / float(SAMPLE_RATE)
-		var envelope: float = 1.0 - (float(i) / float(samples))
-		envelope = envelope * envelope
+		# Quick attack, exponential decay — punchier than a linear ramp.
+		var env: float = _attack_decay_env(i, samples, 0.04)
 
-		# Square-ish wave for industrial feel (clipped sine)
+		# Square-ish wave for industrial feel (clipped sine).
 		var sample: float = sin(t * freq * TAU)
 		sample = clampf(sample * 2.0, -1.0, 1.0)
-		sample *= envelope
+		sample *= env
 
-		var value: int = int(sample * 16000.0)
-		value = clampi(value, -32768, 32767)
-		data[i * 2] = value & 0xFF
-		data[i * 2 + 1] = (value >> 8) & 0xFF
+		_write_sample(data, i, sample)
 
-	var stream := AudioStreamWAV.new()
-	stream.format = AudioStreamWAV.FORMAT_16_BITS
-	stream.mix_rate = SAMPLE_RATE
-	stream.data = data
-	return stream
+	return _make_stream(data)
+
+
+func _generate_pitched_tone(start_freq: float, end_freq: float, duration: float) -> AudioStreamWAV:
+	# Frequency sweep — thump, kick, boom feel.
+	var samples: int = int(SAMPLE_RATE * duration)
+	var data := PackedByteArray()
+	data.resize(samples * 2)
+
+	# Phase accumulator so the pitch sweep is smooth and click-free.
+	var phase: float = 0.0
+	for i: int in samples:
+		var u: float = float(i) / float(samples)
+		var freq: float = lerp(start_freq, end_freq, u)
+		phase += freq * TAU / float(SAMPLE_RATE)
+
+		var env: float = _attack_decay_env(i, samples, 0.02)
+		var sample: float = sin(phase)
+		# Subtle saturation for body — gentle clip.
+		sample = clampf(sample * 1.4, -1.0, 1.0)
+		sample *= env
+
+		_write_sample(data, i, sample)
+
+	return _make_stream(data)
 
 
 func _generate_two_tone(freq1: float, freq2: float, duration: float) -> AudioStreamWAV:
@@ -135,43 +170,61 @@ func _generate_two_tone(freq1: float, freq2: float, duration: float) -> AudioStr
 
 	for i: int in samples:
 		var t: float = float(i) / float(SAMPLE_RATE)
-		var envelope: float = 1.0 - (float(i) / float(samples))
-		envelope = envelope * envelope
+		var env: float = _attack_decay_env(i, samples, 0.05)
 
 		var freq: float = freq1 if i < half else freq2
 		var sample: float = sin(t * freq * TAU)
 		sample = clampf(sample * 2.0, -1.0, 1.0)
-		sample *= envelope
+		sample *= env
 
-		var value: int = int(sample * 16000.0)
-		value = clampi(value, -32768, 32767)
-		data[i * 2] = value & 0xFF
-		data[i * 2 + 1] = (value >> 8) & 0xFF
+		_write_sample(data, i, sample)
 
-	var stream := AudioStreamWAV.new()
-	stream.format = AudioStreamWAV.FORMAT_16_BITS
-	stream.mix_rate = SAMPLE_RATE
-	stream.data = data
-	return stream
+	return _make_stream(data)
 
 
-func _generate_noise(duration: float) -> AudioStreamWAV:
+func _generate_filtered_noise(duration: float, lowpass_hz: float) -> AudioStreamWAV:
+	# One-pole IIR low-pass. Lower cutoff = more rumbly/muffled.
 	var samples: int = int(SAMPLE_RATE * duration)
 	var data := PackedByteArray()
 	data.resize(samples * 2)
 
+	var dt: float = 1.0 / float(SAMPLE_RATE)
+	var rc: float = 1.0 / (TAU * maxf(lowpass_hz, 1.0))
+	var alpha: float = dt / (rc + dt)
+	var prev: float = 0.0
+
 	for i: int in samples:
-		var envelope: float = 1.0 - (float(i) / float(samples))
-		envelope = envelope * envelope * envelope
+		var raw: float = randf_range(-1.0, 1.0)
+		# IIR low-pass.
+		prev = prev + alpha * (raw - prev)
+		var env: float = _attack_decay_env(i, samples, 0.005)
+		# Boost a bit since LP cuts amplitude.
+		var sample: float = clampf(prev * 2.0, -1.0, 1.0) * env
 
-		# Filtered noise — low-pass by averaging
-		var noise: float = randf_range(-1.0, 1.0) * envelope * 0.6
+		_write_sample(data, i, sample)
 
-		var value: int = int(noise * 16000.0)
-		value = clampi(value, -32768, 32767)
-		data[i * 2] = value & 0xFF
-		data[i * 2 + 1] = (value >> 8) & 0xFF
+	return _make_stream(data)
 
+
+## --- Helpers ---
+
+func _attack_decay_env(i: int, samples: int, attack_frac: float) -> float:
+	## Quick attack ramp + exponential decay — feels punchier than a linear fade.
+	var u: float = float(i) / float(maxi(samples, 1))
+	var attack: float = clampf(u / maxf(attack_frac, 0.0001), 0.0, 1.0)
+	var decay_u: float = clampf((u - attack_frac) / maxf(1.0 - attack_frac, 0.0001), 0.0, 1.0)
+	var decay: float = exp(-decay_u * 4.0)
+	return attack * decay
+
+
+func _write_sample(data: PackedByteArray, i: int, sample: float) -> void:
+	var value: int = int(sample * 16000.0)
+	value = clampi(value, -32768, 32767)
+	data[i * 2] = value & 0xFF
+	data[i * 2 + 1] = (value >> 8) & 0xFF
+
+
+func _make_stream(data: PackedByteArray) -> AudioStreamWAV:
 	var stream := AudioStreamWAV.new()
 	stream.format = AudioStreamWAV.FORMAT_16_BITS
 	stream.mix_rate = SAMPLE_RATE
