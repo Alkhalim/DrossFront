@@ -13,6 +13,24 @@ signal squad_destroyed   # for combat target validation parity with Unit
 
 const PLAYER_COLOR := Color(0.15, 0.45, 0.9, 1.0)
 const ENEMY_COLOR := Color(0.85, 0.2, 0.15, 1.0)
+const NEUTRAL_COLOR := Color(0.85, 0.7, 0.3, 1.0)
+
+
+static func _color_for(owner_idx: int) -> Color:
+	# Static fallback when no registry is reachable. Runtime callers go
+	# through `_resolve_team_color` which honours team alliances.
+	if owner_idx == 0:
+		return PLAYER_COLOR
+	if owner_idx == 2:
+		return NEUTRAL_COLOR
+	return ENEMY_COLOR
+
+
+func _resolve_team_color() -> Color:
+	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	if registry and registry.has_method("get_perspective_color"):
+		return registry.get_perspective_color(owner_id)
+	return SalvageCrawler._color_for(owner_id)
 const ARRIVE_THRESHOLD: float = 1.4
 ## Crawler's worker harvest radius (matches the doc's 45 world units; doc
 ## phrasing is "450m" but our prototype scales to ~10x smaller).
@@ -38,6 +56,10 @@ var hp_bar_hovered: bool = false
 var _move_speed: float = 3.0          # set from stats.speed_tier in _ready
 var _nav_agent: NavigationAgent3D = null
 var _yard_component: Node = null
+## Stuck-rescue: same logic as Unit. Tracks how long the Crawler has been
+## ordered somewhere but unable to make progress; re-paths once at 1.5s and
+## gives up at 5s so a wedged Crawler doesn't grind forever.
+var _stuck_timer: float = 0.0
 
 ## Wreck-crushing — runs at a low cadence so we don't hammer the wrecks group.
 const CRUSH_CHECK_INTERVAL: float = 0.25
@@ -129,7 +151,7 @@ func get_power_efficiency() -> float:
 ## --- Visuals ---
 
 func _build_visuals() -> void:
-	var team_color: Color = PLAYER_COLOR if owner_id == 0 else ENEMY_COLOR
+	var team_color: Color = _resolve_team_color()
 
 	# Low rectangular hull (treads-and-platform silhouette).
 	_hull = MeshInstance3D.new()
@@ -277,6 +299,7 @@ func command_move(target: Vector3, _clear_combat: bool = true) -> void:
 		return
 	move_target = Vector3(target.x, global_position.y, target.z)
 	has_move_order = true
+	_stuck_timer = 0.0
 	if _nav_agent:
 		_nav_agent.target_position = move_target
 
@@ -342,7 +365,23 @@ func _physics_process(delta: float) -> void:
 
 	var direction: Vector3 = to_next / maxf(dist, 0.001)
 	velocity = direction * _move_speed
+	var prev_pos: Vector3 = global_position
 	move_and_slide()
+
+	# Stuck rescue — same thresholds as Unit so the Crawler doesn't sit
+	# wedged against a wreck or a chokepoint forever.
+	var actual_move: float = (global_position - prev_pos).length()
+	var expected_move: float = _move_speed * delta * 0.3
+	if actual_move < expected_move:
+		_stuck_timer += delta
+		if _stuck_timer >= 1.5 and _stuck_timer < 1.5 + delta * 1.5:
+			if _nav_agent:
+				_nav_agent.target_position = move_target
+		elif _stuck_timer > 5.0:
+			stop()
+			return
+	else:
+		_stuck_timer = 0.0
 
 	# Face direction of travel.
 	var face_dir: Vector3 = velocity.normalized()

@@ -9,8 +9,22 @@ const DEPOSIT_SIZE: float = 4.0
 
 var _player_color := Color(0.2, 0.5, 1.0, 1.0)
 var _enemy_color := Color(1.0, 0.2, 0.15, 1.0)
-var _neutral_color := Color(0.7, 0.6, 0.3, 1.0)
+var _neutral_color := Color(0.85, 0.7, 0.3, 1.0)
 var _wreck_color := Color(0.4, 0.35, 0.25, 0.5)
+
+
+func _color_for_owner(owner_idx: int) -> Color:
+	# Prefer the PlayerRegistry's perspective rule so 2v2 allies show in
+	# their own tint instead of generic enemy red. Falls back to the
+	# pre-registry behaviour for headless / test scenes.
+	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	if registry and registry.has_method("get_perspective_color"):
+		return registry.get_perspective_color(owner_idx)
+	if owner_idx == 0:
+		return _player_color
+	if owner_idx == 2:
+		return _neutral_color
+	return _enemy_color
 
 
 func _process(_delta: float) -> void:
@@ -31,7 +45,7 @@ func _draw() -> void:
 		if not is_instance_valid(node):
 			continue
 		var pos: Vector2 = _world_to_map(node.global_position, map_size, half_world)
-		var color: Color = _player_color if node.get("owner_id") == 0 else _enemy_color
+		var color: Color = _color_for_owner(node.get("owner_id") as int)
 		draw_rect(Rect2(pos - Vector2(BUILDING_SIZE / 2.0, BUILDING_SIZE / 2.0), Vector2(BUILDING_SIZE, BUILDING_SIZE)), color)
 
 	# Draw fuel deposits
@@ -71,7 +85,7 @@ func _draw() -> void:
 		if "alive_count" in node and node.get("alive_count") <= 0:
 			continue
 		var pos: Vector2 = _world_to_map(node.global_position, map_size, half_world)
-		var color: Color = _player_color if node.get("owner_id") == 0 else _enemy_color
+		var color: Color = _color_for_owner(node.get("owner_id") as int)
 		draw_circle(pos, DOT_SIZE, color)
 
 	# Draw camera viewport rectangle

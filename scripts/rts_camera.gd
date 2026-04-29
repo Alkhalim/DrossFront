@@ -59,6 +59,117 @@ func _unhandled_input(event: InputEvent) -> void:
 			elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 				_target_size = minf(_target_size + zoom_speed, zoom_max)
 				get_viewport().set_input_as_handled()
+	elif event is InputEventKey:
+		var key := event as InputEventKey
+		if key.pressed and not key.echo:
+			if key.keycode == KEY_H:
+				_jump_to_player_hq()
+				get_viewport().set_input_as_handled()
+			elif key.keycode == KEY_F1:
+				_jump_to_player_army()
+				get_viewport().set_input_as_handled()
+			elif key.keycode == KEY_EQUAL or key.keycode == KEY_KP_ADD:
+				_step_match_speed(1)
+				get_viewport().set_input_as_handled()
+			elif key.keycode == KEY_MINUS or key.keycode == KEY_KP_SUBTRACT:
+				_step_match_speed(-1)
+				get_viewport().set_input_as_handled()
+			elif key.keycode == KEY_BACKSPACE:
+				_reset_match_speed()
+				get_viewport().set_input_as_handled()
+
+
+## Match-speed control — discrete steps so the player can step through them
+## by tapping +/-. Resetting via BACKSPACE returns to real time.
+const MATCH_SPEEDS: Array[float] = [0.5, 1.0, 2.0, 4.0]
+
+
+func _step_match_speed(direction: int) -> void:
+	var current: float = Engine.time_scale
+	var idx: int = 1  # default to 1.0
+	for i: int in MATCH_SPEEDS.size():
+		if absf(MATCH_SPEEDS[i] - current) < 0.01:
+			idx = i
+			break
+	idx = clampi(idx + direction, 0, MATCH_SPEEDS.size() - 1)
+	_apply_match_speed(MATCH_SPEEDS[idx])
+
+
+func _reset_match_speed() -> void:
+	_apply_match_speed(1.0)
+
+
+func _apply_match_speed(speed: float) -> void:
+	Engine.time_scale = speed
+	var alert_mgr: Node = get_tree().current_scene.get_node_or_null("AlertManager") if get_tree() else null
+	if alert_mgr and alert_mgr.has_method("emit_alert"):
+		alert_mgr.emit_alert("Match speed: %sx" % str(speed), 0, global_position, "match_speed", 0.5)
+
+
+func _jump_to(world_pos: Vector3) -> void:
+	# Both pivots updated so the smooth-lerp catches up cleanly without a
+	# delayed slide. Y is forced to 0 — the pivot tracks the ground plane.
+	var target := Vector3(world_pos.x, 0.0, world_pos.z)
+	_pivot = target
+	_target_pivot = target
+
+
+func _jump_to_player_hq() -> void:
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		if node.get("owner_id") != 0:
+			continue
+		var stats: Resource = node.get("stats") as Resource
+		if stats and stats.get("building_id") == &"headquarters":
+			_jump_to((node as Node3D).global_position)
+			return
+	# Fallback — any player building.
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if is_instance_valid(node) and node.get("owner_id") == 0:
+			_jump_to((node as Node3D).global_position)
+			return
+
+
+func _jump_to_player_army() -> void:
+	# Prefer the currently selected units' centroid so the player can flick
+	# back to whatever they're commanding. Fall back to the full army when
+	# nothing is selected.
+	var sel_mgr: Node = get_tree().current_scene.get_node_or_null("SelectionManager") if get_tree() else null
+	var selected: Array = []
+	if sel_mgr:
+		var raw: Variant = sel_mgr.get("_selected_units")
+		if raw is Array:
+			selected = raw
+
+	var sum := Vector3.ZERO
+	var count: int = 0
+	if not selected.is_empty():
+		for unit: Object in selected:
+			if not is_instance_valid(unit):
+				continue
+			var n3: Node3D = unit as Node3D
+			if not n3:
+				continue
+			if "alive_count" in unit and (unit.get("alive_count") as int) <= 0:
+				continue
+			sum += n3.global_position
+			count += 1
+
+	if count == 0:
+		# No (live) selection — jump to the centroid of all player units.
+		for node: Node in get_tree().get_nodes_in_group("units"):
+			if not is_instance_valid(node):
+				continue
+			if node.get("owner_id") != 0:
+				continue
+			if "alive_count" in node and (node.get("alive_count") as int) <= 0:
+				continue
+			sum += (node as Node3D).global_position
+			count += 1
+
+	if count > 0:
+		_jump_to(sum / float(count))
 
 
 func _process(delta: float) -> void:

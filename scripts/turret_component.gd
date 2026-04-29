@@ -131,12 +131,17 @@ func _find_nearest_enemy() -> Node3D:
 	var range_v: float = get_range()
 	var nearest: Node3D = null
 	var nearest_dist: float = INF
+	var registry: PlayerRegistry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
 
 	var units: Array[Node] = get_tree().get_nodes_in_group("units")
 	for node: Node in units:
 		if not node.has_method("take_damage"):
 			continue
-		if node.get("owner_id") == my_owner:
+		var target_owner: int = node.get("owner_id")
+		var hostile: bool = (registry.are_enemies(my_owner, target_owner)
+			if registry
+			else target_owner != my_owner)
+		if not hostile:
 			continue
 		if "alive_count" in node and node.get("alive_count") <= 0:
 			continue
@@ -178,7 +183,13 @@ func _is_valid_target(target: Node3D) -> bool:
 		return false
 	if not target.has_method("take_damage"):
 		return false
-	if target.get("owner_id") == _building.get("owner_id"):
+	var my_owner: int = _building.get("owner_id")
+	var target_owner: int = target.get("owner_id")
+	var registry: PlayerRegistry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
+	var hostile: bool = (registry.are_enemies(my_owner, target_owner)
+		if registry
+		else target_owner != my_owner)
+	if not hostile:
 		return false
 	if "alive_count" in target and target.get("alive_count") <= 0:
 		return false

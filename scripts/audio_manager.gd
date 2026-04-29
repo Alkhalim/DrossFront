@@ -77,6 +77,21 @@ func play_error() -> void:
 	_play_tone(randf_range(70.0, 82.0), randf_range(0.22, 0.28), -6.0, randf_range(-2.0, 2.0))
 	_play_filtered_noise(0.18, 800.0, -16.0)
 
+
+func play_alert(severity: int = 0) -> void:
+	# Two-pulse warning chirp — higher and brighter for criticals so the
+	# player can read the urgency without looking at the HUD. Severity 0
+	# (info) is a single soft beep; 1 (warning) double-pulses; 2 (critical)
+	# triple-pulses with a low body thump for weight.
+	var pitch: float = lerp(420.0, 620.0, clampf(float(severity) / 2.0, 0.0, 1.0))
+	var pulse_db: float = lerp(-12.0, -7.0, clampf(float(severity) / 2.0, 0.0, 1.0))
+	var pulse_count: int = clampi(severity + 1, 1, 3)
+	for i: int in pulse_count:
+		_play_tone(pitch + randf_range(-15.0, 15.0), 0.07, pulse_db)
+		_play_tone(pitch * 1.5 + randf_range(-15.0, 15.0), 0.05, pulse_db - 4.0)
+	if severity >= 2:
+		_play_thump(randf_range(85.0, 110.0), 0.18, -9.0)
+
 func play_weapon_fire(weapon: WeaponResource = null) -> void:
 	## Layered crack tuned by the weapon's damage / ROF / role:
 	## - Heavier weapons (high+ damage tier) drop the body pitch and bump

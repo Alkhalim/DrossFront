@@ -92,6 +92,12 @@ func _update_capture(delta: float) -> void:
 		# New capturer — reset progress
 		_capturing_owner = capturer_id
 		_capture_progress = 0.0
+		# If the player owned this deposit and someone else just started
+		# capturing it, surface that immediately — losing a deposit is the
+		# kind of event the player wants to know about even if they're
+		# elsewhere on the map.
+		if owner_id == 0 and capturer_id != 0:
+			_emit_alert("Fuel deposit being captured", 1, "deposit_capture:%d" % get_instance_id(), 12.0)
 
 	_capture_progress += delta
 	if _capture_progress >= capture_time:
@@ -100,6 +106,7 @@ func _update_capture(delta: float) -> void:
 
 
 func _complete_capture(new_owner: int) -> void:
+	var prev_owner: int = owner_id
 	owner_id = new_owner
 	_capturing_owner = -1
 	_capture_progress = 0.0
@@ -109,6 +116,19 @@ func _complete_capture(new_owner: int) -> void:
 	if audio and audio.has_method("play_construction_complete"):
 		audio.play_construction_complete()
 
+	# Alerts on ownership change touching the player.
+	if new_owner == 0:
+		_emit_alert("Fuel deposit captured", 0, "", 0.0)
+	elif prev_owner == 0:
+		_emit_alert("Fuel deposit lost", 2, "", 0.0)
+
+
+func _emit_alert(message: String, severity: int, channel: String, cooldown: float) -> void:
+	var alert: Node = get_tree().current_scene.get_node_or_null("AlertManager") if get_tree() else null
+	if not alert or not alert.has_method("emit_alert"):
+		return
+	alert.emit_alert(message, severity, global_position, channel, cooldown)
+
 
 func _generate_fuel(delta: float) -> void:
 	if owner_id < 0:
@@ -116,9 +136,17 @@ func _generate_fuel(delta: float) -> void:
 	if _is_contested:
 		return
 
-	# Find the resource manager for the owner
-	var rm_name: String = "ResourceManager" if owner_id == 0 else "AIResourceManager"
-	var rm: Node = get_tree().current_scene.get_node_or_null(rm_name)
+	# Look up the manager via the registry so adding more players in v2 doesn't
+	# require teaching every deposit a new naming scheme.
+	var registry: PlayerRegistry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
+	var rm: Node = null
+	if registry:
+		rm = registry.get_resource_manager(owner_id)
+	else:
+		# Fallback for scenes without a registry (some test setups still use
+		# the legacy named-node convention).
+		var rm_name: String = "ResourceManager" if owner_id == 0 else "AIResourceManager"
+		rm = get_tree().current_scene.get_node_or_null(rm_name)
 	if not rm or not rm.has_method("add_fuel"):
 		return
 

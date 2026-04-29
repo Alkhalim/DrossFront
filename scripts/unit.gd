@@ -64,6 +64,29 @@ var _last_position: Vector3 = Vector3.ZERO
 ## Player colors.
 const PLAYER_COLOR := Color(0.15, 0.45, 0.9, 1.0)
 const ENEMY_COLOR := Color(0.85, 0.2, 0.15, 1.0)
+const NEUTRAL_COLOR := Color(0.85, 0.7, 0.3, 1.0)
+
+
+static func team_color_for(owner_idx: int) -> Color:
+	# Static fallback when the PlayerRegistry isn't reachable (headless
+	# test scenes, units instantiated before the scene tree settles).
+	# Real perspective coloring goes through `_resolve_team_color` below.
+	if owner_idx == 0:
+		return PLAYER_COLOR
+	if owner_idx == 2:
+		return NEUTRAL_COLOR
+	return ENEMY_COLOR
+
+
+func _resolve_team_color() -> Color:
+	# Routes through PlayerRegistry.get_perspective_color so allies in 2v2
+	# show in green and enemies in red regardless of which faction
+	# they're playing. Falls back to the static rule when the registry
+	# isn't present.
+	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	if registry and registry.has_method("get_perspective_color"):
+		return registry.get_perspective_color(owner_id)
+	return Unit.team_color_for(owner_id)
 
 ## Unit-vector formation offsets per squad size (XZ plane, magnitude ~1).
 ## Multiplied by each class's formation_spacing in _build_squad_visuals so
@@ -226,7 +249,7 @@ func _build_squad_visuals() -> void:
 		old_mesh.queue_free()
 
 	var shape_data: Dictionary = CLASS_SHAPES.get(stats.unit_class, CLASS_SHAPES[&"medium"])
-	var team_color: Color = PLAYER_COLOR if owner_id == 0 else ENEMY_COLOR
+	var team_color: Color = _resolve_team_color()
 
 	var squad: int = stats.squad_size
 	var unit_offsets: Array = FORMATION_OFFSETS.get(squad, FORMATION_OFFSETS[1])
@@ -1157,6 +1180,7 @@ func command_move(target: Vector3, clear_combat: bool = true) -> void:
 	move_target = target
 	move_target.y = global_position.y
 	has_move_order = true
+	_stuck_timer = 0.0
 	if _nav_agent:
 		_nav_agent.target_position = move_target
 	if clear_combat:
@@ -1244,7 +1268,26 @@ func _physics_process(delta: float) -> void:
 	var direction := to_next / maxf(distance, 0.01)
 	velocity = direction * _move_speed
 
+	var prev_pos: Vector3 = global_position
 	move_and_slide()
+
+	# Stuck detection: if we tried to move but barely got anywhere, the unit is
+	# wedged against geometry or a peer. Re-issue the path once at 1.5s; if
+	# that doesn't help, give up at 5s so we don't grind forever.
+	var actual_move: float = (global_position - prev_pos).length()
+	var expected_move: float = _move_speed * delta * 0.3
+	if actual_move < expected_move:
+		_stuck_timer += delta
+		if _stuck_timer >= 1.5 and _stuck_timer < 1.5 + delta * 1.5:
+			if _nav_agent:
+				_nav_agent.target_position = move_target
+		elif _stuck_timer > 5.0:
+			has_move_order = false
+			stop()
+			arrived.emit()
+			return
+	else:
+		_stuck_timer = 0.0
 
 	_last_position = global_position
 

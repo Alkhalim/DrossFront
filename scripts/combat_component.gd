@@ -8,6 +8,10 @@ var _current_target: Node3D = null
 var _fire_cooldown: float = 0.0
 var _secondary_cooldown: float = 0.0
 var _search_timer: float = 0.0
+## Cached PlayerRegistry — used to ask "is my owner allied with this owner?"
+## instead of comparing raw owner_ids. Falls back to the raw compare when
+## the registry isn't present, so headless / test scenes keep working.
+var _registry: PlayerRegistry = null
 
 ## Burst-fire state for high-RoF weapons. Counts shots within the current
 ## burst; once the burst is full the cooldown is bumped up so the average
@@ -38,6 +42,16 @@ var attack_move_target: Vector3 = Vector3.INF
 
 func _ready() -> void:
 	_unit = get_parent()
+	_registry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
+
+
+func _is_hostile(my_owner: int, target_owner: int) -> bool:
+	# Single shape used by the targeting and validation paths so a future
+	# alliance change (gifting / treason / 2v2 ally betrayal) only has to
+	# touch the registry rule.
+	if _registry:
+		return _registry.are_enemies(my_owner, target_owner)
+	return target_owner != my_owner
 
 
 func _physics_process(delta: float) -> void:
@@ -169,7 +183,7 @@ func _find_nearest_enemy(max_range: float) -> Node3D:
 		if not node.has_method("take_damage"):
 			continue
 		var node_owner: int = node.get("owner_id")
-		if node_owner == my_owner:
+		if not _is_hostile(my_owner, node_owner):
 			continue
 		var node_alive: int = node.get("alive_count")
 		if node_alive <= 0:
@@ -185,7 +199,7 @@ func _find_nearest_enemy(max_range: float) -> Node3D:
 		if not node.has_method("take_damage"):
 			continue
 		var node_owner: int = node.get("owner_id")
-		if node_owner == my_owner:
+		if not _is_hostile(my_owner, node_owner):
 			continue
 		var d: float = my_pos.distance_to(node.global_position)
 		if d <= max_range and d < nearest_dist:
@@ -224,7 +238,7 @@ func _is_valid_target(target: Node3D) -> bool:
 		return false
 	var target_owner: int = target.get("owner_id")
 	var my_owner: int = _unit.get("owner_id")
-	if target_owner == my_owner:
+	if not _is_hostile(my_owner, target_owner):
 		return false
 	# Check if unit is still alive
 	if "alive_count" in target:
@@ -298,8 +312,16 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 		_unit.global_position, _current_target
 	)
 
+	# High-ground bonus (V2 §"Map 1") — units firing from at least 0.4u
+	# above their target deal 15% more damage. Threshold is just under
+	# the 0.6u platform height so the bonus reads cleanly when standing
+	# on an elevated piece without false-positives from squad bobbing.
+	var elevation_mod: float = 1.0
+	if _unit.global_position.y - _current_target.global_position.y >= 0.4:
+		elevation_mod = 1.15
+
 	# Per-member damage
-	var damage_per_member: float = float(base_damage) * role_mod * dir_mod * accuracy * (1.0 - armor_reduction)
+	var damage_per_member: float = float(base_damage) * role_mod * dir_mod * elevation_mod * accuracy * (1.0 - armor_reduction)
 	var per_member_dmg: int = maxi(int(damage_per_member), 1)
 
 	# Fire one projectile per alive squad member, originating at the actual

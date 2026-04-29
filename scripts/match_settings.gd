@@ -5,12 +5,16 @@ extends Node
 ## as `MatchSettings` so any node can read e.g. `MatchSettings.difficulty`.
 
 enum Difficulty { EASY, NORMAL, HARD }
+enum Mode { ONE_V_ONE, TWO_V_TWO }
 
 ## Picked on the main menu before launching a match.
 var difficulty: Difficulty = Difficulty.NORMAL
 ## True when the player launched via the Tutorial button — the HUD shows a
 ## controls overlay on first load.
 var tutorial_mode: bool = false
+## Match format. ONE_V_ONE = local human vs one AI; TWO_V_TWO = local human +
+## one AI ally vs two AI enemies (Pillar 3 architecture sanity check).
+var mode: Mode = Mode.ONE_V_ONE
 
 
 func get_difficulty_label() -> String:

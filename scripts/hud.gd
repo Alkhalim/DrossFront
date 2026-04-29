@@ -67,6 +67,8 @@ func _ready() -> void:
 	_build_progress_bar()
 	_build_pause_overlay()
 	_build_power_widget()
+	_build_alert_banner()
+	_build_gifting_panel()
 
 	# Tutorial overlay — shown only when the player launched via the Tutorial
 	# button on the main menu. Dismisses with TAB or its own close button.
@@ -399,6 +401,7 @@ func _process(delta: float) -> void:
 	_update_selection_display()
 	_update_button_affordability()
 	_check_tutorial_progress()
+	_refresh_gift_panel()
 
 
 ## --- Theme ---
@@ -595,12 +598,16 @@ func _update_selection_display() -> void:
 	if building and building.stats:
 		_bottom_panel.visible = true
 		_update_building_panel(building)
+	elif not units.is_empty():
+		# Mixed selection (units + crawler): the unit panel is more useful
+		# because it surfaces builder / production hotkeys. The crawler is
+		# still selected — right-click move still routes to it — but the
+		# panel reflects the larger group.
+		_bottom_panel.visible = true
+		_update_unit_panel(units)
 	elif crawler:
 		_bottom_panel.visible = true
 		_update_crawler_panel(crawler)
-	elif not units.is_empty():
-		_bottom_panel.visible = true
-		_update_unit_panel(units)
 	else:
 		_bottom_panel.visible = false
 		_last_building_id = -1
@@ -960,8 +967,9 @@ func _on_research_anchor() -> void:
 	if not _resource_manager:
 		return
 	if not _resource_manager.can_afford(300, 35):
-		if _audio:
-			_audio.play_error()
+		var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
+		if audio and audio.has_method("play_error"):
+			audio.play_error()
 		return
 	_resource_manager.spend(300, 35)
 	rm.start_research(&"anchor_mode", "Anchor Mode", 50.0)
@@ -974,6 +982,234 @@ func _on_branch_commit(base_stats: UnitStatResource, branch_stats: UnitStatResou
 	if bcm and bcm.has_method("start_commit"):
 		bcm.start_commit(base_stats, branch_stats, branch_name)
 		_last_building_id = -1
+
+
+## --- Resource gifting (2v2 allies) ---
+##
+## A compact panel anchored to the right-center of the screen that lists
+## each allied player's current resources and offers quick-send buttons.
+## Hidden in 1v1 (no allies) so it doesn't take up space; populated and
+## shown automatically when at least one ally is registered.
+
+var _gift_panel: PanelContainer = null
+var _gift_vbox: VBoxContainer = null
+## Per-ally row state: ally_id -> { label: Label, salvage_buttons: Array, fuel_buttons: Array }
+var _gift_rows: Dictionary = {}
+
+
+const GIFT_AMOUNTS_SALVAGE: Array[int] = [50, 100, 250]
+const GIFT_AMOUNTS_FUEL: Array[int] = [10, 25, 50]
+
+
+func _build_gifting_panel() -> void:
+	_gift_panel = PanelContainer.new()
+	_gift_panel.name = "GiftPanel"
+	_gift_panel.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
+	_gift_panel.position = Vector2(-260.0, -120.0)
+	_gift_panel.custom_minimum_size = Vector2(240.0, 0.0)
+	_gift_panel.mouse_filter = Control.MOUSE_FILTER_PASS
+	_gift_panel.visible = false
+	add_child(_gift_panel)
+
+	_gift_vbox = VBoxContainer.new()
+	_gift_vbox.add_theme_constant_override("separation", 6)
+	_gift_panel.add_child(_gift_vbox)
+
+	var title := Label.new()
+	title.text = "Gift Allies"
+	title.add_theme_font_size_override("font_size", 16)
+	title.add_theme_color_override("font_color", COLOR_NAME)
+	_gift_vbox.add_child(title)
+
+
+func _refresh_gift_panel() -> void:
+	if not _gift_panel:
+		return
+	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry")
+	if not registry:
+		_gift_panel.visible = false
+		return
+
+	var local_id: int = registry.get("local_player_id") as int
+	var all_ids: Array = registry.get_all_player_ids() if registry.has_method("get_all_player_ids") else []
+	var ally_ids: Array[int] = []
+	for id_var: Variant in all_ids:
+		var pid: int = id_var as int
+		if pid == local_id:
+			continue
+		if registry.are_allied(local_id, pid):
+			ally_ids.append(pid)
+
+	if ally_ids.is_empty():
+		_gift_panel.visible = false
+		return
+	_gift_panel.visible = true
+
+	# Drop rows for allies who got eliminated since the last refresh.
+	for existing_id: Variant in _gift_rows.keys():
+		if (existing_id as int) not in ally_ids:
+			var row_dict: Dictionary = _gift_rows[existing_id]
+			var row: Node = row_dict.get("root", null) as Node
+			if row and is_instance_valid(row):
+				row.queue_free()
+			_gift_rows.erase(existing_id)
+
+	# Add rows for newly-registered allies.
+	for ally_id: int in ally_ids:
+		if not _gift_rows.has(ally_id):
+			_build_gift_row(ally_id, registry)
+		_update_gift_row(ally_id, registry, local_id)
+
+
+func _build_gift_row(ally_id: int, registry: Node) -> void:
+	var state: Resource = registry.get_state(ally_id) as Resource
+	var name: String = "Ally"
+	if state and "display_name" in state:
+		name = state.get("display_name") as String
+
+	var row := VBoxContainer.new()
+	row.add_theme_constant_override("separation", 2)
+
+	var header := Label.new()
+	header.text = name
+	header.add_theme_font_size_override("font_size", 14)
+	if state and "player_color" in state:
+		header.add_theme_color_override("font_color", state.get("player_color") as Color)
+	row.add_child(header)
+
+	var resources_label := Label.new()
+	resources_label.add_theme_font_size_override("font_size", 12)
+	resources_label.add_theme_color_override("font_color", COLOR_STATS)
+	row.add_child(resources_label)
+
+	var salvage_row := HBoxContainer.new()
+	row.add_child(salvage_row)
+	for amt: int in GIFT_AMOUNTS_SALVAGE:
+		var btn := Button.new()
+		btn.text = "+%dS" % amt
+		btn.custom_minimum_size = Vector2(60, 26)
+		btn.tooltip_text = "Send %d salvage to %s" % [amt, name]
+		var captured_amt: int = amt
+		var captured_id: int = ally_id
+		btn.pressed.connect(func() -> void: _send_gift(captured_id, captured_amt, 0))
+		salvage_row.add_child(btn)
+
+	var fuel_row := HBoxContainer.new()
+	row.add_child(fuel_row)
+	for amt: int in GIFT_AMOUNTS_FUEL:
+		var btn := Button.new()
+		btn.text = "+%dF" % amt
+		btn.custom_minimum_size = Vector2(60, 26)
+		btn.tooltip_text = "Send %d fuel to %s" % [amt, name]
+		var captured_amt: int = amt
+		var captured_id: int = ally_id
+		btn.pressed.connect(func() -> void: _send_gift(captured_id, 0, captured_amt))
+		fuel_row.add_child(btn)
+
+	_gift_vbox.add_child(row)
+	_gift_rows[ally_id] = {
+		"root": row,
+		"resources_label": resources_label,
+	}
+
+
+func _update_gift_row(ally_id: int, registry: Node, local_id: int) -> void:
+	var row_dict: Dictionary = _gift_rows.get(ally_id, {}) as Dictionary
+	var label: Label = row_dict.get("resources_label", null) as Label
+	if not label:
+		return
+	var rm: Node = registry.get_resource_manager(ally_id)
+	var ally_salvage: int = (rm.get("salvage") as int) if rm else 0
+	var ally_fuel: int = (rm.get("fuel") as int) if rm else 0
+	var local_rm: Node = registry.get_resource_manager(local_id)
+	var local_salvage: int = (local_rm.get("salvage") as int) if local_rm else 0
+	var local_fuel: int = (local_rm.get("fuel") as int) if local_rm else 0
+	label.text = "Ally: %dS  %dF\nYou: %dS  %dF" % [ally_salvage, ally_fuel, local_salvage, local_fuel]
+
+
+func _send_gift(to_id: int, salvage: int, fuel: int) -> void:
+	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry")
+	if not registry or not registry.has_method("transfer_resources"):
+		return
+	var local_id: int = registry.get("local_player_id") as int
+	var ok: bool = registry.transfer_resources(local_id, to_id, salvage, fuel) as bool
+	var alert_mgr: Node = get_tree().current_scene.get_node_or_null("AlertManager")
+	if not alert_mgr:
+		return
+	if ok:
+		var msg: String = "Sent gift to ally"
+		if salvage > 0 and fuel > 0:
+			msg = "Sent %dS / %dF" % [salvage, fuel]
+		elif salvage > 0:
+			msg = "Sent %d salvage" % salvage
+		elif fuel > 0:
+			msg = "Sent %d fuel" % fuel
+		alert_mgr.emit_alert(msg, 0, Vector3.ZERO, "gift", 0.5)
+	else:
+		alert_mgr.emit_alert("Gift failed — not enough resources", 1, Vector3.ZERO, "gift_fail", 0.5)
+
+
+## --- Alert banner ---
+##
+## A single line of text that appears centered near the top of the screen,
+## with a tint based on severity, fading out after a fixed duration. Each
+## new alert replaces the previous one — players read the latest event;
+## the older one is gone from the HUD but the audio cue still played.
+
+var _alert_label: Label = null
+var _alert_tween: Tween = null
+
+
+func _build_alert_banner() -> void:
+	_alert_label = Label.new()
+	_alert_label.name = "AlertBanner"
+	_alert_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	_alert_label.offset_top = 60.0
+	_alert_label.offset_bottom = 96.0
+	_alert_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_alert_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_alert_label.add_theme_font_size_override("font_size", 22)
+	_alert_label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.95))
+	_alert_label.add_theme_constant_override("outline_size", 6)
+	_alert_label.modulate.a = 0.0
+	_alert_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_alert_label)
+
+	# Children _ready before parents in Godot, so AlertManager (created in
+	# TestArenaController._ready) doesn't exist yet — connect on the next
+	# frame once all _ready calls have settled.
+	call_deferred("_connect_alert_manager")
+
+
+func _connect_alert_manager() -> void:
+	var alert_mgr: Node = get_tree().current_scene.get_node_or_null("AlertManager")
+	if alert_mgr and alert_mgr.has_signal("alert_emitted"):
+		alert_mgr.connect("alert_emitted", _on_alert)
+
+
+func _on_alert(message: String, severity: int, _world_pos: Vector3) -> void:
+	if not _alert_label:
+		return
+	var tint: Color = COLOR_NAME
+	match severity:
+		1:
+			tint = Color(1.0, 0.78, 0.32, 1.0)  # warning amber
+		2:
+			tint = Color(1.0, 0.4, 0.35, 1.0)   # critical red
+		_:
+			tint = Color(0.85, 0.95, 0.85, 1.0) # info pale green
+	_alert_label.text = message
+	_alert_label.add_theme_color_override("font_color", tint)
+	_alert_label.modulate.a = 1.0
+	if _alert_tween and _alert_tween.is_valid():
+		_alert_tween.kill()
+	_alert_tween = create_tween()
+	_alert_tween.tween_interval(3.5)
+	_alert_tween.tween_property(_alert_label, "modulate:a", 0.0, 1.5)
+
+	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
+	if audio and audio.has_method("play_alert"):
+		audio.play_alert(severity)
 
 
 ## --- Unit panel ---

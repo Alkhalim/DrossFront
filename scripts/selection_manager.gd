@@ -11,9 +11,11 @@ const GROUND_LAYER: int = 1
 const BUILDING_LAYER: int = 4
 
 var _selected_units: Array[Unit] = []
-## Currently-selected Crawler (only one — Crawlers are individual units, not
-## squads). Independent from _selected_units because Crawlers aren't Units.
-var _selected_crawler: SalvageCrawler = null
+## Selected Crawlers. Crawlers aren't Unit instances (different base class), so
+## they live in a parallel list, but selection / move / drag-select code now
+## treats both lists as one combined "movables" set so the player can mix and
+## match the same way they would with units alone.
+var _selected_crawlers: Array[SalvageCrawler] = []
 var _is_dragging: bool = false
 var _drag_start: Vector2 = Vector2.ZERO
 var _camera: Camera3D
@@ -96,10 +98,7 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 			_is_dragging = false
 
 	elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-		if _selected_crawler and is_instance_valid(_selected_crawler):
-			# Crawler is selected — right-click moves it.
-			_command_crawler_move(event.position)
-		elif _selected_building and _selected_building.stats and not _selected_building.stats.producible_units.is_empty():
+		if _selected_building and _selected_building.stats and not _selected_building.stats.producible_units.is_empty() and _selection_movables_count() == 0:
 			_set_rally_point(event.position)
 		elif _attack_move_mode:
 			_command_attack_move(event.position)
@@ -117,6 +116,20 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 				else:
 					_command_move(event.position)
 		get_viewport().set_input_as_handled()
+
+
+func _selection_movables_count() -> int:
+	# Combined live count across units + crawlers — used to decide whether a
+	# right-click should issue a move or fall through to building rally-point
+	# / no-op behaviors.
+	var n: int = 0
+	for u: Unit in _selected_units:
+		if is_instance_valid(u) and u.alive_count > 0:
+			n += 1
+	for c: SalvageCrawler in _selected_crawlers:
+		if is_instance_valid(c) and c.alive_count > 0:
+			n += 1
+	return n
 
 
 ## Available buildings that engineers can construct.
@@ -211,9 +224,10 @@ func _click_select(event: InputEventMouseButton) -> void:
 
 	if unit:
 		_deselect_building()
-		_deselect_crawler()
 		if is_double and unit.stats:
 			# Double-click: select all on-screen units of same type
+			if not shift:
+				_clear_crawler_selection()
 			_select_all_of_type(unit.stats.unit_name)
 		elif shift:
 			if unit.is_selected:
@@ -222,20 +236,29 @@ func _click_select(event: InputEventMouseButton) -> void:
 				_add_to_selection(unit)
 		else:
 			_clear_selection()
+			_clear_crawler_selection()
 			_add_to_selection(unit)
 	else:
-		# Try selecting a Crawler — they live on the unit collision layer but
-		# aren't Unit instances, so they get their own selection slot.
+		# Try selecting a Crawler — same combined-selection rules as units so
+		# shift extends, plain click replaces, and a Crawler can be in the
+		# same selection as combat mechs.
 		var crawler := _raycast_crawler(event.position)
 		if crawler and crawler.owner_id == 0:
-			_clear_selection()
 			_deselect_building()
-			_select_crawler(crawler)
+			if shift:
+				if crawler in _selected_crawlers:
+					_remove_crawler_from_selection(crawler)
+				else:
+					_add_crawler_to_selection(crawler)
+			else:
+				_clear_selection()
+				_clear_crawler_selection()
+				_add_crawler_to_selection(crawler)
 		else:
 			# Try selecting a building
 			var building := _find_building_at(event.position)
 			if building:
-				_deselect_crawler()
+				_clear_crawler_selection()
 				if is_double and building.stats:
 					_select_all_buildings_of_type(building.stats.building_id)
 				else:
@@ -244,8 +267,8 @@ func _click_select(event: InputEventMouseButton) -> void:
 					_select_building(building)
 			elif not shift:
 				_clear_selection()
+				_clear_crawler_selection()
 				_deselect_building()
-				_deselect_crawler()
 
 	get_viewport().set_input_as_handled()
 
@@ -255,6 +278,7 @@ func _finish_box_select(event: InputEventMouseButton) -> void:
 
 	if not event.shift_pressed:
 		_clear_selection()
+		_clear_crawler_selection()
 		_deselect_building()
 
 	# Check units against the screen-space rectangle
@@ -267,8 +291,19 @@ func _finish_box_select(event: InputEventMouseButton) -> void:
 		if rect.has_point(screen_pos):
 			_add_to_selection(unit)
 
-	# If no units were selected, check for a building in the box
-	if _selected_units.is_empty():
+	# Crawlers are scooped into the same drag rectangle so a sweep across the
+	# base picks up the harvester alongside its escorts.
+	var crawlers := get_tree().get_nodes_in_group("crawlers")
+	for node: Node in crawlers:
+		var crawler := node as SalvageCrawler
+		if not crawler or crawler.owner_id != 0:
+			continue
+		var screen_pos := _camera.unproject_position(crawler.global_position)
+		if rect.has_point(screen_pos):
+			_add_crawler_to_selection(crawler)
+
+	# If nothing movable was selected, check for a building in the box
+	if _selected_units.is_empty() and _selected_crawlers.is_empty():
 		var buildings := get_tree().get_nodes_in_group("buildings")
 		for node: Node in buildings:
 			var building: Building = node as Building
@@ -284,7 +319,15 @@ func _finish_box_select(event: InputEventMouseButton) -> void:
 
 func _command_move(screen_pos: Vector2) -> void:
 	_prune_selection()
-	if _selected_units.is_empty():
+	# Combined movables list — units and crawlers both honor command_move(target).
+	var movables: Array = []
+	for u: Unit in _selected_units:
+		if is_instance_valid(u) and u.alive_count > 0:
+			movables.append(u)
+	for c: SalvageCrawler in _selected_crawlers:
+		if is_instance_valid(c) and c.alive_count > 0:
+			movables.append(c)
+	if movables.is_empty():
 		return
 	_cancel_builder_tasks()
 	if _audio:
@@ -294,8 +337,11 @@ func _command_move(screen_pos: Vector2) -> void:
 	if ground_pos == Vector3.INF:
 		return
 
-	# Simple formation: offset units in a grid around the target
-	var count := _selected_units.size()
+	# Simple formation: offset entries in a grid around the target. Crawlers
+	# slot into the formation alongside units — the wider crawler footprint
+	# is handled by the Crawler's collision response, not by special-casing
+	# its formation slot.
+	var count: int = movables.size()
 	var cols := ceili(sqrt(float(count)))
 	var spacing := 2.5
 
@@ -307,7 +353,7 @@ func _command_move(screen_pos: Vector2) -> void:
 			0,
 			(row - (cols - 1) / 2.0) * spacing
 		)
-		_selected_units[i].command_move(ground_pos + offset)
+		movables[i].command_move(ground_pos + offset)
 
 
 func _command_assist_build(building: Building) -> void:
@@ -450,8 +496,17 @@ func _assign_control_group(index: int) -> void:
 		_audio.play_select()
 
 
+## Last-recalled control group + timestamp so a second press of the same key
+## within DOUBLE_PRESS_WINDOW jumps the camera to that group's centroid —
+## standard RTS muscle memory ("press 1 to select, press 1 again to find it").
+const DOUBLE_PRESS_WINDOW: float = 0.4
+var _last_recalled_group: int = -1
+var _last_recalled_at: float = -1.0
+
+
 func _recall_control_group(index: int) -> void:
 	_clear_selection()
+	_clear_crawler_selection()
 	_deselect_building()
 	var ids: Array = _control_groups[index]
 	for uid: int in ids:
@@ -460,6 +515,34 @@ func _recall_control_group(index: int) -> void:
 			var unit: Unit = obj as Unit
 			if is_instance_valid(unit) and unit.alive_count > 0:
 				_add_to_selection(unit)
+
+	# Double-press detection: same group within the window pans the camera
+	# to where those units are right now.
+	var now: float = float(Time.get_ticks_msec()) / 1000.0
+	if _last_recalled_group == index and (now - _last_recalled_at) < DOUBLE_PRESS_WINDOW:
+		_jump_camera_to_selection()
+	_last_recalled_group = index
+	_last_recalled_at = now
+
+
+func _jump_camera_to_selection() -> void:
+	# Centroid of the currently-selected units; nothing to jump to if dead /
+	# empty (e.g. control group's units were all destroyed before recall).
+	var sum := Vector3.ZERO
+	var count: int = 0
+	for unit: Unit in _selected_units:
+		if not is_instance_valid(unit) or unit.alive_count <= 0:
+			continue
+		sum += unit.global_position
+		count += 1
+	if count == 0:
+		return
+	var cam: Camera3D = get_viewport().get_camera_3d()
+	if not cam:
+		return
+	var centroid: Vector3 = sum / float(count)
+	cam.set("_pivot", Vector3(centroid.x, 0.0, centroid.z))
+	cam.set("_target_pivot", Vector3(centroid.x, 0.0, centroid.z))
 
 
 func get_selected_units() -> Array[Unit]:
@@ -494,17 +577,6 @@ func _clear_selection() -> void:
 	_selected_units.clear()
 
 
-func _command_crawler_move(screen_pos: Vector2) -> void:
-	if not _selected_crawler or not is_instance_valid(_selected_crawler):
-		return
-	var ground_pos := _raycast_ground(screen_pos)
-	if ground_pos == Vector3.INF:
-		return
-	_selected_crawler.command_move(ground_pos)
-	if _audio:
-		_audio.play_command()
-
-
 func _cancel_builder_tasks() -> void:
 	## Tell every selected engineer to drop its current build target so the
 	## subsequent move/attack command isn't immediately overridden by the
@@ -518,13 +590,20 @@ func _cancel_builder_tasks() -> void:
 
 
 func _prune_selection() -> void:
-	## Remove freed or dead units from the selection so command iterators are safe.
+	## Remove freed or dead units / crawlers from the selection so command
+	## iterators don't trip over stale references.
 	var i: int = _selected_units.size() - 1
 	while i >= 0:
 		var unit: Unit = _selected_units[i]
 		if not is_instance_valid(unit) or unit.alive_count <= 0:
 			_selected_units.remove_at(i)
 		i -= 1
+	var ci: int = _selected_crawlers.size() - 1
+	while ci >= 0:
+		var crawler: SalvageCrawler = _selected_crawlers[ci]
+		if not is_instance_valid(crawler) or crawler.alive_count <= 0:
+			_selected_crawlers.remove_at(ci)
+		ci -= 1
 
 
 func _raycast_unit(screen_pos: Vector2) -> Unit:
@@ -701,24 +780,41 @@ func get_selected_building() -> Building:
 
 
 func get_selected_crawler() -> SalvageCrawler:
-	return _selected_crawler
+	# Back-compat: HUD reads this for the crawler info panel. Returns the
+	# first live crawler in the selection (or null) — the panel doesn't yet
+	# render multi-crawler info, but the rest of the selection flow works.
+	for c: SalvageCrawler in _selected_crawlers:
+		if is_instance_valid(c):
+			return c
+	return null
 
 
-func _select_crawler(crawler: SalvageCrawler) -> void:
-	if _selected_crawler == crawler:
+func get_selected_crawlers() -> Array[SalvageCrawler]:
+	return _selected_crawlers
+
+
+func _add_crawler_to_selection(crawler: SalvageCrawler) -> void:
+	if not is_instance_valid(crawler) or crawler.owner_id != 0:
 		return
-	if _selected_crawler and is_instance_valid(_selected_crawler):
-		_selected_crawler.deselect()
-	_selected_crawler = crawler
-	_selected_crawler.select()
+	if crawler in _selected_crawlers:
+		return
+	_selected_crawlers.append(crawler)
+	crawler.select()
 	if _audio:
 		_audio.play_select()
 
 
-func _deselect_crawler() -> void:
-	if _selected_crawler and is_instance_valid(_selected_crawler):
-		_selected_crawler.deselect()
-	_selected_crawler = null
+func _remove_crawler_from_selection(crawler: SalvageCrawler) -> void:
+	_selected_crawlers.erase(crawler)
+	if is_instance_valid(crawler):
+		crawler.deselect()
+
+
+func _clear_crawler_selection() -> void:
+	for c: SalvageCrawler in _selected_crawlers:
+		if is_instance_valid(c):
+			c.deselect()
+	_selected_crawlers.clear()
 
 
 ## --- Rally Point ---
@@ -744,11 +840,26 @@ func _hide_rally_marker() -> void:
 const CRAWLER_CAP: int = 3
 
 
+## Debounce rapid double-fires of the production button. Some inputs (a
+## bouncy mouse click, or keyboard repeat after a held key) can deliver two
+## "pressed" events within the same frame, which previously queued two
+## units off a single intended click. 100ms is well below human
+## double-click intent, so this never blocks legitimate fast queueing.
+var _last_queue_msec: Dictionary = {}
+
+
 func queue_unit_at_building(index: int) -> void:
 	if not _selected_building or not _selected_building.stats:
 		return
 	if index < 0 or index >= _selected_building.stats.producible_units.size():
 		return
+
+	var bid: int = _selected_building.get_instance_id()
+	var now: int = Time.get_ticks_msec()
+	var prev: int = (_last_queue_msec.get(bid, 0) as int)
+	if (now - prev) < 100:
+		return
+	_last_queue_msec[bid] = now
 
 	var unit_stats: UnitStatResource = _selected_building.stats.producible_units[index]
 	var resource_mgr: ResourceManager = get_tree().current_scene.get_node("ResourceManager") as ResourceManager
@@ -874,8 +985,8 @@ func _is_valid_build_position(pos: Vector3) -> bool:
 		if dx < (half_x + BUILD_OBSTACLE_MARGIN) and dz < (half_z + BUILD_OBSTACLE_MARGIN):
 			return false
 
-	# Fuel deposits and wrecks — terrain features that block placement.
-	for group_name: String in ["fuel_deposits", "wrecks"]:
+	# Fuel deposits, wrecks, and terrain pieces all block placement.
+	for group_name: String in ["fuel_deposits", "wrecks", "terrain"]:
 		for node: Node in get_tree().get_nodes_in_group(group_name):
 			if not is_instance_valid(node):
 				continue

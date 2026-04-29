@@ -61,13 +61,44 @@ func _setup() -> void:
 				_hq = node
 				break
 
-	for node: Node in buildings:
-		if node.get("owner_id") == 0:
-			if node.get("stats") and node.get("stats").get("building_id") == &"headquarters":
-				_player_hq_pos = node.global_position
-				break
+	# Find the nearest enemy HQ to attack-move toward. In 1v1 that's the
+	# player; in 2v2 it's whichever enemy team's HQ is closer to ours so
+	# the AI doesn't traipse across the entire map past a closer target.
+	_player_hq_pos = _find_nearest_enemy_hq_pos(buildings)
 
-	_ai_resource_manager = get_parent().get_node_or_null("AIResourceManager")
+	# Resource manager: prefer the registry lookup (works regardless of
+	# how many AIs are in the scene) and fall back to the legacy node-name
+	# convention for headless/test scenes.
+	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	if registry and registry.has_method("get_resource_manager"):
+		_ai_resource_manager = registry.get_resource_manager(owner_id)
+	if not _ai_resource_manager:
+		_ai_resource_manager = get_parent().get_node_or_null("AIResourceManager")
+
+
+func _find_nearest_enemy_hq_pos(buildings: Array[Node]) -> Vector3:
+	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	var origin: Vector3 = (_hq.global_position if _hq else Vector3.ZERO)
+	var best_pos: Vector3 = origin
+	var best_dist: float = INF
+	for node: Node in buildings:
+		var node_owner: int = node.get("owner_id") as int
+		var hostile: bool = (
+			registry.are_enemies(owner_id, node_owner)
+			if registry and registry.has_method("are_enemies")
+			else node_owner != owner_id
+		)
+		if not hostile:
+			continue
+		var stats: Variant = node.get("stats")
+		if not stats or stats.get("building_id") != &"headquarters":
+			continue
+		var pos: Vector3 = (node as Node3D).global_position
+		var d: float = origin.distance_to(pos)
+		if d < best_dist:
+			best_dist = d
+			best_pos = pos
+	return best_pos
 
 	if _hq:
 		_state = AIState.ECONOMY
@@ -161,6 +192,13 @@ func _process_army() -> void:
 
 
 func _process_attack() -> void:
+	# Refresh the target HQ each wave — in 2v2 one enemy might have fallen
+	# already, in which case we want to attack-move toward whoever's left
+	# instead of an empty rubble pile.
+	var fresh_hq: Vector3 = _find_nearest_enemy_hq_pos(get_tree().get_nodes_in_group("buildings"))
+	if fresh_hq != Vector3.ZERO or _player_hq_pos == Vector3.ZERO:
+		_player_hq_pos = fresh_hq
+
 	# Keep some units near base as defenders
 	var attack_units: Array[Node] = []
 	var defender_count: int = 0
@@ -180,7 +218,7 @@ func _process_attack() -> void:
 				continue
 		attack_units.append(node)
 
-	# Send attackers toward player
+	# Send attackers toward the chosen enemy HQ
 	for node: Node in attack_units:
 		if not is_instance_valid(node):
 			continue
@@ -322,32 +360,78 @@ func _maintain_crawlers() -> void:
 	_hq.queue_unit(crawler_stats)
 
 
+## How fresh "took damage" must be to count as under-fire (seconds).
+const CRAWLER_RETREAT_WINDOW: float = 4.0
+## Damage HP each Crawler had last poll, keyed by instance id. Used to
+## detect "Crawler is being shot at this tick".
+var _crawler_last_hp: Dictionary = {}
+## Last time each Crawler took damage, keyed by instance id.
+var _crawler_last_damage_at: Dictionary = {}
+## How wide a sweep the Crawler's workers actually use when harvesting —
+## must match SalvageCrawler.HARVEST_RADIUS minus a margin so we don't
+## conclude "no wrecks" the instant the Crawler arrives at a cluster
+## boundary. Keep in sync if SalvageCrawler.HARVEST_RADIUS changes.
+const CRAWLER_LOCAL_HARVEST_RADIUS: float = 18.0
+## Sweep across the whole map when the local radius is dry. ±150 nav.
+const CRAWLER_RELOCATE_SEARCH_RADIUS: float = 400.0
+
+
 func _command_idle_crawler_to_wreck() -> void:
-	## For each AI Crawler with no live move order, point it at the nearest
-	## wreck. Crawlers harvest from their current position, so simply
-	## relocating them to dense salvage fields is the whole strategy.
+	## Shepherds each AI Crawler:
+	## - Track damage so we can detect "under fire" and force a retreat to
+	##   the HQ. Anchored Crawlers ride out the hit since unanchoring is
+	##   itself vulnerable.
+	## - When workers have nothing to harvest (no wrecks within local
+	##   harvest range), relocate to the nearest wreck anywhere on the map.
+	##   Without this, an AI Crawler harvests the safe-zone wrecks, runs
+	##   them dry, and then sits parked next to its HQ forever.
+	var now: float = float(Time.get_ticks_msec()) / 1000.0
 	for node: Node in get_tree().get_nodes_in_group("crawlers"):
 		if not is_instance_valid(node):
 			continue
 		if node.get("owner_id") != owner_id:
 			continue
-		# Skip if currently moving or anchored.
+
+		var iid: int = node.get_instance_id()
+		var cur_hp: int = node.get("current_hp") as int
+		var prev_hp: int = (_crawler_last_hp.get(iid, cur_hp) as int)
+		if cur_hp < prev_hp:
+			_crawler_last_damage_at[iid] = now
+		_crawler_last_hp[iid] = cur_hp
+
+		var anchored: bool = node.has_method("is_anchored") and node.is_anchored()
+		var under_fire: bool = (now - (_crawler_last_damage_at.get(iid, -999.0) as float)) < CRAWLER_RETREAT_WINDOW
+
+		# Retreat takes priority — we route home even if a move order is
+		# already in flight (it might be heading toward the threat).
+		if under_fire and not anchored:
+			if is_instance_valid(_hq):
+				var retreat_pos: Vector3 = _hq.global_position + Vector3(0.0, 0.0, 8.0)
+				if node.has_method("command_move"):
+					node.command_move(retreat_pos)
+			continue
+
+		# Nothing to override the retreat — only push relocate orders when
+		# the Crawler is genuinely idle.
 		if node.get("has_move_order") == true:
 			continue
-		if node.has_method("is_anchored") and node.is_anchored():
+		if anchored:
 			continue
-		var nearest: Node3D = _find_nearest_wreck(node.global_position, 80.0)
-		if not nearest:
+
+		var local_wreck: Node3D = _find_nearest_wreck(node.global_position, CRAWLER_LOCAL_HARVEST_RADIUS)
+		if local_wreck:
+			# Plenty to chew on right here — let workers do their job.
 			continue
-		# Move to a point a couple of units short of the wreck so workers
-		# spawn within harvesting radius without the Crawler crushing the
-		# whole pile on contact.
-		var dir: Vector3 = (nearest.global_position - node.global_position)
+
+		var target_wreck: Node3D = _find_nearest_wreck(node.global_position, CRAWLER_RELOCATE_SEARCH_RADIUS)
+		if not target_wreck:
+			continue
+		var dir: Vector3 = (target_wreck.global_position - node.global_position)
 		dir.y = 0.0
 		var dist: float = dir.length()
 		if dist < 6.0:
-			continue  # Already on it.
-		var target_pos: Vector3 = nearest.global_position - dir.normalized() * 4.0
+			continue
+		var target_pos: Vector3 = target_wreck.global_position - dir.normalized() * 4.0
 		if node.has_method("command_move"):
 			node.command_move(target_pos)
 
@@ -470,8 +554,9 @@ func _is_placement_clear(pos: Vector3, footprint: Vector3) -> bool:
 		if dx < (half_x + UNIT_PLACEMENT_MARGIN) and dz < (half_z + UNIT_PLACEMENT_MARGIN):
 			return false
 
-	# Fuel deposits and wrecks.
-	for group_name: String in ["fuel_deposits", "wrecks"]:
+	# Fuel deposits, wrecks, and terrain. Terrain pieces are static so AI
+	# foundations dropped on top would clip into them and never finish.
+	for group_name: String in ["fuel_deposits", "wrecks", "terrain"]:
 		for node: Node in get_tree().get_nodes_in_group(group_name):
 			if not is_instance_valid(node):
 				continue

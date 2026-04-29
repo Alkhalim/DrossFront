@@ -36,6 +36,24 @@ var resource_manager: Node = null
 
 const PLAYER_COLOR := Color(0.15, 0.45, 0.9, 1.0)
 const ENEMY_COLOR := Color(0.85, 0.2, 0.15, 1.0)
+const NEUTRAL_COLOR := Color(0.85, 0.7, 0.3, 1.0)
+
+
+static func team_color_for(owner_idx: int) -> Color:
+	# Static fallback used by tools / tests that lack a PlayerRegistry.
+	# Live colors at runtime go through `_resolve_team_color`.
+	if owner_idx == 0:
+		return PLAYER_COLOR
+	if owner_idx == 2:
+		return NEUTRAL_COLOR
+	return ENEMY_COLOR
+
+
+func _resolve_team_color() -> Color:
+	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	if registry and registry.has_method("get_perspective_color"):
+		return registry.get_perspective_color(owner_id)
+	return Building.team_color_for(owner_id)
 var _team_ring: MeshInstance3D = null
 
 var _progress_bg: MeshInstance3D = null
@@ -198,7 +216,7 @@ func _team_collar(width: float, height: float, depth: float, pos: Vector3) -> vo
 	## Small team-colored band at the base of a detail tower (smokestack,
 	## spire, turret base, crane pole, etc.) so the hull-band's identity
 	## carries up through the upper geometry too.
-	var team_color: Color = PLAYER_COLOR if owner_id == 0 else ENEMY_COLOR
+	var team_color: Color = _resolve_team_color()
 	var collar := MeshInstance3D.new()
 	var box := BoxMesh.new()
 	box.size = Vector3(width, height, depth)
@@ -864,7 +882,7 @@ func _apply_team_ring() -> void:
 	if not stats:
 		return
 
-	var team_color: Color = PLAYER_COLOR if owner_id == 0 else ENEMY_COLOR
+	var team_color: Color = _resolve_team_color()
 
 	# Horizontal team-color band wrapping the building. Slightly larger than the
 	# footprint in X/Z so it sits proud of the walls and is visible from every
@@ -974,6 +992,12 @@ func _finish_construction() -> void:
 	construction_complete.emit()
 	_apply_placeholder_shape()
 	_remove_progress_bar()
+	# Tell the arena to re-bake the navmesh now that this footprint is
+	# active — without this, pathfinders keep routing units straight into
+	# the new wall and stuck-rescue eventually gives up on the move order.
+	var arena: Node = get_tree().current_scene
+	if arena and arena.has_method("request_navmesh_rebake"):
+		arena.request_navmesh_rebake()
 	# Belt-and-suspenders: even though _is_foundation_clear gates progress,
 	# fast-moving units can slip into the footprint between frames. Push any
 	# stragglers out before the collision shape activates.
@@ -1321,15 +1345,47 @@ func _restore_select_glow(node: Node) -> void:
 func take_damage(amount: int, _attacker: Node3D = null) -> void:
 	current_hp -= amount
 	_update_damage_state()
+	if owner_id == 0:
+		_emit_player_damage_alert()
 	if current_hp <= 0:
 		current_hp = 0
 		_spawn_building_wreck()
+		if owner_id == 0:
+			_emit_player_destroyed_alert()
 		destroyed.emit()
+		# Re-bake so units can walk through the now-empty footprint.
+		var arena_dead: Node = get_tree().current_scene
+		if arena_dead and arena_dead.has_method("request_navmesh_rebake"):
+			arena_dead.request_navmesh_rebake()
 		# Big screen shake — buildings going down should feel weighty.
 		var cam: Camera3D = get_viewport().get_camera_3d() if get_viewport() else null
 		if cam and cam.has_method("add_shake"):
 			cam.add_shake(0.55)
 		queue_free()
+
+
+func _emit_player_damage_alert() -> void:
+	# One alert per building per cooldown — a building under sustained fire
+	# shouldn't spam every tick. Channel keys the building's instance id so
+	# different buildings can each fire their own alert independently.
+	var alert: Node = get_tree().current_scene.get_node_or_null("AlertManager") if get_tree() else null
+	if not alert or not alert.has_method("emit_alert"):
+		return
+	var label: String = _alert_label()
+	alert.emit_alert("%s under attack" % label, 1, global_position, "building_attack:%d" % get_instance_id(), 8.0)
+
+
+func _emit_player_destroyed_alert() -> void:
+	var alert: Node = get_tree().current_scene.get_node_or_null("AlertManager") if get_tree() else null
+	if not alert or not alert.has_method("emit_alert"):
+		return
+	alert.emit_alert("%s destroyed" % _alert_label(), 2, global_position, "", 0.0)
+
+
+func _alert_label() -> String:
+	if stats and stats.building_name != "":
+		return stats.building_name
+	return "Building"
 
 
 func _update_damage_state() -> void:
