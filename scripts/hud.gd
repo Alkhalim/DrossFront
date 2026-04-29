@@ -419,8 +419,14 @@ func _update_building_panel(building: Building) -> void:
 		_showing_build_buttons = false
 		if building.stats.building_id == &"basic_armory":
 			_rebuild_armory_buttons(building)
+		elif building.has_node("TurretComponent"):
+			_rebuild_turret_profile_buttons(building)
 		else:
 			_rebuild_production_buttons(building)
+	elif building.has_node("TurretComponent"):
+		# Re-tint each frame so the active profile stays highlighted even
+		# without a selection-change rebuild.
+		_refresh_turret_profile_highlight(building)
 
 	# Under construction → show construction progress bar.
 	if not building.is_constructed:
@@ -520,6 +526,83 @@ func _rebuild_production_buttons(building: Building) -> void:
 func _on_production_button(index: int) -> void:
 	if _selection_manager:
 		_selection_manager.queue_unit_at_building(index)
+
+
+func _rebuild_turret_profile_buttons(building: Building) -> void:
+	## Four upgrade buttons for a selected gun emplacement — each calls into
+	## TurretComponent.set_profile to swap weapon stats and visuals.
+	_clear_buttons()
+	var turret: Node = building.get_node_or_null("TurretComponent")
+	if not turret:
+		_action_label.text = ""
+		return
+
+	_action_label.text = "Turret Profile"
+	var profiles: Array[Dictionary] = [
+		{ "key": &"balanced",   "hotkey": "Q" },
+		{ "key": &"anti_light", "hotkey": "W" },
+		{ "key": &"anti_heavy", "hotkey": "E" },
+		{ "key": &"anti_air",   "hotkey": "R" },
+	]
+	for entry: Dictionary in profiles:
+		var key: StringName = entry["key"] as StringName
+		var data: Dictionary = TurretComponent.PROFILES[key] as Dictionary
+		var dps: float = float(data["damage"]) / float(data["fire"])
+		var btn := Button.new()
+		btn.custom_minimum_size = Vector2(120, 50)
+		btn.text = "[%s] %s\nDPS %.0f  Rng %d" % [
+			entry["hotkey"],
+			data["name"],
+			dps,
+			int(data["range"]),
+		]
+		btn.tooltip_text = _turret_profile_tooltip(key, data)
+		btn.pressed.connect(_on_turret_profile_button.bind(turret, key))
+		_button_grid.add_child(btn)
+		_action_buttons.append({ "button": btn, "kind": "turret_profile", "key": key })
+
+	_refresh_turret_profile_highlight(building)
+
+
+func _refresh_turret_profile_highlight(building: Building) -> void:
+	var turret: Node = building.get_node_or_null("TurretComponent")
+	if not turret:
+		return
+	var current: StringName = turret.get("profile") as StringName
+	for entry: Dictionary in _action_buttons:
+		if (entry.get("kind") as String) != "turret_profile":
+			continue
+		var btn: Button = entry["button"] as Button
+		if not is_instance_valid(btn):
+			continue
+		if (entry["key"] as StringName) == current:
+			btn.modulate = Color(0.55, 1.0, 0.55, 1.0)
+		else:
+			btn.modulate = Color.WHITE
+
+
+func _on_turret_profile_button(turret: Node, key: StringName) -> void:
+	if turret and is_instance_valid(turret) and turret.has_method("set_profile"):
+		turret.set_profile(key)
+
+
+func _turret_profile_tooltip(key: StringName, data: Dictionary) -> String:
+	var role: StringName = data["role"] as StringName
+	var lines: PackedStringArray = PackedStringArray()
+	lines.append("%s turret" % data["name"])
+	lines.append("Damage %d   ROF %.2fs   Range %d   Role %s" % [
+		data["damage"], data["fire"], int(data["range"]), str(role)
+	])
+	match key:
+		&"anti_light":
+			lines.append("Quad-barrel rotary. High RoF eats light/medium chassis but bounces off heavy armor.")
+		&"anti_heavy":
+			lines.append("Slow howitzer. One shot can crater a Bulwark; ineffective vs swarms.")
+		&"anti_air":
+			lines.append("Tilted missile rack. Fast fire, AA-tagged ordnance — best vs flyers and lights.")
+		_:
+			lines.append("Generalist autocannon. Decent vs everything, specialised vs nothing.")
+	return "\n".join(lines)
 
 
 func _rebuild_armory_buttons(_building: Building) -> void:

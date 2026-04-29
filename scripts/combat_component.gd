@@ -9,7 +9,18 @@ var _fire_cooldown: float = 0.0
 var _secondary_cooldown: float = 0.0
 var _search_timer: float = 0.0
 
+## Burst-fire state for high-RoF weapons. Counts shots within the current
+## burst; once the burst is full the cooldown is bumped up so the average
+## shots-per-second matches the underlying ROF tier.
+var _burst_count: int = 0
+
 const SEARCH_INTERVAL: float = 0.5
+
+## Weapons whose ROF is at or below this threshold (seconds between shots)
+## switch to a burst pattern so they don't read as a metronome.
+const BURST_THRESHOLD: float = 0.3
+const BURST_SHOTS: int = 3
+const BURST_INTRA_DELAY: float = 0.06
 
 ## Idle units engage enemies up to this multiple of weapon range — they'll
 ## advance into firing range instead of standing still while an enemy is in sight.
@@ -68,6 +79,9 @@ func _physics_process(delta: float) -> void:
 			_current_target = found
 
 	if not _current_target:
+		# Reset the burst counter so a half-finished burst from the previous
+		# target doesn't bleed into the next engagement.
+		_burst_count = 0
 		# If attack-move and arrived, stay put and keep scanning
 		if attack_move_target != Vector3.INF:
 			if _unit.get("move_target") == Vector3.INF:
@@ -244,7 +258,21 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 
 	var rof: float = CombatTables.get_rof(weapon.rof_tier)
 	if is_primary:
-		_fire_cooldown = rof
+		# Burst pattern for very high RoF: BURST_SHOTS quick shots, then a
+		# longer pause that keeps the average DPS the same.
+		if rof <= BURST_THRESHOLD:
+			_burst_count += 1
+			if _burst_count >= BURST_SHOTS:
+				_burst_count = 0
+				# burst_period = rof * BURST_SHOTS, minus the intra-burst gaps
+				# we already paid between shots.
+				var long_pause: float = rof * float(BURST_SHOTS) - float(BURST_SHOTS - 1) * BURST_INTRA_DELAY
+				_fire_cooldown = maxf(long_pause, BURST_INTRA_DELAY)
+			else:
+				_fire_cooldown = BURST_INTRA_DELAY
+		else:
+			_burst_count = 0
+			_fire_cooldown = rof
 	else:
 		_secondary_cooldown = rof
 

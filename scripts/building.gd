@@ -1092,6 +1092,11 @@ func get_build_progress_percent() -> float:
 
 var _is_selected: bool = false
 
+## Emission state captured before applying the selection highlight, so
+## deselect can restore exactly what each material had. Keyed by the
+## StandardMaterial3D itself.
+var _saved_emission: Dictionary = {}
+
 
 func select_building() -> void:
 	if _is_selected:
@@ -1108,21 +1113,58 @@ func deselect_building() -> void:
 
 
 func _update_selection_visual() -> void:
-	if not _mesh or not stats:
+	if not _visual_root:
 		return
-	var mat := StandardMaterial3D.new()
-	mat.roughness = 0.9
 	if _is_selected:
-		mat.albedo_color = Color(stats.placeholder_color.r + 0.15, stats.placeholder_color.g + 0.2, stats.placeholder_color.b + 0.1)
-		mat.emission_enabled = true
-		mat.emission = Color(0.2, 0.9, 0.2)
-		mat.emission_energy_multiplier = 0.3
+		_apply_select_glow(_visual_root)
 	else:
-		mat.albedo_color = stats.placeholder_color
-		if not is_constructed:
-			mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			mat.albedo_color.a = 0.5
-	_mesh.set_surface_override_material(0, mat)
+		_restore_select_glow(_visual_root)
+
+
+## Soft green emission boost applied per-material. Existing emissive
+## materials (team band, indicator lights, beacons) get a small bump
+## that blends with their own color so they don't all flash green.
+const _SELECT_TINT: Color = Color(0.25, 0.85, 0.35)
+const _SELECT_ENERGY_FLOOR: float = 0.45
+
+
+func _apply_select_glow(node: Node) -> void:
+	if node is MeshInstance3D:
+		var mi: MeshInstance3D = node as MeshInstance3D
+		var mat: StandardMaterial3D = mi.get_surface_override_material(0) as StandardMaterial3D
+		if mat and not _saved_emission.has(mat):
+			_saved_emission[mat] = {
+				"enabled": mat.emission_enabled,
+				"color": mat.emission,
+				"energy": mat.emission_energy_multiplier,
+			}
+			mat.emission_enabled = true
+			if mat.emission == Color(0.0, 0.0, 0.0, 1.0) or not (_saved_emission[mat] as Dictionary)["enabled"]:
+				# Plain metal — give it a soft green wash.
+				mat.emission = _SELECT_TINT
+				mat.emission_energy_multiplier = _SELECT_ENERGY_FLOOR
+			else:
+				# Already emissive (team band, indicator lights). Blend toward
+				# the select tint so the highlight is visible without losing
+				# the original color identity.
+				mat.emission = mat.emission.lerp(_SELECT_TINT, 0.35)
+				mat.emission_energy_multiplier = maxf(mat.emission_energy_multiplier + 0.4, _SELECT_ENERGY_FLOOR + 0.4)
+	for child: Node in node.get_children():
+		_apply_select_glow(child)
+
+
+func _restore_select_glow(node: Node) -> void:
+	if node is MeshInstance3D:
+		var mi: MeshInstance3D = node as MeshInstance3D
+		var mat: StandardMaterial3D = mi.get_surface_override_material(0) as StandardMaterial3D
+		if mat and _saved_emission.has(mat):
+			var saved: Dictionary = _saved_emission[mat] as Dictionary
+			mat.emission_enabled = saved["enabled"] as bool
+			mat.emission = saved["color"] as Color
+			mat.emission_energy_multiplier = saved["energy"] as float
+			_saved_emission.erase(mat)
+	for child: Node in node.get_children():
+		_restore_select_glow(child)
 
 
 func take_damage(amount: int, _attacker: Node3D = null) -> void:
