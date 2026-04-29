@@ -150,7 +150,11 @@ func _find_nearest_enemy() -> Node3D:
 
 func _aim_at_target(delta: float) -> void:
 	## Rotate the building's `turret_pivot` (created in _detail_gun_emplacement)
-	## around Y to face the current target.
+	## around Y to face the current target. The pivot is parented under the
+	## building's VisualRoot, which itself has a slight randomized Y rotation
+	## per building, so we have to subtract that parent rotation when
+	## computing the local target angle — otherwise the turret aims off by the
+	## same amount the building was rotated.
 	var pivot: Node3D = _building.get("turret_pivot") as Node3D
 	if not pivot or not is_instance_valid(pivot):
 		return
@@ -158,9 +162,15 @@ func _aim_at_target(delta: float) -> void:
 	to_target.y = 0.0
 	if to_target.length_squared() < 0.01:
 		return
-	# atan2(x, z) + PI gives the Y rotation aligning local -Z with the target.
-	var target_y: float = atan2(to_target.x, to_target.z) + PI
-	pivot.rotation.y = lerp_angle(pivot.rotation.y, target_y, clampf(TURRET_TURN_SPEED * delta, 0.0, 1.0))
+	# atan2(x, z) + PI gives the world Y rotation aligning local -Z with the
+	# target.
+	var target_y_world: float = atan2(to_target.x, to_target.z) + PI
+	var compensation: float = 0.0
+	var parent_root: Node = pivot.get_parent()
+	if parent_root and parent_root is Node3D:
+		compensation = (parent_root as Node3D).rotation.y
+	var target_y_local: float = target_y_world - compensation
+	pivot.rotation.y = lerp_angle(pivot.rotation.y, target_y_local, clampf(TURRET_TURN_SPEED * delta, 0.0, 1.0))
 
 
 func _is_valid_target(target: Node3D) -> bool:

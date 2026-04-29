@@ -321,25 +321,38 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 			var proj: Node3D = proj_script.create(fire_pos, _current_target.global_position, weapon.role_tag, weapon.rof_tier)
 			get_tree().current_scene.add_child(proj)
 
-	# Muzzle flash on each member
-	_spawn_squad_muzzle_flash()
+	# Muzzle flash on each member — colored by the weapon's role.
+	_spawn_squad_muzzle_flash(_muzzle_color_for(weapon))
 
 	# Trigger cannon recoil animation on the unit.
 	if _unit.has_method("play_shoot_anim"):
 		_unit.play_shoot_anim()
 
-	# Sound
+	# Sound — pass the weapon so the audio manager can color the layered
+	# generators based on damage tier, fire rate, and role.
 	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
 	if audio and audio.has_method("play_weapon_fire"):
-		audio.play_weapon_fire()
+		audio.play_weapon_fire(weapon)
 
 
-func _spawn_squad_muzzle_flash() -> void:
+func _muzzle_color_for(weapon: WeaponResource) -> Color:
+	if not weapon:
+		return Color(1.0, 0.7, 0.1, 1.0)
+	match weapon.role_tag:
+		&"AA":
+			return Color(0.4, 0.85, 1.0, 1.0)   # cool blue tracers
+		&"AP":
+			return Color(1.0, 0.55, 0.1, 1.0)   # punchy orange
+		_:
+			return Color(1.0, 0.85, 0.3, 1.0)   # warm yellow generic
+
+
+func _spawn_squad_muzzle_flash(color: Color = Color(1.0, 0.7, 0.1, 1.0)) -> void:
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(1.0, 0.8, 0.2, 0.9)
+	mat.albedo_color = Color(color.r, color.g, color.b, 0.9)
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.emission_enabled = true
-	mat.emission = Color(1.0, 0.7, 0.1, 1.0)
+	mat.emission = color
 	mat.emission_energy_multiplier = 6.0
 
 	# Prefer real barrel-tip positions; fall back to chest-height if none.

@@ -94,6 +94,12 @@ func _ensure_visual_root() -> void:
 		return
 	_visual_root = Node3D.new()
 	_visual_root.name = "VisualRoot"
+	# Slight Y rotation per real building so the bases don't read as a flat
+	# row of identical boxes from the RTS camera. Ghost previews stay aligned
+	# (rotation = 0) so the player sees exactly what they're placing.
+	# Turret pivots compensate via TurretComponent._aim_at_target.
+	if not is_ghost_preview:
+		_visual_root.rotation.y = randf_range(-0.22, 0.22)
 	add_child(_visual_root)
 
 
