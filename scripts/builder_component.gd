@@ -112,6 +112,12 @@ func place_building(building_stats: BuildingStatResource, position: Vector3, res
 	var building_scene: PackedScene = load("res://scenes/building.tscn") as PackedScene
 	var building: Building = building_scene.instantiate() as Building
 	building.stats = building_stats
+	# Inherit ownership from the engineer placing the building. Without this
+	# step every building came up as owner_id=0 (player) regardless of who
+	# built it — AI bases ended up player-coloured and the win-condition
+	# tracking treated them as the player's.
+	if _unit:
+		building.owner_id = _unit.owner_id
 	building.resource_manager = resource_mgr
 	building.global_position = position
 
