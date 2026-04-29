@@ -10,6 +10,11 @@ signal construction_complete
 @export var owner_faction: FactionResource
 @export var owner_id: int = 0
 
+## When true the building behaves as a placement-preview ghost: no group
+## membership, no collision, no nav obstacle, no logic components. Visuals are
+## still built so the player can see exactly what they're placing.
+var is_ghost_preview: bool = false
+
 ## Set during placement by the builder.
 var is_constructed: bool = false
 var current_hp: int = 0
@@ -39,17 +44,39 @@ var _progress_mat: StandardMaterial3D = null
 var _progress_label: Label3D = null
 var _bar_width: float = 0.0
 
+## Holds all visual children (mesh, team ring, type-specific details). The
+## construction-rise animation lifts this single node from below ground to its
+## final position; collision/nav obstacle stay fixed at scene root.
+var _visual_root: Node3D = null
+
+## Gun-emplacement turret pivot — rotates around Y to track the current target.
+## Set by _detail_gun_emplacement; read by TurretComponent.
+var turret_pivot: Node3D = null
+
 
 func _ready() -> void:
+	if is_ghost_preview:
+		# Ghost preview: visuals only. No groups, no collision, no logic.
+		if stats:
+			is_constructed = true
+			_ensure_visual_root()
+			_apply_placeholder_shape()
+			_add_building_details()
+			if _collision:
+				_collision.disabled = true
+		return
+
 	add_to_group("buildings")
 	add_to_group("owner_%d" % owner_id)
 	if stats:
 		current_hp = stats.hp
 		rally_point = global_position + Vector3(0, 0, stats.footprint_size.z + 2.0)
+		_ensure_visual_root()
 		_apply_placeholder_shape()
 		_add_nav_obstacle()
+		_add_building_details()
 
-		# Add specialized components based on building type
+		# Specialized logic components.
 		if stats.building_id == &"salvage_yard":
 			var script: GDScript = load("res://scripts/salvage_yard_component.gd") as GDScript
 			var yard: Node = script.new()
@@ -60,6 +87,637 @@ func _ready() -> void:
 			var turret: Node = turret_script.new()
 			turret.name = "TurretComponent"
 			add_child(turret)
+
+
+func _ensure_visual_root() -> void:
+	if _visual_root and is_instance_valid(_visual_root):
+		return
+	_visual_root = Node3D.new()
+	_visual_root.name = "VisualRoot"
+	add_child(_visual_root)
+
+
+func _attach_visual(node: Node3D) -> void:
+	_ensure_visual_root()
+	_visual_root.add_child(node)
+
+
+## --- Per-building visual details ---
+
+func _add_building_details() -> void:
+	## Add type-specific decorations on top of the placeholder box so each
+	## building is recognizable at a glance: foundries get smokestacks,
+	## generators get cooling fins, salvage yards get crane arms, etc.
+	if not stats:
+		return
+	match stats.building_id:
+		&"headquarters": _detail_headquarters()
+		&"basic_foundry": _detail_foundry(false)
+		&"advanced_foundry": _detail_foundry(true)
+		&"basic_generator": _detail_generator()
+		&"basic_armory": _detail_armory()
+		&"salvage_yard": _detail_salvage_yard()
+		&"gun_emplacement": _detail_gun_emplacement()
+
+
+func _detail_dark_metal_mat(c: Color = Color(0.18, 0.18, 0.2)) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = c
+	m.roughness = 0.85
+	m.metallic = 0.4
+	return m
+
+
+func _detail_emissive_mat(c: Color, energy: float = 1.5) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = c
+	m.emission_enabled = true
+	m.emission = c
+	m.emission_energy_multiplier = energy
+	m.roughness = 0.5
+	return m
+
+
+func _add_production_door(width: float, height: float) -> void:
+	## Recessed dark door on the camera-facing (+Z) side of the building, sized
+	## per the unit class trained inside. Larger units → bigger door.
+	if not stats:
+		return
+	var fs: Vector3 = stats.footprint_size
+	var door := MeshInstance3D.new()
+	var db := BoxMesh.new()
+	db.size = Vector3(width, height, 0.08)
+	door.mesh = db
+	door.position = Vector3(0, height * 0.5 + 0.05, fs.z * 0.5 + 0.04)
+	door.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.08, 0.08, 0.1)))
+	_attach_visual(door)
+
+	# Top door rail (lighter trim).
+	var rail := MeshInstance3D.new()
+	var rb := BoxMesh.new()
+	rb.size = Vector3(width + 0.1, 0.06, 0.04)
+	rail.mesh = rb
+	rail.position = Vector3(0, height + 0.05, fs.z * 0.5 + 0.07)
+	rail.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.32, 0.3, 0.25)))
+	_attach_visual(rail)
+
+
+func _team_collar(width: float, height: float, depth: float, pos: Vector3) -> void:
+	## Small team-colored band at the base of a detail tower (smokestack,
+	## spire, turret base, crane pole, etc.) so the hull-band's identity
+	## carries up through the upper geometry too.
+	var team_color: Color = PLAYER_COLOR if owner_id == 0 else ENEMY_COLOR
+	var collar := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = Vector3(width, height, depth)
+	collar.mesh = box
+	collar.position = pos
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = team_color
+	mat.emission_enabled = true
+	mat.emission = team_color
+	mat.emission_energy_multiplier = 1.2
+	mat.roughness = 0.6
+	collar.set_surface_override_material(0, mat)
+	_attach_visual(collar)
+
+
+func _detail_headquarters() -> void:
+	var fs: Vector3 = stats.footprint_size
+	# Team collar at the base of the spire so the upper geometry stays readable.
+	_team_collar(fs.x * 0.32, 0.12, fs.z * 0.32, Vector3(0, fs.y + 0.06, 0))
+	# Central command spire — a tall thin tower rising from the roof.
+	var spire := MeshInstance3D.new()
+	var sb := BoxMesh.new()
+	sb.size = Vector3(fs.x * 0.25, fs.y * 0.65, fs.z * 0.25)
+	spire.mesh = sb
+	spire.position = Vector3(0, fs.y + sb.size.y * 0.5, 0)
+	spire.set_surface_override_material(0, _detail_dark_metal_mat())
+	_attach_visual(spire)
+
+	# Radar dish on top of the spire.
+	var dish := MeshInstance3D.new()
+	var dish_sphere := SphereMesh.new()
+	dish_sphere.radius = fs.x * 0.18
+	dish_sphere.height = fs.x * 0.18
+	dish.mesh = dish_sphere
+	dish.position = Vector3(0, fs.y + sb.size.y + dish_sphere.height * 0.4, 0)
+	dish.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.3, 0.3, 0.32)))
+	_attach_visual(dish)
+
+	# Beacon light on the spire.
+	var beacon := MeshInstance3D.new()
+	var beacon_sphere := SphereMesh.new()
+	beacon_sphere.radius = 0.12
+	beacon_sphere.height = 0.24
+	beacon.mesh = beacon_sphere
+	beacon.position = Vector3(0, fs.y + sb.size.y + 0.45, 0)
+	beacon.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.4, 0.2), 2.5))
+	_attach_visual(beacon)
+
+	# Lower flanking wings on each side, like fortified bunkers.
+	for side: int in 2:
+		var sx: float = -fs.x * 0.5 - 0.6 if side == 0 else fs.x * 0.5 + 0.6
+		var wing := MeshInstance3D.new()
+		var wb := BoxMesh.new()
+		wb.size = Vector3(1.2, fs.y * 0.55, fs.z * 0.7)
+		wing.mesh = wb
+		wing.position = Vector3(sx, wb.size.y * 0.5, 0)
+		wing.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.25, 0.22, 0.2)))
+		_attach_visual(wing)
+
+	# Four corner spotlights with green emissive lenses — security floodlights.
+	var corner_offsets: Array[Vector2] = [
+		Vector2(-fs.x * 0.45, -fs.z * 0.45),
+		Vector2(fs.x * 0.45, -fs.z * 0.45),
+		Vector2(-fs.x * 0.45, fs.z * 0.45),
+		Vector2(fs.x * 0.45, fs.z * 0.45),
+	]
+	for c: Vector2 in corner_offsets:
+		var post := MeshInstance3D.new()
+		var post_box := BoxMesh.new()
+		post_box.size = Vector3(0.12, 0.4, 0.12)
+		post.mesh = post_box
+		post.position = Vector3(c.x, fs.y + post_box.size.y * 0.5, c.y)
+		post.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.18, 0.18)))
+		_attach_visual(post)
+		var lamp := MeshInstance3D.new()
+		var lamp_sphere := SphereMesh.new()
+		lamp_sphere.radius = 0.08
+		lamp_sphere.height = 0.16
+		lamp.mesh = lamp_sphere
+		lamp.position = Vector3(c.x, fs.y + post_box.size.y, c.y)
+		lamp.set_surface_override_material(0, _detail_emissive_mat(Color(0.5, 1.0, 0.4), 1.6))
+		_attach_visual(lamp)
+
+	# Wide trim band around the top of the main hull.
+	var trim := MeshInstance3D.new()
+	var trim_box := BoxMesh.new()
+	trim_box.size = Vector3(fs.x * 1.02, 0.18, fs.z * 1.02)
+	trim.mesh = trim_box
+	trim.position = Vector3(0, fs.y - 0.05, 0)
+	trim.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.2, 0.18, 0.16)))
+	_attach_visual(trim)
+
+	# Spawn door for engineers (small unit door on the camera-facing side).
+	_add_production_door(1.1, 1.5)
+
+
+func _detail_foundry(advanced: bool) -> void:
+	var fs: Vector3 = stats.footprint_size
+	# Team collar at the base of the main smokestack.
+	_team_collar(fs.x * 0.32, 0.1, fs.z * 0.32, Vector3(fs.x * 0.28, fs.y + 0.05, fs.z * 0.18))
+	# Off-center smokestack.
+	var stack := MeshInstance3D.new()
+	var stack_cyl := CylinderMesh.new()
+	stack_cyl.top_radius = fs.x * 0.12
+	stack_cyl.bottom_radius = fs.x * 0.16
+	stack_cyl.height = fs.y * (1.1 if advanced else 0.9)
+	stack.mesh = stack_cyl
+	stack.position = Vector3(fs.x * 0.28, fs.y + stack_cyl.height * 0.5, fs.z * 0.18)
+	stack.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.15, 0.13, 0.12)))
+	_attach_visual(stack)
+
+	# Glowing rim at the top of the stack — molten interior.
+	var glow := MeshInstance3D.new()
+	var glow_cyl := CylinderMesh.new()
+	glow_cyl.top_radius = stack_cyl.top_radius * 0.85
+	glow_cyl.bottom_radius = stack_cyl.top_radius * 0.85
+	glow_cyl.height = 0.08
+	glow.mesh = glow_cyl
+	glow.position = Vector3(stack.position.x, fs.y + stack_cyl.height + 0.04, stack.position.z)
+	glow.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.45, 0.1), 3.0))
+	_attach_visual(glow)
+
+	# Intake vent on the front face.
+	var vent := MeshInstance3D.new()
+	var vent_box := BoxMesh.new()
+	vent_box.size = Vector3(fs.x * 0.45, fs.y * 0.18, 0.08)
+	vent.mesh = vent_box
+	vent.position = Vector3(0, fs.y * 0.5, -fs.z * 0.5 - 0.03)
+	vent.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.12, 0.12, 0.12)))
+	_attach_visual(vent)
+
+	# For advanced foundry, add a second smaller stack and a roof detail.
+	if advanced:
+		var stack2 := MeshInstance3D.new()
+		var stack2_cyl := CylinderMesh.new()
+		stack2_cyl.top_radius = fs.x * 0.09
+		stack2_cyl.bottom_radius = fs.x * 0.12
+		stack2_cyl.height = fs.y * 0.7
+		stack2.mesh = stack2_cyl
+		stack2.position = Vector3(-fs.x * 0.3, fs.y + stack2_cyl.height * 0.5, fs.z * 0.1)
+		stack2.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.15, 0.13, 0.12)))
+		_attach_visual(stack2)
+
+	# Ore intake hopper — angled wedge on the left side.
+	var hopper := MeshInstance3D.new()
+	var hopper_box := BoxMesh.new()
+	hopper_box.size = Vector3(0.7, fs.y * 0.35, fs.z * 0.5)
+	hopper.mesh = hopper_box
+	hopper.rotation.z = 0.35
+	hopper.position = Vector3(-fs.x * 0.5 - 0.2, fs.y * 0.7, 0)
+	hopper.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.2, 0.18)))
+	_attach_visual(hopper)
+
+	# Three indicator lights on the front face.
+	for i: int in 3:
+		var light := MeshInstance3D.new()
+		var ls := SphereMesh.new()
+		ls.radius = 0.06
+		ls.height = 0.12
+		light.mesh = ls
+		light.position = Vector3((float(i) - 1.0) * 0.35, fs.y * 0.85, -fs.z * 0.5 - 0.06)
+		var lcolor: Color = Color(1.0, 0.6, 0.2) if i == 1 else Color(0.5, 0.95, 0.4)
+		light.set_surface_override_material(0, _detail_emissive_mat(lcolor, 1.8))
+		_attach_visual(light)
+
+	# Side panel ribs along both walls — heavy industrial look.
+	for side: int in 2:
+		var sx: float = -fs.x * 0.5 - 0.04 if side == 0 else fs.x * 0.5 + 0.04
+		for r: int in 4:
+			var rib := MeshInstance3D.new()
+			var rb := BoxMesh.new()
+			rb.size = Vector3(0.06, fs.y * 0.85, 0.18)
+			rib.mesh = rb
+			var rz: float = (float(r) - 1.5) * fs.z * 0.25
+			rib.position = Vector3(sx, fs.y * 0.5, rz)
+			rib.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.16, 0.15)))
+			_attach_visual(rib)
+
+	# Production door — bigger for the advanced foundry which builds Bulwark.
+	if advanced:
+		_add_production_door(4.0, 2.6)
+	else:
+		_add_production_door(2.7, 1.9)
+
+
+func _detail_generator() -> void:
+	var fs: Vector3 = stats.footprint_size
+	# Team collar at the base of the central core tower.
+	_team_collar(fs.x * 0.7, 0.1, fs.z * 0.7, Vector3(0, fs.y + 0.05, 0))
+	# Central cylindrical core protruding above the housing.
+	var core := MeshInstance3D.new()
+	var core_cyl := CylinderMesh.new()
+	core_cyl.top_radius = fs.x * 0.3
+	core_cyl.bottom_radius = fs.x * 0.32
+	core_cyl.height = fs.y * 0.55
+	core.mesh = core_cyl
+	core.position = Vector3(0, fs.y + core_cyl.height * 0.5, 0)
+	core.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.25, 0.25, 0.28)))
+	_attach_visual(core)
+
+	# Vertical cooling fins around the core (4 cardinal sides).
+	for i: int in 4:
+		var ang: float = float(i) * PI * 0.5
+		var fin := MeshInstance3D.new()
+		var fin_box := BoxMesh.new()
+		fin_box.size = Vector3(0.08, fs.y * 0.55, fs.x * 0.18)
+		fin.mesh = fin_box
+		var dx: float = sin(ang) * (fs.x * 0.32 + 0.05)
+		var dz: float = cos(ang) * (fs.x * 0.32 + 0.05)
+		fin.position = Vector3(dx, fs.y + fin_box.size.y * 0.5, dz)
+		fin.rotation.y = -ang
+		fin.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.22, 0.22)))
+		_attach_visual(fin)
+
+	# Glowing top cap.
+	var cap := MeshInstance3D.new()
+	var cap_cyl := CylinderMesh.new()
+	cap_cyl.top_radius = fs.x * 0.22
+	cap_cyl.bottom_radius = fs.x * 0.22
+	cap_cyl.height = 0.12
+	cap.mesh = cap_cyl
+	cap.position = Vector3(0, fs.y + core_cyl.height + cap_cyl.height * 0.5, 0)
+	cap.set_surface_override_material(0, _detail_emissive_mat(Color(0.3, 0.85, 1.0), 2.0))
+	_attach_visual(cap)
+
+	# Wider base flange around the bottom of the housing.
+	var flange := MeshInstance3D.new()
+	var flange_cyl := CylinderMesh.new()
+	flange_cyl.top_radius = fs.x * 0.55
+	flange_cyl.bottom_radius = fs.x * 0.55
+	flange_cyl.height = 0.18
+	flange.mesh = flange_cyl
+	flange.position = Vector3(0, 0.09, 0)
+	flange.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.16, 0.16, 0.18)))
+	_attach_visual(flange)
+
+	# Cable trunks routed up the housing on opposite sides.
+	for side: int in 2:
+		var sx: float = -fs.x * 0.5 - 0.06 if side == 0 else fs.x * 0.5 + 0.06
+		var cable := MeshInstance3D.new()
+		var cb := BoxMesh.new()
+		cb.size = Vector3(0.08, fs.y * 0.85, 0.18)
+		cable.mesh = cb
+		cable.position = Vector3(sx, fs.y * 0.5, 0)
+		cable.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.15, 0.13, 0.12)))
+		_attach_visual(cable)
+
+	# Warning stripes around the housing — angled hazard pattern.
+	var stripe := MeshInstance3D.new()
+	var stripe_box := BoxMesh.new()
+	stripe_box.size = Vector3(fs.x * 1.02, 0.12, fs.z * 1.02)
+	stripe.mesh = stripe_box
+	stripe.position = Vector3(0, fs.y * 0.25, 0)
+	stripe.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.7, 0.1), 1.0))
+	_attach_visual(stripe)
+
+
+func _detail_armory() -> void:
+	var fs: Vector3 = stats.footprint_size
+	# Vertical rib panels along each side wall — like ammunition lockers.
+	for side: int in 2:
+		var sx: float = -fs.x * 0.5 if side == 0 else fs.x * 0.5
+		for i: int in 3:
+			var rib := MeshInstance3D.new()
+			var rib_box := BoxMesh.new()
+			rib_box.size = Vector3(0.06, fs.y * 0.7, 0.18)
+			rib.mesh = rib_box
+			var rib_z: float = (float(i) - 1.0) * fs.z * 0.3
+			rib.position = Vector3(sx + (-0.04 if side == 0 else 0.04), fs.y * 0.5, rib_z)
+			rib.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.2, 0.18)))
+			_attach_visual(rib)
+
+	# Indicator strip across the front.
+	var strip := MeshInstance3D.new()
+	var strip_box := BoxMesh.new()
+	strip_box.size = Vector3(fs.x * 0.7, 0.06, 0.04)
+	strip.mesh = strip_box
+	strip.position = Vector3(0, fs.y * 0.78, -fs.z * 0.5 - 0.02)
+	strip.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.85, 0.3), 1.6))
+	_attach_visual(strip)
+
+	# Loading dock door on the front — recessed panel with a horizontal bar.
+	var dock := MeshInstance3D.new()
+	var dock_box := BoxMesh.new()
+	dock_box.size = Vector3(fs.x * 0.4, fs.y * 0.55, 0.08)
+	dock.mesh = dock_box
+	dock.position = Vector3(0, fs.y * 0.3, -fs.z * 0.5 - 0.04)
+	dock.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.14, 0.13, 0.12)))
+	_attach_visual(dock)
+
+	var dock_bar := MeshInstance3D.new()
+	var dock_bar_box := BoxMesh.new()
+	dock_bar_box.size = Vector3(fs.x * 0.42, 0.05, 0.02)
+	dock_bar.mesh = dock_bar_box
+	dock_bar.position = Vector3(0, fs.y * 0.4, -fs.z * 0.5 - 0.085)
+	dock_bar.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.3, 0.28, 0.25)))
+	_attach_visual(dock_bar)
+
+	# Stacked ammo crates against the right side wall.
+	for c: int in 2:
+		var crate := MeshInstance3D.new()
+		var cb := BoxMesh.new()
+		cb.size = Vector3(0.4, 0.4, 0.4)
+		crate.mesh = cb
+		crate.position = Vector3(fs.x * 0.5 + 0.25, 0.2 + float(c) * 0.42, -fs.z * 0.2)
+		crate.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.42, 0.32, 0.18)))
+		_attach_visual(crate)
+
+	# Roof overhang lip.
+	var lip := MeshInstance3D.new()
+	var lip_box := BoxMesh.new()
+	lip_box.size = Vector3(fs.x * 1.1, 0.1, 0.4)
+	lip.mesh = lip_box
+	lip.position = Vector3(0, fs.y, -fs.z * 0.5 - 0.15)
+	lip.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.2, 0.18)))
+	_attach_visual(lip)
+
+
+func _detail_salvage_yard() -> void:
+	var fs: Vector3 = stats.footprint_size
+	# Team collar at the base of the crane pole.
+	_team_collar(0.32, 0.08, 0.32, Vector3(fs.x * 0.3, fs.y + 0.04, -fs.z * 0.3))
+	# Crane arm — tall pole with a horizontal jib.
+	var pole := MeshInstance3D.new()
+	var pole_box := BoxMesh.new()
+	pole_box.size = Vector3(0.12, fs.y * 1.4, 0.12)
+	pole.mesh = pole_box
+	pole.position = Vector3(fs.x * 0.3, fs.y + pole_box.size.y * 0.5, -fs.z * 0.3)
+	pole.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.35, 0.3, 0.18)))
+	_attach_visual(pole)
+
+	var jib := MeshInstance3D.new()
+	var jib_box := BoxMesh.new()
+	jib_box.size = Vector3(fs.x * 0.6, 0.08, 0.08)
+	jib.mesh = jib_box
+	jib.position = Vector3(fs.x * 0.0, fs.y + pole_box.size.y - 0.12, -fs.z * 0.3)
+	jib.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.35, 0.3, 0.18)))
+	_attach_visual(jib)
+
+	# Hook hanging from the jib.
+	var hook := MeshInstance3D.new()
+	var hook_box := BoxMesh.new()
+	hook_box.size = Vector3(0.08, 0.2, 0.08)
+	hook.mesh = hook_box
+	hook.position = Vector3(-fs.x * 0.25, fs.y + pole_box.size.y - 0.35, -fs.z * 0.3)
+	hook.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.15, 0.13, 0.12)))
+	_attach_visual(hook)
+
+	# Small storage bins on the deck.
+	for i: int in 2:
+		var bin := MeshInstance3D.new()
+		var bin_box := BoxMesh.new()
+		bin_box.size = Vector3(fs.x * 0.25, fs.y * 0.45, fs.z * 0.25)
+		bin.mesh = bin_box
+		bin.position = Vector3(-fs.x * 0.22 + float(i) * fs.x * 0.45, fs.y + bin_box.size.y * 0.5, fs.z * 0.22)
+		bin.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.32, 0.28, 0.18)))
+		_attach_visual(bin)
+
+	# Scrap pile on the front — pile of dark salvage chunks.
+	for s: int in 4:
+		var chunk := MeshInstance3D.new()
+		var chunk_box := BoxMesh.new()
+		var sz: float = randf_range(0.18, 0.32)
+		chunk_box.size = Vector3(sz, sz * 0.6, sz)
+		chunk.mesh = chunk_box
+		chunk.rotation.y = randf_range(0.0, TAU)
+		chunk.position = Vector3(
+			-fs.x * 0.2 + float(s) * 0.18,
+			sz * 0.3,
+			-fs.z * 0.5 - 0.4
+		)
+		chunk.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.16, 0.14)))
+		_attach_visual(chunk)
+
+	# Crane support strut from the pole base back to the chassis.
+	var strut := MeshInstance3D.new()
+	var strut_box := BoxMesh.new()
+	strut_box.size = Vector3(0.1, 0.1, fs.z * 0.4)
+	strut.mesh = strut_box
+	strut.rotation.x = -0.6
+	strut.position = Vector3(fs.x * 0.3, fs.y * 0.5 + 0.4, -fs.z * 0.1)
+	strut.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.3, 0.26, 0.16)))
+	_attach_visual(strut)
+
+
+func _detail_gun_emplacement() -> void:
+	var fs: Vector3 = stats.footprint_size
+	# Team collar around the base of the turret.
+	_team_collar(fs.x * 0.95, 0.1, fs.z * 0.95, Vector3(0, fs.y + 0.05, 0))
+	# Pivot at the top center of the chassis; the turret + barrel rotate
+	# around its Y axis to track targets. The barrel meshes themselves are
+	# rebuilt by `rebuild_turret_visual` whenever the profile changes.
+	var pivot := Node3D.new()
+	pivot.name = "TurretPivot"
+	pivot.position = Vector3(0, fs.y, 0)
+	_attach_visual(pivot)
+	turret_pivot = pivot
+
+	rebuild_turret_visual(&"balanced")
+
+
+func rebuild_turret_visual(profile: StringName) -> void:
+	## Replaces all children of `turret_pivot` with a profile-specific turret.
+	## anti_light = quad-barrel rotary; anti_heavy = single thick howitzer;
+	## anti_air = tall slim missile rack with skyward tilt; balanced = the
+	## original cylindrical autocannon.
+	if not turret_pivot:
+		return
+	var fs: Vector3 = stats.footprint_size
+
+	# Wipe existing barrels/dome.
+	for child: Node in turret_pivot.get_children():
+		child.queue_free()
+
+	# Dome — color varies subtly per profile.
+	var dome_color: Color = Color(0.3, 0.28, 0.25)
+	match profile:
+		&"anti_light": dome_color = Color(0.32, 0.32, 0.28)
+		&"anti_heavy": dome_color = Color(0.36, 0.3, 0.22)
+		&"anti_air":   dome_color = Color(0.25, 0.3, 0.36)
+
+	var dome_sphere := SphereMesh.new()
+	dome_sphere.radius = fs.x * 0.42
+	dome_sphere.height = fs.x * 0.5
+	var dome := MeshInstance3D.new()
+	dome.mesh = dome_sphere
+	dome.position.y = dome_sphere.height * 0.25
+	dome.set_surface_override_material(0, _detail_dark_metal_mat(dome_color))
+	turret_pivot.add_child(dome)
+
+	var arm_y: float = dome_sphere.height * 0.35
+	var dark: StandardMaterial3D = _detail_dark_metal_mat(Color(0.18, 0.16, 0.16))
+
+	match profile:
+		&"anti_light":
+			# Quad short barrels (rotary autocannon look).
+			for i: int in 4:
+				var ang: float = float(i) / 4.0 * TAU
+				var bx: float = cos(ang) * 0.07
+				var by: float = sin(ang) * 0.07
+				var b := MeshInstance3D.new()
+				var bc := CylinderMesh.new()
+				bc.top_radius = 0.045
+				bc.bottom_radius = 0.045
+				bc.height = fs.x * 0.7
+				b.mesh = bc
+				b.rotation.x = -PI / 2
+				b.position = Vector3(bx, arm_y + by, -bc.height * 0.5 - 0.05)
+				b.set_surface_override_material(0, dark)
+				turret_pivot.add_child(b)
+		&"anti_heavy":
+			# Single thick howitzer barrel + chunky muzzle brake.
+			var b := MeshInstance3D.new()
+			var bc := CylinderMesh.new()
+			bc.top_radius = 0.16
+			bc.bottom_radius = 0.18
+			bc.height = fs.x * 1.05
+			b.mesh = bc
+			b.rotation.x = -PI / 2
+			b.position = Vector3(0, arm_y, -bc.height * 0.5 - 0.05)
+			b.set_surface_override_material(0, dark)
+			turret_pivot.add_child(b)
+			# Muzzle brake — fat ring at the tip.
+			var muzzle := MeshInstance3D.new()
+			var mc := CylinderMesh.new()
+			mc.top_radius = 0.24
+			mc.bottom_radius = 0.22
+			mc.height = 0.16
+			muzzle.mesh = mc
+			muzzle.rotation.x = -PI / 2
+			muzzle.position = Vector3(0, arm_y, -bc.height - 0.13)
+			muzzle.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.1, 0.1, 0.1)))
+			turret_pivot.add_child(muzzle)
+		&"anti_air":
+			# Missile rack — three tubes pointing up-and-forward, plus a small
+			# radar dish.
+			var rack_pivot := Node3D.new()
+			rack_pivot.position.y = arm_y + 0.05
+			rack_pivot.rotation.x = -0.4  # tilt skyward
+			turret_pivot.add_child(rack_pivot)
+			for i: int in 3:
+				var tube := MeshInstance3D.new()
+				var tc := CylinderMesh.new()
+				tc.top_radius = 0.07
+				tc.bottom_radius = 0.07
+				tc.height = fs.x * 0.5
+				tube.mesh = tc
+				tube.rotation.x = -PI / 2
+				tube.position = Vector3((float(i) - 1.0) * 0.18, 0.05, -tc.height * 0.5 - 0.04)
+				tube.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.2, 0.22, 0.28)))
+				rack_pivot.add_child(tube)
+			# Side radar dish.
+			var dish := MeshInstance3D.new()
+			var dish_sphere := SphereMesh.new()
+			dish_sphere.radius = 0.14
+			dish_sphere.height = 0.18
+			dish.mesh = dish_sphere
+			dish.position = Vector3(fs.x * 0.3, arm_y + 0.18, 0)
+			dish.set_surface_override_material(0, _detail_emissive_mat(Color(0.4, 1.0, 0.5), 1.4))
+			turret_pivot.add_child(dish)
+		_:
+			# Balanced — original single autocannon.
+			var b := MeshInstance3D.new()
+			var bc := CylinderMesh.new()
+			bc.top_radius = 0.1
+			bc.bottom_radius = 0.12
+			bc.height = fs.x * 0.9
+			b.mesh = bc
+			b.rotation.x = -PI / 2
+			b.position = Vector3(0, arm_y, -bc.height * 0.5 - 0.05)
+			b.set_surface_override_material(0, dark)
+			turret_pivot.add_child(b)
+			# Muzzle ring.
+			var muzzle := MeshInstance3D.new()
+			var mc := CylinderMesh.new()
+			mc.top_radius = 0.14
+			mc.bottom_radius = 0.14
+			mc.height = 0.1
+			muzzle.mesh = mc
+			muzzle.rotation.x = -PI / 2
+			muzzle.position = Vector3(0, arm_y, -bc.height - 0.1)
+			muzzle.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.1, 0.1, 0.1)))
+			turret_pivot.add_child(muzzle)
+
+	# Ammo crate at the base of the emplacement (decorative, doesn't rotate).
+	var crate := MeshInstance3D.new()
+	var cb := BoxMesh.new()
+	cb.size = Vector3(0.5, 0.4, 0.35)
+	crate.mesh = cb
+	crate.position = Vector3(-fs.x * 0.4, 0.2, fs.z * 0.4)
+	crate.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.32, 0.26, 0.16)))
+	_attach_visual(crate)
+
+	# Sandbag wall around two sides of the base.
+	for i: int in 4:
+		var sandbag := MeshInstance3D.new()
+		var sb := BoxMesh.new()
+		sb.size = Vector3(0.35, 0.18, 0.22)
+		sandbag.mesh = sb
+		sandbag.position = Vector3(-fs.x * 0.45 + float(i) * 0.32, 0.09, -fs.z * 0.5 - 0.18)
+		sandbag.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.35, 0.32, 0.22)))
+		_attach_visual(sandbag)
+
+	# Reinforced base plate around the emplacement.
+	var base_plate := MeshInstance3D.new()
+	var bp_box := BoxMesh.new()
+	bp_box.size = Vector3(fs.x * 1.05, 0.18, fs.z * 1.05)
+	base_plate.mesh = bp_box
+	base_plate.position = Vector3(0, 0.09, 0)
+	base_plate.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.18, 0.2)))
+	_attach_visual(base_plate)
 
 
 func _add_nav_obstacle() -> void:
@@ -96,6 +754,20 @@ func _apply_placeholder_shape() -> void:
 		mat.albedo_color.a = 0.5
 	_mesh.set_surface_override_material(0, mat)
 
+	# Move the visual mesh under VisualRoot so the construction-rise tween
+	# carries it; collision stays at scene root.
+	_ensure_visual_root()
+	if _mesh.get_parent() != _visual_root:
+		_mesh.reparent(_visual_root, false)
+
+	# Buried while under construction, fully risen once complete. AI buildings
+	# spawn with is_constructed=true immediately and skip the rise.
+	if _visual_root:
+		if is_constructed:
+			_visual_root.position.y = 0.0
+		else:
+			_visual_root.position.y = -stats.footprint_size.y * 0.95
+
 	var col_shape := BoxShape3D.new()
 	col_shape.size = stats.footprint_size
 	_collision.shape = col_shape
@@ -113,23 +785,31 @@ func _apply_team_ring() -> void:
 
 	var team_color: Color = PLAYER_COLOR if owner_id == 0 else ENEMY_COLOR
 
-	# Shell that conforms to the building shape
+	# Horizontal team-color band wrapping the building. Slightly larger than the
+	# footprint in X/Z so it sits proud of the walls and is visible from every
+	# angle. Replaces the old inverted-shell trick which only rendered on one
+	# face from the RTS camera angle.
 	_team_ring = MeshInstance3D.new()
-	var shell := BoxMesh.new()
-	shell.size = stats.footprint_size + Vector3(0.3, 0.3, 0.3)
-	_team_ring.mesh = shell
-	_team_ring.position.y = stats.footprint_size.y / 2.0
+	var stripe := BoxMesh.new()
+	stripe.size = Vector3(
+		stats.footprint_size.x + 0.12,
+		stats.footprint_size.y * 0.14,
+		stats.footprint_size.z + 0.12
+	)
+	_team_ring.mesh = stripe
+	# Near the bottom of the hull — keeps the silhouette readable while leaving
+	# the upper detail layers (turrets, stacks, spires) free for their own band.
+	_team_ring.position.y = stats.footprint_size.y * 0.18
 
 	var mat := StandardMaterial3D.new()
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.albedo_color = Color(team_color.r, team_color.g, team_color.b, 0.25)
+	mat.albedo_color = team_color
 	mat.emission_enabled = true
 	mat.emission = team_color
-	mat.emission_energy_multiplier = 0.8
-	mat.cull_mode = BaseMaterial3D.CULL_FRONT
+	mat.emission_energy_multiplier = 1.4
+	mat.roughness = 0.6
 	_team_ring.set_surface_override_material(0, mat)
 
-	add_child(_team_ring)
+	_attach_visual(_team_ring)
 
 
 func begin_construction() -> void:
@@ -137,15 +817,59 @@ func begin_construction() -> void:
 	is_constructed = false
 	_apply_placeholder_shape()
 	_create_progress_bar()
+	# Foundation is a "ghost" — units can walk into and out of it freely until
+	# the structure is complete. Solid collision is enabled in _finish_construction.
+	if _collision:
+		_collision.disabled = true
+	# Sink the visuals so the building rises out of the ground as it's built.
+	if _visual_root and stats:
+		_visual_root.position.y = -stats.footprint_size.y * 0.95
 
 
 func advance_construction(amount: float) -> void:
 	if is_constructed:
 		return
+	# Construction halts while any unit is standing inside the footprint, so
+	# foundations placed on top of units (or with units passing through) wait
+	# for the area to clear before progressing.
+	if not _is_foundation_clear():
+		return
 	_construction_progress += amount
 	_update_progress_bar()
+	_update_construction_rise()
 	if _construction_progress >= stats.build_time:
 		_finish_construction()
+
+
+func _update_construction_rise() -> void:
+	## Lerp the visual root from -fs.y * 0.95 (mostly buried) to 0 (fully risen)
+	## as the construction progresses.
+	if not _visual_root or not stats:
+		return
+	var pct: float = get_construction_percent()
+	_visual_root.position.y = -stats.footprint_size.y * 0.95 * (1.0 - pct)
+
+
+func _is_foundation_clear() -> bool:
+	## True when no unit's center is inside (or just at the edge of) the
+	## building's XZ footprint. Margin = 0.4 prevents construction completing
+	## while a unit is straddling the boundary, which used to trap engineers
+	## the moment collision activated.
+	if not stats:
+		return true
+	var half_x: float = stats.footprint_size.x * 0.5 + 0.4
+	var half_z: float = stats.footprint_size.z * 0.5 + 0.4
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node):
+			continue
+		var node3d: Node3D = node as Node3D
+		if not node3d:
+			continue
+		var dx: float = absf(node3d.global_position.x - global_position.x)
+		var dz: float = absf(node3d.global_position.z - global_position.z)
+		if dx < half_x and dz < half_z:
+			return false
+	return true
 
 
 func get_construction_percent() -> float:
@@ -160,6 +884,47 @@ func _finish_construction() -> void:
 	construction_complete.emit()
 	_apply_placeholder_shape()
 	_remove_progress_bar()
+	# Belt-and-suspenders: even though _is_foundation_clear gates progress,
+	# fast-moving units can slip into the footprint between frames. Push any
+	# stragglers out before the collision shape activates.
+	_kick_units_out_of_footprint()
+	# Solidify now that the structure stands.
+	if _collision:
+		_collision.disabled = false
+	if _visual_root:
+		_visual_root.position.y = 0.0
+
+
+func _kick_units_out_of_footprint() -> void:
+	if not stats:
+		return
+	var half_x: float = stats.footprint_size.x * 0.5
+	var half_z: float = stats.footprint_size.z * 0.5
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node):
+			continue
+		var u: Node3D = node as Node3D
+		if not u:
+			continue
+		var dx: float = u.global_position.x - global_position.x
+		var dz: float = u.global_position.z - global_position.z
+		var inside_x: bool = absf(dx) < half_x
+		var inside_z: bool = absf(dz) < half_z
+		if not (inside_x and inside_z):
+			continue
+		# Pop the unit out along whichever axis it's closest to escaping.
+		var dx_in: float = half_x - absf(dx)
+		var dz_in: float = half_z - absf(dz)
+		if dx_in < dz_in:
+			var dir_x: float = 1.0
+			if dx < 0.0:
+				dir_x = -1.0
+			u.global_position.x = global_position.x + (half_x + 0.6) * dir_x
+		else:
+			var dir_z: float = 1.0
+			if dz < 0.0:
+				dir_z = -1.0
+			u.global_position.z = global_position.z + (half_z + 0.6) * dir_z
 
 
 func _create_progress_bar() -> void:
@@ -167,7 +932,9 @@ func _create_progress_bar() -> void:
 		return
 
 	_bar_width = stats.footprint_size.x
-	var bar_y: float = stats.footprint_size.y + 0.5
+	# Lift the bar well above the tallest detail (spires, smokestacks, crane
+	# arms) so decorative geometry never obscures the construction percentage.
+	var bar_y: float = stats.footprint_size.y * 1.5 + 2.0
 	var half_w: float = _bar_width * 0.5
 
 	# Dark background bar (full width)
@@ -358,12 +1125,16 @@ func _update_selection_visual() -> void:
 	_mesh.set_surface_override_material(0, mat)
 
 
-func take_damage(amount: int) -> void:
+func take_damage(amount: int, _attacker: Node3D = null) -> void:
 	current_hp -= amount
 	if current_hp <= 0:
 		current_hp = 0
 		_spawn_building_wreck()
 		destroyed.emit()
+		# Big screen shake — buildings going down should feel weighty.
+		var cam: Camera3D = get_viewport().get_camera_3d() if get_viewport() else null
+		if cam and cam.has_method("add_shake"):
+			cam.add_shake(0.55)
 		queue_free()
 
 

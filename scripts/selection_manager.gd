@@ -18,7 +18,8 @@ var _camera: Camera3D
 ## Build placement state.
 var _build_mode: bool = false
 var _build_stats: BuildingStatResource = null
-var _build_ghost: MeshInstance3D = null
+## Now a full Building scene (in ghost mode) so the preview shows real geometry.
+var _build_ghost: Node3D = null
 
 ## Currently selected building (if any).
 var _selected_building: Building = null
@@ -32,12 +33,38 @@ var _control_groups: Array[Array] = []
 
 var _audio: AudioManager = null
 
+## Last unit pointed at by the mouse — kept so we can clear its hover bar
+## when the cursor moves to a different unit.
+var _hovered_unit: Unit = null
+
 
 func _ready() -> void:
 	_camera = get_viewport().get_camera_3d()
 	_audio = get_tree().current_scene.get_node_or_null("AudioManager") as AudioManager
 	for i: int in 10:
 		_control_groups.append([])
+
+
+func _process(_delta: float) -> void:
+	_update_hover()
+
+
+func _update_hover() -> void:
+	if not _camera or _build_mode:
+		_set_hover(null)
+		return
+	var hovered: Unit = _raycast_unit(get_viewport().get_mouse_position())
+	_set_hover(hovered)
+
+
+func _set_hover(unit: Unit) -> void:
+	if _hovered_unit == unit:
+		return
+	if _hovered_unit and is_instance_valid(_hovered_unit):
+		_hovered_unit.hp_bar_hovered = false
+	_hovered_unit = unit
+	if _hovered_unit and is_instance_valid(_hovered_unit):
+		_hovered_unit.hp_bar_hovered = true
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -142,6 +169,7 @@ func _handle_build_hotkey(key: InputEventKey) -> void:
 			return
 
 	# Build placement hotkeys when an engineer is selected (1-7)
+	_prune_selection()
 	var has_engineer: bool = false
 	for unit: Unit in _selected_units:
 		if unit.get_builder():
@@ -239,8 +267,10 @@ func _finish_box_select(event: InputEventMouseButton) -> void:
 
 
 func _command_move(screen_pos: Vector2) -> void:
+	_prune_selection()
 	if _selected_units.is_empty():
 		return
+	_cancel_builder_tasks()
 	if _audio:
 		_audio.play_command()
 
@@ -265,6 +295,7 @@ func _command_move(screen_pos: Vector2) -> void:
 
 
 func _command_assist_build(building: Building) -> void:
+	_prune_selection()
 	for unit: Unit in _selected_units:
 		var builder: Node = unit.get_builder()
 		if builder and builder.has_method("start_building"):
@@ -274,8 +305,10 @@ func _command_assist_build(building: Building) -> void:
 
 
 func _command_attack(target: Node3D) -> void:
+	_prune_selection()
 	if _selected_units.is_empty():
 		return
+	_cancel_builder_tasks()
 	if _audio:
 		_audio.play_command()
 	for unit: Unit in _selected_units:
@@ -288,8 +321,10 @@ func _command_attack(target: Node3D) -> void:
 
 
 func _command_attack_move(screen_pos: Vector2) -> void:
+	_prune_selection()
 	if _selected_units.is_empty():
 		return
+	_cancel_builder_tasks()
 	if _audio:
 		_audio.play_command()
 	var ground_pos := _raycast_ground(screen_pos)
@@ -391,6 +426,7 @@ func _key_to_group_index(keycode: int) -> int:
 
 
 func _assign_control_group(index: int) -> void:
+	_prune_selection()
 	_control_groups[index] = []
 	for unit: Unit in _selected_units:
 		_control_groups[index].append(unit.get_instance_id())
@@ -440,6 +476,28 @@ func _clear_selection() -> void:
 		if is_instance_valid(unit):
 			unit.deselect()
 	_selected_units.clear()
+
+
+func _cancel_builder_tasks() -> void:
+	## Tell every selected engineer to drop its current build target so the
+	## subsequent move/attack command isn't immediately overridden by the
+	## builder dragging the unit back to the construction site.
+	for unit: Unit in _selected_units:
+		if not is_instance_valid(unit):
+			continue
+		var builder: Node = unit.get_builder()
+		if builder and builder.has_method("cancel_build"):
+			builder.cancel_build()
+
+
+func _prune_selection() -> void:
+	## Remove freed or dead units from the selection so command iterators are safe.
+	var i: int = _selected_units.size() - 1
+	while i >= 0:
+		var unit: Unit = _selected_units[i]
+		if not is_instance_valid(unit) or unit.alive_count <= 0:
+			_selected_units.remove_at(i)
+		i -= 1
 
 
 func _raycast_unit(screen_pos: Vector2) -> Unit:
@@ -647,19 +705,21 @@ func start_build_placement(bstat: BuildingStatResource) -> void:
 	_build_mode = true
 	_build_stats = bstat
 
-	# Create ghost preview
-	_build_ghost = MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = bstat.footprint_size
-	_build_ghost.mesh = box
-	_build_ghost.position.y = bstat.footprint_size.y / 2.0
+	# Spawn a real Building scene as the ghost so the preview shows the actual
+	# silhouette (smokestacks, turrets, antenna farms, etc.), not just a box.
+	# `is_ghost_preview = true` makes Building skip groups, collision, and
+	# logic components — visuals only.
+	var scene: PackedScene = load("res://scenes/building.tscn") as PackedScene
+	var ghost: Building = scene.instantiate() as Building
+	ghost.is_ghost_preview = true
+	ghost.stats = bstat
+	ghost.owner_id = 0
+	get_tree().current_scene.add_child(ghost)
+	# Recolor every material under the ghost to a translucent green tint —
+	# the validity update repaints to red when overlap is detected.
+	_apply_ghost_tint(ghost, Color(0.25, 0.85, 0.3, 0.45))
 
-	var mat := StandardMaterial3D.new()
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.albedo_color = Color(0.2, 0.8, 0.2, 0.3)
-	_build_ghost.set_surface_override_material(0, mat)
-
-	get_tree().current_scene.add_child(_build_ghost)
+	_build_ghost = ghost as Node3D
 
 
 func cancel_build_placement() -> void:
@@ -670,12 +730,96 @@ func cancel_build_placement() -> void:
 	_build_ghost = null
 
 
+## Margin added around units / terrain features when checking placement overlap.
+const BUILD_OBSTACLE_MARGIN: float = 0.4
+## Clear gap required between adjacent buildings.
+const BUILD_PLACEMENT_GAP: float = 0.8
+
+
+func _is_valid_build_position(pos: Vector3) -> bool:
+	## True when the build footprint at `pos` would not overlap any existing
+	## building, unit, or terrain feature (fuel deposit, wreck).
+	if not _build_stats:
+		return false
+	var half_x: float = _build_stats.footprint_size.x * 0.5
+	var half_z: float = _build_stats.footprint_size.z * 0.5
+
+	# Other buildings — AABB-vs-AABB in XZ.
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var b: Building = node as Building
+		if not b or not b.stats:
+			continue
+		var their_hx: float = b.stats.footprint_size.x * 0.5
+		var their_hz: float = b.stats.footprint_size.z * 0.5
+		var dx: float = absf(b.global_position.x - pos.x)
+		var dz: float = absf(b.global_position.z - pos.z)
+		if dx < (half_x + their_hx + BUILD_PLACEMENT_GAP) and dz < (half_z + their_hz + BUILD_PLACEMENT_GAP):
+			return false
+
+	# Units — treat each as a small disc.
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node):
+			continue
+		var u: Node3D = node as Node3D
+		if not u:
+			continue
+		var dx: float = absf(u.global_position.x - pos.x)
+		var dz: float = absf(u.global_position.z - pos.z)
+		if dx < (half_x + BUILD_OBSTACLE_MARGIN) and dz < (half_z + BUILD_OBSTACLE_MARGIN):
+			return false
+
+	# Fuel deposits and wrecks — terrain features that block placement.
+	for group_name: String in ["fuel_deposits", "wrecks"]:
+		for node: Node in get_tree().get_nodes_in_group(group_name):
+			if not is_instance_valid(node):
+				continue
+			var f: Node3D = node as Node3D
+			if not f:
+				continue
+			var dx: float = absf(f.global_position.x - pos.x)
+			var dz: float = absf(f.global_position.z - pos.z)
+			if dx < (half_x + BUILD_OBSTACLE_MARGIN) and dz < (half_z + BUILD_OBSTACLE_MARGIN):
+				return false
+
+	return true
+
+
+func _update_ghost_validity_tint(pos: Vector3) -> void:
+	if not _build_ghost:
+		return
+	var tint: Color = Color(0.25, 0.85, 0.3, 0.45)
+	if not _is_valid_build_position(pos):
+		tint = Color(0.95, 0.2, 0.18, 0.55)
+	_apply_ghost_tint(_build_ghost, tint)
+
+
+func _apply_ghost_tint(node: Node, tint: Color) -> void:
+	## Walks the ghost tree and replaces every mesh's material with a
+	## translucent emissive tint so the preview reads as a hologram.
+	if node is MeshInstance3D:
+		var mi: MeshInstance3D = node as MeshInstance3D
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = tint
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.emission_enabled = true
+		mat.emission = Color(tint.r, tint.g, tint.b)
+		mat.emission_energy_multiplier = 0.45
+		mi.set_surface_override_material(0, mat)
+	for child: Node in node.get_children():
+		_apply_ghost_tint(child, tint)
+
+
 func _handle_build_mode_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
 		var motion: InputEventMouseMotion = event as InputEventMouseMotion
 		var ground_pos := _raycast_ground(motion.position)
 		if ground_pos != Vector3.INF and _build_ghost:
-			_build_ghost.global_position = Vector3(ground_pos.x, _build_stats.footprint_size.y / 2.0, ground_pos.z)
+			# The Building ghost's visual origin sits at ground level (its mesh
+			# is offset internally), so place the root at the ground.
+			_build_ghost.global_position = Vector3(ground_pos.x, 0.0, ground_pos.z)
+			_update_ghost_validity_tint(ground_pos)
 
 	elif event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
@@ -703,12 +847,21 @@ func _confirm_build_placement(screen_pos: Vector2) -> void:
 	if ground_pos == Vector3.INF:
 		return
 
+	# Reject placement that would overlap another building, a unit, or a
+	# terrain feature (fuel deposit, wreck). Stay in build mode so the player
+	# can adjust and try again.
+	if not _is_valid_build_position(ground_pos):
+		if _audio:
+			_audio.play_error()
+		return
+
 	var resource_mgr: ResourceManager = get_tree().current_scene.get_node("ResourceManager") as ResourceManager
 	if not resource_mgr:
 		cancel_build_placement()
 		return
 
 	# Find the first selected engineer
+	_prune_selection()
 	var builder_unit: Unit = null
 	for unit: Unit in _selected_units:
 		if unit.get_builder():
@@ -723,6 +876,15 @@ func _confirm_build_placement(screen_pos: Vector2) -> void:
 	var building: Building = builder.place_building(_build_stats, ground_pos, resource_mgr)
 
 	if building:
+		# Every other selected engineer also walks over and builds — multiple
+		# Ratchets share the work so a squad gets the whole task instead of
+		# leaving three idle.
+		for unit: Unit in _selected_units:
+			if unit == builder_unit:
+				continue
+			var other_builder: Node = unit.get_builder()
+			if other_builder and other_builder.has_method("start_building"):
+				other_builder.start_building(building)
 		if _audio:
 			_audio.play_building_placed()
 		cancel_build_placement()

@@ -1,11 +1,29 @@
 class_name TurretComponent
 extends Node
 ## Attaches to a Building. Auto-attacks enemies in range.
+##
+## Each turret has a profile (`balanced`, `anti_light`, `anti_heavy`, `anti_air`)
+## chosen at runtime. Profile values drive damage, fire rate, range, and the
+## projectile's role tag; the building rebuilds its visual barrel to match.
 
+const SEARCH_INTERVAL: float = 0.5
+## How fast the turret swings to face its target, in lerp factor per second.
+const TURRET_TURN_SPEED: float = 5.0
+
+## Backwards-compatible defaults so external code can still read these.
 const TURRET_RANGE: float = 20.0
 const TURRET_DAMAGE: int = 15
 const FIRE_INTERVAL: float = 0.8
-const SEARCH_INTERVAL: float = 0.5
+
+## Profile presets. Keep keys stable — HUD code references them by name.
+const PROFILES: Dictionary = {
+	&"balanced":   { "damage": 15, "fire": 0.8,  "range": 20.0, "role": &"Universal", "name": "Balanced" },
+	&"anti_light": { "damage": 8,  "fire": 0.4,  "range": 18.0, "role": &"AP",        "name": "Anti-Light" },
+	&"anti_heavy": { "damage": 45, "fire": 2.0,  "range": 22.0, "role": &"AP",        "name": "Anti-Heavy" },
+	&"anti_air":   { "damage": 6,  "fire": 0.25, "range": 24.0, "role": &"AA",        "name": "Anti-Air" },
+}
+
+var profile: StringName = &"balanced"
 
 var _building: Node = null
 var _target: Node3D = null
@@ -15,6 +33,45 @@ var _search_timer: float = 0.0
 
 func _ready() -> void:
 	_building = get_parent()
+	# Apply the visual barrel matching the default profile.
+	_apply_visual_profile()
+
+
+func get_damage() -> int:
+	return (PROFILES[profile] as Dictionary).get("damage", TURRET_DAMAGE) as int
+
+
+func get_fire_interval() -> float:
+	return (PROFILES[profile] as Dictionary).get("fire", FIRE_INTERVAL) as float
+
+
+func get_range() -> float:
+	return (PROFILES[profile] as Dictionary).get("range", TURRET_RANGE) as float
+
+
+func get_role() -> StringName:
+	return (PROFILES[profile] as Dictionary).get("role", &"Universal") as StringName
+
+
+func get_dps() -> float:
+	var fi: float = get_fire_interval()
+	if fi <= 0.0:
+		return 0.0
+	return float(get_damage()) / fi
+
+
+func set_profile(new_profile: StringName) -> void:
+	if not PROFILES.has(new_profile):
+		return
+	profile = new_profile
+	_target = null
+	_fire_timer = 0.0
+	_apply_visual_profile()
+
+
+func _apply_visual_profile() -> void:
+	if _building and _building.has_method("rebuild_turret_visual"):
+		_building.rebuild_turret_visual(profile)
 
 
 func _process(delta: float) -> void:
@@ -36,9 +93,12 @@ func _process(delta: float) -> void:
 	if not _target:
 		return
 
+	# Slew the turret pivot toward the target before firing.
+	_aim_at_target(delta)
+
 	# Fire
 	if _fire_timer <= 0.0:
-		_fire_timer = FIRE_INTERVAL
+		_fire_timer = get_fire_interval()
 
 		# Apply power efficiency
 		var efficiency: float = 1.0
@@ -46,16 +106,17 @@ func _process(delta: float) -> void:
 			efficiency = _building.get_power_efficiency()
 		_fire_timer /= maxf(efficiency, 0.1)
 
-		var damage: int = maxi(int(float(TURRET_DAMAGE) * efficiency), 1)
-		_target.take_damage(damage)
+		var damage: int = maxi(int(float(get_damage()) * efficiency), 1)
+		_target.take_damage(damage, _building as Node3D)
 
-		# Projectile visual
+		# Projectile visual — uses the profile's role tag so anti-air shoots AA
+		# missiles, anti-heavy spits AP shells, etc.
 		var proj_script: GDScript = load("res://scripts/projectile.gd") as GDScript
 		if proj_script:
 			var proj: Node3D = proj_script.create(
 				_building.global_position + Vector3(0, 2.0, 0),
 				_target.global_position,
-				&"AP"
+				get_role()
 			)
 			get_tree().current_scene.add_child(proj)
 
@@ -67,6 +128,7 @@ func _process(delta: float) -> void:
 func _find_nearest_enemy() -> Node3D:
 	var my_owner: int = _building.get("owner_id")
 	var my_pos: Vector3 = _building.global_position
+	var range_v: float = get_range()
 	var nearest: Node3D = null
 	var nearest_dist: float = INF
 
@@ -79,11 +141,26 @@ func _find_nearest_enemy() -> Node3D:
 		if "alive_count" in node and node.get("alive_count") <= 0:
 			continue
 		var d: float = my_pos.distance_to(node.global_position)
-		if d <= TURRET_RANGE and d < nearest_dist:
+		if d <= range_v and d < nearest_dist:
 			nearest_dist = d
 			nearest = node as Node3D
 
 	return nearest
+
+
+func _aim_at_target(delta: float) -> void:
+	## Rotate the building's `turret_pivot` (created in _detail_gun_emplacement)
+	## around Y to face the current target.
+	var pivot: Node3D = _building.get("turret_pivot") as Node3D
+	if not pivot or not is_instance_valid(pivot):
+		return
+	var to_target: Vector3 = _target.global_position - _building.global_position
+	to_target.y = 0.0
+	if to_target.length_squared() < 0.01:
+		return
+	# atan2(x, z) + PI gives the Y rotation aligning local -Z with the target.
+	var target_y: float = atan2(to_target.x, to_target.z) + PI
+	pivot.rotation.y = lerp_angle(pivot.rotation.y, target_y, clampf(TURRET_TURN_SPEED * delta, 0.0, 1.0))
 
 
 func _is_valid_target(target: Node3D) -> bool:
@@ -96,4 +173,4 @@ func _is_valid_target(target: Node3D) -> bool:
 	if "alive_count" in target and target.get("alive_count") <= 0:
 		return false
 	var d: float = _building.global_position.distance_to(target.global_position)
-	return d <= TURRET_RANGE
+	return d <= get_range()
