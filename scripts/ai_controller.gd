@@ -35,6 +35,19 @@ const DEFENDERS: int = 2
 
 var _salvage_accumulator: float = 0.0
 
+## Cached difficulty multipliers from the MatchSettings autoload (defaults to
+## Normal if the autoload isn't present, e.g. when running the test arena
+## scene directly from the editor).
+var _econ_mul: float = 1.0
+var _agg_mul: float = 1.0
+
+
+func _enter_tree() -> void:
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if settings:
+		_econ_mul = settings.get_ai_economy_multiplier()
+		_agg_mul = settings.get_ai_aggression_multiplier()
+
 
 func _ready() -> void:
 	call_deferred("_setup")
@@ -68,9 +81,10 @@ func _process(delta: float) -> void:
 		_hq_destroyed = true
 		return
 
-	# Passive income
+	# Passive income — scaled by difficulty's economy multiplier so Easy
+	# starves the AI a bit and Hard makes it tech up faster.
 	if _ai_resource_manager and _ai_resource_manager.has_method("add_salvage"):
-		_salvage_accumulator += AI_SALVAGE_TRICKLE * delta
+		_salvage_accumulator += AI_SALVAGE_TRICKLE * _econ_mul * delta
 		if _salvage_accumulator >= 1.0:
 			var trickle: int = int(_salvage_accumulator)
 			_salvage_accumulator -= float(trickle)
@@ -128,8 +142,11 @@ func _process_army() -> void:
 	if _wave_count >= 2 and is_instance_valid(_adv_foundry):
 		_try_queue_at(_adv_foundry)
 
-	var wave_size: int = INITIAL_WAVE_SIZE + _wave_count * 2
-	if _units.size() >= wave_size or _state_timer >= ARMY_DURATION:
+	# Wave size scales with the aggression multiplier — Hard sends bigger
+	# pushes, Easy sends fewer units before attacking.
+	var base_wave: float = float(INITIAL_WAVE_SIZE + _wave_count * 2) * _agg_mul
+	var wave_size: int = maxi(int(round(base_wave)), 2)
+	if _units.size() >= wave_size or _state_timer >= ARMY_DURATION / _agg_mul:
 		_state = AIState.ATTACK
 		_state_timer = 0.0
 

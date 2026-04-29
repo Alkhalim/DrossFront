@@ -13,9 +13,13 @@ config_version=5
 config/name="Drossfront"
 config/description="Real-time strategy game set on Kethara, a dying industrial world."
 config/tags=PackedStringArray("rts", "strategy")
-run/main_scene="res://scenes/test_arena.tscn"
+run/main_scene="res://scenes/main_menu.tscn"
 config/features=PackedStringArray("4.6")
 config/icon="res://icon.svg"
+
+[autoload]
+
+MatchSettings="*res://scripts/match_settings.gd"
 
 [display]
 

@@ -112,9 +112,16 @@ func _show_end_screen(victory: bool) -> void:
 	# Restart button
 	var restart_btn := Button.new()
 	restart_btn.text = "Restart"
-	restart_btn.custom_minimum_size = Vector2(200, 50)
+	restart_btn.custom_minimum_size = Vector2(220, 44)
 	restart_btn.pressed.connect(_on_restart)
 	vbox.add_child(restart_btn)
+
+	# Main Menu button — return to the lobby for a fresh map / difficulty pick.
+	var menu_btn := Button.new()
+	menu_btn.text = "Main Menu"
+	menu_btn.custom_minimum_size = Vector2(220, 44)
+	menu_btn.pressed.connect(_on_main_menu)
+	vbox.add_child(menu_btn)
 
 	# Pause the game
 	get_tree().paused = true
@@ -124,3 +131,8 @@ func _show_end_screen(victory: bool) -> void:
 func _on_restart() -> void:
 	get_tree().paused = false
 	get_tree().reload_current_scene()
+
+
+func _on_main_menu() -> void:
+	get_tree().paused = false
+	get_tree().change_scene_to_file("res://scenes/main_menu.tscn")

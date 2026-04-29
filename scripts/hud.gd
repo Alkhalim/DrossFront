@@ -68,6 +68,69 @@ func _ready() -> void:
 	_build_pause_overlay()
 	_build_power_widget()
 
+	# Tutorial overlay — shown only when the player launched via the Tutorial
+	# button on the main menu. Dismisses with TAB or its own close button.
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if settings and settings.get("tutorial_mode"):
+		_build_tutorial_overlay()
+
+
+func _build_tutorial_overlay() -> void:
+	var overlay := PanelContainer.new()
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	overlay.position = Vector2(-260, 56)
+	overlay.custom_minimum_size = Vector2(520, 0)
+	overlay.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(overlay)
+
+	var inner := VBoxContainer.new()
+	inner.add_theme_constant_override("separation", 4)
+	overlay.add_child(inner)
+
+	var title := Label.new()
+	title.text = "Welcome, Commander"
+	title.add_theme_font_size_override("font_size", 20)
+	title.add_theme_color_override("font_color", Color(0.95, 0.92, 0.78, 1.0))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	inner.add_child(title)
+
+	var lines: PackedStringArray = PackedStringArray([
+		"Left click  — select unit / building",
+		"Left drag   — box-select multiple units",
+		"Shift+click — add to selection",
+		"Right click — move / attack / assist",
+		"A then RMB  — attack-move",
+		"WASD / edge — pan camera, mouse wheel zooms",
+		"Ctrl+0..9   — assign control group, 0..9 to recall",
+		"Q W E       — train units (basic foundry / armory)",
+		"1..7        — place buildings (with engineer selected)",
+		"ESC         — pause (resume + volume + main menu)",
+		"",
+		"Goal: destroy the enemy headquarters across the map.",
+	])
+	for line: String in lines:
+		var lbl := Label.new()
+		lbl.text = line
+		lbl.add_theme_font_size_override("font_size", 14)
+		lbl.add_theme_color_override("font_color", Color(0.85, 0.9, 0.95, 1.0))
+		inner.add_child(lbl)
+
+	var hint := Label.new()
+	hint.text = "Press TAB or click Dismiss to close"
+	hint.add_theme_font_size_override("font_size", 12)
+	hint.add_theme_color_override("font_color", Color(0.7, 0.85, 0.95, 1.0))
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	inner.add_child(hint)
+
+	var close_btn := Button.new()
+	close_btn.text = "Dismiss"
+	close_btn.custom_minimum_size = Vector2(120, 30)
+	close_btn.pressed.connect(func() -> void: overlay.queue_free())
+	inner.add_child(close_btn)
+
+	# Cache so the TAB handler can free it.
+	set_meta("tutorial_overlay", overlay)
+
 
 func _build_power_widget() -> void:
 	## Replace the bare PowerLabel with a small column: numeric label on top,
@@ -127,6 +190,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		if key.pressed and not key.echo and key.keycode == KEY_ESCAPE:
 			_toggle_pause()
 			get_viewport().set_input_as_handled()
+		elif key.pressed and not key.echo and key.keycode == KEY_TAB:
+			# TAB toggles / dismisses the tutorial overlay.
+			if has_meta("tutorial_overlay"):
+				var overlay: Node = get_meta("tutorial_overlay")
+				if is_instance_valid(overlay):
+					overlay.queue_free()
+				remove_meta("tutorial_overlay")
+				get_viewport().set_input_as_handled()
 
 
 func _toggle_pause() -> void:
@@ -190,7 +261,24 @@ func _build_pause_overlay() -> void:
 	vol_slider.process_mode = Node.PROCESS_MODE_ALWAYS
 	vbox.add_child(vol_slider)
 
+	# Spacer + return-to-menu button.
+	var menu_spacer := Control.new()
+	menu_spacer.custom_minimum_size = Vector2(0, 14)
+	vbox.add_child(menu_spacer)
+
+	var menu_btn := Button.new()
+	menu_btn.text = "Return to Main Menu"
+	menu_btn.custom_minimum_size = Vector2(220, 36)
+	menu_btn.process_mode = Node.PROCESS_MODE_ALWAYS
+	menu_btn.pressed.connect(_on_return_to_menu)
+	vbox.add_child(menu_btn)
+
 	_pause_overlay = overlay
+
+
+func _on_return_to_menu() -> void:
+	get_tree().paused = false
+	get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
 
 
 func _on_volume_changed(db: float) -> void:
