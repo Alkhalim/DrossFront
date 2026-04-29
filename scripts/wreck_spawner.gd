@@ -29,5 +29,8 @@ func _ready() -> void:
 			randf_range(0.3, 0.6),
 			randf_range(1.0, 2.0)
 		)
-		wreck.global_position = pos
+		# Set local position before adding to tree — global_position requires the
+		# node to already be in-tree, but we add deferred. The wreck is added
+		# directly under the scene root so local == global once attached.
+		wreck.position = pos
 		get_tree().current_scene.add_child.call_deferred(wreck)

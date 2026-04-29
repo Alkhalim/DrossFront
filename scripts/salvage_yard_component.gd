@@ -12,15 +12,32 @@ var _workers: Array[SalvageWorker] = []
 var _building: Node = null
 var _total_spawned: int = 0
 var _range_indicator: MeshInstance3D = null
+var _initial_spawned: bool = false
 
 
 func _ready() -> void:
 	_building = get_parent()
+	# Spawn the first worker the instant the yard finishes construction so the
+	# economy starts up without a 15-second wait.
+	if _building and _building.has_signal("construction_complete"):
+		_building.construction_complete.connect(_on_construction_complete)
+
+
+func _on_construction_complete() -> void:
+	if _initial_spawned:
+		return
+	_initial_spawned = true
+	_spawn_worker()
 
 
 func _process(delta: float) -> void:
 	if not _building or not _building.get("is_constructed"):
 		return
+
+	# Catch the AI-instant-built case (skips construction_complete signal).
+	if not _initial_spawned:
+		_initial_spawned = true
+		_spawn_worker()
 
 	# Clean up dead worker references
 	var i: int = _workers.size() - 1
@@ -48,6 +65,9 @@ func _spawn_worker() -> void:
 	worker.home_yard = _building
 	worker.resource_manager = _building.get("resource_manager")
 	worker.search_radius = COLLECTION_RADIUS
+	# Inherit the yard owner so workers belong to the right side and pick up
+	# the matching team-color stripe.
+	worker.owner_id = _building.get("owner_id") as int
 
 	var spawn_offset := Vector3(randf_range(-2.0, 2.0), 0, randf_range(-2.0, 2.0))
 	worker.global_position = _building.global_position + spawn_offset

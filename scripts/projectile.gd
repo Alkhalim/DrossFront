@@ -79,10 +79,14 @@ func _create_bullet_mesh(color: Color) -> void:
 func _create_missile_mesh(color: Color) -> void:
 	_mesh = MeshInstance3D.new()
 	var cyl := CylinderMesh.new()
-	cyl.top_radius = 0.04
-	cyl.bottom_radius = 0.1
+	cyl.top_radius = 0.04   # nose
+	cyl.bottom_radius = 0.1 # exhaust
 	cyl.height = 0.4
 	_mesh.mesh = cyl
+	# Default cylinder height is along +Y. Rotate so it aligns with the
+	# projectile's -Z (forward) — the nose then leads the trajectory and
+	# look_at properly orients the body along the arc.
+	_mesh.rotation.x = -PI / 2
 
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = color
@@ -167,9 +171,11 @@ func _process(delta: float) -> void:
 			if global_position.distance_to(next_pos) > 0.01:
 				look_at(next_pos, Vector3.UP)
 
-		# Trail behind missile
+		# Trail behind missile. After look_at, basis.z is the world direction of
+		# the projectile's local +Z (i.e. backward). +basis.z places the trail
+		# behind the missile.
 		if _trail:
-			_trail.global_position = global_position - global_basis.z.normalized() * 0.3
+			_trail.global_position = global_position + global_basis.z.normalized() * 0.3
 
 		if t >= 1.0:
 			_spawn_impact()
@@ -213,3 +219,7 @@ func _spawn_impact() -> void:
 	timer.autostart = true
 	timer.timeout.connect(flash.queue_free)
 	flash.add_child(timer)
+
+	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
+	if audio and audio.has_method("play_weapon_impact"):
+		audio.play_weapon_impact()
