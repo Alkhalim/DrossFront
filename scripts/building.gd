@@ -161,11 +161,13 @@ func _attach_visual(node: Node3D) -> void:
 
 func _apply_visual_cull_margin(root: Node, margin: float) -> void:
 	## Walks the visual tree and bumps `extra_cull_margin` on every
-	## VisualInstance3D so the small per-mesh AABBs (smokestacks, ribs,
+	## GeometryInstance3D so the small per-mesh AABBs (smokestacks, ribs,
 	## vents, etc.) stay drawn until the *whole building* is off-screen,
-	## not just each individual detail.
-	if root is VisualInstance3D:
-		(root as VisualInstance3D).extra_cull_margin = margin
+	## not just each individual detail. Lights live under VisualInstance3D
+	## too but don't expose extra_cull_margin — narrow the cast to
+	## GeometryInstance3D so we don't try to set the property on them.
+	if root is GeometryInstance3D:
+		(root as GeometryInstance3D).extra_cull_margin = margin
 	for child: Node in root.get_children():
 		_apply_visual_cull_margin(child, margin)
 
