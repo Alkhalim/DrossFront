@@ -1410,7 +1410,11 @@ func _physics_process(delta: float) -> void:
 		var idle_combat: Node = get_combat()
 		if idle_combat:
 			idle_combat_target = idle_combat.get("_current_target")
-		var has_combat: bool = idle_combat_target is Object and is_instance_valid(idle_combat_target as Object)
+		# `is Object` against a freed Variant crashes ("Left operand of
+		# 'is' is a previously freed instance"). `is_instance_valid`
+		# safely returns false on a stale reference, so it's the
+		# right primitive here.
+		var has_combat: bool = idle_combat_target != null and is_instance_valid(idle_combat_target)
 		if has_combat:
 			velocity.x = 0.0
 			velocity.z = 0.0
