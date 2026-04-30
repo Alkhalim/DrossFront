@@ -303,7 +303,16 @@ func place_building(building_stats: BuildingStatResource, position: Vector3, res
 	building.begin_construction()
 
 	# Recalculate power when building finishes
-	building.construction_complete.connect(func() -> void: resource_mgr.update_power())
+	building.construction_complete.connect(func() -> void:
+		resource_mgr.update_power()
+		resource_mgr.update_population_cap()
+	)
+	# Also re-tally on building death so the cap shrinks when a foundry
+	# is destroyed.
+	building.destroyed.connect(func() -> void:
+		resource_mgr.update_power()
+		resource_mgr.update_population_cap()
+	)
 
 	start_building(building)
 	return building

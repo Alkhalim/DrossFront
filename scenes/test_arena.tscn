@@ -94,10 +94,6 @@ stats = ExtResource("4")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0, 5)
 stats = ExtResource("5")
 
-[node name="Bulwark1" parent="Units" instance=ExtResource("2")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0, 2)
-stats = ExtResource("6")
-
 [node name="PlayerHQ" parent="." instance=ExtResource("10")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
 stats = ExtResource("11")

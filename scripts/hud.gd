@@ -928,6 +928,12 @@ func _refresh_global_queue() -> void:
 
 var _queue_icons_row: HBoxContainer = null
 const _QUEUE_ICON_SLOT_SIZE: Vector2 = Vector2(32.0, 32.0)
+## Cache the last building + queue contents we rendered so the icons
+## row only rebuilds when something actually changed. Without this the
+## row queue_free'd its children every frame, which raced with click
+## input — clicking a queue icon often happened on a button that was
+## already pending free, and the cancel signal was lost.
+var _last_queue_signature: String = ""
 
 
 func _ensure_queue_icons_row() -> void:
@@ -941,17 +947,28 @@ func _ensure_queue_icons_row() -> void:
 
 func _refresh_queue_icons(building: Building) -> void:
 	_ensure_queue_icons_row()
-	# Clear existing icons each refresh — cheap (max ~8 per building) and
-	# avoids stale state when the queue's been reordered elsewhere.
-	for child: Node in _queue_icons_row.get_children():
-		child.queue_free()
 
 	if not building or not building.is_constructed:
 		_queue_icons_row.visible = false
+		_last_queue_signature = ""
 		return
 	var queue: Array = []
 	if building.has_method("get_queue_snapshot"):
 		queue = building.get_queue_snapshot()
+
+	# Build a cheap signature so we only rebuild when the queue actually
+	# changes — building id + each unit's instance_id in order.
+	var sig := "%d" % building.get_instance_id()
+	for entry: UnitStatResource in queue:
+		sig += ":%d" % (entry.get_instance_id() if entry else 0)
+	if sig == _last_queue_signature:
+		return
+	_last_queue_signature = sig
+
+	# Clear existing icons — only happens on actual change now.
+	for child: Node in _queue_icons_row.get_children():
+		child.queue_free()
+
 	if queue.is_empty():
 		_queue_icons_row.visible = false
 		return

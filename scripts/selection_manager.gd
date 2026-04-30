@@ -497,6 +497,13 @@ func _find_enemy_at(screen_pos: Vector2) -> Node3D:
 	if unit and unit.owner_id != 0:
 		return unit
 
+	# Check Crawlers — they aren't Unit instances and slip past
+	# `_raycast_unit`'s typed cast, so without this branch right-clicking
+	# an enemy Crawler did nothing and the player relied on auto-target.
+	var crawler := _raycast_crawler(screen_pos)
+	if crawler and crawler.owner_id != 0:
+		return crawler
+
 	# Check enemy buildings via screen projection
 	var buildings: Array[Node] = get_tree().get_nodes_in_group("buildings")
 	for node: Node in buildings:

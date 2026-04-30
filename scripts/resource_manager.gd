@@ -10,8 +10,19 @@ signal population_changed(current: int, cap: int)
 ## Starting values per the design doc.
 const SALVAGE_CAP: int = 9999
 const FUEL_CAP_BASE: int = 500
-const POPULATION_CAP: int = 100
 const HQ_SALVAGE_TRICKLE: float = 5.0
+## Population scales with infrastructure: a baseline cap from the HQ
+## itself + a per-production-building bonus, hard-capped at the upper
+## ceiling. New player starts modest (50) and grows their barracks
+## space by completing foundries / armories.
+const POPULATION_BASE: int = 50
+const POPULATION_PER_BUILDING: int = 25
+const POPULATION_MAX: int = 250
+
+## Which player this manager bookkeeps for. Used by `update_population_cap`
+## to count this player's production buildings rather than the whole map.
+## 0 = local human; AI managers set their own player_id via PlayerRegistry.
+var owner_id: int = 0
 
 var salvage: int = 200
 var fuel: int = 0
@@ -19,6 +30,7 @@ var fuel_cap: int = FUEL_CAP_BASE
 var power_production: int = 0
 var power_consumption: int = 0
 var population: int = 0
+var population_cap: int = POPULATION_BASE
 
 var _salvage_accumulator: float = 0.0
 
@@ -56,7 +68,7 @@ func can_afford(salvage_cost: int, fuel_cost: int) -> bool:
 
 
 func has_population(pop_cost: int) -> bool:
-	return population + pop_cost <= POPULATION_CAP
+	return population + pop_cost <= population_cap
 
 
 func spend(salvage_cost: int, fuel_cost: int) -> bool:
@@ -81,12 +93,33 @@ func add_fuel(amount: int) -> void:
 
 func add_population(amount: int) -> void:
 	population += amount
-	population_changed.emit(population, POPULATION_CAP)
+	population_changed.emit(population, population_cap)
 
 
 func remove_population(amount: int) -> void:
 	population = maxi(population - amount, 0)
-	population_changed.emit(population, POPULATION_CAP)
+	population_changed.emit(population, population_cap)
+
+
+func update_population_cap() -> void:
+	## Recomputes population_cap = BASE + 25 per friendly production
+	## building (anything that has at least one producible unit), capped
+	## at POPULATION_MAX. Called by Building._finish_construction so the
+	## cap rises as soon as a foundry / armory completes.
+	var production_count: int = 0
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		var building: Building = node as Building
+		if not building or not building.is_constructed or not building.stats:
+			continue
+		if building.owner_id != owner_id:
+			continue
+		if building.stats.producible_units.is_empty():
+			continue
+		production_count += 1
+	var new_cap: int = mini(POPULATION_BASE + production_count * POPULATION_PER_BUILDING, POPULATION_MAX)
+	if new_cap != population_cap:
+		population_cap = new_cap
+		population_changed.emit(population, population_cap)
 
 
 func update_power() -> void:

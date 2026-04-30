@@ -223,6 +223,10 @@ func _spawn_ai_player(player_id: int, display_name: String) -> void:
 	var ai_res := ResourceManager.new()
 	ai_res.name = ("AIResourceManager" if player_id == 1 else "AIResourceManager_%d" % player_id)
 	ai_res.salvage = 500
+	# So `update_population_cap` knows whose buildings to count. The
+	# manager would otherwise default to owner 0 and tally the player's
+	# foundries against the AI's population pool.
+	ai_res.owner_id = player_id
 	add_child(ai_res)
 
 	var registry: PlayerRegistry = $PlayerRegistry as PlayerRegistry
