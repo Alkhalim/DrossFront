@@ -188,18 +188,20 @@ func _process_economy() -> void:
 	# Queue and pilot a Crawler.
 	_maintain_crawlers()
 
-	# Phase 1: Basic buildings
-	_try_place("generator", "res://resources/buildings/basic_generator.tres", Vector3(5, 0, 3))
-	_try_place("foundry", "res://resources/buildings/basic_foundry.tres", Vector3(-5, 0, 3))
-	_try_place("salvage_yard", "res://resources/buildings/salvage_yard.tres", Vector3(0, 0, 6))
+	# Phase 1: Basic buildings — offsets pushed out so the AI base lays
+	# out as a real footprint with units able to thread between
+	# buildings instead of getting wedged against tight 5u clearances.
+	_try_place("generator", "res://resources/buildings/basic_generator.tres", Vector3(9, 0, 6))
+	_try_place("foundry", "res://resources/buildings/basic_foundry.tres", Vector3(-9, 0, 6))
+	_try_place("salvage_yard", "res://resources/buildings/salvage_yard.tres", Vector3(0, 0, 13))
 
 	# Phase 2: After first wave, build advanced structures
 	if _wave_count >= 1:
-		_try_place("generator2", "res://resources/buildings/basic_generator.tres", Vector3(7, 0, 5))
-		_try_place("turret", "res://resources/buildings/gun_emplacement.tres", Vector3(0, 0, -3))
+		_try_place("generator2", "res://resources/buildings/basic_generator.tres", Vector3(13, 0, 13))
+		_try_place("turret", "res://resources/buildings/gun_emplacement.tres", Vector3(0, 0, -9))
 
 	if _wave_count >= 2:
-		_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", Vector3(-7, 0, 5))
+		_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", Vector3(-13, 0, 13))
 
 	if _state_timer >= ECONOMY_DURATION:
 		_state = AIState.ARMY

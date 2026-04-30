@@ -127,6 +127,9 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 		elif _attack_move_mode:
 			_command_attack_move(event.position)
 			_attack_move_mode = false
+		elif _patrol_target_mode:
+			_command_patrol(event.position)
+			_patrol_target_mode = false
 		else:
 			# Check if right-clicking an enemy → attack command
 			var enemy := _find_enemy_at(event.position)
@@ -180,6 +183,18 @@ func _input(event: InputEvent) -> void:
 			# A key = attack-move mode
 			if key.keycode == KEY_A and not _selected_units.is_empty():
 				_attack_move_mode = true
+				_patrol_target_mode = false
+				get_viewport().set_input_as_handled()
+				return
+			# S key = Stand Ground / Hold Position
+			if key.keycode == KEY_S and not _selected_units.is_empty():
+				command_hold_position_on_selection()
+				get_viewport().set_input_as_handled()
+				return
+			# P key = Patrol target mode (next right-click sets endpoint)
+			if key.keycode == KEY_P and not _selected_units.is_empty():
+				_patrol_target_mode = true
+				_attack_move_mode = false
 				get_viewport().set_input_as_handled()
 				return
 
@@ -489,6 +504,52 @@ func _command_attack_move(screen_pos: Vector2) -> void:
 			combat.command_attack_move(ground_pos)
 		else:
 			unit.command_move(ground_pos)
+
+
+## Stand Ground / Patrol mode flags driven by the unit-action panel.
+var _patrol_target_mode: bool = false
+
+
+func enter_attack_move_mode() -> void:
+	## Public version of the 'A' hotkey toggle so the HUD button can
+	## hand off the same flow.
+	if not _selected_units.is_empty():
+		_attack_move_mode = true
+		_patrol_target_mode = false
+
+
+func enter_patrol_target_mode() -> void:
+	if _selected_units.is_empty():
+		return
+	_patrol_target_mode = true
+	_attack_move_mode = false
+
+
+func command_hold_position_on_selection() -> void:
+	_prune_selection()
+	if _selected_units.is_empty():
+		return
+	_cancel_builder_tasks()
+	if _audio:
+		_audio.play_command()
+	for unit: Unit in _selected_units:
+		if unit.has_method("command_hold_position"):
+			unit.command_hold_position()
+
+
+func _command_patrol(screen_pos: Vector2) -> void:
+	_prune_selection()
+	if _selected_units.is_empty():
+		return
+	_cancel_builder_tasks()
+	if _audio:
+		_audio.play_command()
+	var ground_pos := _raycast_ground(screen_pos)
+	if ground_pos == Vector3.INF:
+		return
+	for unit: Unit in _selected_units:
+		if unit.has_method("command_patrol"):
+			unit.command_patrol(ground_pos)
 
 
 func _find_enemy_at(screen_pos: Vector2) -> Node3D:
@@ -840,9 +901,11 @@ func _select_building(building: Building) -> void:
 	if _selected_building and _selected_building != building:
 		_selected_building.deselect_building()
 		_hide_yard_range(_selected_building)
+		_hide_attack_range(_selected_building)
 	_selected_building = building
 	_selected_building.select_building()
 	_show_yard_range(building)
+	_show_attack_range(building)
 	# Single-select path also resets the cohort to just this building so
 	# subsequent queue calls don't fan out to a stale double-click set.
 	_selected_buildings.clear()
@@ -862,9 +925,54 @@ func _deselect_building() -> void:
 	if _selected_building:
 		_selected_building.deselect_building()
 		_hide_yard_range(_selected_building)
+		_hide_attack_range(_selected_building)
 	_selected_building = null
 	_selected_buildings.clear()
 	_hide_rally_marker()
+
+
+func _show_attack_range(building: Building) -> void:
+	## Adds a translucent disc at the building's footprint matching its
+	## turret range. Stores it as a child so `_hide_attack_range` can
+	## kill it on deselect.
+	if not building or not building.stats:
+		return
+	if building.stats.building_id != &"gun_emplacement":
+		return
+	if building.has_node("SelectionAttackRange"):
+		return  # Already showing.
+	var ring := MeshInstance3D.new()
+	ring.name = "SelectionAttackRange"
+	var disc := CylinderMesh.new()
+	var radius: float = TurretComponent.TURRET_RANGE
+	# If the turret component is live, take its actual range (covers
+	# upgraded profiles in case we add range modifiers later).
+	var turret: Node = building.get_node_or_null("TurretComponent")
+	if turret and turret.has_method("get_range"):
+		radius = turret.get_range()
+	disc.top_radius = radius
+	disc.bottom_radius = radius
+	disc.height = 0.04
+	disc.radial_segments = 64
+	ring.mesh = disc
+	ring.position.y = 0.06
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.95, 0.4, 0.35, 0.30)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.emission_enabled = true
+	mat.emission = Color(0.95, 0.4, 0.35, 1.0)
+	mat.emission_energy_multiplier = 0.4
+	ring.set_surface_override_material(0, mat)
+	building.add_child(ring)
+
+
+func _hide_attack_range(building: Building) -> void:
+	if not building:
+		return
+	var ring: Node = building.get_node_or_null("SelectionAttackRange")
+	if ring:
+		ring.queue_free()
 
 
 func _show_yard_range(building: Building) -> void:
@@ -1096,6 +1204,35 @@ func start_build_placement(bstat: BuildingStatResource) -> void:
 	_apply_ghost_tint(ghost, Color(0.25, 0.85, 0.3, 0.45))
 
 	_build_ghost = ghost as Node3D
+
+	# Attack-range ring on ghosts for buildings that fire at things.
+	# Currently only the gun emplacement; other defensive types (SAM
+	# site, etc.) drop in here later.
+	if bstat.building_id == &"gun_emplacement":
+		_attach_range_ring(ghost, TurretComponent.TURRET_RANGE, Color(0.95, 0.4, 0.35, 0.35))
+
+
+func _attach_range_ring(parent: Node3D, radius: float, color: Color) -> void:
+	## Flat translucent disc parented to the placement ghost so the player
+	## sees what the turret will cover before committing.
+	var ring := MeshInstance3D.new()
+	ring.name = "RangeRing"
+	var disc := CylinderMesh.new()
+	disc.top_radius = radius
+	disc.bottom_radius = radius
+	disc.height = 0.04
+	disc.radial_segments = 64
+	ring.mesh = disc
+	ring.position.y = 0.05  # just above ground to avoid z-fighting
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.emission_enabled = true
+	mat.emission = Color(color.r, color.g, color.b, 1.0)
+	mat.emission_energy_multiplier = 0.4
+	ring.set_surface_override_material(0, mat)
+	parent.add_child(ring)
 
 
 func cancel_build_placement() -> void:

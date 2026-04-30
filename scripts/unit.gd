@@ -33,6 +33,17 @@ var move_target: Vector3 = Vector3.INF
 var move_queue: Array[Vector3] = []
 var is_selected: bool = false
 var has_move_order: bool = false
+## Stand-ground state. When true the combat component skips auto-acquire
+## scanning and the movement loop refuses to chase out-of-range enemies.
+## The unit still fires at anything that wanders into actual weapon range,
+## just doesn't reposition itself. Cleared by any explicit move/attack/
+## attack-move/patrol order.
+var is_holding_position: bool = false
+## Patrol state — when both ends are set the unit walks A → B → A → B in a
+## loop, scanning for enemies along the way (same engagement rules as
+## attack-move, which is functionally what each leg is).
+var patrol_a: Vector3 = Vector3.INF
+var patrol_b: Vector3 = Vector3.INF
 var _move_speed: float = 8.0
 
 ## How fast the unit's body slews around Y, in lerp factor per second.
@@ -1236,8 +1247,13 @@ func command_move(target: Vector3, clear_combat: bool = true) -> void:
 	## Move toward `target`. By default this also clears any combat target
 	## (player-issued moves preempt combat). Pass `clear_combat=false` for
 	## combat-internal chase commands so the chaser doesn't immediately wipe
-	## its own forced target. Plain move clears any pending waypoint queue.
+	## its own forced target. Plain move clears any pending waypoint queue,
+	## the patrol pair, and the stand-ground flag — those are all
+	## superseded by an explicit move.
 	move_queue.clear()
+	is_holding_position = false
+	patrol_a = Vector3.INF
+	patrol_b = Vector3.INF
 	move_target = target
 	move_target.y = global_position.y
 	has_move_order = true
@@ -1248,6 +1264,41 @@ func command_move(target: Vector3, clear_combat: bool = true) -> void:
 		var combat: Node = get_combat()
 		if combat and combat.has_method("clear_target"):
 			combat.clear_target()
+
+
+func command_hold_position() -> void:
+	## Stand Ground. Stops moving, clears combat target, and sets
+	## `is_holding_position` so CombatComponent skips the auto-acquire
+	## scan. Anything that walks into actual weapon range still gets
+	## shot — hold means "don't reposition", not "go pacifist".
+	stop()
+	is_holding_position = true
+	patrol_a = Vector3.INF
+	patrol_b = Vector3.INF
+	var combat: Node = get_combat()
+	if combat and combat.has_method("clear_target"):
+		combat.clear_target()
+
+
+func command_patrol(target: Vector3) -> void:
+	## Patrol between current position and `target`, looping. Each leg
+	## walks like an attack-move (auto-engage en route). If the target
+	## is essentially the unit's current position, no patrol is set.
+	patrol_a = Vector3(global_position.x, global_position.y, global_position.z)
+	patrol_b = Vector3(target.x, global_position.y, target.z)
+	if patrol_a.distance_to(patrol_b) < 1.0:
+		patrol_a = Vector3.INF
+		patrol_b = Vector3.INF
+		return
+	is_holding_position = false
+	# Kick off leg 1 toward B via attack-move so the unit fights on
+	# the way. The patrol-loop logic in _physics_process flips legs
+	# when the unit arrives at each end.
+	var combat: Node = get_combat()
+	if combat and combat.has_method("command_attack_move"):
+		combat.command_attack_move(patrol_b)
+	else:
+		command_move(patrol_b, false)
 
 
 func queue_move(target: Vector3) -> void:
@@ -1323,19 +1374,35 @@ func _physics_process(delta: float) -> void:
 		velocity.y = 0.0
 
 	if move_target == Vector3.INF:
-		# Idle: gently push apart from any same-team neighbour that's
-		# overlapping, so a tightly-bunched squad spreads out rather
-		# than stacking on a single point. Skipped while a combat
-		# target is engaged — the combat loop drives its own movement.
+		# Idle. Three cases:
+		#  - In combat: the combat loop drives positioning, just zero
+		#    horizontal velocity here.
+		#  - Patrolling: flip to the other patrol endpoint.
+		#  - Otherwise: gently push apart from same-team neighbours so
+		#    a clumped squad spreads out at rest.
 		var idle_combat_target: Variant = null
 		var idle_combat: Node = get_combat()
 		if idle_combat:
 			idle_combat_target = idle_combat.get("_current_target")
-		if not (idle_combat_target is Object and is_instance_valid(idle_combat_target as Object)):
-			_apply_idle_spread()
-		else:
+		var has_combat: bool = idle_combat_target is Object and is_instance_valid(idle_combat_target as Object)
+		if has_combat:
 			velocity.x = 0.0
 			velocity.z = 0.0
+		elif patrol_a != Vector3.INF and patrol_b != Vector3.INF:
+			# Pick whichever endpoint is further from us — that's the
+			# next leg. attack_move so the unit fights en route.
+			var d_a: float = global_position.distance_to(patrol_a)
+			var d_b: float = global_position.distance_to(patrol_b)
+			var next: Vector3 = patrol_a if d_a > d_b else patrol_b
+			var combat: Node = get_combat()
+			if combat and combat.has_method("command_attack_move"):
+				combat.command_attack_move(next)
+			else:
+				command_move(next, false)
+			velocity.x = 0.0
+			velocity.z = 0.0
+		else:
+			_apply_idle_spread()
 		# Always run move_and_slide while idle — gravity needs to settle
 		# airborne units, and the spread velocity (when set) needs to
 		# actually move the body.

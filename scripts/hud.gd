@@ -1014,6 +1014,56 @@ func _on_queue_icon_pressed(building: Building, index: int) -> void:
 	_last_building_id = -1
 
 
+## --- Unit command buttons ---
+##
+## Stand Ground / Patrol / Attack-Move row shown when a non-engineer
+## unit is selected. Clicking Patrol or Attack-Move puts the
+## SelectionManager into a target-pick mode; the next right-click
+## sets the destination.
+
+func _rebuild_unit_command_buttons() -> void:
+	_action_label.text = "Commands"
+	# Hold (Stand Ground)
+	var hold_btn := Button.new()
+	hold_btn.text = "[S] Hold"
+	hold_btn.tooltip_text = "Stand Ground — units stop moving and don't chase enemies, but still fire on threats in range."
+	hold_btn.custom_minimum_size = Vector2(94, 42)
+	hold_btn.pressed.connect(_on_hold_button)
+	_button_grid.add_child(hold_btn)
+	_action_buttons.append({"button": hold_btn, "kind": "command", "key": "hold"})
+	# Patrol
+	var patrol_btn := Button.new()
+	patrol_btn.text = "[P] Patrol"
+	patrol_btn.tooltip_text = "Patrol — units walk between current position and a chosen point, attacking en route."
+	patrol_btn.custom_minimum_size = Vector2(94, 42)
+	patrol_btn.pressed.connect(_on_patrol_button)
+	_button_grid.add_child(patrol_btn)
+	_action_buttons.append({"button": patrol_btn, "kind": "command", "key": "patrol"})
+	# Attack-Move
+	var amove_btn := Button.new()
+	amove_btn.text = "[A] Attack-Move"
+	amove_btn.tooltip_text = "Attack-Move — units advance to a point and engage anything they pass on the way."
+	amove_btn.custom_minimum_size = Vector2(120, 42)
+	amove_btn.pressed.connect(_on_attack_move_button)
+	_button_grid.add_child(amove_btn)
+	_action_buttons.append({"button": amove_btn, "kind": "command", "key": "attack_move"})
+
+
+func _on_hold_button() -> void:
+	if _selection_manager and _selection_manager.has_method("command_hold_position_on_selection"):
+		_selection_manager.command_hold_position_on_selection()
+
+
+func _on_patrol_button() -> void:
+	if _selection_manager and _selection_manager.has_method("enter_patrol_target_mode"):
+		_selection_manager.enter_patrol_target_mode()
+
+
+func _on_attack_move_button() -> void:
+	if _selection_manager and _selection_manager.has_method("enter_attack_move_mode"):
+		_selection_manager.enter_attack_move_mode()
+
+
 ## --- Production / Build buttons ---
 
 func _rebuild_production_buttons(building: Building) -> void:
@@ -1481,7 +1531,7 @@ func _update_unit_panel(units: Array[Unit]) -> void:
 		elif not has_builder:
 			_showing_build_buttons = false
 			_clear_buttons()
-			_action_label.text = ""
+			_rebuild_unit_command_buttons()
 
 	# Update text every frame
 	_queue_label.text = ""

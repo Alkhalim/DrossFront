@@ -78,7 +78,10 @@ func _physics_process(delta: float) -> void:
 	# Auto-acquire targets: allowed when idle, or during attack-move. We scan a
 	# wider engage range than the weapon range so an idle unit will move toward
 	# an enemy that's in sight but just out of range, rather than ignoring it.
-	var can_auto_target: bool = not unit_has_move_order or attack_move_target != Vector3.INF
+	# Stand-ground units skip this — they shoot what walks into actual
+	# range but don't hunt.
+	var holding: bool = bool(_unit.get("is_holding_position"))
+	var can_auto_target: bool = (not unit_has_move_order or attack_move_target != Vector3.INF) and not holding
 	if not _current_target and can_auto_target and _search_timer <= 0.0:
 		_search_timer = SEARCH_INTERVAL
 		var stats: UnitStatResource = _unit.get("stats") as UnitStatResource
