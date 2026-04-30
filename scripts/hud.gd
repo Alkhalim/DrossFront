@@ -613,12 +613,61 @@ func _update_selection_display() -> void:
 		_bottom_panel.visible = true
 		_update_crawler_panel(crawler)
 	else:
-		_bottom_panel.visible = false
-		_last_building_id = -1
-		_last_unit_ids.clear()
-		_showing_build_buttons = false
-		if _progress_bar:
-			_progress_bar.visible = false
+		# Nothing of ours selected — fall back to the read-only enemy
+		# inspection panel if the player clicked an enemy / neutral.
+		var inspected: Node3D = null
+		if _selection_manager.has_method("get_inspected_enemy"):
+			inspected = _selection_manager.get_inspected_enemy()
+		if inspected:
+			_bottom_panel.visible = true
+			_update_enemy_inspect_panel(inspected)
+		else:
+			_bottom_panel.visible = false
+			_last_building_id = -1
+			_last_unit_ids.clear()
+			_showing_build_buttons = false
+			if _progress_bar:
+				_progress_bar.visible = false
+
+
+func _update_enemy_inspect_panel(target: Node3D) -> void:
+	## Read-only panel for an enemy / neutral unit or Crawler. No
+	## buttons, no progress bar — just identification + HP + stats.
+	_clear_buttons()
+	_action_label.text = ""
+	_queue_label.text = ""
+	_hide_progress()
+	_last_unit_ids.clear()
+	_last_building_id = -1
+	_showing_build_buttons = false
+
+	var stats: UnitStatResource = target.get("stats") as UnitStatResource if "stats" in target else null
+	var hp_now: int = (target.get("current_hp") as int) if "current_hp" in target else 0
+	var hp_max: int = stats.hp_total if stats else hp_now
+	var alive: int = (target.get("alive_count") as int) if "alive_count" in target else 1
+
+	# Owner tag — Enemy / Neutral.
+	var owner_id: int = (target.get("owner_id") as int) if "owner_id" in target else -1
+	var owner_label: String = "Enemy"
+	if owner_id == 2:
+		owner_label = "Neutral"
+
+	if stats:
+		_name_label.text = "%s (%s)" % [stats.unit_name, owner_label]
+		_stats_label.text = "%s   HP %d / %d   Squad %d / %d   Armor %s" % [
+			str(stats.unit_class).capitalize(),
+			hp_now, hp_max,
+			alive, stats.squad_size,
+			str(stats.armor_class).capitalize(),
+		]
+		var hp_pct: float = float(hp_now) / float(maxi(hp_max, 1))
+		var hp_color: Color = Color(0.95, 0.4, 0.35, 0.95)
+		if hp_pct >= 0.5:
+			hp_color = Color(0.95, 0.78, 0.32, 0.95)
+		_show_progress(hp_pct, hp_color)
+	else:
+		_name_label.text = "%s Unit" % owner_label
+		_stats_label.text = "HP %d" % hp_now
 
 
 func _update_crawler_panel(crawler: SalvageCrawler) -> void:

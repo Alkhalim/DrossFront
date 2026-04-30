@@ -110,6 +110,8 @@ func _upgrade_existing_units(base_stats: UnitStatResource, branch_stats: UnitSta
 			# Re-init HP with new stats (heal to new max)
 			if node.has_method("_init_hp"):
 				node._init_hp()
-			# Update visual to reflect new stats
-			if node.has_method("_apply_placeholder_shape"):
-				node._apply_placeholder_shape()
+			# Rebuild visuals so the upgrade reads on existing squads.
+			# Unit uses `_build_squad_visuals`, not the Building-only
+			# `_apply_placeholder_shape` we used to call here.
+			if node.has_method("_build_squad_visuals"):
+				node._build_squad_visuals()

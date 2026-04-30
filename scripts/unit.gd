@@ -456,6 +456,32 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 	torso_pivot.add_child(visor)
 	mats.append(visor_mat)
 
+	# Branch-variant cap on top of the head — small visual cue so the
+	# player can tell a Tracker apart from a Ripper at a glance even
+	# though both share the medium-class silhouette.
+	var unit_name_str: String = stats.unit_name if stats else ""
+	if unit_name_str.findn("Tracker") >= 0 or unit_name_str.findn("Ripper") >= 0:
+		var variant_mark := MeshInstance3D.new()
+		var mark_sphere := SphereMesh.new()
+		mark_sphere.radius = head_size.x * 0.18
+		mark_sphere.height = head_size.x * 0.36
+		variant_mark.mesh = mark_sphere
+		variant_mark.position = Vector3(0.0, torso_size.y + head_size.y + head_size.x * 0.18, head_fwd_offset)
+		var mark_mat := StandardMaterial3D.new()
+		if unit_name_str.findn("Tracker") >= 0:
+			# Cyan signal — long-range / sensor variant.
+			mark_mat.albedo_color = Color(0.2, 0.85, 1.0, 1.0)
+			mark_mat.emission = Color(0.3, 0.9, 1.0, 1.0)
+		else:
+			# Hot red — close-range brawler variant.
+			mark_mat.albedo_color = Color(1.0, 0.3, 0.2, 1.0)
+			mark_mat.emission = Color(1.0, 0.4, 0.2, 1.0)
+		mark_mat.emission_enabled = true
+		mark_mat.emission_energy_multiplier = 2.2
+		variant_mark.set_surface_override_material(0, mark_mat)
+		torso_pivot.add_child(variant_mark)
+		mats.append(mark_mat)
+
 	# --- Shoulders / Cannons ---
 	var shoulders: Array[Node3D] = []
 	var cannons: Array[Node3D] = []

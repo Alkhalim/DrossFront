@@ -41,6 +41,10 @@ var _selected_buildings: Array[Building] = []
 ## and re-select the freshly-placed foundation. Cleared on the first
 ## release that consumes it.
 var _suppress_next_release: bool = false
+## Read-only inspection target — set when the player clicks an enemy or
+## neutral unit/Crawler so the HUD can show its name + HP + stats. Doesn't
+## interact with movement / attack commands; it's pure info display.
+var _inspected_enemy: Node3D = null
 
 ## Attack-move mode: next right-click issues attack-move instead of move.
 var _attack_move_mode: bool = false
@@ -257,9 +261,19 @@ func _click_select(event: InputEventMouseButton) -> void:
 	var is_double: bool = _pending_double_click
 	_pending_double_click = false
 
-	# Only select player-owned units
+	# Only select player-owned units. Enemy / neutral clicks become a
+	# read-only "inspect this thing" — the HUD shows its name + stats
+	# but the player can't command it.
 	if unit and unit.owner_id != 0:
-		unit = null
+		_inspected_enemy = unit
+		_clear_selection()
+		_clear_crawler_selection()
+		_deselect_building()
+		get_viewport().set_input_as_handled()
+		return
+	# Clear stale inspection on any new click attempt — the new selection
+	# (if any) will write to it; otherwise it just stays cleared.
+	_inspected_enemy = null
 
 	if unit:
 		_deselect_building()
@@ -293,6 +307,14 @@ func _click_select(event: InputEventMouseButton) -> void:
 				_clear_selection()
 				_clear_crawler_selection()
 				_add_crawler_to_selection(crawler)
+		elif crawler and crawler.owner_id != 0:
+			# Enemy / neutral Crawler — same inspect treatment as units.
+			_inspected_enemy = crawler
+			_clear_selection()
+			_clear_crawler_selection()
+			_deselect_building()
+			get_viewport().set_input_as_handled()
+			return
 		else:
 			# Try selecting a building
 			var building := _find_building_at(event.position)
@@ -1026,6 +1048,12 @@ func get_selected_crawler() -> SalvageCrawler:
 
 func get_selected_crawlers() -> Array[SalvageCrawler]:
 	return _selected_crawlers
+
+
+func get_inspected_enemy() -> Node3D:
+	if _inspected_enemy and not is_instance_valid(_inspected_enemy):
+		_inspected_enemy = null
+	return _inspected_enemy
 
 
 func _add_crawler_to_selection(crawler: SalvageCrawler, play_audio: bool = true) -> void:
