@@ -573,9 +573,12 @@ func _update_resource_display() -> void:
 				fill_color = Color(0.4, 0.95, 0.4, 1.0)  # comfortable green
 			_power_bar_fill_style.bg_color = fill_color
 
-	# Population — yellow when >= 90%, red when capped.
-	var pop_pct: float = float(_resource_manager.population) / float(ResourceManager.POPULATION_CAP)
-	_pop_label.text = "Pop  %d / %d" % [_resource_manager.population, ResourceManager.POPULATION_CAP]
+	# Population — yellow when >= 90%, red when capped. Pop cap is now
+	# dynamic (base + production buildings) so we read the live field
+	# instead of the previous static constant.
+	var pop_cap: int = maxi(_resource_manager.population_cap, 1)
+	var pop_pct: float = float(_resource_manager.population) / float(pop_cap)
+	_pop_label.text = "Pop  %d / %d" % [_resource_manager.population, pop_cap]
 	if pop_pct >= 1.0:
 		_pop_label.add_theme_color_override("font_color", COLOR_WARN)
 	elif pop_pct >= 0.9:
