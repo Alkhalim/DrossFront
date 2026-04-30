@@ -20,6 +20,7 @@ func _ready() -> void:
 	_setup_fuel_deposits()
 	_setup_terrain()
 	_setup_elevation()
+	_setup_skyline_features()
 	_setup_neutral_patrols()
 	_setup_buildable_buildings()
 	# Bake last — once every static collider (HQs, terrain) is in place, so
@@ -381,9 +382,45 @@ func _setup_terrain() -> void:
 		{"pos": Vector3(-110, 0, 55), "size": Vector3(3.5, 2.0, 3.0), "kind": "rock"},
 		{"pos": Vector3(110, 0, -50), "size": Vector3(3.5, 2.5, 3.0), "kind": "rock"},
 		{"pos": Vector3(-110, 0, -45), "size": Vector3(3.0, 2.0, 3.5), "kind": "rock"},
+		# Scrap-pile terrain: low + wide debris fields. Different
+		# silhouette from rocks/ruins (flatter, more chunks per piece)
+		# so the same area can mix variety.
+		{"pos": Vector3(40, 0, 50), "size": Vector3(5.0, 1.0, 5.0), "kind": "scrap_pile"},
+		{"pos": Vector3(-40, 0, 50), "size": Vector3(4.5, 1.2, 5.5), "kind": "scrap_pile"},
+		{"pos": Vector3(40, 0, -50), "size": Vector3(4.5, 1.0, 5.0), "kind": "scrap_pile"},
+		{"pos": Vector3(-40, 0, -50), "size": Vector3(5.0, 1.2, 4.5), "kind": "scrap_pile"},
+		{"pos": Vector3(0, 0, 50), "size": Vector3(6.0, 0.9, 4.5), "kind": "scrap_pile"},
+		{"pos": Vector3(0, 0, -65), "size": Vector3(5.5, 1.0, 5.0), "kind": "scrap_pile"},
 	]
 	for piece: Dictionary in pieces:
 		_spawn_terrain_piece(piece["pos"] as Vector3, piece["size"] as Vector3, piece["kind"] as String)
+	# Boulder clusters — three close-spaced small rocks that read as a
+	# weathered formation rather than a single big shape.
+	var cluster_centers: Array[Vector3] = [
+		Vector3(85, 0, 25),
+		Vector3(-85, 0, 25),
+		Vector3(85, 0, -25),
+		Vector3(-85, 0, -25),
+	]
+	for c: Vector3 in cluster_centers:
+		_spawn_boulder_cluster(c)
+
+
+func _spawn_boulder_cluster(center: Vector3) -> void:
+	# Three small boulders within 4u of each other. Each is its own
+	# StaticBody3D so unit pathing can thread between them, and each
+	# uses the regular `_spawn_terrain_piece` rock path so it picks up
+	# all the rotation / color / debris-chunk variation.
+	for i: int in 3:
+		var ang: float = float(i) / 3.0 * TAU + randf_range(0.0, 0.7)
+		var radius: float = randf_range(1.6, 2.4)
+		var off := Vector3(cos(ang) * radius, 0.0, sin(ang) * radius)
+		var size := Vector3(
+			randf_range(1.6, 2.4),
+			randf_range(1.2, 1.8),
+			randf_range(1.6, 2.4),
+		)
+		_spawn_terrain_piece(center + off, size, "rock")
 
 
 func _spawn_terrain_piece(pos: Vector3, piece_size: Vector3, kind: String) -> void:
@@ -410,6 +447,9 @@ func _spawn_terrain_piece(pos: Vector3, piece_size: Vector3, kind: String) -> vo
 	var base_color: Color
 	if kind == "ruin":
 		base_color = Color(0.32, 0.26, 0.22, 1.0)
+	elif kind == "scrap_pile":
+		# Rust-orange palette — clearly "metal debris", not "stone".
+		base_color = Color(0.36, 0.22, 0.14, 1.0)
 	else:
 		base_color = Color(0.28, 0.27, 0.24, 1.0)
 	var jitter: float = 0.05
@@ -427,29 +467,66 @@ func _spawn_terrain_piece(pos: Vector3, piece_size: Vector3, kind: String) -> vo
 	mesh_inst.material_override = mat
 	root.add_child(mesh_inst)
 
-	# Secondary debris chunk on top — random size + rotation, slightly
-	# darker shade. Adds vertical silhouette variation and breaks the
-	# perfect-cube read without changing the collision footprint.
-	var chunk := MeshInstance3D.new()
-	var chunk_box := BoxMesh.new()
-	var cs: float = piece_size.x * randf_range(0.35, 0.55)
-	chunk_box.size = Vector3(cs, randf_range(0.4, 0.8) * piece_size.y, cs * randf_range(0.7, 1.1))
-	chunk.mesh = chunk_box
-	chunk.position = Vector3(
-		randf_range(-piece_size.x * 0.18, piece_size.x * 0.18),
-		piece_size.y * 0.5 + chunk_box.size.y * 0.4,
-		randf_range(-piece_size.z * 0.18, piece_size.z * 0.18),
-	)
-	chunk.rotation = Vector3(
-		randf_range(-0.18, 0.18),
-		randf_range(0.0, TAU),
-		randf_range(-0.18, 0.18),
-	)
-	var chunk_mat := StandardMaterial3D.new()
-	chunk_mat.albedo_color = base_color.darkened(randf_range(0.05, 0.18))
-	chunk_mat.roughness = mat.roughness
-	chunk.material_override = chunk_mat
-	root.add_child(chunk)
+	# Scrap piles read as "field of broken metal" — many small chunks
+	# scattered across the footprint, no single dominant block. Rocks /
+	# ruins keep the existing one-debris-chunk shape so the silhouette
+	# stays grouped.
+	if kind == "scrap_pile":
+		var chunk_count: int = randi_range(5, 8)
+		for i: int in chunk_count:
+			var chunk := MeshInstance3D.new()
+			var chunk_box := BoxMesh.new()
+			var cs: float = randf_range(0.25, 0.55) * piece_size.x * 0.5
+			chunk_box.size = Vector3(
+				cs,
+				randf_range(0.35, 0.95) * piece_size.y,
+				cs * randf_range(0.7, 1.3),
+			)
+			chunk.mesh = chunk_box
+			chunk.position = Vector3(
+				randf_range(-piece_size.x * 0.4, piece_size.x * 0.4),
+				piece_size.y * 0.5 + chunk_box.size.y * 0.4,
+				randf_range(-piece_size.z * 0.4, piece_size.z * 0.4),
+			)
+			chunk.rotation = Vector3(
+				randf_range(-0.4, 0.4),
+				randf_range(0.0, TAU),
+				randf_range(-0.4, 0.4),
+			)
+			var chunk_mat := StandardMaterial3D.new()
+			# Mix darkened and rust-bright tones so the pile reads as
+			# weathered metal rather than uniform colored.
+			if randf() < 0.4:
+				chunk_mat.albedo_color = base_color.lerp(Color(0.6, 0.32, 0.14, 1.0), 0.4)
+			else:
+				chunk_mat.albedo_color = base_color.darkened(randf_range(0.0, 0.3))
+			chunk_mat.roughness = mat.roughness
+			chunk.material_override = chunk_mat
+			root.add_child(chunk)
+	else:
+		# Single debris chunk on top — random size + rotation, slightly
+		# darker shade. Adds vertical silhouette variation and breaks the
+		# perfect-cube read without changing the collision footprint.
+		var chunk := MeshInstance3D.new()
+		var chunk_box := BoxMesh.new()
+		var cs: float = piece_size.x * randf_range(0.35, 0.55)
+		chunk_box.size = Vector3(cs, randf_range(0.4, 0.8) * piece_size.y, cs * randf_range(0.7, 1.1))
+		chunk.mesh = chunk_box
+		chunk.position = Vector3(
+			randf_range(-piece_size.x * 0.18, piece_size.x * 0.18),
+			piece_size.y * 0.5 + chunk_box.size.y * 0.4,
+			randf_range(-piece_size.z * 0.18, piece_size.z * 0.18),
+		)
+		chunk.rotation = Vector3(
+			randf_range(-0.18, 0.18),
+			randf_range(0.0, TAU),
+			randf_range(-0.18, 0.18),
+		)
+		var chunk_mat := StandardMaterial3D.new()
+		chunk_mat.albedo_color = base_color.darkened(randf_range(0.05, 0.18))
+		chunk_mat.roughness = mat.roughness
+		chunk.material_override = chunk_mat
+		root.add_child(chunk)
 
 	# RVO obstacle so units steer around instead of grinding into the side.
 	# Radius is the larger horizontal half-extent + a small margin.
@@ -520,6 +597,229 @@ func _spawn_elevation_piece(pos: Vector3, piece_size: Vector3) -> void:
 	mat.roughness = 0.92
 	mesh_inst.material_override = mat
 	root.add_child(mesh_inst)
+
+
+func _setup_skyline_features() -> void:
+	# Tall decorative refinery stacks / broken towers / chimney columns
+	# scattered around the map. Non-walkable obstacles (collision_layer 4
+	# like terrain) — purely about giving the silhouette a vertical read
+	# from the RTS camera angle so the map doesn't look flat.
+	#
+	# Positions are off the central battle lanes (deposits / chokepoints
+	# are still clear) and skewed toward the edges so they fill empty
+	# corners rather than block routing.
+	var pieces: Array[Dictionary] = [
+		# Pair of refinery stacks flanking the apex wreck.
+		{"pos": Vector3(20.0, 0.0, -45.0), "kind": "stack", "height": 8.5},
+		{"pos": Vector3(-22.0, 0.0, -45.0), "kind": "stack", "height": 7.5},
+		# Broken tower north-east of the player base.
+		{"pos": Vector3(80.0, 0.0, 90.0), "kind": "tower", "height": 6.5},
+		# Mirror near the AI base.
+		{"pos": Vector3(-80.0, 0.0, -90.0), "kind": "tower", "height": 6.0},
+		# Chimney cluster at the deep east edge.
+		{"pos": Vector3(125.0, 0.0, 30.0), "kind": "chimneys", "height": 7.0},
+		{"pos": Vector3(125.0, 0.0, -30.0), "kind": "chimneys", "height": 7.5},
+		# Smaller pylons along the long flanks (visual bookends).
+		{"pos": Vector3(105.0, 0.0, 75.0), "kind": "pylon", "height": 5.5},
+		{"pos": Vector3(-105.0, 0.0, 75.0), "kind": "pylon", "height": 5.0},
+		{"pos": Vector3(105.0, 0.0, -75.0), "kind": "pylon", "height": 5.5},
+		{"pos": Vector3(-105.0, 0.0, -75.0), "kind": "pylon", "height": 5.0},
+	]
+	for piece: Dictionary in pieces:
+		_spawn_skyline_feature(
+			piece["pos"] as Vector3,
+			piece["kind"] as String,
+			piece["height"] as float,
+		)
+
+
+func _spawn_skyline_feature(pos: Vector3, kind: String, height: float) -> void:
+	# Each feature is a single StaticBody3D parent on layer 4 with a
+	# narrow base collider — units bump into the trunk and route around.
+	# Tall visual mass is built from MeshInstance3D children that sit
+	# above the collider, so units can't stand on top but the silhouette
+	# reads as a real structure.
+	var root := StaticBody3D.new()
+	root.collision_layer = 4
+	root.collision_mask = 0
+	root.position = pos
+	root.rotation.y = randf_range(0.0, TAU)
+	root.add_to_group("terrain")
+	add_child(root)
+
+	# Trunk collision (kept short relative to total height — the visual
+	# mass on top is decoration only).
+	var trunk_radius: float = 1.4 if kind != "pylon" else 0.9
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(trunk_radius * 1.6, height * 0.4, trunk_radius * 1.6)
+	shape.shape = box
+	shape.position.y = height * 0.2
+	root.add_child(shape)
+
+	# Base color palette per kind — cooler / darker than terrain rocks.
+	var base_color: Color
+	match kind:
+		"stack":
+			base_color = Color(0.20, 0.18, 0.16, 1.0)
+		"tower":
+			base_color = Color(0.24, 0.21, 0.19, 1.0)
+		"chimneys":
+			base_color = Color(0.18, 0.16, 0.14, 1.0)
+		_:  # pylon
+			base_color = Color(0.22, 0.20, 0.18, 1.0)
+	# Subtle per-instance jitter.
+	base_color.r = clampf(base_color.r + randf_range(-0.04, 0.04), 0.0, 1.0)
+	base_color.g = clampf(base_color.g + randf_range(-0.04, 0.04), 0.0, 1.0)
+	base_color.b = clampf(base_color.b + randf_range(-0.04, 0.04), 0.0, 1.0)
+
+	if kind == "stack":
+		_build_skyline_stack(root, base_color, height)
+	elif kind == "tower":
+		_build_skyline_tower(root, base_color, height)
+	elif kind == "chimneys":
+		_build_skyline_chimneys(root, base_color, height)
+	else:
+		_build_skyline_pylon(root, base_color, height)
+
+
+func _build_skyline_stack(root: Node3D, color: Color, height: float) -> void:
+	# A wide brick base + tall thinner column + cap ring — reads as an
+	# old foundry chimney / refinery stack.
+	var base := MeshInstance3D.new()
+	var base_box := BoxMesh.new()
+	base_box.size = Vector3(2.4, height * 0.18, 2.4)
+	base.mesh = base_box
+	base.position.y = height * 0.09
+	var base_mat := StandardMaterial3D.new()
+	base_mat.albedo_color = color.darkened(0.15)
+	base_mat.roughness = 0.95
+	base.material_override = base_mat
+	root.add_child(base)
+	var column := MeshInstance3D.new()
+	var column_cyl := CylinderMesh.new()
+	column_cyl.top_radius = 0.7
+	column_cyl.bottom_radius = 0.95
+	column_cyl.height = height * 0.78
+	column.mesh = column_cyl
+	column.position.y = height * 0.18 + column_cyl.height * 0.5
+	var col_mat := StandardMaterial3D.new()
+	col_mat.albedo_color = color
+	col_mat.roughness = 0.92
+	column.material_override = col_mat
+	root.add_child(column)
+	# Cap ring at the top — slight emissive so distant skyline catches the eye.
+	var cap := MeshInstance3D.new()
+	var cap_cyl := CylinderMesh.new()
+	cap_cyl.top_radius = 1.0
+	cap_cyl.bottom_radius = 1.0
+	cap_cyl.height = 0.25
+	cap.mesh = cap_cyl
+	cap.position.y = height * 0.96
+	var cap_mat := StandardMaterial3D.new()
+	cap_mat.albedo_color = color.darkened(0.3)
+	cap_mat.emission_enabled = true
+	cap_mat.emission = Color(1.0, 0.45, 0.18)
+	cap_mat.emission_energy_multiplier = 0.6
+	cap.material_override = cap_mat
+	root.add_child(cap)
+
+
+func _build_skyline_tower(root: Node3D, color: Color, height: float) -> void:
+	# Square broken tower — tapered with a partial-height upper section
+	# leaning slightly off-axis (reads as collapsed roof).
+	var trunk := MeshInstance3D.new()
+	var trunk_box := BoxMesh.new()
+	trunk_box.size = Vector3(2.2, height * 0.6, 2.2)
+	trunk.mesh = trunk_box
+	trunk.position.y = height * 0.3
+	var trunk_mat := StandardMaterial3D.new()
+	trunk_mat.albedo_color = color
+	trunk_mat.roughness = 0.95
+	trunk.material_override = trunk_mat
+	root.add_child(trunk)
+	var upper := MeshInstance3D.new()
+	var upper_box := BoxMesh.new()
+	upper_box.size = Vector3(1.6, height * 0.32, 1.6)
+	upper.mesh = upper_box
+	upper.position = Vector3(0.18, height * 0.6 + upper_box.size.y * 0.5, 0.0)
+	upper.rotation.z = deg_to_rad(8.0)
+	var upper_mat := StandardMaterial3D.new()
+	upper_mat.albedo_color = color.darkened(0.1)
+	upper_mat.roughness = 0.95
+	upper.material_override = upper_mat
+	root.add_child(upper)
+	# Detail crenellations / broken edge.
+	for i: int in 4:
+		var ang: float = float(i) / 4.0 * TAU
+		var c := MeshInstance3D.new()
+		var cb := BoxMesh.new()
+		cb.size = Vector3(0.4, 0.5, 0.4)
+		c.mesh = cb
+		c.position = Vector3(cos(ang) * 1.0, height * 0.62, sin(ang) * 1.0)
+		c.material_override = trunk_mat
+		root.add_child(c)
+
+
+func _build_skyline_chimneys(root: Node3D, color: Color, height: float) -> void:
+	# Cluster of three chimneys at slightly different heights / offsets
+	# — reads as an old industrial complex.
+	var positions: Array[Vector3] = [
+		Vector3(0.0, 0.0, 0.0),
+		Vector3(1.6, 0.0, 0.4),
+		Vector3(-1.4, 0.0, -0.6),
+	]
+	var heights: Array[float] = [height, height * 0.78, height * 0.88]
+	for i: int in positions.size():
+		var ch := MeshInstance3D.new()
+		var ch_cyl := CylinderMesh.new()
+		ch_cyl.top_radius = 0.45
+		ch_cyl.bottom_radius = 0.6
+		ch_cyl.height = heights[i]
+		ch.mesh = ch_cyl
+		ch.position = positions[i] + Vector3(0.0, heights[i] * 0.5, 0.0)
+		var ch_mat := StandardMaterial3D.new()
+		ch_mat.albedo_color = color.darkened(randf_range(0.0, 0.2))
+		ch_mat.roughness = 0.95
+		ch.material_override = ch_mat
+		root.add_child(ch)
+
+
+func _build_skyline_pylon(root: Node3D, color: Color, height: float) -> void:
+	# Narrow lattice-ish power pylon — central post + four leg struts +
+	# cross-arms near the top. Implemented with simple boxes since lines
+	# don't render reliably from the RTS camera distance.
+	var post := MeshInstance3D.new()
+	var post_box := BoxMesh.new()
+	post_box.size = Vector3(0.35, height, 0.35)
+	post.mesh = post_box
+	post.position.y = height * 0.5
+	var post_mat := StandardMaterial3D.new()
+	post_mat.albedo_color = color
+	post_mat.roughness = 0.95
+	post.material_override = post_mat
+	root.add_child(post)
+	# Four leg struts angled outward at the base.
+	for i: int in 4:
+		var ang: float = float(i) / 4.0 * TAU + 0.78
+		var leg := MeshInstance3D.new()
+		var leg_box := BoxMesh.new()
+		leg_box.size = Vector3(0.12, height * 0.45, 0.12)
+		leg.mesh = leg_box
+		leg.position = Vector3(cos(ang) * 0.9, height * 0.22, sin(ang) * 0.9)
+		leg.rotation.x = -0.25 * sin(ang)
+		leg.rotation.z = 0.25 * cos(ang)
+		leg.material_override = post_mat
+		root.add_child(leg)
+	# Cross-arms near the top.
+	for offset_y: float in [height * 0.7, height * 0.85]:
+		var arm := MeshInstance3D.new()
+		var arm_box := BoxMesh.new()
+		arm_box.size = Vector3(2.0, 0.12, 0.18)
+		arm.mesh = arm_box
+		arm.position.y = offset_y
+		arm.material_override = post_mat
+		root.add_child(arm)
 
 
 func _setup_neutral_patrols() -> void:
