@@ -22,11 +22,13 @@ var _spatial_pos: Vector3 = Vector3.INF
 const POOL_SIZE: int = 16
 const SAMPLE_RATE: int = 22050
 ## How loud a sound is at the listener relative to its source — units of
-## meters in Godot's 3D audio model. Tuned for the prototype's scale: a
-## fight just outside the screen is faintly audible; a fight on the
-## opposite side of the map is silent.
-const POSITIONAL_UNIT_SIZE: float = 6.0
-const POSITIONAL_MAX_DISTANCE: float = 65.0
+## meters in Godot's 3D audio model. The RTS camera arm is ~30u above
+## the ground, so even an event directly under the camera is 30u away
+## from the listener. `unit_size` is set well above the camera height
+## so on-screen action plays at near-full volume; falloff still kicks
+## in for off-screen events at the larger ranges.
+const POSITIONAL_UNIT_SIZE: float = 36.0
+const POSITIONAL_MAX_DISTANCE: float = 130.0
 
 
 func _ready() -> void:
