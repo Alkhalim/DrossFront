@@ -262,7 +262,9 @@ func _on_play_pressed() -> void:
 
 
 func _on_mode_chosen(mode: int) -> void:
-	MatchSettings.mode = mode
+	# Cast int → Mode enum explicitly. Strict typing rejects the implicit
+	# conversion even when the value is in-range.
+	MatchSettings.mode = mode as MatchSettingsClass.Mode
 	_show_difficulty()
 
 
@@ -283,7 +285,9 @@ func _on_quit_pressed() -> void:
 
 
 func _on_difficulty_chosen(diff: int) -> void:
-	MatchSettings.difficulty = diff
+	# Same int → enum cast as `_on_mode_chosen` — strict typing requires
+	# the explicit conversion.
+	MatchSettings.difficulty = diff as MatchSettingsClass.Difficulty
 	_start_match()
 
 

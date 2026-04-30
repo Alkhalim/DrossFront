@@ -85,10 +85,12 @@ const MATCH_SPEEDS: Array[float] = [0.5, 1.0, 2.0, 4.0]
 
 
 func _step_match_speed(direction: int) -> void:
-	var current: float = Engine.time_scale
+	# `current_scale` (not `current`) — Camera3D has a `current` property
+	# and shadowing it errors out under strict typing.
+	var current_scale: float = Engine.time_scale
 	var idx: int = 1  # default to 1.0
 	for i: int in MATCH_SPEEDS.size():
-		if absf(MATCH_SPEEDS[i] - current) < 0.01:
+		if absf(MATCH_SPEEDS[i] - current_scale) < 0.01:
 			idx = i
 			break
 	idx = clampi(idx + direction, 0, MATCH_SPEEDS.size() - 1)
