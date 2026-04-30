@@ -13,21 +13,41 @@ func _ready() -> void:
 	# - 3 mid-map clusters distributed E/W/center
 	# - 2 deep-territory clusters near the player and AI safe deposits
 	# - 1 battlefield-scar cluster mid-map with an Apex-class wreck
+	# Symmetric around z = 0 so neither player has more salvage in arm's
+	# reach than the other. Density boosted so AI forward-yard expansion
+	# (every ~35s) actually has fresh clusters to claim.
 	var clusters: Array[Dictionary] = [
-		# Player near-base
-		{ "center": Vector3(12, 0, 8),    "spread": 4.0, "count": 4, "size_min": 0.8, "size_max": 1.5 },
-		{ "center": Vector3(-14, 0, 6),   "spread": 4.0, "count": 4, "size_min": 0.8, "size_max": 1.5 },
-		# AI near-base
-		{ "center": Vector3(12, 0, -110), "spread": 4.0, "count": 4, "size_min": 0.8, "size_max": 1.5 },
-		{ "center": Vector3(-14, 0, -112),"spread": 4.0, "count": 4, "size_min": 0.8, "size_max": 1.5 },
-		# Mid-map clusters
-		{ "center": Vector3(0, 0, -60),   "spread": 6.0, "count": 6, "size_min": 1.0, "size_max": 1.8 },
-		{ "center": Vector3(28, 0, -45),  "spread": 5.0, "count": 5, "size_min": 0.9, "size_max": 1.6 },
-		{ "center": Vector3(-30, 0, -45), "spread": 5.0, "count": 5, "size_min": 0.9, "size_max": 1.6 },
-		{ "center": Vector3(20, 0, -75),  "spread": 5.0, "count": 5, "size_min": 0.9, "size_max": 1.6 },
-		{ "center": Vector3(-22, 0, -78), "spread": 5.0, "count": 5, "size_min": 0.9, "size_max": 1.6 },
-		# Battlefield scar — denser cluster with one big wreck
-		{ "center": Vector3(0, 0, -30),   "spread": 7.0, "count": 7, "size_min": 1.0, "size_max": 2.0, "apex": true },
+		# Player near-base (z ≈ 100, north)
+		{ "center": Vector3(12, 0, 100),  "spread": 4.0, "count": 4, "size_min": 0.8, "size_max": 1.5 },
+		{ "center": Vector3(-14, 0, 102), "spread": 4.0, "count": 4, "size_min": 0.8, "size_max": 1.5 },
+		# AI near-base (mirrored on z ≈ -100, south)
+		{ "center": Vector3(12, 0, -100), "spread": 4.0, "count": 4, "size_min": 0.8, "size_max": 1.5 },
+		{ "center": Vector3(-14, 0, -102),"spread": 4.0, "count": 4, "size_min": 0.8, "size_max": 1.5 },
+		# Mid-map clusters along the central z = 0 axis.
+		{ "center": Vector3(0, 0, 55),    "spread": 6.0, "count": 6, "size_min": 1.0, "size_max": 1.8 },
+		{ "center": Vector3(0, 0, -55),   "spread": 6.0, "count": 6, "size_min": 1.0, "size_max": 1.8 },
+		{ "center": Vector3(28, 0, 25),   "spread": 5.0, "count": 5, "size_min": 0.9, "size_max": 1.6 },
+		{ "center": Vector3(-30, 0, 25),  "spread": 5.0, "count": 5, "size_min": 0.9, "size_max": 1.6 },
+		{ "center": Vector3(20, 0, -25),  "spread": 5.0, "count": 5, "size_min": 0.9, "size_max": 1.6 },
+		{ "center": Vector3(-22, 0, -25), "spread": 5.0, "count": 5, "size_min": 0.9, "size_max": 1.6 },
+		# Battlefield scar — denser cluster with one Apex-class wreck.
+		# Tucked just south of center so it doesn't sit underneath the
+		# central plateau geometry.
+		{ "center": Vector3(0, 0, -45),   "spread": 7.0, "count": 7, "size_min": 1.0, "size_max": 2.0, "apex": true },
+		# Far-flank "old battlefield" clusters — give the AI / player
+		# legitimate forward-expansion targets along the east + west
+		# corridors.
+		{ "center": Vector3(85, 0, 50),   "spread": 5.0, "count": 5, "size_min": 0.9, "size_max": 1.7 },
+		{ "center": Vector3(-85, 0, 50),  "spread": 5.0, "count": 5, "size_min": 0.9, "size_max": 1.7 },
+		{ "center": Vector3(85, 0, -50),  "spread": 5.0, "count": 5, "size_min": 0.9, "size_max": 1.7 },
+		{ "center": Vector3(-85, 0, -50), "spread": 5.0, "count": 5, "size_min": 0.9, "size_max": 1.7 },
+		# Northern + southern clusters between the safe deposits and mid
+		# — secondary harvest zones the AI's yard expansion can reach
+		# safely once it owns the safe-side deposit.
+		{ "center": Vector3(50, 0, 65),   "spread": 5.0, "count": 5, "size_min": 0.9, "size_max": 1.6 },
+		{ "center": Vector3(-50, 0, 65),  "spread": 5.0, "count": 5, "size_min": 0.9, "size_max": 1.6 },
+		{ "center": Vector3(50, 0, -65),  "spread": 5.0, "count": 5, "size_min": 0.9, "size_max": 1.6 },
+		{ "center": Vector3(-50, 0, -65), "spread": 5.0, "count": 5, "size_min": 0.9, "size_max": 1.6 },
 	]
 
 	for cluster: Dictionary in clusters:

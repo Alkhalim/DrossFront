@@ -224,4 +224,4 @@ func _spawn_impact() -> void:
 
 	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
 	if audio and audio.has_method("play_weapon_impact"):
-		audio.play_weapon_impact()
+		audio.play_weapon_impact(global_position)

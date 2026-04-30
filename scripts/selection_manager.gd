@@ -9,6 +9,8 @@ const UNIT_LAYER: int = 2
 const GROUND_LAYER: int = 1
 ## Layer mask for raycast against buildings (layer 4).
 const BUILDING_LAYER: int = 4
+## Layer mask for raycast against wrecks (layer 8).
+const WRECK_LAYER: int = 8
 
 var _selected_units: Array[Unit] = []
 ## Selected Crawlers. Crawlers aren't Unit instances (different base class), so
@@ -28,6 +30,17 @@ var _build_ghost: Node3D = null
 
 ## Currently selected building (if any).
 var _selected_building: Building = null
+## Cohort of same-type buildings selected together — populated by
+## `_select_all_buildings_of_type` (the double-click path). The
+## primary `_selected_building` is the one whose info panel shows in
+## the HUD; queue commands fan out across the cohort, picking the
+## member with the smallest current queue.
+var _selected_buildings: Array[Building] = []
+## After confirming a building placement on mouse-press, we want to swallow
+## the corresponding mouse-release so it doesn't leak to `_click_select`
+## and re-select the freshly-placed foundation. Cleared on the first
+## release that consumes it.
+var _suppress_next_release: bool = false
 
 ## Attack-move mode: next right-click issues attack-move instead of move.
 var _attack_move_mode: bool = false
@@ -91,6 +104,13 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 			_pending_double_click = event.double_click
 		else:
 			# Mouse released
+			if _suppress_next_release:
+				# A placement click consumed the press; swallow the matching
+				# release so it doesn't drop into `_click_select` and
+				# auto-select the new foundation.
+				_suppress_next_release = false
+				_is_dragging = false
+				return
 			if _is_dragging:
 				_finish_box_select(event)
 			else:
@@ -98,6 +118,10 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 			_is_dragging = false
 
 	elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+		# Ctrl-held → queue this command after whatever the unit is already
+		# doing instead of replacing it. Only the plain move path supports
+		# queueing for now (attack / assist / rally still replace).
+		var queue: bool = event.ctrl_pressed
 		if _selected_building and _selected_building.stats and not _selected_building.stats.producible_units.is_empty() and _selection_movables_count() == 0:
 			_set_rally_point(event.position)
 		elif _attack_move_mode:
@@ -114,7 +138,7 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 				if friendly_building and not friendly_building.is_constructed:
 					_command_assist_build(friendly_building)
 				else:
-					_command_move(event.position)
+					_command_move(event.position, queue)
 		get_viewport().set_input_as_handled()
 
 
@@ -265,12 +289,57 @@ func _click_select(event: InputEventMouseButton) -> void:
 					if not shift:
 						_clear_selection()
 					_select_building(building)
-			elif not shift:
-				_clear_selection()
-				_clear_crawler_selection()
-				_deselect_building()
+			else:
+				# Wreck click → just surface its remaining salvage value.
+				# Doesn't clear other selections; treats the wreck as a
+				# queryable info-only object.
+				var wreck: Wreck = _raycast_wreck(event.position)
+				if wreck:
+					_show_wreck_readout(wreck)
+				elif not shift:
+					_clear_selection()
+					_clear_crawler_selection()
+					_deselect_building()
 
 	get_viewport().set_input_as_handled()
+
+
+func _raycast_wreck(screen_pos: Vector2) -> Wreck:
+	var from := _camera.project_ray_origin(screen_pos)
+	var dir := _camera.project_ray_normal(screen_pos)
+	var space := get_viewport().world_3d.direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(from, from + dir * 500.0, WRECK_LAYER)
+	var result := space.intersect_ray(query)
+	if result.is_empty():
+		return null
+	var collider: Object = result["collider"]
+	if collider is Wreck:
+		return collider as Wreck
+	return null
+
+
+func _show_wreck_readout(wreck: Wreck) -> void:
+	## Spawn a tiny floating Label3D above the wreck displaying its
+	## remaining salvage. Auto-fades after a couple of seconds so the
+	## battlefield doesn't accumulate stale readouts.
+	if not is_instance_valid(wreck):
+		return
+	var label := Label3D.new()
+	label.text = "%d salvage" % wreck.salvage_remaining
+	label.font_size = 28
+	label.pixel_size = 0.012
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.no_depth_test = true
+	label.modulate = Color(0.95, 0.78, 0.32, 1.0)
+	label.outline_size = 8
+	label.outline_modulate = Color(0.0, 0.0, 0.0, 1.0)
+	label.global_position = wreck.global_position + Vector3(0.0, 1.4, 0.0)
+	get_tree().current_scene.add_child(label)
+	var tween := label.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(label, "global_position", label.global_position + Vector3(0.0, 0.6, 0.0), 1.6)
+	tween.tween_property(label, "modulate:a", 0.0, 1.6).set_ease(Tween.EASE_IN).set_delay(0.6)
+	tween.chain().tween_callback(label.queue_free)
 
 
 func _finish_box_select(event: InputEventMouseButton) -> void:
@@ -281,6 +350,12 @@ func _finish_box_select(event: InputEventMouseButton) -> void:
 		_clear_crawler_selection()
 		_deselect_building()
 
+	# Track the pre-drag size so we know whether the drag actually picked up
+	# anything new; we play a single select sound at the end instead of one
+	# per added unit (otherwise a 6-unit drag fires six clicks at once).
+	var prev_unit_count: int = _selected_units.size()
+	var prev_crawler_count: int = _selected_crawlers.size()
+
 	# Check units against the screen-space rectangle
 	var units := get_tree().get_nodes_in_group("units")
 	for node: Node in units:
@@ -289,7 +364,7 @@ func _finish_box_select(event: InputEventMouseButton) -> void:
 			continue
 		var screen_pos := _camera.unproject_position(unit.global_position)
 		if rect.has_point(screen_pos):
-			_add_to_selection(unit)
+			_add_to_selection(unit, false)
 
 	# Crawlers are scooped into the same drag rectangle so a sweep across the
 	# base picks up the harvester alongside its escorts.
@@ -300,7 +375,15 @@ func _finish_box_select(event: InputEventMouseButton) -> void:
 			continue
 		var screen_pos := _camera.unproject_position(crawler.global_position)
 		if rect.has_point(screen_pos):
-			_add_crawler_to_selection(crawler)
+			_add_crawler_to_selection(crawler, false)
+
+	# Single select chime if anything new actually entered the selection.
+	var added_anything: bool = (
+		_selected_units.size() > prev_unit_count
+		or _selected_crawlers.size() > prev_crawler_count
+	)
+	if added_anything and _audio:
+		_audio.play_select()
 
 	# If nothing movable was selected, check for a building in the box
 	if _selected_units.is_empty() and _selected_crawlers.is_empty():
@@ -317,7 +400,7 @@ func _finish_box_select(event: InputEventMouseButton) -> void:
 	get_viewport().set_input_as_handled()
 
 
-func _command_move(screen_pos: Vector2) -> void:
+func _command_move(screen_pos: Vector2, queue: bool = false) -> void:
 	_prune_selection()
 	# Combined movables list — units and crawlers both honor command_move(target).
 	var movables: Array = []
@@ -329,7 +412,10 @@ func _command_move(screen_pos: Vector2) -> void:
 			movables.append(c)
 	if movables.is_empty():
 		return
-	_cancel_builder_tasks()
+	# Don't cancel in-progress build tasks when *queueing* — the player wants
+	# the engineer to finish what it's doing and then walk to the waypoint.
+	if not queue:
+		_cancel_builder_tasks()
 	if _audio:
 		_audio.play_command()
 
@@ -353,7 +439,12 @@ func _command_move(screen_pos: Vector2) -> void:
 			0,
 			(row - (cols - 1) / 2.0) * spacing
 		)
-		movables[i].command_move(ground_pos + offset)
+		var slot: Vector3 = ground_pos + offset
+		var movable: Object = movables[i]
+		if queue and movable.has_method("queue_move"):
+			movable.queue_move(slot)
+		else:
+			movable.command_move(slot)
 
 
 func _command_assist_build(building: Building) -> void:
@@ -436,6 +527,7 @@ func _select_all_of_type(unit_name: String) -> void:
 	_deselect_building()
 	var viewport_rect := get_viewport().get_visible_rect()
 	var all_units: Array[Node] = get_tree().get_nodes_in_group("units")
+	var added: bool = false
 	for node: Node in all_units:
 		var unit: Unit = node as Unit
 		if not unit or unit.owner_id != 0 or unit.alive_count <= 0:
@@ -444,17 +536,21 @@ func _select_all_of_type(unit_name: String) -> void:
 			continue
 		var screen_pos: Vector2 = _camera.unproject_position(unit.global_position)
 		if viewport_rect.has_point(screen_pos):
-			_add_to_selection(unit)
+			_add_to_selection(unit, false)
+			added = true
+	if added and _audio:
+		_audio.play_select()
 
 
 func _select_all_buildings_of_type(building_id: StringName) -> void:
 	_clear_selection()
 	_deselect_building()
-	# For buildings we just select the first matching one
-	# (building selection is single-select in this prototype)
+	# Gather every on-screen, friendly building of this type into the
+	# cohort. The first one becomes the panel-displayed primary; the rest
+	# are eligible queue targets via load-balanced fan-out.
 	var viewport_rect := get_viewport().get_visible_rect()
-	var buildings: Array[Node] = get_tree().get_nodes_in_group("buildings")
-	for node: Node in buildings:
+	var matches: Array[Building] = []
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not ("owner_id" in node) or node.get("owner_id") != 0:
 			continue
 		if not ("stats" in node) or node.get("stats") == null:
@@ -463,11 +559,18 @@ func _select_all_buildings_of_type(building_id: StringName) -> void:
 		if not bstats or bstats.building_id != building_id:
 			continue
 		var screen_pos: Vector2 = _camera.unproject_position(node.global_position)
-		if viewport_rect.has_point(screen_pos):
-			var building: Building = node as Building
-			if building:
-				_select_building(building)
-			break
+		if not viewport_rect.has_point(screen_pos):
+			continue
+		var b: Building = node as Building
+		if b:
+			matches.append(b)
+
+	if matches.is_empty():
+		return
+	# Primary = the first match (closest to top-left); _select_building
+	# also resets the cohort to just that one, so we re-populate after.
+	_select_building(matches[0])
+	_selected_buildings = matches
 
 
 ## --- Control Groups ---
@@ -509,12 +612,16 @@ func _recall_control_group(index: int) -> void:
 	_clear_crawler_selection()
 	_deselect_building()
 	var ids: Array = _control_groups[index]
+	var added: bool = false
 	for uid: int in ids:
 		var obj: Object = instance_from_id(uid)
 		if obj and obj is Unit:
 			var unit: Unit = obj as Unit
 			if is_instance_valid(unit) and unit.alive_count > 0:
-				_add_to_selection(unit)
+				_add_to_selection(unit, false)
+				added = true
+	if added and _audio:
+		_audio.play_select()
 
 	# Double-press detection: same group within the window pans the camera
 	# to where those units are right now.
@@ -553,14 +660,14 @@ func get_buildable_stats() -> Array[BuildingStatResource]:
 	return _buildable_stats
 
 
-func _add_to_selection(unit: Unit) -> void:
+func _add_to_selection(unit: Unit, play_audio: bool = true) -> void:
 	if not is_instance_valid(unit) or unit.owner_id != 0:
 		return
 	if unit in _selected_units:
 		return
 	_selected_units.append(unit)
 	unit.select()
-	if _audio:
+	if play_audio and _audio:
 		_audio.play_select()
 
 
@@ -665,8 +772,13 @@ func _raycast_ground(screen_pos: Vector2) -> Vector3:
 ## --- Building Selection ---
 
 func _find_building_at(screen_pos: Vector2) -> Building:
-	## Find a building under the click by checking screen-space distance.
-	## Uses the same unproject_position method proven to work for unit selection.
+	## Find a building under the click. Filters to *local-player-owned*
+	## buildings only — clicking on an ally's foundry shouldn't count as a
+	## selection (the player would otherwise be able to queue units from
+	## the ally's HQ on the player's own resource budget). Enemy / ally
+	## buildings are discoverable through other paths (right-click attack,
+	## minimap dot, perspective coloring) so they're never invisible, just
+	## not commandable.
 	var nearest: Building = null
 	var nearest_dist: float = INF
 
@@ -685,6 +797,9 @@ func _find_building_at(screen_pos: Vector2) -> Building:
 		if not node.has_method("get_queue_size"):
 			continue
 		if not ("stats" in node) or node.get("stats") == null:
+			continue
+		# Local-player owned only.
+		if not ("owner_id" in node) or node.get("owner_id") != 0:
 			continue
 
 		var bstats: BuildingStatResource = node.get("stats") as BuildingStatResource
@@ -721,6 +836,10 @@ func _select_building(building: Building) -> void:
 	_selected_building = building
 	_selected_building.select_building()
 	_show_yard_range(building)
+	# Single-select path also resets the cohort to just this building so
+	# subsequent queue calls don't fan out to a stale double-click set.
+	_selected_buildings.clear()
+	_selected_buildings.append(building)
 	if _audio:
 		_audio.play_select()
 
@@ -737,6 +856,7 @@ func _deselect_building() -> void:
 		_selected_building.deselect_building()
 		_hide_yard_range(_selected_building)
 	_selected_building = null
+	_selected_buildings.clear()
 	_hide_rally_marker()
 
 
@@ -793,14 +913,14 @@ func get_selected_crawlers() -> Array[SalvageCrawler]:
 	return _selected_crawlers
 
 
-func _add_crawler_to_selection(crawler: SalvageCrawler) -> void:
+func _add_crawler_to_selection(crawler: SalvageCrawler, play_audio: bool = true) -> void:
 	if not is_instance_valid(crawler) or crawler.owner_id != 0:
 		return
 	if crawler in _selected_crawlers:
 		return
 	_selected_crawlers.append(crawler)
 	crawler.select()
-	if _audio:
+	if play_audio and _audio:
 		_audio.play_select()
 
 
@@ -854,14 +974,23 @@ func queue_unit_at_building(index: int) -> void:
 	if index < 0 or index >= _selected_building.stats.producible_units.size():
 		return
 
-	var bid: int = _selected_building.get_instance_id()
+	# Pick the cohort member with the smallest current queue. With a
+	# single-foundry selection that's just `_selected_building` itself.
+	# After a double-click cohort, queueing fans out so a player who
+	# spammed the production button gets one unit per foundry instead
+	# of all units stacking on the primary.
+	var target: Building = _pick_lowest_queue_target()
+	if not target:
+		return
+
+	var bid: int = target.get_instance_id()
 	var now: int = Time.get_ticks_msec()
 	var prev: int = (_last_queue_msec.get(bid, 0) as int)
 	if (now - prev) < 100:
 		return
 	_last_queue_msec[bid] = now
 
-	var unit_stats: UnitStatResource = _selected_building.stats.producible_units[index]
+	var unit_stats: UnitStatResource = target.stats.producible_units[index]
 	var resource_mgr: ResourceManager = get_tree().current_scene.get_node("ResourceManager") as ResourceManager
 	if not resource_mgr:
 		return
@@ -880,9 +1009,34 @@ func queue_unit_at_building(index: int) -> void:
 
 	resource_mgr.spend(unit_stats.cost_salvage, unit_stats.cost_fuel)
 	resource_mgr.add_population(unit_stats.population)
-	_selected_building.queue_unit(unit_stats)
+	target.queue_unit(unit_stats)
 	if _audio:
 		_audio.play_production_started()
+
+
+func _pick_lowest_queue_target() -> Building:
+	## Returns the cohort member with the smallest current queue size, or
+	## the singular `_selected_building` when no cohort is active. Buildings
+	## that have somehow drifted out of the same producible_units shape
+	## (different building_id) are skipped — the cohort should already be
+	## same-type via `_select_all_buildings_of_type`, but the guard makes
+	## this resilient if other code paths populate `_selected_buildings`.
+	if _selected_buildings.is_empty():
+		return _selected_building
+	var primary: Building = _selected_building
+	var primary_id: StringName = primary.stats.building_id if primary and primary.stats else &""
+	var best: Building = null
+	var best_q: int = 0x7FFFFFFF
+	for b: Building in _selected_buildings:
+		if not is_instance_valid(b) or not b.is_constructed:
+			continue
+		if not b.stats or b.stats.building_id != primary_id:
+			continue
+		var q: int = b.get_queue_size() if b.has_method("get_queue_size") else 0
+		if q < best_q:
+			best_q = q
+			best = b
+	return best if best else primary
 
 
 func _crawler_count_for_owner(owner_id: int) -> int:
@@ -948,7 +1102,12 @@ func cancel_build_placement() -> void:
 ## Margin added around units / terrain features when checking placement overlap.
 const BUILD_OBSTACLE_MARGIN: float = 0.4
 ## Clear gap required between adjacent buildings.
-const BUILD_PLACEMENT_GAP: float = 0.8
+## Bumped 0.8 → 2.6 so two adjacent player buildings leave enough room
+## for a unit (≈1u collision capsule + a little clearance) to actually
+## walk between them rather than wedge in the gap. The narrow-gap stuck
+## bug was rooted in this — paths went through 0.8u corridors that the
+## unit physically didn't fit through.
+const BUILD_PLACEMENT_GAP: float = 2.6
 
 
 func _is_valid_build_position(pos: Vector3) -> bool:
@@ -986,7 +1145,7 @@ func _is_valid_build_position(pos: Vector3) -> bool:
 			return false
 
 	# Fuel deposits, wrecks, and terrain pieces all block placement.
-	for group_name: String in ["fuel_deposits", "wrecks", "terrain"]:
+	for group_name: String in ["fuel_deposits", "wrecks", "terrain", "elevation"]:
 		for node: Node in get_tree().get_nodes_in_group(group_name):
 			if not is_instance_valid(node):
 				continue
@@ -1044,7 +1203,10 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 				var gui_control: Control = get_viewport().gui_get_hovered_control()
 				if gui_control:
 					return
-				_confirm_build_placement(mb.position)
+				# Ctrl-held → "stay in build mode" so the player can drop the
+				# same foundation type repeatedly without re-pressing the
+				# hotkey for each one.
+				_confirm_build_placement(mb.position, mb.ctrl_pressed)
 				get_viewport().set_input_as_handled()
 			elif mb.button_index == MOUSE_BUTTON_RIGHT:
 				cancel_build_placement()
@@ -1057,7 +1219,7 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 
 
-func _confirm_build_placement(screen_pos: Vector2) -> void:
+func _confirm_build_placement(screen_pos: Vector2, keep_placing: bool = false) -> void:
 	var ground_pos := _raycast_ground(screen_pos)
 	if ground_pos == Vector3.INF:
 		return
@@ -1101,8 +1263,18 @@ func _confirm_build_placement(screen_pos: Vector2) -> void:
 			if other_builder and other_builder.has_method("start_building"):
 				other_builder.start_building(building)
 		if _audio:
-			_audio.play_building_placed()
-		cancel_build_placement()
+			_audio.play_building_placed(building.global_position)
+		# Swallow the click's matching mouse-release so it doesn't drop
+		# through to `_click_select` and reselect the new foundation —
+		# the player should keep their engineers selected after placing.
+		_suppress_next_release = true
+		# Ctrl held → reuse the same build_stats for the next click so
+		# the player can chain a row of generators without re-pressing the
+		# hotkey. Plain click ends placement after one drop.
+		if keep_placing:
+			start_build_placement(_build_stats)
+		else:
+			cancel_build_placement()
 	else:
 		# Not enough resources — keep placement mode active
 		pass

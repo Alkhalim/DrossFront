@@ -12,6 +12,7 @@ const COLOR_PANEL_BG := Color(0.08, 0.09, 0.10, 0.92)
 
 var _root_vbox: VBoxContainer = null
 var _main_buttons: VBoxContainer = null
+var _mode_panel: VBoxContainer = null
 var _difficulty_panel: VBoxContainer = null
 var _settings_panel: VBoxContainer = null
 
@@ -96,6 +97,7 @@ func _build_layout() -> void:
 	_root_vbox.add_child(spacer)
 
 	_build_main_buttons()
+	_build_mode_panel()
 	_build_difficulty_panel()
 	_build_settings_panel()
 
@@ -117,6 +119,41 @@ func _build_main_buttons() -> void:
 		btn.custom_minimum_size = Vector2(280, 44)
 		btn.pressed.connect(entry["callback"] as Callable)
 		_main_buttons.add_child(btn)
+
+
+func _build_mode_panel() -> void:
+	_mode_panel = VBoxContainer.new()
+	_mode_panel.add_theme_constant_override("separation", 10)
+	_mode_panel.alignment = BoxContainer.ALIGNMENT_CENTER
+	_mode_panel.visible = false
+	_root_vbox.add_child(_mode_panel)
+
+	var heading := Label.new()
+	heading.text = "Choose Match Format"
+	heading.add_theme_font_size_override("font_size", 22)
+	heading.add_theme_color_override("font_color", COLOR_SUBTITLE)
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_mode_panel.add_child(heading)
+
+	for entry: Dictionary in [
+		{ "label": "1v1",
+		  "value": MatchSettingsClass.Mode.ONE_V_ONE,
+		  "blurb": "You vs one AI opponent" },
+		{ "label": "2v2",
+		  "value": MatchSettingsClass.Mode.TWO_V_TWO,
+		  "blurb": "You + AI ally vs two AI opponents" },
+	]:
+		var btn := Button.new()
+		btn.text = "%s — %s" % [entry["label"], entry["blurb"]]
+		btn.custom_minimum_size = Vector2(360, 44)
+		btn.pressed.connect(_on_mode_chosen.bind(entry["value"]))
+		_mode_panel.add_child(btn)
+
+	var back := Button.new()
+	back.text = "Back"
+	back.custom_minimum_size = Vector2(160, 36)
+	back.pressed.connect(_show_main)
+	_mode_panel.add_child(back)
 
 
 func _build_difficulty_panel() -> void:
@@ -191,18 +228,28 @@ func _build_settings_panel() -> void:
 
 func _show_main() -> void:
 	_main_buttons.visible = true
+	_mode_panel.visible = false
+	_difficulty_panel.visible = false
+	_settings_panel.visible = false
+
+
+func _show_mode() -> void:
+	_main_buttons.visible = false
+	_mode_panel.visible = true
 	_difficulty_panel.visible = false
 	_settings_panel.visible = false
 
 
 func _show_difficulty() -> void:
 	_main_buttons.visible = false
+	_mode_panel.visible = false
 	_difficulty_panel.visible = true
 	_settings_panel.visible = false
 
 
 func _show_settings() -> void:
 	_main_buttons.visible = false
+	_mode_panel.visible = false
 	_difficulty_panel.visible = false
 	_settings_panel.visible = true
 
@@ -211,13 +258,19 @@ func _show_settings() -> void:
 
 func _on_play_pressed() -> void:
 	MatchSettings.tutorial_mode = false
+	_show_mode()
+
+
+func _on_mode_chosen(mode: int) -> void:
+	MatchSettings.mode = mode
 	_show_difficulty()
 
 
 func _on_tutorial_pressed() -> void:
 	MatchSettings.tutorial_mode = true
-	# Tutorial always runs on Easy so new players aren't crushed while reading.
+	# Tutorial always runs on Easy + 1v1 so new players aren't crushed while reading.
 	MatchSettings.difficulty = MatchSettingsClass.Difficulty.EASY
+	MatchSettings.mode = MatchSettingsClass.Mode.ONE_V_ONE
 	_start_match()
 
 

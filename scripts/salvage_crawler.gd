@@ -50,6 +50,8 @@ var current_hp: int = 800
 var has_move_order: bool = false
 ## Where the unit is currently moving to. Vector3.INF means stopped.
 var move_target: Vector3 = Vector3.INF
+## Optional waypoint chain for Ctrl-clicked queued moves.
+var move_queue: Array[Vector3] = []
 var is_selected: bool = false
 var hp_bar_hovered: bool = false
 
@@ -201,6 +203,31 @@ func _build_visuals() -> void:
 	crane_arm.set_surface_override_material(0, _make_metal(Color(0.22, 0.2, 0.16)))
 	add_child(crane_arm)
 
+	# Sensor mast — tall thin antenna on the front of the workshop. Adds a
+	# vertical silhouette element so the Crawler reads as a "moving
+	# fortress" against the flatter Salvage Yard footprint.
+	var mast := MeshInstance3D.new()
+	var mast_box := BoxMesh.new()
+	mast_box.size = Vector3(0.05, 1.2, 0.05)
+	mast.mesh = mast_box
+	mast.position = Vector3(0.9, 2.7, -1.1)
+	mast.set_surface_override_material(0, _make_metal(Color(0.2, 0.18, 0.15)))
+	add_child(mast)
+	# Tiny emissive cap on top so the mast catches the eye.
+	var mast_tip := MeshInstance3D.new()
+	var tip_sphere := SphereMesh.new()
+	tip_sphere.radius = 0.05
+	tip_sphere.height = 0.1
+	mast_tip.mesh = tip_sphere
+	mast_tip.position = Vector3(0.9, 3.32, -1.1)
+	var tip_mat := StandardMaterial3D.new()
+	tip_mat.albedo_color = Color(1.0, 0.55, 0.2)
+	tip_mat.emission_enabled = true
+	tip_mat.emission = Color(1.0, 0.55, 0.2)
+	tip_mat.emission_energy_multiplier = 2.0
+	mast_tip.set_surface_override_material(0, tip_mat)
+	add_child(mast_tip)
+
 	# Reactor lamp atop the workshop — emissive cyan, marks the Crawler at
 	# a distance.
 	var lamp := MeshInstance3D.new()
@@ -220,6 +247,16 @@ func _build_visuals() -> void:
 	var lamp_light := OmniLight3D.new()
 	lamp_light.light_color = Color(0.4, 0.85, 1.0)
 	lamp_light.light_energy = 1.4
+	# Forge-amber working pool — wider and warmer than the Salvage Yard's
+	# work lamp so the Crawler reads as the larger economic centerpiece
+	# per READABILITY_PASS.md §Task 5.
+	var work_pool := OmniLight3D.new()
+	work_pool.light_color = Color(1.0, 0.55, 0.2)
+	work_pool.light_energy = 1.2
+	work_pool.omni_range = 9.0
+	work_pool.omni_attenuation = 1.4
+	work_pool.position = Vector3(0.0, 1.4, -0.4)
+	add_child(work_pool)
 	lamp_light.omni_range = 6.0
 	lamp_light.position = lamp.position
 	add_child(lamp_light)
@@ -297,6 +334,7 @@ func command_move(target: Vector3, _clear_combat: bool = true) -> void:
 	# first. We just no-op the command so the existing UI flow is harmless.
 	if anchor_state == AnchorState.ANCHORED or anchor_state == AnchorState.DEPLOYING:
 		return
+	move_queue.clear()
 	move_target = Vector3(target.x, global_position.y, target.z)
 	has_move_order = true
 	_stuck_timer = 0.0
@@ -304,8 +342,19 @@ func command_move(target: Vector3, _clear_combat: bool = true) -> void:
 		_nav_agent.target_position = move_target
 
 
+func queue_move(target: Vector3) -> void:
+	if anchor_state == AnchorState.ANCHORED or anchor_state == AnchorState.DEPLOYING:
+		return
+	var fixed: Vector3 = Vector3(target.x, global_position.y, target.z)
+	if move_target == Vector3.INF:
+		command_move(fixed)
+		return
+	move_queue.append(fixed)
+
+
 func stop() -> void:
 	move_target = Vector3.INF
+	move_queue.clear()
 	velocity = Vector3.ZERO
 	has_move_order = false
 
@@ -348,6 +397,12 @@ func _physics_process(delta: float) -> void:
 		return
 
 	if _nav_agent and _nav_agent.is_navigation_finished():
+		if not move_queue.is_empty():
+			var next_wp: Vector3 = move_queue.pop_front() as Vector3
+			move_target = Vector3(next_wp.x, global_position.y, next_wp.z)
+			_stuck_timer = 0.0
+			_nav_agent.target_position = move_target
+			return
 		stop()
 		return
 
@@ -360,6 +415,13 @@ func _physics_process(delta: float) -> void:
 	var dist: float = to_next.length()
 	if dist < ARRIVE_THRESHOLD:
 		if not _nav_agent or _nav_agent.is_navigation_finished():
+			if not move_queue.is_empty():
+				var next_wp: Vector3 = move_queue.pop_front() as Vector3
+				move_target = Vector3(next_wp.x, global_position.y, next_wp.z)
+				_stuck_timer = 0.0
+				if _nav_agent:
+					_nav_agent.target_position = move_target
+				return
 			stop()
 			return
 

@@ -16,8 +16,17 @@ const SPEED_MAP: Dictionary = {
 	&"moderate": 8.0, &"fast": 12.0, &"very_fast": 16.0,
 }
 const ARRIVE_THRESHOLD: float = 0.5
+## Gravity applied to airborne units — keeps them from floating after
+## ending up above floor level. Tuned for "feels right" rather than
+## physical correctness; the prototype's scale is small.
+const GRAVITY: float = 18.0
 
 var move_target: Vector3 = Vector3.INF
+## Optional waypoint chain — populated when the player issues Ctrl-clicked
+## move commands. Each waypoint is consumed when reached; the unit then
+## proceeds to the next without any further input. Empty under normal
+## (non-queued) commands.
+var move_queue: Array[Vector3] = []
 var is_selected: bool = false
 var has_move_order: bool = false
 var _move_speed: float = 8.0
@@ -61,10 +70,30 @@ var _nav_agent: NavigationAgent3D = null
 var _stuck_timer: float = 0.0
 var _last_position: Vector3 = Vector3.ZERO
 
+## Home position used by neutral patrol behaviour. When set (i.e. not
+## Vector3.INF) the unit's combat component:
+## - applies a 0.8× multiplier to its engage range (looser aggro);
+## - returns to this position whenever it has no current target and is
+##   more than ~2.5u away from home, instead of standing wherever its
+##   last fight ended.
+## Set externally after spawning a neutral patrol mech.
+var home_position: Vector3 = Vector3.INF
+## Wall-deflection state. When the unit has been head-on stuck against
+## geometry for ~0.3s, we rotate the desired direction sideways for a short
+## window so slide-along-wall produces real lateral progress instead of
+## zeroing out against a flat surface. `_deflect_until_msec` is the absolute
+## clock time the deflection expires; `_deflect_sign` chooses left vs right.
+var _deflect_until_msec: int = 0
+var _deflect_sign: float = 0.0
+
 ## Player colors.
 const PLAYER_COLOR := Color(0.15, 0.45, 0.9, 1.0)
 const ENEMY_COLOR := Color(0.85, 0.2, 0.15, 1.0)
 const NEUTRAL_COLOR := Color(0.85, 0.7, 0.3, 1.0)
+## Anvil faction identity band — additive accent layered on top of the
+## team-color stripe per READABILITY_PASS.md §Task 7. When other factions
+## land in v3+ this is replaced with a per-faction lookup.
+const ANVIL_BRASS := Color(0.78, 0.62, 0.18, 1.0)
 
 
 static func team_color_for(owner_idx: int) -> Color:
@@ -96,6 +125,9 @@ const FORMATION_OFFSETS: Dictionary = {
 	2: [Vector2(-1.0, 0.0), Vector2(1.0, 0.0)],
 	3: [Vector2(-1.0, 0.55), Vector2(1.0, 0.55), Vector2(0.0, -0.85)],
 	4: [Vector2(-1.0, 0.85), Vector2(1.0, 0.85), Vector2(-1.0, -0.85), Vector2(1.0, -0.85)],
+	# 5-member formation: 4 corners + 1 center, so the squad still reads
+	# as a coherent group rather than a line.
+	5: [Vector2(-1.0, 0.85), Vector2(1.0, 0.85), Vector2(-1.0, -0.85), Vector2(1.0, -0.85), Vector2(0.0, 0.0)],
 }
 
 ## Mech anatomy per class. All values are sizes/positions in member-local space.
@@ -108,26 +140,29 @@ const FORMATION_OFFSETS: Dictionary = {
 ## turn_speed: rad/s body slew speed (lower = sluggish, higher = snappy).
 const CLASS_SHAPES: Dictionary = {
 	&"engineer": {
-		# Ratchet — small hexapod utility mech. Hull is elongated so three
-		# pairs of legs (front, mid, rear) can splay from the chassis sides.
-		"leg": Vector3(0.08, 0.55, 0.08), "hip_y": 0.34, "leg_x": 0.14,
-		"torso": Vector3(0.42, 0.3, 0.78), "head": Vector3(0.26, 0.22, 0.3), "head_shape": "sphere",
-		"cannon": Vector3(0.12, 0.12, 0.38), "cannon_x": 0.23, "cannon_kind": "claw",
+		# Ratchet — small hexapod utility mech. Per readability-pass spec
+		# (READABILITY_PASS.md §Task 3): scaled 0.7× from the medium baseline
+		# so it visibly reads as the smallest unit class. Squad still 5
+		# members for combat per a separate tuning pass.
+		"leg": Vector3(0.056, 0.385, 0.056), "hip_y": 0.238, "leg_x": 0.098,
+		"torso": Vector3(0.294, 0.21, 0.546), "head": Vector3(0.182, 0.154, 0.21), "head_shape": "sphere",
+		"cannon": Vector3(0.084, 0.084, 0.266), "cannon_x": 0.161, "cannon_kind": "claw",
 		"antenna": 0.0,
 		"color": Color(0.5, 0.46, 0.28),
-		"formation_spacing": 0.95,
+		"formation_spacing": 0.7,
 		"turn_speed": 6.0,
 		"leg_kind": "spider",
 		"torso_lean": 0.0,
 	},
 	&"light": {
-		# Rook — agile biped scout.
-		"leg": Vector3(0.11, 0.55, 0.11), "hip_y": 0.55, "leg_x": 0.15,
-		"torso": Vector3(0.38, 0.6, 0.38), "head": Vector3(0.24, 0.24, 0.36), "head_shape": "box",
-		"cannon": Vector3(0.12, 0.12, 0.45), "cannon_x": 0.28, "cannon_kind": "twin",
-		"antenna": 0.5,
+		# Rook — agile biped scout. Scaled 0.85× of the original baseline
+		# so it sits between Engineer and Medium in silhouette weight.
+		"leg": Vector3(0.094, 0.468, 0.094), "hip_y": 0.468, "leg_x": 0.128,
+		"torso": Vector3(0.323, 0.51, 0.323), "head": Vector3(0.204, 0.204, 0.306), "head_shape": "box",
+		"cannon": Vector3(0.102, 0.102, 0.383), "cannon_x": 0.238, "cannon_kind": "twin",
+		"antenna": 0.425,
 		"color": Color(0.32, 0.34, 0.4),
-		"formation_spacing": 0.95,
+		"formation_spacing": 0.85,
 		"turn_speed": 6.5,
 		"leg_kind": "biped",
 		"torso_lean": 0.0,
@@ -135,6 +170,7 @@ const CLASS_SHAPES: Dictionary = {
 	&"medium": {
 		# Hound — Sentinel-style: tall chicken legs dominate, larger cockpit on
 		# top, single cannon mounted on the right at cockpit height. Red visor.
+		# 1.0× baseline — the size every other class is calibrated against.
 		"leg": Vector3(0.18, 0.6, 0.18), "hip_y": 1.15, "leg_x": 0.3,
 		"torso": Vector3(0.65, 0.6, 0.7), "head": Vector3(0.55, 0.42, 0.6), "head_shape": "box",
 		"cannon": Vector3(0.16, 0.16, 0.75), "cannon_x": 0.34, "cannon_kind": "single_right",
@@ -151,12 +187,13 @@ const CLASS_SHAPES: Dictionary = {
 		# armor, single large cannon mounted in the front-center of the hull
 		# (no turret). Cylindrical barrel with a muzzle brake. Detail bulges,
 		# side skirts, and engine deck make it read as a proper war machine.
-		"leg": Vector3(0.28, 0.7, 0.28), "hip_y": 0.7, "leg_x": 0.55,
-		"torso": Vector3(1.1, 0.55, 1.7), "head": Vector3(0.5, 0.4, 0.55), "head_shape": "box",
-		"cannon": Vector3(0.16, 0.16, 1.05), "cannon_x": 0.0, "cannon_kind": "platform",
-		"antenna": 0.3,
+		# Scaled 1.4× of the original baseline so it dominates a Rook squad.
+		"leg": Vector3(0.392, 0.98, 0.392), "hip_y": 0.98, "leg_x": 0.77,
+		"torso": Vector3(1.54, 0.77, 2.38), "head": Vector3(0.7, 0.56, 0.77), "head_shape": "box",
+		"cannon": Vector3(0.224, 0.224, 1.47), "cannon_x": 0.0, "cannon_kind": "platform",
+		"antenna": 0.42,
 		"color": Color(0.42, 0.4, 0.35),
-		"formation_spacing": 1.95,
+		"formation_spacing": 2.0,
 		"turn_speed": 2.0,
 		"leg_kind": "quadruped",
 		"torso_lean": 0.0,
@@ -340,6 +377,25 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 	stripe.set_surface_override_material(0, stripe_mat)
 	torso_pivot.add_child(stripe)
 	mats.append(stripe_mat)
+
+	# Anvil faction-identity brass band — small front-facing accent that
+	# layers on top of the team-color stripe without competing with it.
+	# Per READABILITY_PASS.md §Task 7, this primes the multi-faction
+	# accent system: every faction gets one identity tint here later.
+	var brass := MeshInstance3D.new()
+	var brass_box := BoxMesh.new()
+	brass_box.size = Vector3(torso_size.x * 0.55, torso_size.y * 0.08, 0.04)
+	brass.mesh = brass_box
+	brass.position = Vector3(0.0, torso_size.y * 0.18, -torso_size.z * 0.5 - 0.02)
+	var brass_mat := StandardMaterial3D.new()
+	brass_mat.albedo_color = ANVIL_BRASS
+	brass_mat.emission_enabled = true
+	brass_mat.emission = ANVIL_BRASS
+	brass_mat.emission_energy_multiplier = 0.5
+	brass_mat.metallic = 0.7
+	brass_mat.roughness = 0.4
+	brass.set_surface_override_material(0, brass_mat)
+	torso_pivot.add_child(brass)
 
 	# --- Surface details (chest grille + back vent) on every mech that doesn't
 	# already have its own elaborate hull (the Bulwark platform builds its own).
@@ -1176,7 +1232,8 @@ func command_move(target: Vector3, clear_combat: bool = true) -> void:
 	## Move toward `target`. By default this also clears any combat target
 	## (player-issued moves preempt combat). Pass `clear_combat=false` for
 	## combat-internal chase commands so the chaser doesn't immediately wipe
-	## its own forced target.
+	## its own forced target. Plain move clears any pending waypoint queue.
+	move_queue.clear()
 	move_target = target
 	move_target.y = global_position.y
 	has_move_order = true
@@ -1189,8 +1246,22 @@ func command_move(target: Vector3, clear_combat: bool = true) -> void:
 			combat.clear_target()
 
 
+func queue_move(target: Vector3) -> void:
+	## Append a waypoint to the move queue. If the unit is currently idle,
+	## the appended target becomes its active goal; otherwise the unit
+	## finishes its current target first and then walks to each queued
+	## waypoint in turn.
+	var fixed: Vector3 = Vector3(target.x, global_position.y, target.z)
+	if move_target == Vector3.INF:
+		# Idle — just start the move directly.
+		command_move(fixed)
+		return
+	move_queue.append(fixed)
+
+
 func stop() -> void:
 	move_target = Vector3.INF
+	move_queue.clear()
 	velocity = Vector3.ZERO
 	has_move_order = false
 
@@ -1238,11 +1309,31 @@ func _physics_process(delta: float) -> void:
 			if cam:
 				_hp_bar.global_rotation = cam.global_rotation
 
+	# Gravity — keeps a unit pinned to the ground even when it ends up
+	# briefly above floor level (e.g. spawned with a slight Y offset, or
+	# walked onto a building edge). Without this the squad would float at
+	# whatever Y it last reached and bounce against vertical collision.
+	if not is_on_floor():
+		velocity.y -= GRAVITY * delta
+	else:
+		velocity.y = 0.0
+
 	if move_target == Vector3.INF:
+		# Still apply gravity even while idle so airborne units settle.
+		if not is_on_floor():
+			move_and_slide()
 		return
 
 	# Use NavigationAgent for pathfinding if available
 	if _nav_agent and _nav_agent.is_navigation_finished():
+		# Reached this waypoint. If there are queued ones, advance —
+		# otherwise the move order is fully complete.
+		if not move_queue.is_empty():
+			var next_wp: Vector3 = move_queue.pop_front() as Vector3
+			move_target = Vector3(next_wp.x, global_position.y, next_wp.z)
+			_stuck_timer = 0.0
+			_nav_agent.target_position = move_target
+			return
 		has_move_order = false
 		stop()
 		arrived.emit()
@@ -1260,25 +1351,57 @@ func _physics_process(delta: float) -> void:
 
 	if distance < ARRIVE_THRESHOLD:
 		if not _nav_agent or _nav_agent.is_navigation_finished():
+			# Same waypoint-advance logic as the nav-finished branch
+			# above — kept here for the no-NavAgent fallback path.
+			if not move_queue.is_empty():
+				var next_wp: Vector3 = move_queue.pop_front() as Vector3
+				move_target = Vector3(next_wp.x, global_position.y, next_wp.z)
+				_stuck_timer = 0.0
+				if _nav_agent:
+					_nav_agent.target_position = move_target
+				return
 			has_move_order = false
 			stop()
 			arrived.emit()
 			return
 
 	var direction := to_next / maxf(distance, 0.01)
-	velocity = direction * _move_speed
+	# Wall deflection — when the unit is wedged head-on against geometry,
+	# `move_and_slide` zeroes the perpendicular component and the squad
+	# stops dead instead of sliding around the building. Briefly rotating
+	# the desired heading 50° to one side gives slide a real lateral
+	# component to work with so it wraps the corner.
+	var now_msec: int = Time.get_ticks_msec()
+	if now_msec < _deflect_until_msec and _deflect_sign != 0.0:
+		direction = direction.rotated(Vector3.UP, _deflect_sign * deg_to_rad(50.0))
+	# Preserve the y component (gravity accumulator) so the unit keeps
+	# falling toward the floor while moving horizontally.
+	velocity.x = direction.x * _move_speed
+	velocity.z = direction.z * _move_speed
 
 	var prev_pos: Vector3 = global_position
 	move_and_slide()
 
-	# Stuck detection: if we tried to move but barely got anywhere, the unit is
-	# wedged against geometry or a peer. Re-issue the path once at 1.5s; if
-	# that doesn't help, give up at 5s so we don't grind forever.
+	# Stuck detection ladder:
+	# - 0.3s of zero progress → trigger a 0.8s deflection so slide produces
+	#   forward motion past the obstacle.
+	# - 1.5s without progress → re-issue the path (and flip the deflection
+	#   side in case we picked the wrong way around).
+	# - 5s without progress → give up so the unit doesn't grind forever.
 	var actual_move: float = (global_position - prev_pos).length()
 	var expected_move: float = _move_speed * delta * 0.3
 	if actual_move < expected_move:
 		_stuck_timer += delta
+		if _stuck_timer >= 0.3 and now_msec >= _deflect_until_msec:
+			# Deterministic side per unit so a squad doesn't oscillate
+			# both directions across formation members.
+			_deflect_sign = 1.0 if (get_instance_id() % 2) == 0 else -1.0
+			_deflect_until_msec = now_msec + 800
 		if _stuck_timer >= 1.5 and _stuck_timer < 1.5 + delta * 1.5:
+			# Try the other side and re-issue the path — maybe the first
+			# deflection picked the long way around.
+			_deflect_sign = -_deflect_sign
+			_deflect_until_msec = now_msec + 1200
 			if _nav_agent:
 				_nav_agent.target_position = move_target
 		elif _stuck_timer > 5.0:
@@ -1716,6 +1839,43 @@ func get_total_hp() -> int:
 	return total
 
 
+func heal(amount: float) -> void:
+	## Restore HP across surviving squad members up to per-member cap.
+	## Used by Ratchet auto-repair. Heals members evenly; dead members
+	## stay dead — repair doesn't resurrect.
+	if alive_count <= 0 or not stats:
+		return
+	var per_member_cap: int = stats.hp_per_unit
+	var remaining: int = int(ceil(amount))
+	if remaining <= 0:
+		return
+	# Heal the most-damaged living member first so repair feels like it's
+	# saving the wounded rather than topping up healthy ones.
+	while remaining > 0:
+		var lowest_idx: int = -1
+		var lowest_hp: int = per_member_cap
+		for i: int in member_hp.size():
+			if member_hp[i] <= 0:
+				continue
+			if member_hp[i] < lowest_hp:
+				lowest_hp = member_hp[i]
+				lowest_idx = i
+		if lowest_idx < 0:
+			return  # All living members at full HP.
+		var room: int = per_member_cap - member_hp[lowest_idx]
+		var apply: int = mini(remaining, room)
+		member_hp[lowest_idx] += apply
+		remaining -= apply
+		if apply <= 0:
+			return
+
+
+func is_damaged() -> bool:
+	if alive_count <= 0 or not stats:
+		return false
+	return get_total_hp() < stats.hp_total
+
+
 func get_squad_strength_ratio() -> float:
 	if not stats or stats.squad_size <= 0:
 		return 0.0
@@ -1740,7 +1900,7 @@ func _die() -> void:
 
 	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
 	if audio and audio.has_method("play_unit_destroyed"):
-		audio.play_unit_destroyed()
+		audio.play_unit_destroyed(global_position)
 
 	queue_free()
 

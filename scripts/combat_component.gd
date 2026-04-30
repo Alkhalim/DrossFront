@@ -85,7 +85,15 @@ func _physics_process(delta: float) -> void:
 		var weapon_range: float = 10.0
 		if stats and stats.primary_weapon:
 			weapon_range = CombatTables.get_range(stats.primary_weapon.range_tier)
-		var found: Node3D = _find_nearest_enemy(weapon_range * ENGAGE_RANGE_MULT)
+		var engage_radius: float = weapon_range * ENGAGE_RANGE_MULT
+		# Patrol units (any unit with a `home_position` set) get a -20%
+		# aggro multiplier so a careful player can sneak past them
+		# without triggering a fight.
+		var home: Variant = _unit.get("home_position")
+		var is_patrol: bool = (home is Vector3) and (home as Vector3) != Vector3.INF
+		if is_patrol:
+			engage_radius *= 0.8
+		var found: Node3D = _find_nearest_enemy(engage_radius)
 		if found:
 			# Promote to forced_target so the unit will close the distance even
 			# if the enemy starts outside weapon range.
@@ -101,6 +109,17 @@ func _physics_process(delta: float) -> void:
 			if _unit.get("move_target") == Vector3.INF:
 				# Arrived at attack-move destination — keep scanning
 				pass
+		# Patrol return-to-home: if this unit has a home position and no
+		# current target, send it back home so it doesn't drift across
+		# the map after a brief chase ends.
+		var home_var: Variant = _unit.get("home_position")
+		if home_var is Vector3 and (home_var as Vector3) != Vector3.INF:
+			var home_pos: Vector3 = home_var as Vector3
+			if not unit_has_move_order:
+				var d_home: float = _unit.global_position.distance_to(home_pos)
+				if d_home > 2.5:
+					if _unit.has_method("command_move"):
+						_unit.command_move(home_pos, false)
 		return
 
 	var dist: float = _unit.global_position.distance_to(_current_target.global_position)
@@ -354,7 +373,7 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	# generators based on damage tier, fire rate, and role.
 	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
 	if audio and audio.has_method("play_weapon_fire"):
-		audio.play_weapon_fire(weapon)
+		audio.play_weapon_fire(weapon, _unit.global_position)
 
 
 func _muzzle_color_for(weapon: WeaponResource) -> Color:

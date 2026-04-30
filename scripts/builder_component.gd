@@ -14,6 +14,10 @@ signal construction_finished(building: Building)
 const BUILD_BUFFER: float = 2.5
 
 var _target_building: Building = null
+## Damaged friendly node (Building or Unit) the engineer is currently
+## walking to / repairing. Independent from `_target_building` because
+## repair targets stay registered until full HP, not until "constructed".
+var _repair_target: Node3D = null
 var _unit: Unit = null
 
 
@@ -23,16 +27,41 @@ func _ready() -> void:
 		push_error("BuilderComponent must be a child of a Unit node.")
 
 
+## Radius in which a freshly-idle engineer will automatically pitch in on a
+## nearby teammate's construction site. Tight enough that an idle worker
+## doesn't run across the map to a totally different front, but loose
+## enough that a base under simultaneous build-up always has hands.
+const AUTO_ASSIST_RADIUS: float = 30.0
+## Auto-repair scan radius. Same idea as AUTO_ASSIST_RADIUS — engineer
+## tends only to nearby damage rather than running across the map.
+const AUTO_REPAIR_RADIUS: float = 22.0
+## Repair feels best at a fraction of the unit's `repair_rate` so a single
+## engineer is meaningful but not nearly as fast as the construction itself
+## would have been at full strength. Engineers in a squad stack — three
+## Ratchets repairing the same building still bring it back fast.
+const REPAIR_RATE_FACTOR: float = 0.5
+
+
 func _physics_process(delta: float) -> void:
 	if not _target_building or not is_instance_valid(_target_building):
 		_target_building = null
 		_set_build_anim(false)
+		# No construction in progress — try to repair something nearby
+		# that's damaged. Falls back to construction-assist if there's
+		# nothing to fix. Either path is skipped if the player is
+		# actively moving the engineer somewhere.
+		if _process_repair(delta):
+			return
+		_try_auto_assist()
 		return
 
 	if _target_building.is_constructed:
 		_target_building = null
 		_unit.stop()
 		_set_build_anim(false)
+		if _process_repair(delta):
+			return
+		_try_auto_assist()
 		return
 
 	var dist: float = _unit.global_position.distance_to(_target_building.global_position)
@@ -57,6 +86,114 @@ func _physics_process(delta: float) -> void:
 		construction_finished.emit(_target_building)
 		_target_building = null
 		_set_build_anim(false)
+
+
+func _process_repair(delta: float) -> bool:
+	## Returns true if it took control of the engineer this tick (so the
+	## caller doesn't also try to auto-assist construction). Looks for the
+	## nearest damaged friendly node, walks to it, and applies the
+	## repair_rate.
+	if not _unit or not is_instance_valid(_unit):
+		return false
+	# Honor explicit player commands. Same rule as auto-assist — if the
+	# player just clicked a destination, don't drag the unit somewhere else.
+	if _unit.has_move_order:
+		return false
+
+	# Drop the cached target if it's gone, freed, or fully healed.
+	if _repair_target and is_instance_valid(_repair_target):
+		var still_damaged: bool = false
+		if _repair_target.has_method("is_damaged"):
+			still_damaged = _repair_target.is_damaged()
+		if not still_damaged:
+			_repair_target = null
+	else:
+		_repair_target = null
+
+	if not _repair_target:
+		_repair_target = _find_repair_target()
+		if not _repair_target:
+			return false
+
+	var center: Vector3 = (_repair_target as Node3D).global_position
+	var d: float = _unit.global_position.distance_to(center)
+	var range_max: float = _repair_max_distance(_repair_target)
+	# `RANGE_TOLERANCE` is wider than the NavigationAgent's
+	# `target_desired_distance` so the unit doesn't keep re-walking
+	# whenever arrival lands a hair outside `range_max`. Without this
+	# slack the engineer ping-pongs between "walk closer" → "nav says I
+	# arrived" → "still slightly out of range" and never starts the heal.
+	const RANGE_TOLERANCE: float = 1.5
+	if d > range_max + RANGE_TOLERANCE:
+		# Walk into repair range. Approach point sits well inside the
+		# target's range_max so post-arrival we're guaranteed inside.
+		var to_self: Vector3 = _unit.global_position - center
+		to_self.y = 0.0
+		if to_self.length_squared() < 0.01:
+			to_self = Vector3(1.0, 0.0, 0.0)
+		var approach: Vector3 = center + to_self.normalized() * (range_max - RANGE_TOLERANCE)
+		_unit.command_move(approach, false)
+		_set_build_anim(false)
+		return true
+
+	# In range — tend to the patient.
+	_unit.stop()
+	_set_build_anim(true)
+	var rate: float = REPAIR_RATE_FACTOR
+	var stats: UnitStatResource = _unit.get("stats") as UnitStatResource
+	if stats and "repair_rate" in stats:
+		rate *= float(stats.get("repair_rate"))
+	if _repair_target.has_method("heal"):
+		_repair_target.heal(rate * delta)
+	return true
+
+
+func _find_repair_target() -> Node3D:
+	if not _unit:
+		return null
+	var my_owner: int = _unit.owner_id
+	var my_pos: Vector3 = _unit.global_position
+	var best: Node3D = null
+	var best_dist: float = AUTO_REPAIR_RADIUS
+
+	# Damaged friendly buildings.
+	for node: Node in _unit.get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var b: Building = node as Building
+		if not b or b.owner_id != my_owner:
+			continue
+		if not b.is_damaged():
+			continue
+		var d: float = my_pos.distance_to(b.global_position)
+		if d < best_dist:
+			best_dist = d
+			best = b
+
+	# Damaged friendly units (skip self).
+	for node: Node in _unit.get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node):
+			continue
+		if node == _unit:
+			continue
+		var u: Unit = node as Unit
+		if not u or u.owner_id != my_owner:
+			continue
+		if not u.has_method("is_damaged") or not u.is_damaged():
+			continue
+		var d: float = my_pos.distance_to(u.global_position)
+		if d < best_dist:
+			best_dist = d
+			best = u
+	return best
+
+
+func _repair_max_distance(target: Node3D) -> float:
+	if target is Building and (target as Building).stats:
+		var fs: Vector3 = (target as Building).stats.footprint_size
+		return maxf(fs.x, fs.z) * 0.5 + BUILD_BUFFER
+	# Unit target — small extent.
+	return 2.5
 
 
 func _set_build_anim(active: bool) -> void:
@@ -99,8 +236,39 @@ func _approach_point() -> Vector3:
 
 func cancel_build() -> void:
 	## Called by the player issuing a non-build command (move/attack) so the
-	## builder doesn't immediately drag the unit back to the construction site.
+	## builder doesn't immediately drag the unit back to the construction
+	## site or repair patient.
 	_target_building = null
+	_repair_target = null
+
+
+func _try_auto_assist() -> void:
+	## Look for the nearest under-construction friendly building within
+	## AUTO_ASSIST_RADIUS and start helping it. Bails out if the player
+	## has the engineer mid-move (we honor the explicit order), or if no
+	## eligible site exists.
+	if not _unit or not is_instance_valid(_unit):
+		return
+	if _unit.has_move_order:
+		return  # Player gave a move command — don't second-guess them.
+	var my_owner: int = _unit.owner_id
+	var my_pos: Vector3 = _unit.global_position
+	var best: Building = null
+	var best_dist: float = AUTO_ASSIST_RADIUS
+	for node: Node in _unit.get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var b: Building = node as Building
+		if not b or b.is_constructed:
+			continue
+		if b.owner_id != my_owner:
+			continue
+		var d: float = my_pos.distance_to(b.global_position)
+		if d < best_dist:
+			best_dist = d
+			best = b
+	if best:
+		start_building(best)
 
 
 func place_building(building_stats: BuildingStatResource, position: Vector3, resource_mgr: ResourceManager) -> Building:

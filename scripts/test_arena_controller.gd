@@ -103,96 +103,53 @@ func _setup_alerts() -> void:
 
 
 func _setup_navigation() -> void:
-	# Bake-from-source-geometry navmesh. The arena's static colliders on
-	# layer 5 (1 = ground, 4 = buildings/terrain) are walked at bake time:
-	# the ground slab below provides a finite walkable surface, buildings
-	# and terrain pieces carve out their footprints. This is what lets the
-	# pathfinder route units AROUND structures instead of straight into a
-	# wall and giving up.
+	# Flat manual navmesh — the bake-from-colliders version proved fragile
+	# (infinite WorldBoundaryShape3D + multi-layer walkable surfaces +
+	# async bake timing all combined to occasionally produce a degenerate
+	# navmesh that left every unit reporting "navigation finished" the
+	# moment a path query was issued). Until that's debugged properly,
+	# keep the simple ±150 quad and rely on stuck-rescue + RVO obstacles
+	# for the cases the bake was supposed to solve.
 	var nav_region := NavigationRegion3D.new()
 	nav_region.name = "NavigationRegion"
 
 	var nav_mesh := NavigationMesh.new()
-	nav_mesh.cell_size = 0.5
-	nav_mesh.cell_height = 0.25
-	# agent_radius bigger than the largest unit's collision radius (Bulwark
-	# squad ≈ 1.4) so the bake leaves enough clearance around buildings
-	# that even the heaviest squad fits through the carved corridor.
-	nav_mesh.agent_radius = 1.5
-	nav_mesh.agent_height = 2.0
-	# Bumped from 0.5 to 0.7 so units can step onto the 0.6-unit elevated
-	# platforms placed by `_setup_elevation`. Anything taller than this is
-	# either a ramp (gentle slope, parsed as walkable by max_walkable_slope)
-	# or non-walkable cliff (blocked by the bake).
-	nav_mesh.agent_max_climb = 0.7
-	nav_mesh.geometry_parsed_geometry_type = NavigationMesh.PARSED_GEOMETRY_STATIC_COLLIDERS
-	nav_mesh.geometry_collision_mask = 5  # layer 1 (ground) + layer 4 (structures)
-	nav_mesh.filter_baking_aabb = AABB(Vector3(-150.0, -1.0, -150.0), Vector3(300.0, 4.0, 300.0))
+	nav_mesh.vertices = PackedVector3Array([
+		Vector3(-150, 0, -150),
+		Vector3(150, 0, -150),
+		Vector3(150, 0, 150),
+		Vector3(-150, 0, 150),
+	])
+	nav_mesh.add_polygon(PackedInt32Array([0, 1, 2]))
+	nav_mesh.add_polygon(PackedInt32Array([0, 2, 3]))
 
 	nav_region.navigation_mesh = nav_mesh
 	add_child(nav_region)
 	_nav_region = nav_region
 
-	# WorldBoundaryShape3D in test_arena.tscn is infinite (good for keeping
-	# units on the floor) but bake needs a *finite* walkable surface to parse
-	# as the floor. Add a thin slab on layer 1 strictly for the bake input.
-	var slab := StaticBody3D.new()
-	slab.name = "NavBakeFloor"
-	slab.collision_layer = 1
-	slab.collision_mask = 0
-	var slab_shape := CollisionShape3D.new()
-	var slab_box := BoxShape3D.new()
-	slab_box.size = Vector3(310.0, 0.1, 310.0)
-	slab_shape.shape = slab_box
-	slab.add_child(slab_shape)
-	slab.position = Vector3(0.0, -0.05, 0.0)
-	add_child(slab)
-
 
 func _bake_navmesh_now() -> void:
-	if _nav_region:
-		# Synchronous bake so the first frame's pathfinding queries hit a
-		# real navmesh. ±150 with cell_size 0.5 is small enough that the
-		# main-thread cost is negligible at startup.
-		_nav_region.bake_navigation_mesh(false)
+	# No-op while the manual navmesh is in use. Kept so callers from the
+	# bake-era still wire up cleanly.
+	pass
 
 
 func request_navmesh_rebake() -> void:
-	## Public hook: call after a building finishes construction (or is
-	## destroyed) so the navmesh reflects the new static layout. We defer
-	## to next frame so multiple buildings finishing on the same tick coalesce
-	## into a single bake.
-	if _rebake_pending:
-		return
-	_rebake_pending = true
-	call_deferred("_do_pending_rebake")
+	# Same — a manual navmesh doesn't need re-baking when buildings appear.
+	pass
 
 
-var _rebake_pending: bool = false
-
-
-func _do_pending_rebake() -> void:
-	_rebake_pending = false
-	if _nav_region:
-		# Async bake here — runtime re-bakes shouldn't stutter; pathfinders
-		# fall through to the previous mesh until the new one is ready.
-		_nav_region.bake_navigation_mesh(true)
-
-
-## Spawn positions per player_id. Picked so 2v2 has the team-A pair on the
-## east (player at the corner, ally further north) and team-B on the west
-## opposite — diagonal layout per the "no symmetric mirror maps" guideline
-## but balanced so each team has comparable terrain access.
-const PLAYER_HQ_POSITIONS: Dictionary = {
-	0: Vector3(0.0, 0.0, 0.0),       # 1v1 default — keeps existing scene wiring untouched
-	1: Vector3(60.0, 0.0, -20.0),    # 2v2 ally
-	3: Vector3(-60.0, 0.0, -100.0),  # 2v2 enemy 1
-	4: Vector3(60.0, 0.0, -100.0),   # 2v2 enemy 2
+## HQ placement — both modes use opposite corners around the map center
+## (z = 0). 1v1: player on north edge, AI on south edge, equidistant. 2v2:
+## team A on the north edge (player west, ally east), team B mirrored on
+## the south edge.
+const HQ_POSITIONS_1V1: Dictionary = {
+	0: Vector3(0.0, 0.0, 110.0),
+	1: Vector3(0.0, 0.0, -110.0),
 }
-
 const HQ_POSITIONS_2V2: Dictionary = {
-	0: Vector3(-60.0, 0.0, -20.0),   # Player corner in 2v2
-	1: Vector3(60.0, 0.0, -20.0),    # Ally corner
+	0: Vector3(-60.0, 0.0, 100.0),
+	1: Vector3(60.0, 0.0, 100.0),
 	3: Vector3(-60.0, 0.0, -100.0),
 	4: Vector3(60.0, 0.0, -100.0),
 }
@@ -201,9 +158,7 @@ const HQ_POSITIONS_2V2: Dictionary = {
 func _hq_position_for(player_id: int) -> Vector3:
 	if _is_2v2():
 		return HQ_POSITIONS_2V2.get(player_id, Vector3.ZERO) as Vector3
-	if player_id == 0:
-		return Vector3.ZERO
-	return Vector3(0.0, 0.0, -120.0)
+	return HQ_POSITIONS_1V1.get(player_id, Vector3(0.0, 0.0, -110.0)) as Vector3
 
 
 func _setup_player() -> void:
@@ -214,24 +169,31 @@ func _setup_player() -> void:
 		hq.owner_id = 0
 		hq.is_constructed = true
 		hq.resource_manager = resource_manager
-		# Reposition player HQ for 2v2 since the static scene placement
-		# only fits the 1v1 layout. Track the delta so the starter army
-		# (statically placed in the scene) shifts by the same amount and
-		# stays clustered around the HQ.
-		if _is_2v2():
-			var new_pos: Vector3 = _hq_position_for(0)
-			hq_offset = new_pos - hq.global_position
-			hq.global_position = new_pos
+		# Move the player HQ to its mode-specific corner — the .tscn places
+		# it at world origin for editor convenience, but real matches want
+		# both bases pushed to opposite ends of the map.
+		var new_pos: Vector3 = _hq_position_for(0)
+		hq_offset = new_pos - hq.global_position
+		hq.global_position = new_pos
 		hq._apply_placeholder_shape()
 
-	# Shift the static starter Units alongside the HQ so they don't end up
-	# stranded at world origin.
+	# Shift the static starter Units by the same delta so they cluster
+	# around the relocated HQ instead of getting stranded at world origin.
 	if hq_offset.length_squared() > 0.0001:
 		var units_node: Node = get_node_or_null("Units")
 		if units_node:
 			for child: Node in units_node.get_children():
 				if child is Node3D:
 					(child as Node3D).global_position += hq_offset
+
+	# Snap the camera so the match opens looking at the player's base
+	# instead of wherever the .tscn happened to leave the camera node.
+	# Reuses RTSCamera's pivot fields (same way the H hotkey does).
+	var cam: Camera3D = get_viewport().get_camera_3d() if get_viewport() else null
+	if cam and hq:
+		var focus: Vector3 = Vector3(hq.global_position.x, 0.0, hq.global_position.z)
+		cam.set("_pivot", focus)
+		cam.set("_target_pivot", focus)
 
 	# Wire resource manager to all player buildings
 	var buildings: Array[Node] = get_tree().get_nodes_in_group("buildings")
@@ -280,24 +242,31 @@ func _spawn_ai_player(player_id: int, display_name: String) -> void:
 	ai_hq.is_constructed = true
 	ai_hq._apply_placeholder_shape()
 
-	# Starter army anchored relative to the HQ — same shape regardless of
-	# corner / edge so each AI starts with comparable forces.
+	# Starter army anchored relative to the HQ. The unit offsets are
+	# laid out in `fwd` (toward map center) and `right` (perpendicular)
+	# axes — earlier code used world-space x/z offsets, which for the
+	# 2v2 ally at the (60, 100) corner reliably parked one starter unit
+	# inside the HQ collision (corner spawn → world +x went BACK into
+	# the building). Forward/right space puts every starter clearly out
+	# in open ground regardless of HQ corner.
 	var ratchet_stats: UnitStatResource = load("res://resources/units/anvil_ratchet.tres") as UnitStatResource
 	var rook_stats: UnitStatResource = load("res://resources/units/anvil_rook.tres") as UnitStatResource
 	var hq_pos: Vector3 = ai_hq.global_position
-	# Push starter units further into open ground (away from map corner)
-	# by stepping toward map center on z.
-	var step_dir: Vector3 = (Vector3.ZERO - hq_pos)
-	step_dir.y = 0.0
-	if step_dir.length_squared() > 0.0001:
-		step_dir = step_dir.normalized()
+	var fwd: Vector3 = Vector3.ZERO - hq_pos
+	fwd.y = 0.0
+	if fwd.length_squared() > 0.0001:
+		fwd = fwd.normalized()
 	else:
-		step_dir = Vector3(0.0, 0.0, 1.0)
-	var anchor: Vector3 = hq_pos + step_dir * 5.0
-	_spawn_ai_unit(ratchet_stats, anchor + Vector3(-3.0, 0.0, 0.0), player_id)
-	_spawn_ai_unit(ratchet_stats, anchor + Vector3(3.0, 0.0, 0.0), player_id)
-	_spawn_ai_unit(rook_stats, anchor + Vector3(-2.0, 0.0, 3.0), player_id)
-	_spawn_ai_unit(rook_stats, anchor + Vector3(2.0, 0.0, 3.0), player_id)
+		fwd = Vector3(0.0, 0.0, 1.0)
+	# 90° right of fwd (still XZ-plane).
+	var right: Vector3 = Vector3(-fwd.z, 0.0, fwd.x)
+	# Anchor a generous 8u in front of the HQ — outside the 6u
+	# footprint plus ~2u clearance for the unit's own collision capsule.
+	var anchor: Vector3 = hq_pos + fwd * 8.0
+	_spawn_ai_unit(ratchet_stats, anchor - right * 3.0, player_id)
+	_spawn_ai_unit(ratchet_stats, anchor + right * 3.0, player_id)
+	_spawn_ai_unit(rook_stats, anchor + fwd * 3.0 - right * 2.0, player_id)
+	_spawn_ai_unit(rook_stats, anchor + fwd * 3.0 + right * 2.0, player_id)
 
 	# Controller
 	var ai_script: GDScript = load("res://scripts/ai_controller.gd") as GDScript
@@ -327,24 +296,44 @@ func _setup_fuel_deposits() -> void:
 	if not deposit_script:
 		return
 
-	# Foundry Belt 1v1 layout (per SCOPE_VERTICAL_SLICE_V2.md §"Map 1"):
-	# - 1 in each player's safe area (close to home)
-	# - 2 mid-map deposits (contested, central)
-	# - 1 back-door deposit on the far east flank behind a terrain
-	#   chokepoint (the high-value target — guarded by a Heavy patrol).
-	# Total 5 deposits at varied strategic distances.
-	var positions: Array[Vector3] = [
-		Vector3(28, 0, -8),    # Player safe-side
-		Vector3(-28, 0, -112), # AI safe-side
-		Vector3(35, 0, -60),   # Mid-east (contested)
-		Vector3(-35, 0, -60),  # Mid-west (contested)
-		Vector3(95, 0, -60),   # Back-door (far east, behind chokepoint)
-	]
+	var positions: Array[Vector3] = (
+		_deposit_positions_2v2() if _is_2v2() else _deposit_positions_1v1()
+	)
 
 	for pos: Vector3 in positions:
 		var deposit: Node3D = deposit_script.new()
 		deposit.global_position = pos
 		add_child(deposit)
+
+
+func _deposit_positions_1v1() -> Array[Vector3]:
+	# Foundry Belt 1v1 layout. Symmetric around z = 0 AND x = 0 — the
+	# previous version put the back-door deposit only on the east flank,
+	# which gave the player at z = +110 a faster claim than the AI at
+	# z = -110 to anything west of center. Now both flanks have a
+	# back-door so map dominance is genuinely a both-flanks decision.
+	return [
+		Vector3(28, 0, 80),     # Player safe-side (north)
+		Vector3(-28, 0, -80),   # AI safe-side (south)
+		Vector3(35, 0, 0),      # Mid-east (contested)
+		Vector3(-35, 0, 0),     # Mid-west (contested)
+		Vector3(95, 0, 0),      # East back-door
+		Vector3(-95, 0, 0),     # West back-door (mirror)
+	]
+
+
+func _deposit_positions_2v2() -> Array[Vector3]:
+	# 2v2 layout — each of the four corner spawns gets a near-home deposit
+	# of its own so neither team feels starved on opening, plus a single
+	# central contested deposit that's the dominant mid-game objective.
+	# Total 5 (matches the V2 spec's "4-5 in 2v2" range).
+	return [
+		Vector3(-30, 0, 70),    # Player NW safe
+		Vector3(30, 0, 70),     # Ally NE safe
+		Vector3(-30, 0, -70),   # Enemy SW safe
+		Vector3(30, 0, -70),    # Enemy SE safe
+		Vector3(0, 0, 0),       # Central contested — the hot zone
+	]
 
 
 func _setup_terrain() -> void:
@@ -356,22 +345,42 @@ func _setup_terrain() -> void:
 	# Positions deliberately leave the home-base lanes and deposit approaches
 	# open so the early game stays clean; cover lives in the mid lane where
 	# fights actually happen.
+	# Mirrored across z = 0 so neither side gets a cover advantage. Also
+	# corner-fill ruins in NW / NE / SW / SE so the map reads as an
+	# inhabited industrial belt rather than a flat empty plate.
 	var pieces: Array[Dictionary] = [
-		{"pos": Vector3(-15, 0, -50), "size": Vector3(4.0, 2.5, 3.0), "kind": "rock"},
-		{"pos": Vector3(15, 0, -55), "size": Vector3(3.5, 2.0, 4.0), "kind": "rock"},
-		{"pos": Vector3(48, 0, -45), "size": Vector3(3.0, 3.5, 3.0), "kind": "ruin"},
-		{"pos": Vector3(-48, 0, -75), "size": Vector3(3.5, 3.0, 3.5), "kind": "ruin"},
-		{"pos": Vector3(60, 0, -25), "size": Vector3(2.5, 2.0, 2.5), "kind": "rock"},
-		{"pos": Vector3(-60, 0, -30), "size": Vector3(3.0, 2.5, 3.0), "kind": "ruin"},
-		{"pos": Vector3(50, 0, -100), "size": Vector3(3.0, 2.0, 3.5), "kind": "rock"},
-		{"pos": Vector3(-55, 0, -90), "size": Vector3(4.0, 3.0, 3.0), "kind": "ruin"},
-		# Back-door chokepoint — two large ruins at x ≈ 85 sandwich a narrow
-		# gap (~4 units wide in z) that any attacker must thread through to
-		# reach the back-door deposit at (95, -60). The high-value Heavy-
-		# guarded deposit is the reward; the chokepoint is the price of
-		# admission.
-		{"pos": Vector3(85, 0, -54), "size": Vector3(8.0, 4.0, 8.0), "kind": "ruin"},
-		{"pos": Vector3(85, 0, -66), "size": Vector3(8.0, 4.0, 8.0), "kind": "ruin"},
+		# Mid-line cover — two rocks flanking the central z-axis lane.
+		{"pos": Vector3(-15, 0, 10), "size": Vector3(4.0, 2.5, 3.0), "kind": "rock"},
+		{"pos": Vector3(15, 0, -10), "size": Vector3(3.5, 2.0, 4.0), "kind": "rock"},
+		# Mid-flank ruins.
+		{"pos": Vector3(48, 0, 15), "size": Vector3(3.0, 3.5, 3.0), "kind": "ruin"},
+		{"pos": Vector3(-48, 0, -15), "size": Vector3(3.5, 3.0, 3.5), "kind": "ruin"},
+		# Player-side flank features.
+		{"pos": Vector3(60, 0, 35), "size": Vector3(2.5, 2.0, 2.5), "kind": "rock"},
+		{"pos": Vector3(-60, 0, 30), "size": Vector3(3.0, 2.5, 3.0), "kind": "ruin"},
+		# AI-side flank features (mirrored z values).
+		{"pos": Vector3(50, 0, -40), "size": Vector3(3.0, 2.0, 3.5), "kind": "rock"},
+		{"pos": Vector3(-55, 0, -30), "size": Vector3(4.0, 3.0, 3.0), "kind": "ruin"},
+		# East back-door chokepoint at x ≈ 85.
+		{"pos": Vector3(85, 0, 6), "size": Vector3(8.0, 4.0, 8.0), "kind": "ruin"},
+		{"pos": Vector3(85, 0, -6), "size": Vector3(8.0, 4.0, 8.0), "kind": "ruin"},
+		# West back-door chokepoint mirror at x ≈ -85 — same narrow gap
+		# leading to the west back-door deposit at (-95, 0).
+		{"pos": Vector3(-85, 0, 6), "size": Vector3(8.0, 4.0, 8.0), "kind": "ruin"},
+		{"pos": Vector3(-85, 0, -6), "size": Vector3(8.0, 4.0, 8.0), "kind": "ruin"},
+		# Corner fillers — break up the visual emptiness of the four map
+		# corners without affecting the strategic lanes. Smaller and
+		# pushed near the camera-bound limits.
+		{"pos": Vector3(120, 0, 120), "size": Vector3(4.5, 3.0, 4.5), "kind": "ruin"},
+		{"pos": Vector3(-120, 0, 120), "size": Vector3(5.0, 3.0, 4.0), "kind": "ruin"},
+		{"pos": Vector3(120, 0, -120), "size": Vector3(4.0, 3.0, 5.0), "kind": "ruin"},
+		{"pos": Vector3(-120, 0, -120), "size": Vector3(4.5, 2.5, 4.5), "kind": "ruin"},
+		# Mid-edge filler — the long horizontal flanks need something
+		# between the safe deposits and the corners.
+		{"pos": Vector3(110, 0, 50), "size": Vector3(3.0, 2.5, 3.5), "kind": "rock"},
+		{"pos": Vector3(-110, 0, 55), "size": Vector3(3.5, 2.0, 3.0), "kind": "rock"},
+		{"pos": Vector3(110, 0, -50), "size": Vector3(3.5, 2.5, 3.0), "kind": "rock"},
+		{"pos": Vector3(-110, 0, -45), "size": Vector3(3.0, 2.0, 3.5), "kind": "rock"},
 	]
 	for piece: Dictionary in pieces:
 		_spawn_terrain_piece(piece["pos"] as Vector3, piece["size"] as Vector3, piece["kind"] as String)
@@ -382,6 +391,10 @@ func _spawn_terrain_piece(pos: Vector3, piece_size: Vector3, kind: String) -> vo
 	root.collision_layer = 4
 	root.collision_mask = 0
 	root.position = Vector3(pos.x, piece_size.y * 0.5, pos.z)
+	# Random Y rotation so a row of identical-spec pieces doesn't read as
+	# copy-pasted cubes. The collision shape rotates with the root, so
+	# the AABB still covers the same footprint.
+	root.rotation.y = randf_range(0.0, TAU)
 	root.add_to_group("terrain")
 	add_child(root)
 
@@ -392,20 +405,51 @@ func _spawn_terrain_piece(pos: Vector3, piece_size: Vector3, kind: String) -> vo
 	shape.shape = box
 	root.add_child(shape)
 
-	# Visual mesh with kind-specific color so ruins and rocks read differently.
+	# Per-kind palette with per-instance jitter so adjacent pieces read as
+	# distinct objects rather than a mass of one tone.
+	var base_color: Color
+	if kind == "ruin":
+		base_color = Color(0.32, 0.26, 0.22, 1.0)
+	else:
+		base_color = Color(0.28, 0.27, 0.24, 1.0)
+	var jitter: float = 0.05
+	base_color.r = clampf(base_color.r + randf_range(-jitter, jitter), 0.0, 1.0)
+	base_color.g = clampf(base_color.g + randf_range(-jitter, jitter), 0.0, 1.0)
+	base_color.b = clampf(base_color.b + randf_range(-jitter, jitter), 0.0, 1.0)
+
 	var mesh_inst := MeshInstance3D.new()
 	var box_mesh := BoxMesh.new()
 	box_mesh.size = piece_size
 	mesh_inst.mesh = box_mesh
 	var mat := StandardMaterial3D.new()
-	if kind == "ruin":
-		mat.albedo_color = Color(0.32, 0.26, 0.22, 1.0)
-		mat.roughness = 0.9
-	else:
-		mat.albedo_color = Color(0.28, 0.27, 0.24, 1.0)
-		mat.roughness = 1.0
+	mat.albedo_color = base_color
+	mat.roughness = randf_range(0.85, 0.98)
 	mesh_inst.material_override = mat
 	root.add_child(mesh_inst)
+
+	# Secondary debris chunk on top — random size + rotation, slightly
+	# darker shade. Adds vertical silhouette variation and breaks the
+	# perfect-cube read without changing the collision footprint.
+	var chunk := MeshInstance3D.new()
+	var chunk_box := BoxMesh.new()
+	var cs: float = piece_size.x * randf_range(0.35, 0.55)
+	chunk_box.size = Vector3(cs, randf_range(0.4, 0.8) * piece_size.y, cs * randf_range(0.7, 1.1))
+	chunk.mesh = chunk_box
+	chunk.position = Vector3(
+		randf_range(-piece_size.x * 0.18, piece_size.x * 0.18),
+		piece_size.y * 0.5 + chunk_box.size.y * 0.4,
+		randf_range(-piece_size.z * 0.18, piece_size.z * 0.18),
+	)
+	chunk.rotation = Vector3(
+		randf_range(-0.18, 0.18),
+		randf_range(0.0, TAU),
+		randf_range(-0.18, 0.18),
+	)
+	var chunk_mat := StandardMaterial3D.new()
+	chunk_mat.albedo_color = base_color.darkened(randf_range(0.05, 0.18))
+	chunk_mat.roughness = mat.roughness
+	chunk.material_override = chunk_mat
+	root.add_child(chunk)
 
 	# RVO obstacle so units steer around instead of grinding into the side.
 	# Radius is the larger horizontal half-extent + a small margin.
@@ -432,26 +476,29 @@ func _setup_elevation() -> void:
 	# Avoid x∈[-3, 3], z∈[-3, 8] so player HQ + starting unit cluster
 	# stay clear; same on the AI side at z=-120.
 	var pieces: Array[Dictionary] = [
-		# Central plateau — the contested high ground between the two mid
-		# deposits and just above the apex wreck cluster.
-		{"pos": Vector3(0.0, 0.3, -45.0), "size": Vector3(18.0, 0.6, 12.0)},
-		# East ridge near the back-door chokepoint — defenders of the
-		# back-door deposit can stand on it.
-		{"pos": Vector3(70.0, 0.3, -60.0), "size": Vector3(8.0, 0.6, 14.0)},
-		# West rise, mirrored across the map for the cross-flank push.
-		{"pos": Vector3(-65.0, 0.3, -75.0), "size": Vector3(10.0, 0.6, 10.0)},
+		# Northern plateau (player-side mid).
+		{"pos": Vector3(0.0, 0.3, 25.0), "size": Vector3(18.0, 0.6, 12.0)},
+		# Southern plateau (AI-side mirror) — reduces the previous
+		# north-only asymmetry.
+		{"pos": Vector3(0.0, 0.3, -75.0), "size": Vector3(16.0, 0.6, 10.0)},
+		# East ridge near the back-door chokepoint.
+		{"pos": Vector3(70.0, 0.3, 0.0), "size": Vector3(8.0, 0.6, 14.0)},
+		# West ridge mirror near the new west back-door.
+		{"pos": Vector3(-70.0, 0.3, 0.0), "size": Vector3(8.0, 0.6, 14.0)},
 	]
 	for piece: Dictionary in pieces:
 		_spawn_elevation_piece(piece["pos"] as Vector3, piece["size"] as Vector3)
 
 
 func _spawn_elevation_piece(pos: Vector3, piece_size: Vector3) -> void:
-	# Walkable platform: collision on layer 1 (same as ground) so the
-	# navmesh bake treats the top surface as walkable; click-to-move
-	# raycasts through layer 1 will land on the platform when the player
-	# clicks on top of it.
+	# Visual rise that physically blocks pathing — same collision treatment
+	# as terrain pieces (layer 4). Until the navmesh bake gets sorted out
+	# we can't make the top walkable, so for now these read as low-rise
+	# obstacles units route around. The high-ground combat bonus still
+	# applies to anyone who *does* end up at a higher Y (e.g. firing from
+	# a building roof later).
 	var root := StaticBody3D.new()
-	root.collision_layer = 1
+	root.collision_layer = 4
 	root.collision_mask = 0
 	root.position = pos
 	root.add_to_group("elevation")
@@ -491,20 +538,36 @@ func _setup_neutral_patrols() -> void:
 
 	# Patrol unit, position offset from the deposit center so harvesters
 	# don't spawn directly inside the patrol's collision.
-	var patrols: Array[Dictionary] = [
-		{"stats": rook_stats, "pos": Vector3(28 + 4, 0, -8)},     # Player safe
-		{"stats": rook_stats, "pos": Vector3(-28 - 4, 0, -112)},  # AI safe
-		{"stats": hound_stats, "pos": Vector3(35 + 4, 0, -56)},   # Mid-east contested
-		{"stats": hound_stats, "pos": Vector3(-35 - 4, 0, -56)},  # Mid-west contested
-		# Back-door deposit guard — Heavy patrol (Bulwark). High-value
-		# target: clearing this opens up the strongest deposit on the map.
-		{"stats": bulwark_stats, "pos": Vector3(95 + 4, 0, -56)},
-		# Apex wreck guard — Heavy patrol (Bulwark) sitting on the scar at
-		# (0, -30). Per V2 spec §"Map 1", the apex wreck is a mid-late game
-		# objective and should be heavily guarded; pushing for it costs
-		# real combat power, not a free salvage burst.
-		{"stats": bulwark_stats, "pos": Vector3(4, 0, -28)},
-	]
+	# Patrols sit one unit-radius off each deposit so harvesters don't
+	# immediately overlap the guard's collision capsule. Layout differs
+	# per mode because the deposit positions do.
+	var patrols: Array[Dictionary]
+	if _is_2v2():
+		patrols = [
+			# Each corner safe deposit gets a Light patrol — fast to clear
+			# but enough that a wandering Crawler can't waltz straight in.
+			{"stats": rook_stats, "pos": Vector3(-30 + 4, 0, 70)},
+			{"stats": rook_stats, "pos": Vector3(30 - 4, 0, 70)},
+			{"stats": rook_stats, "pos": Vector3(-30 + 4, 0, -70)},
+			{"stats": rook_stats, "pos": Vector3(30 - 4, 0, -70)},
+			# Central deposit — Heavy patrol (Bulwark). It's the dominant
+			# 2v2 objective; clearing it is a real combat-power investment.
+			{"stats": bulwark_stats, "pos": Vector3(4, 0, 4)},
+			# Apex wreck guard, same as 1v1.
+			{"stats": bulwark_stats, "pos": Vector3(4, 0, -45)},
+		]
+	else:
+		patrols = [
+			{"stats": rook_stats, "pos": Vector3(28 + 4, 0, 80)},     # Player safe
+			{"stats": rook_stats, "pos": Vector3(-28 - 4, 0, -80)},   # AI safe
+			{"stats": hound_stats, "pos": Vector3(35 + 4, 0, 4)},     # Mid-east contested
+			{"stats": hound_stats, "pos": Vector3(-35 - 4, 0, 4)},    # Mid-west contested
+			{"stats": bulwark_stats, "pos": Vector3(95 + 4, 0, 4)},   # East back-door
+			{"stats": bulwark_stats, "pos": Vector3(-95 - 4, 0, 4)},  # West back-door
+			# Apex wreck guard — Heavy patrol (Bulwark) sitting on the central
+			# scar; mid-late game objective per V2 §"Map 1".
+			{"stats": bulwark_stats, "pos": Vector3(4, 0, -45)},
+		]
 	for entry: Dictionary in patrols:
 		_spawn_neutral_unit(entry["stats"] as UnitStatResource, entry["pos"] as Vector3)
 
@@ -516,6 +579,9 @@ func _spawn_neutral_unit(unit_stats: UnitStatResource, pos: Vector3) -> void:
 	var unit: Unit = unit_scene.instantiate() as Unit
 	unit.stats = unit_stats
 	unit.owner_id = 2
+	# Mark this neutral as a patrol — `home_position` triggers the -20%
+	# aggro modifier and the return-to-spawn behaviour in CombatComponent.
+	unit.home_position = pos
 	var units_node: Node = get_node_or_null("Units")
 	if units_node:
 		units_node.add_child(unit)

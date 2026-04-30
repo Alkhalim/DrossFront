@@ -114,7 +114,7 @@ func _complete_capture(new_owner: int) -> void:
 
 	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
 	if audio and audio.has_method("play_construction_complete"):
-		audio.play_construction_complete()
+		audio.play_construction_complete(global_position)
 
 	# Alerts on ownership change touching the player.
 	if new_owner == 0:

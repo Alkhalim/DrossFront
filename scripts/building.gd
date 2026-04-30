@@ -119,6 +119,7 @@ func _ready() -> void:
 		_apply_placeholder_shape()
 		_add_nav_obstacle()
 		_add_building_details()
+		_apply_function_roof_cap()
 
 		# Specialized logic components.
 		if stats.building_id == &"salvage_yard":
@@ -160,6 +161,9 @@ func _add_building_details() -> void:
 	## generators get cooling fins, salvage yards get crane arms, etc.
 	if not stats:
 		return
+	# Universal extras applied to every building. These read as "lived-in
+	# industrial detail" without overlapping the type-specific silhouette.
+	_detail_universal_extras()
 	match stats.building_id:
 		&"headquarters": _detail_headquarters()
 		&"basic_foundry": _detail_foundry(false)
@@ -168,6 +172,82 @@ func _add_building_details() -> void:
 		&"basic_armory": _detail_armory()
 		&"salvage_yard": _detail_salvage_yard()
 		&"gun_emplacement": _detail_gun_emplacement()
+
+
+func _detail_universal_extras() -> void:
+	## Pipes / vents / front doorway glow that every building gets so even
+	## the simplest hull reads as "machinery", not "concrete cube".
+	if not stats:
+		return
+	var fs: Vector3 = stats.footprint_size
+
+	# Side wall ribs — three parallel vertical strips on each long side
+	# break up the otherwise flat hull faces.
+	for side: int in 2:
+		var sx: float = -fs.x * 0.5 - 0.04 if side == 0 else fs.x * 0.5 + 0.04
+		for i: int in 3:
+			var rib := MeshInstance3D.new()
+			var rb := BoxMesh.new()
+			rb.size = Vector3(0.06, fs.y * 0.55, 0.18)
+			rib.mesh = rb
+			rib.position = Vector3(
+				sx,
+				fs.y * 0.45,
+				-fs.z * 0.32 + float(i) * fs.z * 0.32,
+			)
+			rib.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.16, 0.15, 0.14)))
+			_attach_visual(rib)
+
+	# Roof vents — two small box stacks near the rear of the roof.
+	for i: int in 2:
+		var vent := MeshInstance3D.new()
+		var vb := BoxMesh.new()
+		vb.size = Vector3(0.22, 0.32, 0.22)
+		vent.mesh = vb
+		vent.position = Vector3(
+			-fs.x * 0.18 + float(i) * fs.x * 0.36,
+			fs.y + 0.16,
+			fs.z * 0.32,
+		)
+		vent.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.2, 0.18)))
+		_attach_visual(vent)
+
+	# Front doorway glow — small emissive square low on the front face.
+	# Skip on buildings whose main detail layer already puts a feature
+	# right where we'd draw it (foundry's loading door, gun emplacement's
+	# turret base) so we don't double-stack geometry.
+	var bid: StringName = stats.building_id
+	if bid != &"basic_foundry" and bid != &"advanced_foundry" and bid != &"gun_emplacement":
+		var doorway := MeshInstance3D.new()
+		var dbox := BoxMesh.new()
+		dbox.size = Vector3(fs.x * 0.22, fs.y * 0.18, 0.05)
+		doorway.mesh = dbox
+		doorway.position = Vector3(0.0, fs.y * 0.16, -fs.z * 0.5 - 0.03)
+		doorway.set_surface_override_material(0, _detail_emissive_mat(Color(0.95, 0.55, 0.2), 0.9))
+		_attach_visual(doorway)
+
+	# Subtle external pipework — a single conduit running along one side
+	# of the hull. Adds the dieselpunk read.
+	var pipe := MeshInstance3D.new()
+	var pipe_box := BoxMesh.new()
+	pipe_box.size = Vector3(0.1, 0.1, fs.z * 0.85)
+	pipe.mesh = pipe_box
+	pipe.position = Vector3(fs.x * 0.5 + 0.1, fs.y * 0.85, 0.0)
+	pipe.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.32, 0.26, 0.18)))
+	_attach_visual(pipe)
+	# Pipe couplings every ~third of its length.
+	for i: int in 3:
+		var coupling := MeshInstance3D.new()
+		var cb := BoxMesh.new()
+		cb.size = Vector3(0.16, 0.16, 0.16)
+		coupling.mesh = cb
+		coupling.position = Vector3(
+			fs.x * 0.5 + 0.1,
+			fs.y * 0.85,
+			-fs.z * 0.3 + float(i) * fs.z * 0.3,
+		)
+		coupling.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.16, 0.14)))
+		_attach_visual(coupling)
 
 
 func _detail_dark_metal_mat(c: Color = Color(0.18, 0.18, 0.2)) -> StandardMaterial3D:
@@ -245,16 +325,93 @@ func _detail_headquarters() -> void:
 	spire.set_surface_override_material(0, _detail_dark_metal_mat())
 	_attach_visual(spire)
 
-	# Radar dish on top of the spire — slowly rotates via _process.
-	var dish := MeshInstance3D.new()
-	var dish_sphere := SphereMesh.new()
-	dish_sphere.radius = fs.x * 0.18
-	dish_sphere.height = fs.x * 0.18
-	dish.mesh = dish_sphere
-	dish.position = Vector3(0, fs.y + sb.size.y + dish_sphere.height * 0.4, 0)
-	dish.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.3, 0.3, 0.32)))
-	_attach_visual(dish)
-	_atmos_dish = dish
+	# Radar dish on top of the spire. Static parts (mast + base collar)
+	# stay outside the rotating pivot so a sweeping dish doesn't drag a
+	# glowing dot or a tilted base around with it. The pivot rotates a
+	# parabolic dome + a feed horn that's structurally attached to the
+	# dome's back.
+	var dish_top_y: float = fs.y + sb.size.y + 0.55
+	# Static base collar — small disc on top of the spire so the spire's
+	# square corners are hidden when the dish rotates.
+	var dish_collar := MeshInstance3D.new()
+	var collar_cyl := CylinderMesh.new()
+	collar_cyl.top_radius = fs.x * 0.18
+	collar_cyl.bottom_radius = fs.x * 0.22
+	collar_cyl.height = 0.1
+	dish_collar.mesh = collar_cyl
+	dish_collar.position = Vector3(0.0, fs.y + sb.size.y + 0.05, 0.0)
+	dish_collar.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.28, 0.26, 0.24)))
+	_attach_visual(dish_collar)
+	# Static vertical mast under the rotating dome — the dome sits on top
+	# of it. Doesn't rotate with the pivot.
+	var dish_mast := MeshInstance3D.new()
+	var mast_box := BoxMesh.new()
+	mast_box.size = Vector3(0.08, 0.45, 0.08)
+	dish_mast.mesh = mast_box
+	dish_mast.position = Vector3(0.0, dish_top_y - 0.22, 0.0)
+	dish_mast.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.16, 0.14)))
+	_attach_visual(dish_mast)
+	# Rotating pivot — only the dish bowl + feed horn live under here.
+	var dish_pivot := Node3D.new()
+	dish_pivot.position = Vector3(0.0, dish_top_y, 0.0)
+	_attach_visual(dish_pivot)
+	# Parabolic dome — squashed sphere tilted forward 30° so the camera
+	# sees the bowl shape clearly. Sphere never produces visible "corners"
+	# during rotation.
+	var dish_bowl := MeshInstance3D.new()
+	var bowl_sphere := SphereMesh.new()
+	bowl_sphere.radius = fs.x * 0.34
+	bowl_sphere.height = fs.x * 0.14
+	dish_bowl.mesh = bowl_sphere
+	dish_bowl.rotation = Vector3(deg_to_rad(30.0), 0.0, 0.0)
+	dish_bowl.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.34, 0.34, 0.36)))
+	dish_pivot.add_child(dish_bowl)
+	# Concentric ring on the dome surface for added detail — reads as a
+	# rim panel.
+	var bowl_rim := MeshInstance3D.new()
+	var rim_torus := TorusMesh.new()
+	rim_torus.inner_radius = fs.x * 0.28
+	rim_torus.outer_radius = fs.x * 0.34
+	rim_torus.rings = 24
+	rim_torus.ring_segments = 8
+	bowl_rim.mesh = rim_torus
+	bowl_rim.rotation = Vector3(deg_to_rad(30.0), 0.0, 0.0)
+	bowl_rim.position = Vector3(0.0, sin(deg_to_rad(30.0)) * 0.04, 0.0)
+	bowl_rim.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.22, 0.24)))
+	dish_pivot.add_child(bowl_rim)
+	# Feed horn — small box held in front of the dish on a thin tripod
+	# strut. Stays attached to the dish so it doesn't appear to "float".
+	var horn_strut := MeshInstance3D.new()
+	var strut_box := BoxMesh.new()
+	strut_box.size = Vector3(0.04, 0.05, fs.x * 0.32)
+	horn_strut.mesh = strut_box
+	horn_strut.rotation = Vector3(deg_to_rad(30.0), 0.0, 0.0)
+	horn_strut.position = Vector3(0.0, 0.05, -fs.x * 0.14)
+	horn_strut.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.16, 0.14)))
+	dish_pivot.add_child(horn_strut)
+	var horn := MeshInstance3D.new()
+	var horn_box := BoxMesh.new()
+	horn_box.size = Vector3(0.14, 0.14, 0.18)
+	horn.mesh = horn_box
+	# Front of the dish (negative-Z under rotation) where the focal point
+	# of a real parabolic feed sits.
+	horn.rotation = Vector3(deg_to_rad(30.0), 0.0, 0.0)
+	horn.position = Vector3(0.0, 0.18, -fs.x * 0.30)
+	horn.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.45, 0.38, 0.18)))
+	dish_pivot.add_child(horn)
+	# Tiny emissive indicator on the horn so the rotation direction is
+	# legible. Attached to the horn (not floating) — orbits with the dish
+	# but always sits flush against the horn's front face.
+	var horn_lamp := MeshInstance3D.new()
+	var lamp_sphere := SphereMesh.new()
+	lamp_sphere.radius = 0.04
+	lamp_sphere.height = 0.08
+	horn_lamp.mesh = lamp_sphere
+	horn_lamp.rotation = Vector3(deg_to_rad(30.0), 0.0, 0.0)
+	horn_lamp.position = Vector3(0.0, 0.20, -fs.x * 0.34)
+	horn_lamp.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.55, 0.2), 1.6))
+	dish_pivot.add_child(horn_lamp)
+	_atmos_dish = dish_pivot
 
 	# Beacon light on the spire — pulses via _process.
 	var beacon := MeshInstance3D.new()
@@ -274,6 +431,17 @@ func _detail_headquarters() -> void:
 	_atmos_beacon_light.omni_range = 4.5
 	_atmos_beacon_light.position = beacon.position
 	_attach_visual(_atmos_beacon_light)
+
+	# Forge-core glow — a wider, dimmer amber pool centered on the HQ that
+	# bleeds onto nearby ground. Gives the player's command center a
+	# "city aglow at night" presence per READABILITY_PASS.md §Task 5.
+	var forge_pool := OmniLight3D.new()
+	forge_pool.light_color = Color(1.0, 0.55, 0.2)
+	forge_pool.light_energy = 0.9
+	forge_pool.omni_range = 22.0
+	forge_pool.omni_attenuation = 1.6
+	forge_pool.position = Vector3(0.0, fs.y * 0.45, 0.0)
+	_attach_visual(forge_pool)
 
 	# Lower flanking wings on each side, like fortified bunkers.
 	for side: int in 2:
@@ -630,6 +798,16 @@ func _detail_salvage_yard() -> void:
 		chunk.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.16, 0.14)))
 		_attach_visual(chunk)
 
+	# Working-glow lamp under the crane arm — soft amber pool that says
+	# "this building is busy". Per READABILITY_PASS.md §Task 5, it's a
+	# distinct visual cue from the Crawler's brighter reactor lamp.
+	var work_lamp := OmniLight3D.new()
+	work_lamp.light_color = Color(1.0, 0.6, 0.2)
+	work_lamp.light_energy = 0.7
+	work_lamp.omni_range = 4.5
+	work_lamp.position = Vector3(0.0, fs.y + 0.4, 0.0)
+	_attach_visual(work_lamp)
+
 	# Crane support strut from the pole base back to the chassis.
 	var strut := MeshInstance3D.new()
 	var strut_box := BoxMesh.new()
@@ -918,6 +1096,153 @@ func _apply_team_ring() -> void:
 	_team_ring.set_surface_override_material(0, mat)
 
 	_attach_visual(_team_ring)
+	_apply_anvil_brass_band()
+
+
+## Anvil identity strip — a thin brass band that sits just above the
+## team-color ring on the front face of the building. Per
+## READABILITY_PASS.md §Task 7, it's an additive accent: the team color
+## still does the ownership signal, brass marks the *faction*. The
+## infrastructure is the same shape that future factions (Sable / Synod /
+## Inheritors) will swap their own accent material into.
+const ANVIL_BRASS := Color(0.78, 0.62, 0.18, 1.0)
+var _brass_band: MeshInstance3D = null
+
+
+## Function-coded roof-cap colors per READABILITY_PASS.md §Task 2. Picks
+## the cap tint from the building's category so a glance at the roof
+## reveals what the building does (production vs economy vs power vs
+## defense) without having to select it.
+const _ROOF_PRODUCTION: Color = Color(0.22, 0.22, 0.24, 1.0)   # gunmetal grey
+const _ROOF_ECONOMY: Color    = Color(0.65, 0.36, 0.18, 1.0)   # copper-orange
+const _ROOF_TECH: Color       = Color(0.78, 0.66, 0.32, 1.0)   # pale brass
+const _ROOF_POWER: Color      = Color(0.20, 0.24, 0.32, 1.0)   # deep blue-grey
+const _ROOF_DEFENSE: Color    = Color(0.10, 0.10, 0.10, 1.0)   # near-black
+const _ROOF_HQ: Color         = Color(0.16, 0.14, 0.12, 1.0)   # dark with brass inlay (added separately)
+
+
+func _roof_color_for_category() -> Color:
+	if not stats:
+		return _ROOF_PRODUCTION
+	match stats.building_id:
+		&"headquarters":
+			return _ROOF_HQ
+		&"basic_foundry", &"advanced_foundry":
+			return _ROOF_PRODUCTION
+		&"salvage_yard":
+			return _ROOF_ECONOMY
+		&"basic_armory":
+			return _ROOF_TECH
+		&"basic_generator":
+			return _ROOF_POWER
+		&"gun_emplacement":
+			return _ROOF_DEFENSE
+		_:
+			return _ROOF_PRODUCTION
+
+
+var _roof_cap: MeshInstance3D = null
+var _roof_accent: MeshInstance3D = null
+
+
+func _apply_function_roof_cap() -> void:
+	if _roof_cap and is_instance_valid(_roof_cap):
+		_roof_cap.queue_free()
+		_roof_cap = null
+	if _roof_accent and is_instance_valid(_roof_accent):
+		_roof_accent.queue_free()
+		_roof_accent = null
+	if not stats:
+		return
+
+	# Generator already has an emissive cap; the silhouette would clash if
+	# we also stuck a flat box on top. Skip the cap on cylindrical builds.
+	if stats.building_id == &"basic_generator":
+		return
+
+	# Roof slab — sits on top of the placeholder hull, slightly inset so
+	# the team-color band still wraps the lower portion cleanly.
+	var fp: Vector3 = stats.footprint_size
+	_roof_cap = MeshInstance3D.new()
+	var cap_box := BoxMesh.new()
+	cap_box.size = Vector3(fp.x * 0.9, fp.y * 0.08, fp.z * 0.9)
+	_roof_cap.mesh = cap_box
+	_roof_cap.position.y = fp.y * 0.92
+	var cap_color: Color = _roof_color_for_category()
+	var cap_mat := StandardMaterial3D.new()
+	cap_mat.albedo_color = cap_color
+	cap_mat.roughness = 0.7
+	cap_mat.metallic = 0.3
+	_roof_cap.set_surface_override_material(0, cap_mat)
+	_attach_visual(_roof_cap)
+
+	# HQ identity flourish — the doc calls for "distinctive dark with brass
+	# accent" so the player's command center never reads as an ordinary
+	# building. A small brass disc on top is enough for placeholder.
+	if stats.building_id == &"headquarters":
+		_roof_accent = MeshInstance3D.new()
+		var disc := CylinderMesh.new()
+		disc.top_radius = fp.x * 0.18
+		disc.bottom_radius = fp.x * 0.22
+		disc.height = fp.y * 0.05
+		_roof_accent.mesh = disc
+		_roof_accent.position.y = fp.y * 0.99
+		var disc_mat := StandardMaterial3D.new()
+		disc_mat.albedo_color = ANVIL_BRASS
+		disc_mat.emission_enabled = true
+		disc_mat.emission = ANVIL_BRASS
+		disc_mat.emission_energy_multiplier = 0.6
+		disc_mat.metallic = 0.8
+		disc_mat.roughness = 0.35
+		_roof_accent.set_surface_override_material(0, disc_mat)
+		_attach_visual(_roof_accent)
+	# Defense category — small red warning inlay so it reads as "shooting"
+	# rather than "industrial".
+	elif stats.building_id == &"gun_emplacement":
+		_roof_accent = MeshInstance3D.new()
+		var inlay := BoxMesh.new()
+		inlay.size = Vector3(fp.x * 0.4, fp.y * 0.04, fp.z * 0.18)
+		_roof_accent.mesh = inlay
+		_roof_accent.position.y = fp.y * 0.96
+		var inlay_mat := StandardMaterial3D.new()
+		inlay_mat.albedo_color = Color(0.85, 0.12, 0.10, 1.0)
+		inlay_mat.emission_enabled = true
+		inlay_mat.emission = Color(0.95, 0.2, 0.15, 1.0)
+		inlay_mat.emission_energy_multiplier = 0.8
+		_roof_accent.set_surface_override_material(0, inlay_mat)
+		_attach_visual(_roof_accent)
+
+
+func _apply_anvil_brass_band() -> void:
+	if _brass_band and is_instance_valid(_brass_band):
+		_brass_band.queue_free()
+		_brass_band = null
+	if not stats:
+		return
+	# Skip the construction foundation — only show the brass once the
+	# building visual is real.
+	_brass_band = MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = Vector3(
+		stats.footprint_size.x * 0.55,
+		stats.footprint_size.y * 0.06,
+		0.05,
+	)
+	_brass_band.mesh = box
+	_brass_band.position = Vector3(
+		0.0,
+		stats.footprint_size.y * 0.32,
+		-stats.footprint_size.z * 0.5 - 0.03,
+	)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = ANVIL_BRASS
+	mat.emission_enabled = true
+	mat.emission = ANVIL_BRASS
+	mat.emission_energy_multiplier = 0.5
+	mat.metallic = 0.7
+	mat.roughness = 0.4
+	_brass_band.set_surface_override_material(0, mat)
+	_attach_visual(_brass_band)
 
 
 func begin_construction() -> void:
@@ -1128,13 +1453,43 @@ func _remove_progress_bar() -> void:
 		_progress_label = null
 	var audio: AudioManager = get_tree().current_scene.get_node_or_null("AudioManager") as AudioManager
 	if audio:
-		audio.play_construction_complete()
+		audio.play_construction_complete(global_position)
 
 
 func get_power_efficiency() -> float:
 	if resource_manager and resource_manager.has_method("get_power_efficiency"):
 		return resource_manager.get_power_efficiency()
 	return 1.0
+
+
+func cancel_queue_at(index: int) -> bool:
+	## Pop a queued unit and refund its full salvage / fuel cost back to
+	## this building's resource manager. Cancelling index 0 (the in-flight
+	## one) also resets the production timer so the next queued unit
+	## starts fresh; partial progress is abandoned, not refunded.
+	## Returns true if a slot was actually cancelled.
+	if index < 0 or index >= _build_queue.size():
+		return false
+	# Use a different local name than `stats` so we don't shadow the
+	# class's own @export `stats` field — GDScript's parser is unhappy
+	# about the shadow even when there's no real ambiguity.
+	var unit_stats: UnitStatResource = _build_queue[index]
+	if not unit_stats:
+		return false
+	# Salvage / fuel refund.
+	if resource_manager and resource_manager.has_method("add_salvage"):
+		if unit_stats.cost_salvage > 0:
+			resource_manager.add_salvage(unit_stats.cost_salvage)
+	if resource_manager and resource_manager.has_method("add_fuel") and unit_stats.cost_fuel > 0:
+		resource_manager.add_fuel(unit_stats.cost_fuel)
+	# Population also rebates — `queue_unit` (via SelectionManager /
+	# AIController) bumped it on enqueue.
+	if resource_manager and resource_manager.has_method("remove_population"):
+		resource_manager.remove_population(unit_stats.population)
+	_build_queue.remove_at(index)
+	if index == 0:
+		_build_progress = 0.0
+	return true
 
 
 ## Queue a unit for production. Returns true if successfully queued.
@@ -1241,11 +1596,17 @@ func _spawn_unit(unit_stats: UnitStatResource) -> void:
 	unit_produced.emit(unit_scene, spawn_pos)
 	var audio: AudioManager = get_tree().current_scene.get_node_or_null("AudioManager") as AudioManager
 	if audio:
-		audio.play_production_complete()
+		audio.play_production_complete(global_position)
 
 
 func get_queue_size() -> int:
 	return _build_queue.size()
+
+
+func get_queue_snapshot() -> Array[UnitStatResource]:
+	# Defensive copy so HUD code can iterate without seeing live mutation
+	# from a finishing tick.
+	return _build_queue.duplicate()
 
 
 func get_queue_unit_count(filter_class: StringName) -> int:
@@ -1342,6 +1703,22 @@ func _restore_select_glow(node: Node) -> void:
 		_restore_select_glow(child)
 
 
+func heal(amount: float) -> void:
+	## Restore HP up to the building's max — used by Ratchet auto-repair.
+	## Floats so a 0.5/sec accumulation works across frames; we cast back
+	## to int when applying.
+	if not is_constructed or not stats:
+		return
+	if current_hp >= stats.hp:
+		return
+	current_hp = mini(stats.hp, current_hp + int(ceil(amount)))
+	_update_damage_state()
+
+
+func is_damaged() -> bool:
+	return is_constructed and stats != null and current_hp < stats.hp
+
+
 func take_damage(amount: int, _attacker: Node3D = null) -> void:
 	current_hp -= amount
 	_update_damage_state()
@@ -1434,6 +1811,17 @@ func _tick_atmospheric_animations(delta: float) -> void:
 		var ph: float = entry["phase"] as float
 		var base: float = entry["base"] as float
 		lmat.emission_energy_multiplier = base * (0.7 + 0.3 * sin(_atmos_anim_time * 1.8 + ph))
+
+	# Stack-tip lights brighten while the foundry is actively producing —
+	# a clear "this building is doing something right now" signal per
+	# READABILITY_PASS.md §Task 5.
+	if not _atmos_stack_lights.is_empty():
+		var producing: bool = is_constructed and not _build_queue.is_empty()
+		var target_energy: float = 1.4 if producing else 0.55
+		var pulse: float = (1.0 + 0.18 * sin(_atmos_anim_time * 4.1)) if producing else 1.0
+		for stack_light: OmniLight3D in _atmos_stack_lights:
+			if is_instance_valid(stack_light):
+				stack_light.light_energy = target_energy * pulse
 
 	# Periodic smoke puff per stack so foundries feel alive.
 	if not _atmos_stack_tops.is_empty():

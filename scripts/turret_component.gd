@@ -122,7 +122,7 @@ func _process(delta: float) -> void:
 
 		var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
 		if audio and audio.has_method("play_weapon_fire"):
-			audio.play_weapon_fire()
+			audio.play_weapon_fire(null, _building.global_position)
 
 
 func _find_nearest_enemy() -> Node3D:

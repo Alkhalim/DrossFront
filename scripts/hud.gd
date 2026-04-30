@@ -69,6 +69,7 @@ func _ready() -> void:
 	_build_power_widget()
 	_build_alert_banner()
 	_build_gifting_panel()
+	_build_global_queue_panel()
 
 	# Tutorial overlay — shown only when the player launched via the Tutorial
 	# button on the main menu. Dismisses with TAB or its own close button.
@@ -402,6 +403,7 @@ func _process(delta: float) -> void:
 	_update_button_affordability()
 	_check_tutorial_progress()
 	_refresh_gift_panel()
+	_refresh_global_queue()
 
 
 ## --- Theme ---
@@ -764,11 +766,16 @@ func _update_building_panel(building: Building) -> void:
 			_queue_label.text = ""
 			_hide_progress()
 	elif building.get_queue_size() > 0:
-		_queue_label.text = "Queue  %d" % building.get_queue_size()
+		_queue_label.text = ""
 		_show_progress(building.get_build_progress_percent(), Color(0.4, 0.85, 1.0, 0.95))
 	else:
 		_queue_label.text = ""
 		_hide_progress()
+
+	# Queue icons — one button per pending unit, click to cancel and
+	# refund. Yards / armories don't have a build queue in the usual
+	# sense, so they fall through with an empty row (no icons rendered).
+	_refresh_queue_icons(building)
 
 
 func _show_progress(pct: float, fill_color: Color) -> void:
@@ -787,6 +794,162 @@ func _show_progress(pct: float, fill_color: Color) -> void:
 func _hide_progress() -> void:
 	if _progress_bar:
 		_progress_bar.visible = false
+
+
+## --- Global queue panel ---
+##
+## Compact line anchored top-left under the resource counters. Aggregates
+## production queues across every friendly production building plus the
+## current research / branch-commit project so the player sees total
+## throughput at a glance without selecting each building individually.
+
+var _global_queue_label: Label = null
+
+
+func _build_global_queue_panel() -> void:
+	_global_queue_label = Label.new()
+	_global_queue_label.name = "GlobalQueueLabel"
+	_global_queue_label.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	# Sits ~140px below the screen top so it tucks under the resource row
+	# without colliding with the match timer in the same area.
+	_global_queue_label.position = Vector2(16.0, 132.0)
+	_global_queue_label.custom_minimum_size = Vector2(360.0, 0.0)
+	_global_queue_label.add_theme_font_size_override("font_size", 14)
+	_global_queue_label.add_theme_color_override("font_color", COLOR_QUEUE)
+	_global_queue_label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.95))
+	_global_queue_label.add_theme_constant_override("outline_size", 4)
+	_global_queue_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_global_queue_label)
+
+
+func _refresh_global_queue() -> void:
+	if not _global_queue_label:
+		return
+	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry")
+	var local_id: int = (registry.get("local_player_id") as int) if registry else 0
+
+	# Sum production queue across friendly buildings.
+	var total_queued: int = 0
+	var producing_buildings: int = 0
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var b: Building = node as Building
+		if not b or not b.is_constructed:
+			continue
+		if b.owner_id != local_id:
+			continue
+		if not b.has_method("get_queue_size"):
+			continue
+		var qs: int = b.get_queue_size()
+		if qs > 0:
+			total_queued += qs
+			producing_buildings += 1
+
+	# Research line — `ResearchManager` for upgrades, `BranchCommitManager`
+	# for branch commits. Either can be active independently.
+	var research_text: String = ""
+	var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
+	if rm and rm.has_method("is_in_progress") and rm.is_in_progress():
+		var rname: String = (rm.get("current_label") as String) if "current_label" in rm else "Research"
+		if rname == "":
+			rname = "Research"
+		var pct: float = rm.get_progress() if rm.has_method("get_progress") else 0.0
+		research_text = "%s %d%%" % [rname, int(pct * 100.0)]
+	if research_text == "":
+		var bcm: Node = get_tree().current_scene.get_node_or_null("BranchCommitManager")
+		if bcm and bcm.has_method("is_committing") and bcm.is_committing():
+			var bname: String = bcm.get_commit_branch_name() if bcm.has_method("get_commit_branch_name") else "Commit"
+			var pct: float = bcm.get_commit_progress() if bcm.has_method("get_commit_progress") else 0.0
+			research_text = "%s %d%%" % [bname, int(pct * 100.0)]
+
+	var lines: Array[String] = []
+	if total_queued > 0:
+		lines.append("Producing: %d unit(s) across %d building(s)" % [total_queued, producing_buildings])
+	if research_text != "":
+		lines.append("Research: %s" % research_text)
+	_global_queue_label.text = "\n".join(lines)
+	_global_queue_label.visible = not lines.is_empty()
+
+
+## --- Per-building queue icons ---
+##
+## Visualizes the building's `_build_queue` as a row of clickable
+## buttons. Each entry shows the unit's first letter (cheap stand-in
+## for an icon) and its position in the queue. Clicking a button
+## cancels that slot and refunds the resources via
+## `Building.cancel_queue_at`. The row is built lazily and lives
+## inside the InfoSection so it sits next to the building name / HP.
+
+var _queue_icons_row: HBoxContainer = null
+const _QUEUE_ICON_SLOT_SIZE: Vector2 = Vector2(32.0, 32.0)
+
+
+func _ensure_queue_icons_row() -> void:
+	if _queue_icons_row and is_instance_valid(_queue_icons_row):
+		return
+	_queue_icons_row = HBoxContainer.new()
+	_queue_icons_row.name = "QueueIconsRow"
+	_queue_icons_row.add_theme_constant_override("separation", 4)
+	_info_section.add_child(_queue_icons_row)
+
+
+func _refresh_queue_icons(building: Building) -> void:
+	_ensure_queue_icons_row()
+	# Clear existing icons each refresh — cheap (max ~8 per building) and
+	# avoids stale state when the queue's been reordered elsewhere.
+	for child: Node in _queue_icons_row.get_children():
+		child.queue_free()
+
+	if not building or not building.is_constructed:
+		_queue_icons_row.visible = false
+		return
+	var queue: Array = []
+	if building.has_method("get_queue_snapshot"):
+		queue = building.get_queue_snapshot()
+	if queue.is_empty():
+		_queue_icons_row.visible = false
+		return
+	_queue_icons_row.visible = true
+
+	for i: int in queue.size():
+		var unit_stat: UnitStatResource = queue[i] as UnitStatResource
+		if not unit_stat:
+			continue
+		var btn := Button.new()
+		btn.custom_minimum_size = _QUEUE_ICON_SLOT_SIZE
+		# First-letter stand-in icon — readable enough for placeholder UI.
+		var label: String = "?"
+		if unit_stat.unit_name.length() > 0:
+			label = unit_stat.unit_name.substr(0, 1)
+		# In-progress slot gets a "·" prefix so the player can see which
+		# one is mid-build vs queued.
+		if i == 0:
+			label = "•%s" % label
+		btn.text = label
+		var cost_text: String = "%dS" % unit_stat.cost_salvage
+		if unit_stat.cost_fuel > 0:
+			cost_text += " %dF" % unit_stat.cost_fuel
+		btn.tooltip_text = "%s (%s)\nClick to cancel and refund." % [
+			unit_stat.unit_name, cost_text,
+		]
+		var captured_index: int = i
+		var captured_building: Building = building
+		btn.pressed.connect(func() -> void: _on_queue_icon_pressed(captured_building, captured_index))
+		_queue_icons_row.add_child(btn)
+
+
+func _on_queue_icon_pressed(building: Building, index: int) -> void:
+	if not is_instance_valid(building):
+		return
+	if not building.has_method("cancel_queue_at"):
+		return
+	var ok: bool = building.cancel_queue_at(index) as bool
+	if ok and _selection_manager and _selection_manager._audio:
+		_selection_manager._audio.play_command()
+	# Force a panel rebuild so the row redraws without waiting for the
+	# next building-id change.
+	_last_building_id = -1
 
 
 ## --- Production / Build buttons ---
