@@ -170,21 +170,26 @@ func _find_repair_target() -> Node3D:
 			best_dist = d
 			best = b
 
-	# Damaged friendly units (skip self).
+	# Damaged friendly units / Crawlers (skip self). Duck-typed via
+	# `has_method("is_damaged")` instead of `as Unit` because Crawlers
+	# live in the "units" group but extend CharacterBody3D directly,
+	# not Unit — the cast would skip them.
 	for node: Node in _unit.get_tree().get_nodes_in_group("units"):
 		if not is_instance_valid(node):
 			continue
 		if node == _unit:
 			continue
-		var u: Unit = node as Unit
-		if not u or u.owner_id != my_owner:
+		if not ("owner_id" in node) or node.get("owner_id") != my_owner:
 			continue
-		if not u.has_method("is_damaged") or not u.is_damaged():
+		if not node.has_method("is_damaged") or not node.is_damaged():
 			continue
-		var d: float = my_pos.distance_to(u.global_position)
+		var n3: Node3D = node as Node3D
+		if not n3:
+			continue
+		var d: float = my_pos.distance_to(n3.global_position)
 		if d < best_dist:
 			best_dist = d
-			best = u
+			best = n3
 	return best
 
 
@@ -192,6 +197,10 @@ func _repair_max_distance(target: Node3D) -> float:
 	if target is Building and (target as Building).stats:
 		var fs: Vector3 = (target as Building).stats.footprint_size
 		return maxf(fs.x, fs.z) * 0.5 + BUILD_BUFFER
+	# SalvageCrawler — bigger than a mech squad, give the engineer
+	# enough working clearance around the chassis.
+	if target is SalvageCrawler:
+		return 3.6
 	# Unit target — small extent.
 	return 2.5
 

@@ -106,9 +106,13 @@ func _ready() -> void:
 		current_hp = maxi(stats.hp_total, 1)
 		_move_speed = _speed_from_tier(stats.speed_tier)
 
-	# Collision: small layer 2 (units) so projectiles can hit; mask 1 ground.
-	collision_layer = 2
-	collision_mask = 1
+	# Collision: layer 2 (units, so click-select raycasts find it) AND
+	# layer 4 (obstacles, so other units' mask=5 actually collides with
+	# the chassis). Without the layer 4 bit, mechs walked straight
+	# through the Crawler. Mask = 5 (ground + obstacles) so the Crawler
+	# itself bumps into terrain / buildings the same way mechs do.
+	collision_layer = 6
+	collision_mask = 5
 
 	_build_visuals()
 	_build_collision()
@@ -539,6 +543,20 @@ func take_damage(amount: int, _attacker: Node3D = null) -> void:
 
 func get_total_hp() -> int:
 	return maxi(current_hp, 0)
+
+
+func is_damaged() -> bool:
+	## Used by Ratchet auto-repair (BuilderComponent._find_repair_target).
+	## Crawlers want repair the same as buildings or mech squads.
+	return alive_count > 0 and stats != null and current_hp < stats.hp_total
+
+
+func heal(amount: float) -> void:
+	if alive_count <= 0 or not stats:
+		return
+	if current_hp >= stats.hp_total:
+		return
+	current_hp = mini(stats.hp_total, current_hp + int(ceil(amount)))
 
 
 func _die() -> void:

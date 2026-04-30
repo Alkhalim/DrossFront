@@ -235,16 +235,33 @@ func notify_attacked(attacker: Node3D) -> void:
 	## not retaliate. Use attack-move if you want en-route engagement.
 	if not attacker or not is_instance_valid(attacker):
 		return
-	if forced_target and is_instance_valid(forced_target):
-		# Already engaging something — don't drop a player-issued or in-progress
-		# target just because we got hit by someone else.
+	if not _is_valid_target(attacker):
 		return
+
+	# Already engaging something — switch ONLY if the current target
+	# has run beyond practical engage range AND the new attacker is
+	# well within range. Stops a unit from blindly chasing a fleeing
+	# target while a closer threat shoots it in the back.
+	if forced_target and is_instance_valid(forced_target):
+		var stats: UnitStatResource = _unit.get("stats") as UnitStatResource
+		var weapon_range: float = 10.0
+		if stats and stats.primary_weapon:
+			weapon_range = CombatTables.get_range(stats.primary_weapon.range_tier)
+		var my_pos: Vector3 = _unit.global_position
+		var d_current: float = my_pos.distance_to(forced_target.global_position)
+		var d_attacker: float = my_pos.distance_to(attacker.global_position)
+		# Switch if attacker is inside weapon range AND current target
+		# has drifted to >1.5× weapon range away. Otherwise keep the
+		# original engagement.
+		if d_attacker < weapon_range and d_current > weapon_range * 1.5:
+			forced_target = attacker
+			_current_target = attacker
+		return
+
 	var has_move_order: bool = _unit.get("has_move_order") as bool
 	if has_move_order and attack_move_target == Vector3.INF:
 		# Player-issued (or builder-issued) plain move is in progress.
 		# Finish that command before fighting back.
-		return
-	if not _is_valid_target(attacker):
 		return
 	forced_target = attacker
 	_current_target = attacker

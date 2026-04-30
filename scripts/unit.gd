@@ -20,6 +20,10 @@ const ARRIVE_THRESHOLD: float = 0.5
 ## ending up above floor level. Tuned for "feels right" rather than
 ## physical correctness; the prototype's scale is small.
 const GRAVITY: float = 18.0
+## Idle-spread tuning: how close two same-team units have to be before
+## the spread push kicks in, and how strong the push is.
+const IDLE_SPREAD_MIN_DIST: float = 1.6
+const IDLE_SPREAD_FORCE: float = 1.4
 
 var move_target: Vector3 = Vector3.INF
 ## Optional waypoint chain — populated when the player issues Ctrl-clicked
@@ -1319,9 +1323,23 @@ func _physics_process(delta: float) -> void:
 		velocity.y = 0.0
 
 	if move_target == Vector3.INF:
-		# Still apply gravity even while idle so airborne units settle.
-		if not is_on_floor():
-			move_and_slide()
+		# Idle: gently push apart from any same-team neighbour that's
+		# overlapping, so a tightly-bunched squad spreads out rather
+		# than stacking on a single point. Skipped while a combat
+		# target is engaged — the combat loop drives its own movement.
+		var idle_combat_target: Variant = null
+		var idle_combat: Node = get_combat()
+		if idle_combat:
+			idle_combat_target = idle_combat.get("_current_target")
+		if not (idle_combat_target is Object and is_instance_valid(idle_combat_target as Object)):
+			_apply_idle_spread()
+		else:
+			velocity.x = 0.0
+			velocity.z = 0.0
+		# Always run move_and_slide while idle — gravity needs to settle
+		# airborne units, and the spread velocity (when set) needs to
+		# actually move the body.
+		move_and_slide()
 		return
 
 	# Use NavigationAgent for pathfinding if available
@@ -1433,6 +1451,38 @@ func _physics_process(delta: float) -> void:
 	face_dir.y = 0.0
 	if face_dir.length_squared() > 0.001:
 		_turn_toward(face_dir, delta)
+
+
+func _apply_idle_spread() -> void:
+	## Gently pushes the unit away from any same-team neighbour that's
+	## inside `IDLE_SPREAD_MIN_DIST`. Sums per-neighbour push vectors
+	## (closer = stronger) and writes them to `velocity.x/.z`. Cheap —
+	## one distance check per same-team unit, called only while idle.
+	var push: Vector3 = Vector3.ZERO
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if node == self or not is_instance_valid(node):
+			continue
+		if not ("owner_id" in node) or node.get("owner_id") != owner_id:
+			continue
+		if "alive_count" in node and (node.get("alive_count") as int) <= 0:
+			continue
+		var other: Node3D = node as Node3D
+		if not other:
+			continue
+		var to_self: Vector3 = global_position - other.global_position
+		to_self.y = 0.0
+		var d: float = to_self.length()
+		if d > IDLE_SPREAD_MIN_DIST or d < 0.001:
+			continue
+		# Closer overlap → stronger push.
+		var strength: float = (1.0 - d / IDLE_SPREAD_MIN_DIST) * IDLE_SPREAD_FORCE
+		push += to_self.normalized() * strength
+	# Cap so a unit caught in a really dense pile doesn't shoot off at
+	# combat speed.
+	if push.length() > IDLE_SPREAD_FORCE:
+		push = push.normalized() * IDLE_SPREAD_FORCE
+	velocity.x = push.x
+	velocity.z = push.z
 
 
 func _turn_toward(face_dir: Vector3, delta: float) -> void:

@@ -70,6 +70,7 @@ func _ready() -> void:
 	_build_alert_banner()
 	_build_gifting_panel()
 	_build_global_queue_panel()
+	_build_fps_counter()
 
 	# Tutorial overlay — shown only when the player launched via the Tutorial
 	# button on the main menu. Dismisses with TAB or its own close button.
@@ -404,6 +405,7 @@ func _process(delta: float) -> void:
 	_check_tutorial_progress()
 	_refresh_gift_panel()
 	_refresh_global_queue()
+	_refresh_fps_counter(delta)
 
 
 ## --- Theme ---
@@ -794,6 +796,49 @@ func _show_progress(pct: float, fill_color: Color) -> void:
 func _hide_progress() -> void:
 	if _progress_bar:
 		_progress_bar.visible = false
+
+
+## --- FPS counter ---
+##
+## Top-right corner — small monospace-ish label showing the current
+## frame rate, refreshed at most every 0.25s so the digit churn doesn't
+## distract.
+
+var _fps_label: Label = null
+var _fps_refresh_timer: float = 0.0
+
+
+func _build_fps_counter() -> void:
+	_fps_label = Label.new()
+	_fps_label.name = "FPSCounter"
+	_fps_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_fps_label.position = Vector2(-90.0, 12.0)
+	_fps_label.custom_minimum_size = Vector2(76.0, 0.0)
+	_fps_label.add_theme_font_size_override("font_size", 14)
+	_fps_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85, 1.0))
+	_fps_label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.95))
+	_fps_label.add_theme_constant_override("outline_size", 4)
+	_fps_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_fps_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_fps_label)
+
+
+func _refresh_fps_counter(delta: float) -> void:
+	if not _fps_label:
+		return
+	_fps_refresh_timer -= delta
+	if _fps_refresh_timer > 0.0:
+		return
+	_fps_refresh_timer = 0.25
+	var fps: int = Engine.get_frames_per_second()
+	_fps_label.text = "%d FPS" % fps
+	# Tint by health: green ≥55, amber 30–54, red <30.
+	var color: Color = Color(0.6, 0.95, 0.6, 1.0)
+	if fps < 55:
+		color = Color(0.95, 0.85, 0.4, 1.0)
+	if fps < 30:
+		color = Color(0.95, 0.4, 0.35, 1.0)
+	_fps_label.add_theme_color_override("font_color", color)
 
 
 ## --- Global queue panel ---
