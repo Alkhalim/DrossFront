@@ -218,6 +218,16 @@ func _find_wreck() -> void:
 		_target_wreck = nearest
 		_move_target = nearest.global_position
 		state = State.MOVING_TO_WRECK
+		return
+	# No wreck in range — if we've drifted away from the home yard /
+	# Crawler (e.g. last wreck was far out and we're still standing
+	# there), walk back to home so we're idle in a useful position. The
+	# RETURNING state arrives at home_yard, then drops back to IDLE and
+	# re-scans on the next tick.
+	if is_instance_valid(home_yard):
+		var d_home: float = global_position.distance_to(home_yard.global_position)
+		if d_home > 2.5:
+			state = State.RETURNING
 
 
 func _move_toward_wreck(delta: float) -> void:

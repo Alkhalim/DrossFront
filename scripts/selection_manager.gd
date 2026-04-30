@@ -1203,10 +1203,11 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 				var gui_control: Control = get_viewport().gui_get_hovered_control()
 				if gui_control:
 					return
-				# Ctrl-held → "stay in build mode" so the player can drop the
-				# same foundation type repeatedly without re-pressing the
-				# hotkey for each one.
-				_confirm_build_placement(mb.position, mb.ctrl_pressed)
+				# Ctrl OR Shift held → "stay in build mode" so the player can
+				# drop the same foundation type repeatedly without re-pressing
+				# the hotkey for each one. Two modifiers because some players
+				# reach for one and some the other.
+				_confirm_build_placement(mb.position, mb.ctrl_pressed or mb.shift_pressed)
 				get_viewport().set_input_as_handled()
 			elif mb.button_index == MOUSE_BUTTON_RIGHT:
 				cancel_build_placement()

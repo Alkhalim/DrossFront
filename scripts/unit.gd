@@ -1392,18 +1392,33 @@ func _physics_process(delta: float) -> void:
 	var expected_move: float = _move_speed * delta * 0.3
 	if actual_move < expected_move:
 		_stuck_timer += delta
-		if _stuck_timer >= 0.3 and now_msec >= _deflect_until_msec:
+		# 0.25s zero-progress → first deflection.
+		if _stuck_timer >= 0.25 and now_msec >= _deflect_until_msec:
 			# Deterministic side per unit so a squad doesn't oscillate
 			# both directions across formation members.
 			_deflect_sign = 1.0 if (get_instance_id() % 2) == 0 else -1.0
-			_deflect_until_msec = now_msec + 800
-		if _stuck_timer >= 1.5 and _stuck_timer < 1.5 + delta * 1.5:
-			# Try the other side and re-issue the path — maybe the first
-			# deflection picked the long way around.
+			_deflect_until_msec = now_msec + 700
+		# 0.9s without escaping → flip the deflection side. Used to be
+		# 1.5s; corners benefit from a faster retry, otherwise units
+		# oscillate against the corner edge for nearly two seconds.
+		if _stuck_timer >= 0.9 and _stuck_timer < 0.9 + delta * 1.5:
+			_deflect_sign = -_deflect_sign
+			_deflect_until_msec = now_msec + 1000
+			if _nav_agent:
+				_nav_agent.target_position = move_target
+		# 1.8s — flip back AND nudge the move target sideways by 2u so
+		# the agent recomputes a fresh path that starts perpendicular
+		# to whatever's blocking us.
+		if _stuck_timer >= 1.8 and _stuck_timer < 1.8 + delta * 1.5:
 			_deflect_sign = -_deflect_sign
 			_deflect_until_msec = now_msec + 1200
 			if _nav_agent:
-				_nav_agent.target_position = move_target
+				var nudge: Vector3 = Vector3(
+					-direction.z * _deflect_sign * 2.0,
+					0.0,
+					direction.x * _deflect_sign * 2.0,
+				)
+				_nav_agent.target_position = global_position + nudge
 		elif _stuck_timer > 5.0:
 			has_move_order = false
 			stop()

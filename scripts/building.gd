@@ -120,6 +120,12 @@ func _ready() -> void:
 		_add_nav_obstacle()
 		_add_building_details()
 		_apply_function_roof_cap()
+		# Per-mesh AABBs are tiny (smokestacks, vents, ribs etc.) so
+		# Godot frustum-culls each detail piece individually as the
+		# camera nears the screen edge — smokestacks pop in/out, the
+		# building "peels". Generous cull margin keeps every visual
+		# child drawn until the building's center is well off-screen.
+		_apply_visual_cull_margin(_visual_root, 12.0)
 
 		# Specialized logic components.
 		if stats.building_id == &"salvage_yard":
@@ -151,6 +157,17 @@ func _ensure_visual_root() -> void:
 func _attach_visual(node: Node3D) -> void:
 	_ensure_visual_root()
 	_visual_root.add_child(node)
+
+
+func _apply_visual_cull_margin(root: Node, margin: float) -> void:
+	## Walks the visual tree and bumps `extra_cull_margin` on every
+	## VisualInstance3D so the small per-mesh AABBs (smokestacks, ribs,
+	## vents, etc.) stay drawn until the *whole building* is off-screen,
+	## not just each individual detail.
+	if root is VisualInstance3D:
+		(root as VisualInstance3D).extra_cull_margin = margin
+	for child: Node in root.get_children():
+		_apply_visual_cull_margin(child, margin)
 
 
 ## --- Per-building visual details ---

@@ -63,11 +63,17 @@ static func create(from: Vector3, to: Vector3, role_tag: StringName, rof_tier: S
 
 
 func _create_bullet_mesh(color: Color) -> void:
+	# Slim slug shape rather than a round ball — a thin cylinder oriented
+	# along the travel direction reads as a tracer round, not a cannonball.
 	_mesh = MeshInstance3D.new()
-	var sphere := SphereMesh.new()
-	sphere.radius = 0.1
-	sphere.height = 0.2
-	_mesh.mesh = sphere
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.04
+	cyl.bottom_radius = 0.05
+	cyl.height = 0.34
+	_mesh.mesh = cyl
+	# Cylinder default axis is Y; rotate so the long axis aligns with the
+	# projectile's local -Z (which look_at orients toward the target).
+	_mesh.rotation.x = -PI / 2
 
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = color
@@ -98,19 +104,25 @@ func _create_missile_mesh(color: Color) -> void:
 	_mesh.set_surface_override_material(0, mat)
 	add_child(_mesh)
 
-	# Exhaust trail
+	# Exhaust trail — long thin cylinder behind the missile rather than a
+	# small sphere. Extends ~1.5u trailing the body, with alpha
+	# fading toward the tail for the classic rocket-trail read.
 	_trail = MeshInstance3D.new()
-	var trail_sphere := SphereMesh.new()
-	trail_sphere.radius = 0.06
-	trail_sphere.height = 0.12
-	_trail.mesh = trail_sphere
+	var trail_cyl := CylinderMesh.new()
+	trail_cyl.top_radius = 0.02
+	trail_cyl.bottom_radius = 0.12
+	trail_cyl.height = 1.6
+	_trail.mesh = trail_cyl
+	# Cylinder default axis = +Y; rotate so the long axis runs along
+	# local +Z (placed behind the missile in `_process`).
+	_trail.rotation.x = PI / 2
 
 	var trail_mat := StandardMaterial3D.new()
-	trail_mat.albedo_color = Color(1.0, 0.6, 0.1, 0.6)
+	trail_mat.albedo_color = Color(1.0, 0.6, 0.1, 0.7)
 	trail_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	trail_mat.emission_enabled = true
 	trail_mat.emission = Color(1.0, 0.4, 0.0, 1.0)
-	trail_mat.emission_energy_multiplier = 2.0
+	trail_mat.emission_energy_multiplier = 2.4
 	_trail.set_surface_override_material(0, trail_mat)
 	add_child(_trail)
 
@@ -174,10 +186,12 @@ func _process(delta: float) -> void:
 				look_at(next_pos, Vector3.UP)
 
 		# Trail behind missile. After look_at, basis.z is the world direction of
-		# the projectile's local +Z (i.e. backward). +basis.z places the trail
-		# behind the missile.
+		# the projectile's local +Z (i.e. backward). The long-cylinder trail
+		# pivots from its midpoint, so place its center 0.9u behind the
+		# missile body and orient it along the body's basis.
 		if _trail:
-			_trail.global_position = global_position + global_basis.z.normalized() * 0.3
+			_trail.global_position = global_position + global_basis.z.normalized() * 0.9
+			_trail.global_basis = global_basis
 
 		if t >= 1.0:
 			_spawn_impact()
