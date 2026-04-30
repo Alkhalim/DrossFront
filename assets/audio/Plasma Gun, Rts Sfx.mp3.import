@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://b4hjypb66tbsw"
+path="res://.godot/imported/Plasma Gun, Rts Sfx.mp3-dab670013facfdf22a5ec94a3057ba6f.mp3str"
+
+[deps]
+
+source_file="res://assets/audio/Plasma Gun, Rts Sfx.mp3"
+dest_files=["res://.godot/imported/Plasma Gun, Rts Sfx.mp3-dab670013facfdf22a5ec94a3057ba6f.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

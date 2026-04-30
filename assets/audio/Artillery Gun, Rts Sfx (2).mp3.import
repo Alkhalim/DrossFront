@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://844lebgy5aql"
+path="res://.godot/imported/Artillery Gun, Rts Sfx (2).mp3-7f41ba109e393c8570a165a7197ad266.mp3str"
+
+[deps]
+
+source_file="res://assets/audio/Artillery Gun, Rts Sfx (2).mp3"
+dest_files=["res://.godot/imported/Artillery Gun, Rts Sfx (2).mp3-7f41ba109e393c8570a165a7197ad266.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

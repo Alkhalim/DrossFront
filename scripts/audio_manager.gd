@@ -12,6 +12,18 @@ var _players: Array[AudioStreamPlayer] = []
 ## (select / command / error) stay on the 2D pool so they're always
 ## crisp regardless of where the camera is looking.
 var _players_3d: Array[AudioStreamPlayer3D] = []
+
+## Pre-loaded sample banks. Real recorded sound effects replace the
+## procedural-tone generators for the events where a recorded sample
+## reads better (combat fire, impacts, deaths). The procedural
+## generators stay for UI / production / alert noises that don't have
+## a matched recording.
+var _sfx_machine_gun: Array[AudioStream] = []
+var _sfx_cannon: Array[AudioStream] = []
+var _sfx_artillery: Array[AudioStream] = []
+var _sfx_laser: Array[AudioStream] = []
+var _sfx_plasma: Array[AudioStream] = []
+var _sfx_explosion: Array[AudioStream] = []
 ## When set to a non-INF position, the next batch of `_play_tone` /
 ## `_play_thump` / etc. internal calls route to a 3D player at that
 ## position instead of the 2D pool. Public "play X at" methods stash
@@ -46,6 +58,55 @@ func _ready() -> void:
 		add_child(p3d)
 		_players_3d.append(p3d)
 
+	_load_sfx_banks()
+
+
+func _load_sfx_banks() -> void:
+	## Load every recorded sample once at startup. Each bank holds 1-4
+	## variants; play_X picks one at random so back-to-back fires don't
+	## sound copy-pasted.
+	_sfx_machine_gun = _load_bank([
+		"res://assets/audio/Machine Gun, Rts Sfx.mp3",
+		"res://assets/audio/Machine Gun, Rts Sfx (1).mp3",
+	])
+	_sfx_cannon = _load_bank([
+		"res://assets/audio/Cannon, Rts Sfx.mp3",
+	])
+	_sfx_artillery = _load_bank([
+		"res://assets/audio/Artillery Gun, Rts Sfx.mp3",
+		"res://assets/audio/Artillery Gun, Rts Sfx (1).mp3",
+		"res://assets/audio/Artillery Gun, Rts Sfx (2).mp3",
+		"res://assets/audio/Artillery Gun, Rts Sfx (3).mp3",
+	])
+	_sfx_laser = _load_bank([
+		"res://assets/audio/Laser Gun, Rts Sfx.mp3",
+		"res://assets/audio/Laser Gun, Rts Sfx (1).mp3",
+	])
+	_sfx_plasma = _load_bank([
+		"res://assets/audio/Plasma Gun, Rts Sfx.mp3",
+	])
+	_sfx_explosion = _load_bank([
+		"res://assets/audio/Explosion, Rts Sfx.mp3",
+		"res://assets/audio/Explosion, Rts Sfx (1).mp3",
+		"res://assets/audio/Explosion, Rts Sfx (2).mp3",
+		"res://assets/audio/Explosion, Rts Sfx (3).mp3",
+	])
+
+
+func _load_bank(paths: Array) -> Array[AudioStream]:
+	var bank: Array[AudioStream] = []
+	for p: Variant in paths:
+		var stream: AudioStream = load(p as String) as AudioStream
+		if stream:
+			bank.append(stream)
+	return bank
+
+
+func _pick(bank: Array[AudioStream]) -> AudioStream:
+	if bank.is_empty():
+		return null
+	return bank[randi() % bank.size()]
+
 
 func _get_free_player() -> AudioStreamPlayer:
 	for player: AudioStreamPlayer in _players:
@@ -67,10 +128,11 @@ func _get_free_player_3d() -> AudioStreamPlayer3D:
 ## variant uses, then plays it on a 3D player parented at `world_pos`.
 ## Off-screen events fall off naturally; on-screen ones come through.
 
-func _play_3d_at(stream: AudioStream, world_pos: Vector3, volume_db: float = 0.0) -> void:
+func _play_3d_at(stream: AudioStream, world_pos: Vector3, volume_db: float = 0.0, pitch: float = 1.0) -> void:
 	var player := _get_free_player_3d()
 	player.stream = stream
 	player.volume_db = volume_db
+	player.pitch_scale = pitch
 	player.global_position = world_pos
 	player.play()
 
@@ -150,9 +212,56 @@ func play_alert(severity: int = 0) -> void:
 		_play_thump(randf_range(85.0, 110.0), 0.18, -9.0)
 
 func play_weapon_fire(weapon: WeaponResource = null, at: Vector3 = Vector3.INF) -> void:
+	## Pick a recorded sample matching the weapon's character. Falls back
+	## to the original procedural recipe (`_play_weapon_fire_inner`) if
+	## no SFX banks loaded — keeps the prototype usable without the
+	## `assets/audio/` folder present.
+	var stream: AudioStream = _pick_weapon_fire_stream(weapon)
+	if stream:
+		# Volume offset roughly tracks weapon weight so heavy artillery
+		# is louder than a Ratchet pistol crack. Tuned by ear within
+		# the recorded samples' loudness range.
+		var weight: float = _weapon_weight(weapon)
+		var volume_db: float = lerp(-10.0, -3.0, weight) + randf_range(-2.0, 1.0)
+		# Pitch jitter — heavier weapons get tighter range so they
+		# stay recognizably "heavy"; lighter rapid weapons swing wider
+		# so a continuous burst sounds varied.
+		var pitch_spread: float = lerp(0.18, 0.07, weight)
+		var pitch: float = 1.0 + randf_range(-pitch_spread, pitch_spread)
+		_spatial_pos = at
+		_emit(stream, volume_db, pitch)
+		_spatial_pos = Vector3.INF
+		return
 	_spatial_pos = at
 	_play_weapon_fire_inner(weapon)
 	_spatial_pos = Vector3.INF
+
+
+func _pick_weapon_fire_stream(weapon: WeaponResource) -> AudioStream:
+	## Maps weapon characteristics to a recorded bank:
+	## - Continuous-RoF or AA → laser (zippy energy weapons read here).
+	## - Heavy + slow / single → artillery (Bulwark cannon).
+	## - High-damage moderate → cannon (Hound autocannons / Tracker
+	##   long guns).
+	## - Rapid + AP → machine gun (Rook bursts, Ratchet pistols).
+	## - Plasma kept available as a "weird energy" option for future
+	##   weapons; not currently used by any base unit.
+	if not weapon:
+		return _pick(_sfx_machine_gun)
+	var weight: float = _weapon_weight(weapon)
+	var rapid: float = _weapon_rapid_factor(weapon)
+	var role: StringName = weapon.role_tag
+	if role == &"AA" or weapon.rof_tier == &"continuous":
+		return _pick(_sfx_laser)
+	if weight >= 0.7 and rapid < 0.3:
+		return _pick(_sfx_artillery)
+	if weight >= 0.55:
+		return _pick(_sfx_cannon)
+	if rapid >= 0.55:
+		return _pick(_sfx_machine_gun)
+	# Mid-weight, moderate-RoF default — cannon reads as "decent
+	# punch but not artillery" which fits Hound autocannons.
+	return _pick(_sfx_cannon)
 
 
 func _play_weapon_fire_inner(weapon: WeaponResource = null) -> void:
@@ -231,23 +340,43 @@ func _weapon_rapid_factor(weapon: WeaponResource) -> float:
 		_: return 0.4
 
 func play_weapon_impact(at: Vector3 = Vector3.INF) -> void:
-	# Metallic clang: noise crack + pitched ring + low body thump.
+	# Smaller-scale recorded explosion as a metallic clang substitute,
+	# played quietly so it's a brief tick rather than a full boom.
+	# Falls back to the procedural metallic-clang recipe if no bank.
+	var stream: AudioStream = _pick(_sfx_explosion)
+	if stream:
+		# Pitched UP for impacts so the same explosion bank reads as
+		# a quick clang rather than a full boom.
+		var pitch: float = randf_range(1.6, 2.0)
+		_spatial_pos = at
+		_emit(stream, -16.0 + randf_range(-2.0, 1.0), pitch)
+		_spatial_pos = Vector3.INF
+		return
 	_spatial_pos = at
-	var pitch: float = randf_range(100.0, 165.0)
+	var legacy_pitch: float = randf_range(100.0, 165.0)
 	_play_filtered_noise(randf_range(0.03, 0.05), randf_range(2800.0, 3800.0), randf_range(-18.0, -14.0))
-	_play_tone(pitch, randf_range(0.06, 0.09), randf_range(-15.0, -12.0), randf_range(3.0, 8.0))
+	_play_tone(legacy_pitch, randf_range(0.06, 0.09), randf_range(-15.0, -12.0), randf_range(3.0, 8.0))
 	if randf() < 0.4:
-		_play_thump(pitch * 0.5, 0.08, -16.0)
+		_play_thump(legacy_pitch * 0.5, 0.08, -16.0)
 	_spatial_pos = Vector3.INF
 
+
 func play_unit_destroyed(at: Vector3 = Vector3.INF) -> void:
-	# Three-stage explosion with substantial randomization on each stage so
-	# back-to-back kills don't sound copy-pasted.
+	# Full-volume recorded explosion. Procedural three-stage stack
+	# remains as fallback when no bank is loaded.
+	var stream: AudioStream = _pick(_sfx_explosion)
+	if stream:
+		# Slight pitch-down so unit-deaths read heavier than impacts
+		# (which used the same bank pitched up).
+		var pitch: float = randf_range(0.85, 1.05)
+		_spatial_pos = at
+		_emit(stream, -3.0 + randf_range(-1.0, 1.0), pitch)
+		_spatial_pos = Vector3.INF
+		return
 	_spatial_pos = at
-	_play_filtered_noise(randf_range(0.06, 0.1), randf_range(4200.0, 5800.0), randf_range(-5.0, -2.0))   # crack
-	_play_thump(randf_range(45.0, 65.0), randf_range(0.35, 0.5), randf_range(-5.0, -3.0))                # body boom
-	_play_filtered_noise(randf_range(0.45, 0.7), randf_range(550.0, 850.0), randf_range(-10.0, -7.0))    # rumble tail
-	# A mid-frequency crack lands sometimes for added texture.
+	_play_filtered_noise(randf_range(0.06, 0.1), randf_range(4200.0, 5800.0), randf_range(-5.0, -2.0))
+	_play_thump(randf_range(45.0, 65.0), randf_range(0.35, 0.5), randf_range(-5.0, -3.0))
+	_play_filtered_noise(randf_range(0.45, 0.7), randf_range(550.0, 850.0), randf_range(-10.0, -7.0))
 	if randf() < 0.6:
 		_play_filtered_noise(randf_range(0.1, 0.18), randf_range(1400.0, 2200.0), -10.0)
 	_spatial_pos = Vector3.INF
@@ -282,16 +411,19 @@ func _play_filtered_noise(duration: float, lowpass_hz: float, volume_db: float) 
 	_emit(stream, volume_db)
 
 
-func _emit(stream: AudioStream, volume_db: float) -> void:
+func _emit(stream: AudioStream, volume_db: float, pitch: float = 1.0) -> void:
 	# Single dispatch point — routes to the 2D or 3D pool based on whether
 	# a public spatial caller has stashed a position. Saves duplicating
-	# every layered recipe between 2D and 3D variants.
+	# every layered recipe between 2D and 3D variants. Pitch defaults to
+	# 1.0; recorded SFX pass a randomized pitch so back-to-back fires
+	# don't sound identical.
 	if _spatial_pos != Vector3.INF:
-		_play_3d_at(stream, _spatial_pos, volume_db)
+		_play_3d_at(stream, _spatial_pos, volume_db, pitch)
 	else:
 		var player := _get_free_player()
 		player.stream = stream
 		player.volume_db = volume_db
+		player.pitch_scale = pitch
 		player.play()
 
 

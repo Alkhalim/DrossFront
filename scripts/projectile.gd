@@ -6,13 +6,19 @@ var target_pos: Vector3 = Vector3.ZERO
 var start_pos: Vector3 = Vector3.ZERO
 var speed: float = 40.0
 var _mesh: MeshInstance3D = null
-var _trail: MeshInstance3D = null
+## Whether to spawn smoke-puff trail mesh instances behind the projectile.
+## True for missiles, false for bullets / beams.
+var _emit_trail: bool = false
+var _trail_timer: float = 0.0
 
 ## Missile arc state.
 var _is_missile: bool = false
 var _flight_time: float = 0.0
 var _total_flight_time: float = 1.0
 var _arc_height: float = 4.0
+## How often to drop a smoke puff. ~30 puffs/sec at the default cadence
+## paints a continuous trail without flooding the scene.
+const MISSILE_TRAIL_INTERVAL: float = 0.035
 
 const ROLE_COLORS: Dictionary = {
 	&"AP": Color(1.0, 0.8, 0.2, 1.0),
@@ -104,27 +110,10 @@ func _create_missile_mesh(color: Color) -> void:
 	_mesh.set_surface_override_material(0, mat)
 	add_child(_mesh)
 
-	# Exhaust trail — long thin cylinder behind the missile rather than a
-	# small sphere. Extends ~1.5u trailing the body, with alpha
-	# fading toward the tail for the classic rocket-trail read.
-	_trail = MeshInstance3D.new()
-	var trail_cyl := CylinderMesh.new()
-	trail_cyl.top_radius = 0.02
-	trail_cyl.bottom_radius = 0.12
-	trail_cyl.height = 1.6
-	_trail.mesh = trail_cyl
-	# Cylinder default axis = +Y; rotate so the long axis runs along
-	# local +Z (placed behind the missile in `_process`).
-	_trail.rotation.x = PI / 2
-
-	var trail_mat := StandardMaterial3D.new()
-	trail_mat.albedo_color = Color(1.0, 0.6, 0.1, 0.7)
-	trail_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	trail_mat.emission_enabled = true
-	trail_mat.emission = Color(1.0, 0.4, 0.0, 1.0)
-	trail_mat.emission_energy_multiplier = 2.4
-	_trail.set_surface_override_material(0, trail_mat)
-	add_child(_trail)
+	# Exhaust trail = a stream of small smoke puffs spawned behind the
+	# missile in `_process`. Soft, expanding, fading — reads as actual
+	# rocket exhaust instead of the previous (misaligned) tapered cone.
+	_emit_trail = true
 
 
 func _create_beam_mesh(color: Color, from: Vector3, to: Vector3) -> void:
@@ -185,13 +174,15 @@ func _process(delta: float) -> void:
 			if global_position.distance_to(next_pos) > 0.01:
 				look_at(next_pos, Vector3.UP)
 
-		# Trail behind missile. After look_at, basis.z is the world direction of
-		# the projectile's local +Z (i.e. backward). The long-cylinder trail
-		# pivots from its midpoint, so place its center 0.9u behind the
-		# missile body and orient it along the body's basis.
-		if _trail:
-			_trail.global_position = global_position + global_basis.z.normalized() * 0.9
-			_trail.global_basis = global_basis
+		# Smoke trail — drop a fading puff behind the missile every
+		# MISSILE_TRAIL_INTERVAL. Each puff is a free-standing scene
+		# child (not parented to the missile), so it stays put after
+		# the missile passes and produces a real "trail" through space.
+		if _emit_trail:
+			_trail_timer -= delta
+			if _trail_timer <= 0.0:
+				_trail_timer = MISSILE_TRAIL_INTERVAL
+				_spawn_trail_puff()
 
 		if t >= 1.0:
 			_spawn_impact()
@@ -209,6 +200,58 @@ func _process(delta: float) -> void:
 
 	var direction := to_target / dist
 	global_position += direction * speed * delta
+
+
+func _spawn_trail_puff() -> void:
+	## Drops a small soft sphere behind the missile that expands and
+	## fades to alpha 0 over ~0.45s. Each puff is a sibling of the
+	## projectile (parented to the scene), so the trail persists after
+	## the missile flies past.
+	var scene: Node = get_tree().current_scene
+	if not scene:
+		return
+	var puff := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	var start_radius: float = randf_range(0.10, 0.16)
+	sphere.radius = start_radius
+	sphere.height = start_radius * 2.0
+	puff.mesh = sphere
+	# Drop just behind the missile body. global_basis.z is the local +Z
+	# direction in world space, which is the missile's "backward" after
+	# look_at orients local -Z toward the target.
+	var rear_offset: Vector3 = global_basis.z.normalized() * randf_range(0.18, 0.32)
+	# Tiny lateral jitter so consecutive puffs aren't perfectly stacked.
+	rear_offset += Vector3(
+		randf_range(-0.05, 0.05),
+		randf_range(-0.05, 0.05),
+		randf_range(-0.05, 0.05),
+	)
+	puff.global_position = global_position + rear_offset
+	var mat := StandardMaterial3D.new()
+	# Warm-grey smoke with a faint amber tint near the engine.
+	mat.albedo_color = Color(0.6, 0.5, 0.4, 0.65)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.emission_enabled = true
+	mat.emission = Color(0.9, 0.5, 0.2, 1.0)
+	mat.emission_energy_multiplier = 0.4
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	puff.set_surface_override_material(0, mat)
+	scene.add_child(puff)
+
+	var lifetime: float = randf_range(0.35, 0.55)
+	var grow: float = randf_range(2.4, 3.4)
+	var drift: Vector3 = Vector3(
+		randf_range(-0.1, 0.1),
+		randf_range(0.05, 0.2),
+		randf_range(-0.1, 0.1),
+	)
+	var tween := puff.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(puff, "global_position", puff.global_position + drift, lifetime)
+	tween.tween_property(puff, "scale", Vector3(grow, grow, grow), lifetime)
+	tween.tween_property(mat, "albedo_color:a", 0.0, lifetime).set_ease(Tween.EASE_IN)
+	tween.tween_property(mat, "emission_energy_multiplier", 0.0, lifetime * 0.6)
+	tween.chain().tween_callback(puff.queue_free)
 
 
 func _spawn_impact() -> void:

@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://cd5jc5dryabgx"
+path="res://.godot/imported/Explosion, Rts Sfx (1).mp3-2a2dea41ef6f2f654722ace3daa1d1ef.mp3str"
+
+[deps]
+
+source_file="res://assets/audio/Explosion, Rts Sfx (1).mp3"
+dest_files=["res://.godot/imported/Explosion, Rts Sfx (1).mp3-2a2dea41ef6f2f654722ace3daa1d1ef.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

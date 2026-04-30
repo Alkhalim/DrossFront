@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://njiakcfbdo5y"
+path="res://.godot/imported/Laser Gun, Rts Sfx.mp3-56f62839d3dcaa39a427a2d2403394f5.mp3str"
+
+[deps]
+
+source_file="res://assets/audio/Laser Gun, Rts Sfx.mp3"
+dest_files=["res://.godot/imported/Laser Gun, Rts Sfx.mp3-56f62839d3dcaa39a427a2d2403394f5.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

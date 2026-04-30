@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://buva38taub5do"
+path="res://.godot/imported/Machine Gun, Rts Sfx.mp3-254a7be399f6081287470081edca60b1.mp3str"
+
+[deps]
+
+source_file="res://assets/audio/Machine Gun, Rts Sfx.mp3"
+dest_files=["res://.godot/imported/Machine Gun, Rts Sfx.mp3-254a7be399f6081287470081edca60b1.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4
