@@ -186,6 +186,63 @@ func _build_visuals() -> void:
 	workshop.set_surface_override_material(0, _make_metal(Color(0.28, 0.26, 0.22)))
 	add_child(workshop)
 
+	# Player-color identity strip on the bottom of the workshop (above the
+	# chassis). Keeps ownership readable from a top-down camera angle even
+	# though the chassis-level color band is replaced with an underglow.
+	_team_stripe = MeshInstance3D.new()
+	var ws_stripe_box := BoxMesh.new()
+	ws_stripe_box.size = Vector3(2.85, 0.12, 3.45)
+	_team_stripe.mesh = ws_stripe_box
+	_team_stripe.position = Vector3(0.0, 1.0, -0.4)
+	var ws_stripe_mat := StandardMaterial3D.new()
+	ws_stripe_mat.albedo_color = team_color
+	ws_stripe_mat.emission_enabled = true
+	ws_stripe_mat.emission = team_color
+	ws_stripe_mat.emission_energy_multiplier = 1.4
+	_team_stripe.set_surface_override_material(0, ws_stripe_mat)
+	add_child(_team_stripe)
+
+	# Sloped front armor plate — gives the Crawler a clear "front" so the
+	# player can read its facing instantly. Triangular silhouette under
+	# the workshop pointing in the local -Z direction (which is "forward"
+	# per command_move's heading code).
+	var nose := MeshInstance3D.new()
+	var nose_box := BoxMesh.new()
+	nose_box.size = Vector3(2.6, 0.7, 1.0)
+	nose.mesh = nose_box
+	nose.rotation.x = deg_to_rad(-22.0)
+	nose.position = Vector3(0.0, 0.65, -2.1)
+	nose.set_surface_override_material(0, _make_metal(Color(0.22, 0.2, 0.18)))
+	add_child(nose)
+	# Headlight pair on the nose — emissive amber so the front reads even
+	# from a great distance.
+	for side: int in 2:
+		var hx: float = -0.85 if side == 0 else 0.85
+		var headlight := MeshInstance3D.new()
+		var hl_sphere := SphereMesh.new()
+		hl_sphere.radius = 0.13
+		hl_sphere.height = 0.26
+		headlight.mesh = hl_sphere
+		headlight.position = Vector3(hx, 0.78, -2.55)
+		var hl_mat := StandardMaterial3D.new()
+		hl_mat.albedo_color = Color(1.0, 0.75, 0.4)
+		hl_mat.emission_enabled = true
+		hl_mat.emission = Color(1.0, 0.75, 0.4)
+		hl_mat.emission_energy_multiplier = 2.0
+		headlight.set_surface_override_material(0, hl_mat)
+		add_child(headlight)
+	# Rear exhaust block — short stacks on the back of the chassis. Gives
+	# back of Crawler a clearly different silhouette from the front.
+	for side: int in 2:
+		var ex_x: float = -0.7 if side == 0 else 0.7
+		var exhaust := MeshInstance3D.new()
+		var ex_box := BoxMesh.new()
+		ex_box.size = Vector3(0.32, 0.55, 0.32)
+		exhaust.mesh = ex_box
+		exhaust.position = Vector3(ex_x, 1.4, 2.4)
+		exhaust.set_surface_override_material(0, _make_metal(Color(0.16, 0.14, 0.12)))
+		add_child(exhaust)
+
 	# Cargo crane / armature on the back top.
 	var crane := MeshInstance3D.new()
 	var cb := BoxMesh.new()
@@ -261,20 +318,18 @@ func _build_visuals() -> void:
 	lamp_light.position = lamp.position
 	add_child(lamp_light)
 
-	# Team-color band wrapping the hull near the bottom (matches the
-	# building convention so faction identity reads consistently).
-	_team_stripe = MeshInstance3D.new()
-	var stripe_box := BoxMesh.new()
-	stripe_box.size = Vector3(3.7, 0.18, 5.1)
-	_team_stripe.mesh = stripe_box
-	_team_stripe.position.y = 0.18
-	var stripe_mat := StandardMaterial3D.new()
-	stripe_mat.albedo_color = team_color
-	stripe_mat.emission_enabled = true
-	stripe_mat.emission = team_color
-	stripe_mat.emission_energy_multiplier = 1.4
-	_team_stripe.set_surface_override_material(0, stripe_mat)
-	add_child(_team_stripe)
+	# Underchassis glow — an OmniLight3D mounted *under* the hull casts
+	# the player's color onto the ground beneath the Crawler. Replaces
+	# the previous solid strip on the chassis bottom; the stripe at the
+	# workshop base (above) handles the painted-band identity, while
+	# this casts the moving glow that follows the Crawler around.
+	var underglow := OmniLight3D.new()
+	underglow.light_color = team_color
+	underglow.light_energy = 1.6
+	underglow.omni_range = 4.5
+	underglow.omni_attenuation = 1.4
+	underglow.position = Vector3(0.0, 0.05, 0.0)
+	add_child(underglow)
 
 
 func _build_collision() -> void:
