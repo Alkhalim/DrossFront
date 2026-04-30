@@ -31,30 +31,30 @@ func _ready() -> void:
 ## distinct base color, accent color, and number of debris chunks so a
 ## glance reads "small scrap pile" vs "Bulwark hull plate" vs "Apex
 ## carcass" without needing the size cue alone.
-const _WRECK_CLASS_LIGHT: Dictionary = {
+##
+## These are `var` rather than `const` because GDScript's compile-time
+## const evaluator chokes on `Color()` constructor calls inside Dictionary
+## literals — and that parse failure used to cascade through `Building`
+## (and every class that referenced it) all the way to `BuilderComponent`.
+var _WRECK_CLASS_LIGHT: Dictionary = {
 	"max_extent": 1.0,
 	"base":   Color(0.22, 0.15, 0.09, 1.0),
 	"accent": Color(0.55, 0.30, 0.13, 1.0),
 	"chunks": 2,
 }
-const _WRECK_CLASS_MEDIUM: Dictionary = {
+var _WRECK_CLASS_MEDIUM: Dictionary = {
 	"max_extent": 1.6,
 	"base":   Color(0.20, 0.13, 0.08, 1.0),
 	"accent": Color(0.62, 0.34, 0.16, 1.0),
 	"chunks": 3,
 }
-const _WRECK_CLASS_HEAVY: Dictionary = {
+var _WRECK_CLASS_HEAVY: Dictionary = {
 	"max_extent": 2.2,
 	"base":   Color(0.18, 0.12, 0.07, 1.0),
 	"accent": Color(0.70, 0.40, 0.18, 1.0),
 	"chunks": 4,
 }
-## Apex bucket has no real upper cap — pick a number bigger than any
-## wreck the game will ever spawn. `INF` is rejected as a `const`
-## Dictionary value by GDScript's compile-time evaluator (and the
-## resulting parse failure cascades to `Building` and any class that
-## references it), so we use a plain large float instead.
-const _WRECK_CLASS_APEX: Dictionary = {
+var _WRECK_CLASS_APEX: Dictionary = {
 	"max_extent": 1000000.0,
 	"base":   Color(0.22, 0.14, 0.08, 1.0),
 	"accent": Color(0.85, 0.55, 0.20, 1.0),
