@@ -1432,7 +1432,19 @@ func _kick_units_out_of_footprint() -> void:
 		return
 	var half_x: float = stats.footprint_size.x * 0.5
 	var half_z: float = stats.footprint_size.z * 0.5
+	# Pop a unit far enough that its own collision capsule clears the
+	# building edge — half_unit ≈ 1.0u + a comfortable margin so the
+	# next move_and_slide doesn't immediately push it back inside.
+	var clearance: float = 1.6
+	# Iterate units AND crawlers — Crawler is in the "units" group too
+	# but listing both is cheap and protects against future group changes.
+	var trapped: Array[Node] = []
 	for node: Node in get_tree().get_nodes_in_group("units"):
+		trapped.append(node)
+	for node: Node in get_tree().get_nodes_in_group("crawlers"):
+		if not (node in trapped):
+			trapped.append(node)
+	for node: Node in trapped:
 		if not is_instance_valid(node):
 			continue
 		var u: Node3D = node as Node3D
@@ -1440,23 +1452,27 @@ func _kick_units_out_of_footprint() -> void:
 			continue
 		var dx: float = u.global_position.x - global_position.x
 		var dz: float = u.global_position.z - global_position.z
-		var inside_x: bool = absf(dx) < half_x
-		var inside_z: bool = absf(dz) < half_z
+		var inside_x: bool = absf(dx) < half_x + 0.3
+		var inside_z: bool = absf(dz) < half_z + 0.3
 		if not (inside_x and inside_z):
 			continue
 		# Pop the unit out along whichever axis it's closest to escaping.
-		var dx_in: float = half_x - absf(dx)
-		var dz_in: float = half_z - absf(dz)
-		if dx_in < dz_in:
-			var dir_x: float = 1.0
-			if dx < 0.0:
-				dir_x = -1.0
-			u.global_position.x = global_position.x + (half_x + 0.6) * dir_x
+		var dx_in: float = half_x - dx
+		var dz_in: float = half_z - dz
+		# Use signed distances so we kick toward the *near* face on each
+		# axis, not always +x / +z.
+		var sign_x: float = 1.0 if dx >= 0.0 else -1.0
+		var sign_z: float = 1.0 if dz >= 0.0 else -1.0
+		if absf(dx_in) < absf(dz_in):
+			u.global_position.x = global_position.x + (half_x + clearance) * sign_x
 		else:
-			var dir_z: float = 1.0
-			if dz < 0.0:
-				dir_z = -1.0
-			u.global_position.z = global_position.z + (half_z + 0.6) * dir_z
+			u.global_position.z = global_position.z + (half_z + clearance) * sign_z
+		# Reset Y to the building's ground plane. CharacterBody3D's
+		# collision solver was sometimes pushing trapped units UP onto
+		# the building's roof when their Y component was inside the
+		# collider — the unit then bounced between floor + roof while
+		# gravity pulled it back through. Resetting y kills that loop.
+		u.global_position.y = global_position.y
 
 
 func _create_progress_bar() -> void:
