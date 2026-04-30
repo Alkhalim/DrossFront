@@ -249,6 +249,76 @@ func _detail_universal_extras() -> void:
 		coupling.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.16, 0.14)))
 		_attach_visual(coupling)
 
+	# Maintenance ladder up the rear-left side — vertical rails + rungs.
+	var ladder_x: float = -fs.x * 0.4
+	var ladder_z: float = fs.z * 0.5 + 0.05
+	for rail_side: int in 2:
+		var rail_off: float = -0.08 if rail_side == 0 else 0.08
+		var rail := MeshInstance3D.new()
+		var rb := BoxMesh.new()
+		rb.size = Vector3(0.04, fs.y * 0.85, 0.04)
+		rail.mesh = rb
+		rail.position = Vector3(ladder_x + rail_off, fs.y * 0.45, ladder_z)
+		rail.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.2, 0.16)))
+		_attach_visual(rail)
+	var rung_count: int = maxi(int(fs.y * 1.4), 3)
+	for r: int in rung_count:
+		var rung := MeshInstance3D.new()
+		var rung_box := BoxMesh.new()
+		rung_box.size = Vector3(0.20, 0.03, 0.03)
+		rung.mesh = rung_box
+		var t: float = (float(r) + 0.5) / float(rung_count)
+		rung.position = Vector3(ladder_x, fs.y * t * 0.85 + 0.05, ladder_z + 0.02)
+		rung.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.16, 0.14, 0.12)))
+		_attach_visual(rung)
+
+	# Floor-line emissive markers — three small amber points around the
+	# base perimeter. Reads as "guide lights / marshalling lamps".
+	var marker_offsets: Array[Vector3] = [
+		Vector3(-fs.x * 0.45, 0.05, -fs.z * 0.5 - 0.04),
+		Vector3(fs.x * 0.45, 0.05, -fs.z * 0.5 - 0.04),
+		Vector3(0.0, 0.05, -fs.z * 0.5 - 0.04),
+	]
+	for off: Vector3 in marker_offsets:
+		var marker := MeshInstance3D.new()
+		var m_box := BoxMesh.new()
+		m_box.size = Vector3(0.08, 0.08, 0.08)
+		marker.mesh = m_box
+		marker.position = off
+		marker.set_surface_override_material(0, _detail_emissive_mat(Color(0.95, 0.7, 0.25), 1.4))
+		_attach_visual(marker)
+
+	# Cargo crate cluster on the right-rear — three stacked boxes of
+	# varying tones. Sells the "active base" feel without taking up
+	# the silhouette real-estate the type-specific builder uses.
+	var crate_anchor: Vector3 = Vector3(fs.x * 0.35, 0.0, fs.z * 0.5 + 0.6)
+	for ci: int in 3:
+		var crate := MeshInstance3D.new()
+		var crate_box := BoxMesh.new()
+		var cw: float = randf_range(0.32, 0.5)
+		var ch: float = randf_range(0.3, 0.45)
+		crate_box.size = Vector3(cw, ch, cw)
+		crate.mesh = crate_box
+		crate.rotation.y = randf_range(-0.25, 0.25)
+		crate.position = crate_anchor + Vector3(
+			float(ci) * 0.15 + randf_range(-0.05, 0.05),
+			ch * 0.5,
+			float(ci) * 0.18,
+		)
+		var crate_color: Color = Color(0.32, 0.28, 0.20).darkened(randf_range(0.0, 0.2))
+		crate.set_surface_override_material(0, _detail_dark_metal_mat(crate_color))
+		_attach_visual(crate)
+
+	# Stair / loading ramp on the front-left, angled down to ground.
+	var ramp := MeshInstance3D.new()
+	var ramp_box := BoxMesh.new()
+	ramp_box.size = Vector3(fs.x * 0.18, 0.06, fs.z * 0.22)
+	ramp.mesh = ramp_box
+	ramp.rotation.x = deg_to_rad(-12.0)
+	ramp.position = Vector3(-fs.x * 0.32, 0.06, -fs.z * 0.5 - fs.z * 0.10)
+	ramp.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.20, 0.17)))
+	_attach_visual(ramp)
+
 
 func _detail_dark_metal_mat(c: Color = Color(0.18, 0.18, 0.2)) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()

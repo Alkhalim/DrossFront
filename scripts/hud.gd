@@ -135,7 +135,7 @@ func _build_tutorial_overlay() -> void:
 	ctrl_title.add_theme_color_override("font_color", Color(0.7, 0.85, 0.95, 1.0))
 	inner.add_child(ctrl_title)
 	for line: String in [
-		"  WASD / mouse edge — pan camera        Mouse wheel — zoom",
+		"  Arrow keys / mouse edge — pan camera        Mouse wheel — zoom",
 		"  Ctrl+0..9 assign control group        0..9 recall group",
 		"  ESC pause / settings / main menu      TAB hide tutorial",
 	]:

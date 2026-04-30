@@ -1,6 +1,6 @@
 class_name RTSCamera
 extends Camera3D
-## Isometric-style RTS camera with WASD panning, scroll zoom, and edge panning.
+## Isometric-style RTS camera with arrow-key panning, scroll zoom, and edge panning.
 ## Fixed rotation angle — only position changes, never tilts.
 
 @export var pan_speed: float = 30.0
