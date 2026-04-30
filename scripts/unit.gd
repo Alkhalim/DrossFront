@@ -97,9 +97,13 @@ var home_position: Vector3 = Vector3.INF
 ## geometry for ~0.3s, we rotate the desired direction sideways for a short
 ## window so slide-along-wall produces real lateral progress instead of
 ## zeroing out against a flat surface. `_deflect_until_msec` is the absolute
-## clock time the deflection expires; `_deflect_sign` chooses left vs right.
+## clock time the deflection expires; `_deflect_sign` chooses left vs right;
+## `_deflect_angle_deg` lets the stuck-rescue ladder crank the rotation up
+## from a gentle 50° (slip past a corner) to >90° (almost backtracking
+## past a thick wall).
 var _deflect_until_msec: int = 0
 var _deflect_sign: float = 0.0
+var _deflect_angle_deg: float = 50.0
 
 ## Player colors.
 const PLAYER_COLOR := Color(0.15, 0.45, 0.9, 1.0)
@@ -1484,11 +1488,13 @@ func _physics_process(delta: float) -> void:
 	# Wall deflection — when the unit is wedged head-on against geometry,
 	# `move_and_slide` zeroes the perpendicular component and the squad
 	# stops dead instead of sliding around the building. Briefly rotating
-	# the desired heading 50° to one side gives slide a real lateral
-	# component to work with so it wraps the corner.
+	# the desired heading sideways gives slide a real lateral component
+	# to work with so it wraps the corner. The angle ramps up the longer
+	# the unit has been stuck so a thick wall eventually triggers near-
+	# perpendicular sidesteps.
 	var now_msec: int = Time.get_ticks_msec()
 	if now_msec < _deflect_until_msec and _deflect_sign != 0.0:
-		direction = direction.rotated(Vector3.UP, _deflect_sign * deg_to_rad(50.0))
+		direction = direction.rotated(Vector3.UP, _deflect_sign * deg_to_rad(_deflect_angle_deg))
 	# Preserve the y component (gravity accumulator) so the unit keeps
 	# falling toward the floor while moving horizontally.
 	velocity.x = direction.x * _move_speed
@@ -1497,50 +1503,64 @@ func _physics_process(delta: float) -> void:
 	var prev_pos: Vector3 = global_position
 	move_and_slide()
 
-	# Stuck detection ladder:
-	# - 0.3s of zero progress → trigger a 0.8s deflection so slide produces
-	#   forward motion past the obstacle.
-	# - 1.5s without progress → re-issue the path (and flip the deflection
-	#   side in case we picked the wrong way around).
-	# - 5s without progress → give up so the unit doesn't grind forever.
+	# Stuck-rescue ladder. Successive tiers escalate the deflection
+	# angle so a thick wall (where 50° still leaves the unit wedged)
+	# eventually triggers near-perpendicular sidesteps that walk the
+	# unit around the obstacle. We never rewrite `_nav_agent.target_position`
+	# to anything other than `move_target` itself — past attempts to
+	# nudge it 2u sideways made the agent report "navigation finished"
+	# and the unit dropped its move order entirely. The original move
+	# target stays authoritative; only the desired *direction* per
+	# frame is rotated.
 	var actual_move: float = (global_position - prev_pos).length()
 	var expected_move: float = _move_speed * delta * 0.3
 	if actual_move < expected_move:
 		_stuck_timer += delta
-		# 0.25s zero-progress → first deflection.
+		# 0.25s — first sidestep, ~50°. Light corner / shoulder bump.
 		if _stuck_timer >= 0.25 and now_msec >= _deflect_until_msec:
-			# Deterministic side per unit so a squad doesn't oscillate
-			# both directions across formation members.
 			_deflect_sign = 1.0 if (get_instance_id() % 2) == 0 else -1.0
+			_deflect_angle_deg = 50.0
 			_deflect_until_msec = now_msec + 700
-		# 0.9s without escaping → flip the deflection side. Used to be
-		# 1.5s; corners benefit from a faster retry, otherwise units
-		# oscillate against the corner edge for nearly two seconds.
+		# 0.9s — flip side, same angle. Maybe we picked the wrong way.
 		if _stuck_timer >= 0.9 and _stuck_timer < 0.9 + delta * 1.5:
 			_deflect_sign = -_deflect_sign
-			_deflect_until_msec = now_msec + 1000
+			_deflect_angle_deg = 50.0
+			_deflect_until_msec = now_msec + 900
 			if _nav_agent:
 				_nav_agent.target_position = move_target
-		# 1.8s — flip back AND nudge the move target sideways by 2u so
-		# the agent recomputes a fresh path that starts perpendicular
-		# to whatever's blocking us.
+		# 1.8s — escalate to 75°. Pure-perpendicular slide along the
+		# obstacle edge.
 		if _stuck_timer >= 1.8 and _stuck_timer < 1.8 + delta * 1.5:
 			_deflect_sign = -_deflect_sign
-			_deflect_until_msec = now_msec + 1200
+			_deflect_angle_deg = 75.0
+			_deflect_until_msec = now_msec + 1500
+		# 3.5s — escalate to 95°. Slightly past perpendicular — the
+		# unit briefly walks AWAY from the target to find an alternate
+		# approach lane around a thick wall.
+		if _stuck_timer >= 3.5 and _stuck_timer < 3.5 + delta * 1.5:
+			_deflect_sign = -_deflect_sign
+			_deflect_angle_deg = 95.0
+			_deflect_until_msec = now_msec + 2000
 			if _nav_agent:
-				var nudge: Vector3 = Vector3(
-					-direction.z * _deflect_sign * 2.0,
-					0.0,
-					direction.x * _deflect_sign * 2.0,
-				)
-				_nav_agent.target_position = global_position + nudge
-		elif _stuck_timer > 5.0:
+				_nav_agent.target_position = move_target
+		# 7s — same again, opposite side. Last big push before give-up.
+		if _stuck_timer >= 7.0 and _stuck_timer < 7.0 + delta * 1.5:
+			_deflect_sign = -_deflect_sign
+			_deflect_angle_deg = 95.0
+			_deflect_until_msec = now_msec + 2500
+			if _nav_agent:
+				_nav_agent.target_position = move_target
+		# 14s — finally accept that we can't reach (target may be in a
+		# sealed area). Stop so we don't grind here forever; the
+		# player can manually re-task.
+		elif _stuck_timer > 14.0:
 			has_move_order = false
 			stop()
 			arrived.emit()
 			return
 	else:
 		_stuck_timer = 0.0
+		_deflect_angle_deg = 50.0
 
 	_last_position = global_position
 
