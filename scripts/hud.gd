@@ -520,11 +520,17 @@ func _build_progress_bar() -> void:
 func _update_resource_display() -> void:
 	if not _resource_manager:
 		return
-	_salvage_label.text = "Salvage  %d" % _resource_manager.salvage
+	# Resource counters get a 30s rolling-average income suffix so the
+	# player can read economy health at a glance without watching the
+	# numbers tick.
+	var avg_income: Vector2 = Vector2.ZERO
+	if _resource_manager.has_method("get_average_income"):
+		avg_income = _resource_manager.get_average_income()
+	_salvage_label.text = "Salvage  %d  (+%.1f/s)" % [_resource_manager.salvage, avg_income.x]
 
 	# Fuel — turn red when below 20% capacity (early-warning).
 	var fuel_pct: float = float(_resource_manager.fuel) / float(maxi(_resource_manager.fuel_cap, 1))
-	_fuel_label.text = "Fuel  %d / %d" % [_resource_manager.fuel, _resource_manager.fuel_cap]
+	_fuel_label.text = "Fuel  %d / %d  (+%.1f/s)" % [_resource_manager.fuel, _resource_manager.fuel_cap, avg_income.y]
 	_fuel_label.add_theme_color_override(
 		"font_color",
 		COLOR_WARN if fuel_pct < 0.2 else COLOR_FUEL

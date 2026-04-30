@@ -34,6 +34,13 @@ var population_cap: int = POPULATION_BASE
 
 var _salvage_accumulator: float = 0.0
 
+## Rolling income window — list of (timestamp_seconds, salvage_gain, fuel_gain)
+## entries. Stale entries get pruned each `add_*` call so memory stays small
+## (a few dozen entries per minute at typical play). The HUD reads the
+## sum / window for an average-per-second readout.
+const INCOME_WINDOW_SEC: float = 30.0
+var _income_log: Array[Dictionary] = []
+
 
 func _process(delta: float) -> void:
 	# HQ passive salvage trickle
@@ -84,11 +91,41 @@ func spend(salvage_cost: int, fuel_cost: int) -> bool:
 func add_salvage(amount: int) -> void:
 	salvage = mini(salvage + amount, SALVAGE_CAP)
 	salvage_changed.emit(salvage)
+	_record_income(amount, 0)
 
 
 func add_fuel(amount: int) -> void:
 	fuel = mini(fuel + amount, fuel_cap)
 	fuel_changed.emit(fuel)
+	_record_income(0, amount)
+
+
+func _record_income(salvage_amt: int, fuel_amt: int) -> void:
+	if salvage_amt <= 0 and fuel_amt <= 0:
+		return
+	var now: float = float(Time.get_ticks_msec()) / 1000.0
+	# Drop entries older than the window.
+	while not _income_log.is_empty() and (_income_log[0]["t"] as float) < now - INCOME_WINDOW_SEC:
+		_income_log.pop_front()
+	_income_log.append({"t": now, "s": salvage_amt, "f": fuel_amt})
+
+
+func get_average_income() -> Vector2:
+	## Returns (salvage_per_sec, fuel_per_sec) averaged over the last
+	## INCOME_WINDOW_SEC. Empty log → (0, 0).
+	if _income_log.is_empty():
+		return Vector2.ZERO
+	var now: float = float(Time.get_ticks_msec()) / 1000.0
+	var total_s: int = 0
+	var total_f: int = 0
+	for entry: Dictionary in _income_log:
+		if (entry["t"] as float) < now - INCOME_WINDOW_SEC:
+			continue
+		total_s += entry["s"] as int
+		total_f += entry["f"] as int
+	# Use the configured window even before it's been alive that long
+	# — running average smooths out the spiky early-game numbers.
+	return Vector2(float(total_s) / INCOME_WINDOW_SEC, float(total_f) / INCOME_WINDOW_SEC)
 
 
 func add_population(amount: int) -> void:
