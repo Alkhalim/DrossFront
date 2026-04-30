@@ -49,8 +49,13 @@ const _WRECK_CLASS_HEAVY: Dictionary = {
 	"accent": Color(0.70, 0.40, 0.18, 1.0),
 	"chunks": 4,
 }
+## Apex bucket has no real upper cap — pick a number bigger than any
+## wreck the game will ever spawn. `INF` is rejected as a `const`
+## Dictionary value by GDScript's compile-time evaluator (and the
+## resulting parse failure cascades to `Building` and any class that
+## references it), so we use a plain large float instead.
 const _WRECK_CLASS_APEX: Dictionary = {
-	"max_extent": INF,
+	"max_extent": 1000000.0,
 	"base":   Color(0.22, 0.14, 0.08, 1.0),
 	"accent": Color(0.85, 0.55, 0.20, 1.0),
 	"chunks": 6,
