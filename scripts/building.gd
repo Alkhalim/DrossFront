@@ -469,11 +469,15 @@ func _detail_headquarters() -> void:
 		post.position = Vector3(c.x, fs.y + post_box.size.y * 0.5, c.y)
 		post.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.18, 0.18)))
 		_attach_visual(post)
+		# `corner_lamp_sphere` rather than `lamp_sphere` — the radar dish
+		# code earlier in this function already declares a `lamp_sphere`,
+		# and GDScript 4 treats two `var` declarations with the same name
+		# in one function (even across blocks) as a duplicate error.
 		var lamp := MeshInstance3D.new()
-		var lamp_sphere := SphereMesh.new()
-		lamp_sphere.radius = 0.08
-		lamp_sphere.height = 0.16
-		lamp.mesh = lamp_sphere
+		var corner_lamp_sphere := SphereMesh.new()
+		corner_lamp_sphere.radius = 0.08
+		corner_lamp_sphere.height = 0.16
+		lamp.mesh = corner_lamp_sphere
 		lamp.position = Vector3(c.x, fs.y + post_box.size.y, c.y)
 		lamp.set_surface_override_material(0, _detail_emissive_mat(Color(0.5, 1.0, 0.4), 1.6))
 		_attach_visual(lamp)
