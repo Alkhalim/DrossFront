@@ -418,82 +418,70 @@ func _setup_alerts() -> void:
 
 
 func _setup_navigation() -> void:
-	# Ground polygon = the big ±150 rectangle MINUS every queued
-	# plateau / ramp footprint. After clipping, each remaining piece is
-	# triangulated and added to the navmesh. Plateau top fans + ramp
-	# slope polys (queued in _pending_nav_polys) are appended as-is.
-	# Result: ramp bottom-edge endpoints coincide with ground polygon
-	# vertices (because clip_polygons emits the ramp footprint
-	# perimeter as part of the resulting ground polygon), so the ramp
-	# slope poly and the surrounding ground triangle share an edge —
-	# the path planner sees them as connected and a unit on a ramp can
-	# plan a path onto the ground (and vice-versa).
+	## Godot-native navmesh BAKING. Walks the existing collision shapes
+	## via the "terrain" group (plateaus, ramps, terrain pieces, the
+	## ground plane via GroundCollision) and produces a properly
+	## connected navmesh. Replaces the previous manual strip-
+	## decomposition approach which had recurring connectivity bugs at
+	## adjacent strip boundaries — different float-jitter at the same
+	## logical Z value left invisible seams the path planner couldn't
+	## bridge.
+	##
+	## Bake parameters:
+	##   cell_size 0.5 — reasonable resolution for a 300×300 map
+	##   agent_radius 2.5 — covers the largest unit (Bulwark squad
+	##     formation) so corridors narrower than 5u get carved out;
+	##     fixes the "lights pass, heavies don't" symptom from the
+	##     manual decomposition where corridors were carved per-AABB
+	##     without considering agent size
+	##   agent_max_climb 2.0 — plateaus are 1.5-2.0u tall so the bake
+	##     correctly walks the ramp slopes
+	##   agent_max_slope 30° — ramps are ~13°, well within range
 	var nav_region := NavigationRegion3D.new()
 	nav_region.name = "NavigationRegion"
-
-	var verts := PackedVector3Array()
-	var polys: Array[PackedInt32Array] = []
-	# Vertex deduplication. Adjacent strip-decomposition rects share
-	# corner positions; without deduping the navmesh has 4 separate
-	# vertices at every shared corner, and the polygons appear to share
-	# an EDGE only via Godot's edge_connection_margin auto-merge — which
-	# can fail at long T-junctions and on near-but-not-quite-coincident
-	# float positions, leaving thin invisible barriers between adjacent
-	# walkable cells. Hashing on a quantised position guarantees true
-	# vertex sharing so polygon adjacency is explicit in the index list.
-	var vert_lookup: Dictionary = {}
-	var add_vert := func(v: Vector3) -> int:
-		# Quantise to mm so float jitter doesn't prevent dedup matches.
-		var key: Vector3i = Vector3i(roundi(v.x * 1000.0), roundi(v.y * 1000.0), roundi(v.z * 1000.0))
-		if vert_lookup.has(key):
-			return vert_lookup[key] as int
-		var idx: int = verts.size()
-		verts.append(v)
-		vert_lookup[key] = idx
-		return idx
-
-	# Build the ground decomposition — each piece is an axis-aligned
-	# CCW quad. Emit each as 2 navmesh triangles directly (no need to
-	# call triangulate_polygon for known rectangles).
-	var ground_polys: Array[PackedVector2Array] = _build_ground_triangulation()
-	for piece: PackedVector2Array in ground_polys:
-		if piece.size() < 4:
-			continue
-		var i0: int = add_vert.call(Vector3(piece[0].x, 0.0, piece[0].y))
-		var i1: int = add_vert.call(Vector3(piece[1].x, 0.0, piece[1].y))
-		var i2: int = add_vert.call(Vector3(piece[2].x, 0.0, piece[2].y))
-		var i3: int = add_vert.call(Vector3(piece[3].x, 0.0, piece[3].y))
-		polys.append(PackedInt32Array([i0, i1, i2]))
-		polys.append(PackedInt32Array([i0, i2, i3]))
-
-	# Merge plateau-top fan + ramp slope polys. Same dedup so a ramp's
-	# bottom-edge endpoints share indices with the ground rect they sit
-	# above (universal X-cuts ensure those positions match exactly).
-	for poly_verts: PackedVector3Array in _pending_nav_polys:
-		var indices: PackedInt32Array = PackedInt32Array()
-		for v: Vector3 in poly_verts:
-			indices.append(add_vert.call(v))
-		polys.append(indices)
-
-	var nav_mesh := NavigationMesh.new()
-	nav_mesh.vertices = verts
-	for p: PackedInt32Array in polys:
-		nav_mesh.add_polygon(p)
-	# Agent radius 0 — we DON'T want the navmesh to shrink around
-	# obstacles. Heavy units' clearance is already baked into terrain
-	# footprint inflation (NAV_INFLATION in `_spawn_terrain_piece`).
-	nav_mesh.agent_radius = 0.0
-
-	nav_region.navigation_mesh = nav_mesh
 	add_child(nav_region)
 	_nav_region = nav_region
 
-	# Generous edge-connection margin as a backstop for any edge that
-	# slipped past vertex dedup (e.g. plateau-ramp T-junctions). The
-	# margin lives on the NavigationServer per-map, not on the mesh
-	# itself — set it after the region is in the tree so the map exists.
-	# Default 0.25 is too tight for the strip-decomp setup; 1.0 catches
-	# near-misses without spuriously joining unrelated polygons.
+	var nav_mesh := NavigationMesh.new()
+	nav_mesh.cell_size = 0.5
+	nav_mesh.cell_height = 0.25
+	nav_mesh.agent_radius = 2.5
+	nav_mesh.agent_height = 2.0
+	nav_mesh.agent_max_climb = 2.0
+	nav_mesh.agent_max_slope = 30.0
+	# Pull source geometry from the "terrain" group + the ground
+	# collision (already in scene). The bake walks each shape, treats
+	# walkable surfaces as candidates, and rejects areas a unit of the
+	# specified agent_radius can't enter.
+	nav_mesh.geometry_parsed_geometry_type = NavigationMesh.PARSED_GEOMETRY_STATIC_COLLIDERS
+	nav_mesh.geometry_source_geometry_mode = NavigationMesh.SOURCE_GEOMETRY_GROUPS_WITH_CHILDREN
+	nav_mesh.geometry_source_group_name = &"terrain"
+	# Terrain blockers live on collision_layer 4; the ground plane on 1.
+	# Bake mask covers both so the ground is walkable and obstacles
+	# carve out their footprints.
+	nav_mesh.geometry_collision_mask = 1 | 4
+	# Bake region — a generous box covering the full ±150 map plus a
+	# small buffer. Without this, the bake AABB defaults to a tiny
+	# region around the source geometry origin and skips most of the map.
+	nav_mesh.filter_baking_aabb = AABB(Vector3(-160, -5, -160), Vector3(320, 25, 320))
+	nav_region.navigation_mesh = nav_mesh
+
+	# Make sure the GroundCollision and all terrain blockers are in
+	# the "terrain" group so the bake picks them up. The terrain
+	# spawners already add their pieces; the .tscn-placed
+	# GroundCollision needs the group set here.
+	var ground_col: Node = get_node_or_null("GroundCollision")
+	if ground_col and not ground_col.is_in_group("terrain"):
+		ground_col.add_to_group("terrain")
+
+	# Synchronous bake — for a 300×300 map at 0.5 cell_size this
+	# produces ~360k cells which Godot bakes in <1s. Async would mean
+	# the first frame of the match has no navmesh and units spawn
+	# without paths.
+	nav_region.bake_navigation_mesh(false)
+
+	# Generous edge-connection margin for any T-junctions the bake
+	# leaves at boundary cell edges.
 	var nav_map: RID = nav_region.get_navigation_map()
 	if nav_map.is_valid():
 		NavigationServer3D.map_set_edge_connection_margin(nav_map, 1.0)
