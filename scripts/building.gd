@@ -1407,6 +1407,15 @@ func _apply_placeholder_shape() -> void:
 	_collision.position.y = stats.footprint_size.y / 2.0
 	_apply_team_ring()
 
+	# Sable hull silhouette — overlays a stepped angular hull and tall
+	# antenna spires on top of the boxy primitive so a Sable foundry,
+	# armory, etc. reads as a different build language than Anvil's
+	# blocky industrial hulks. Generator stays cylindrical (its
+	# silhouette already contrasts), and HQ gets a stronger pyramid
+	# treatment downstream.
+	if _resolve_faction_id() == 1 and stats.building_id != &"basic_generator":
+		_apply_sable_building_silhouette()
+
 
 func _apply_team_ring() -> void:
 	if _team_ring and is_instance_valid(_team_ring):
@@ -1985,6 +1994,137 @@ func get_producible_units() -> Array[UnitStatResource]:
 	if out.is_empty():
 		return stats.producible_units
 	return out
+
+
+func _apply_sable_building_silhouette() -> void:
+	## Layers a faceted angular hull + sensor spires + cyan edge seams
+	## over the standard placeholder hull, hiding the original primitive
+	## so the Sable building reads as a distinct architectural language
+	## (low setbacks, slim antennae, glowing seams) rather than a
+	## colour-shifted Anvil structure.
+	if not stats or not _visual_root:
+		return
+	# Hide the standard primitive hull. Keep it parented so the team
+	# ring + collision + animations that reference it still resolve.
+	if _mesh:
+		_mesh.visible = false
+
+	var fs: Vector3 = stats.footprint_size
+	var hull_color: Color = _faction_tint_building_chassis(stats.placeholder_color).darkened(0.05)
+	var seam_color: Color = Color(0.45, 0.95, 1.0, 1.0)
+
+	# Stepped main hull — base box (full footprint, ~70% height),
+	# narrower middle setback (~80% width, +25% height), then a thin
+	# spine block. Reads as a tiered corpo tower instead of a brick.
+	var base_block := MeshInstance3D.new()
+	var base_box := BoxMesh.new()
+	base_box.size = Vector3(fs.x, fs.y * 0.62, fs.z)
+	base_block.mesh = base_box
+	base_block.position.y = fs.y * 0.31
+	base_block.set_surface_override_material(0, _make_sable_hull_mat(hull_color))
+	_visual_root.add_child(base_block)
+
+	var mid_block := MeshInstance3D.new()
+	var mid_box := BoxMesh.new()
+	mid_box.size = Vector3(fs.x * 0.78, fs.y * 0.30, fs.z * 0.78)
+	mid_block.mesh = mid_box
+	mid_block.position.y = fs.y * 0.62 + fs.y * 0.15
+	mid_block.set_surface_override_material(0, _make_sable_hull_mat(hull_color.darkened(0.08)))
+	_visual_root.add_child(mid_block)
+
+	var top_spine := MeshInstance3D.new()
+	var top_box := BoxMesh.new()
+	top_box.size = Vector3(fs.x * 0.32, fs.y * 0.18, fs.z * 0.42)
+	top_spine.mesh = top_box
+	top_spine.position.y = fs.y * 0.92 + fs.y * 0.09
+	top_spine.set_surface_override_material(0, _make_sable_hull_mat(hull_color.darkened(0.15)))
+	_visual_root.add_child(top_spine)
+
+	# Forward chevron prow — slim slabs angled at the front face,
+	# echoing the Sable mech silhouette so units and structures
+	# share design DNA.
+	var prow_mat := _make_sable_hull_mat(hull_color.darkened(0.12))
+	var prow_l := MeshInstance3D.new()
+	var prow_box := BoxMesh.new()
+	prow_box.size = Vector3(fs.x * 0.40, fs.y * 0.50, fs.z * 0.30)
+	prow_l.mesh = prow_box
+	prow_l.position = Vector3(-fs.x * 0.18, fs.y * 0.30, -fs.z * 0.45)
+	prow_l.rotation.y = deg_to_rad(20.0)
+	prow_l.set_surface_override_material(0, prow_mat)
+	_visual_root.add_child(prow_l)
+	var prow_r := MeshInstance3D.new()
+	prow_r.mesh = prow_box
+	prow_r.position = Vector3(fs.x * 0.18, fs.y * 0.30, -fs.z * 0.45)
+	prow_r.rotation.y = deg_to_rad(-20.0)
+	prow_r.set_surface_override_material(0, prow_mat)
+	_visual_root.add_child(prow_r)
+
+	# Cyan emissive seams along the edge where each setback meets — a
+	# horizontal line at base/mid joint and another at mid/spine joint.
+	var seam_mat := StandardMaterial3D.new()
+	seam_mat.albedo_color = seam_color
+	seam_mat.emission_enabled = true
+	seam_mat.emission = seam_color
+	seam_mat.emission_energy_multiplier = 2.0
+	seam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	for ring_data: Dictionary in [
+		{ "y": fs.y * 0.62, "w": fs.x, "d": fs.z, "thick": 0.045 },
+		{ "y": fs.y * 0.92, "w": fs.x * 0.78, "d": fs.z * 0.78, "thick": 0.035 },
+	]:
+		var ring_y: float = ring_data["y"] as float
+		var ring_w: float = (ring_data["w"] as float) + 0.05
+		var ring_d: float = (ring_data["d"] as float) + 0.05
+		var thick: float = ring_data["thick"] as float
+		# Four edges of a flat ring — cheaper than a torus and plays
+		# nicer with the boxy aesthetic.
+		for edge_data: Dictionary in [
+			{ "size": Vector3(ring_w, thick, 0.05), "pos": Vector3(0.0, ring_y, ring_d * 0.5) },
+			{ "size": Vector3(ring_w, thick, 0.05), "pos": Vector3(0.0, ring_y, -ring_d * 0.5) },
+			{ "size": Vector3(0.05, thick, ring_d), "pos": Vector3(ring_w * 0.5, ring_y, 0.0) },
+			{ "size": Vector3(0.05, thick, ring_d), "pos": Vector3(-ring_w * 0.5, ring_y, 0.0) },
+		]:
+			var edge := MeshInstance3D.new()
+			var ebox := BoxMesh.new()
+			ebox.size = edge_data["size"] as Vector3
+			edge.mesh = ebox
+			edge.position = edge_data["pos"] as Vector3
+			edge.set_surface_override_material(0, seam_mat)
+			_visual_root.add_child(edge)
+
+	# Sensor spires — tall thin antennas off opposing corners of the
+	# top spine. Critical Sable silhouette element. Heights scale with
+	# building footprint so the HQ towers higher than a generator.
+	var spire_h: float = fs.y * 1.2 + maxf(fs.x, fs.z) * 0.22
+	for spire_idx: int in 2:
+		var spire := MeshInstance3D.new()
+		var spire_box := BoxMesh.new()
+		spire_box.size = Vector3(0.18, spire_h, 0.18)
+		spire.mesh = spire_box
+		var sx: float = fs.x * 0.16 if spire_idx == 0 else -fs.x * 0.16
+		var sz: float = fs.z * 0.18
+		spire.position = Vector3(sx, fs.y * 1.05 + spire_h * 0.5, sz)
+		spire.rotation.z = deg_to_rad(-3.0 if spire_idx == 0 else 3.0)
+		spire.set_surface_override_material(0, _make_sable_hull_mat(hull_color.darkened(0.35)))
+		_visual_root.add_child(spire)
+		# Cyan tip light — single pulse point at the spire crown.
+		var tip := MeshInstance3D.new()
+		var tip_box := BoxMesh.new()
+		tip_box.size = Vector3(0.30, 0.16, 0.30)
+		tip.mesh = tip_box
+		tip.position = Vector3(0.0, spire_h * 0.5 + 0.08, 0.0)
+		tip.set_surface_override_material(0, seam_mat)
+		spire.add_child(tip)
+
+
+func _make_sable_hull_mat(c: Color) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = c
+	m.albedo_texture = SharedTextures.get_metal_wear_texture()
+	m.uv1_offset = Vector3(randf(), randf(), 0.0)
+	m.uv1_scale = Vector3(2.5, 2.5, 1.0)
+	m.metallic = 0.5
+	m.roughness = 0.5
+	return m
 
 
 func _resolve_faction_id() -> int:

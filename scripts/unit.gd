@@ -884,6 +884,13 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		torso_pivot.add_child(tip)
 		mats.append(tip_mat)
 
+	# Sable silhouette pass — replaces the boxy torso + head with a
+	# faceted angular hull and adds back-spire antennas so a Sable
+	# squad is recognisable purely from outline at full zoom. Anvil
+	# units skip this and keep the v1 industrial silhouette.
+	if _faction_id() == 1:
+		_apply_sable_silhouette(torso_pivot, torso, head, torso_size, head_size, base_color, mats)
+
 	# Per-member gait variation so a squad doesn't goose-step in lockstep.
 	# Each mech has its own phase, slightly different stride speed, swing
 	# amplitude, and torso bob amount — same skeleton, individual feel.
@@ -906,6 +913,142 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		"idle_phase": randf_range(0.0, TAU),
 		"idle_speed": randf_range(0.6, 1.0),
 	}
+
+
+func _apply_sable_silhouette(
+	torso_pivot: Node3D,
+	torso: MeshInstance3D,
+	head: MeshInstance3D,
+	torso_size: Vector3,
+	head_size: Vector3,
+	base_color: Color,
+	mats: Array[StandardMaterial3D],
+) -> void:
+	## Replaces the standard boxy torso and head with Sable's angular,
+	## chevron-fronted silhouette. Anvil reads as "industrial heavy
+	## machine"; Sable should read as "low-slung stealth chassis with
+	## sensor spires" — same scale + collision footprint, different
+	## profile.
+	# Hide the standard boxy meshes — keep them in-tree so animation /
+	# damage / wreck code that holds a reference still works, but make
+	# them invisible so only the Sable replacement reads.
+	if torso:
+		torso.visible = false
+	if head:
+		head.visible = false
+
+	# Faceted hull: a forward chevron wedge + a rear shoulder block,
+	# slightly slanted top and bottom. Built as small box meshes
+	# rotated around Y/Z so the silhouette has chamfered corners and
+	# a clear leading edge instead of a brick face.
+	var dark_mat := _make_metal_mat(base_color)
+	mats.append(dark_mat)
+	var accent_mat := StandardMaterial3D.new()
+	accent_mat.albedo_color = SABLE_NEON
+	accent_mat.emission_enabled = true
+	accent_mat.emission = SABLE_NEON
+	accent_mat.emission_energy_multiplier = 2.0
+	accent_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mats.append(accent_mat)
+
+	# Front chevron — two long thin slabs meeting at the centerline,
+	# pointing -Z (forward). Reads as a cutwater / prow.
+	var prow_mat := _make_metal_mat(base_color.darkened(0.15))
+	mats.append(prow_mat)
+	var prow_left := MeshInstance3D.new()
+	var prow_box := BoxMesh.new()
+	prow_box.size = Vector3(torso_size.x * 0.46, torso_size.y * 0.55, torso_size.z * 0.85)
+	prow_left.mesh = prow_box
+	prow_left.position = Vector3(-torso_size.x * 0.18, torso_size.y * 0.55, -torso_size.z * 0.06)
+	prow_left.rotation.y = deg_to_rad(18.0)
+	prow_left.set_surface_override_material(0, prow_mat)
+	torso_pivot.add_child(prow_left)
+	var prow_right := MeshInstance3D.new()
+	prow_right.mesh = prow_box
+	prow_right.position = Vector3(torso_size.x * 0.18, torso_size.y * 0.55, -torso_size.z * 0.06)
+	prow_right.rotation.y = deg_to_rad(-18.0)
+	prow_right.set_surface_override_material(0, prow_mat)
+	torso_pivot.add_child(prow_right)
+
+	# Rear shoulder block — a low wide platform behind the prow,
+	# slightly canted so the back reads as armored cargo, not a
+	# featureless cube. Engineer for shoulder mounts to ride on.
+	var shoulder_block := MeshInstance3D.new()
+	var shoulder_box := BoxMesh.new()
+	shoulder_box.size = Vector3(torso_size.x * 1.05, torso_size.y * 0.45, torso_size.z * 0.55)
+	shoulder_block.mesh = shoulder_box
+	shoulder_block.position = Vector3(0.0, torso_size.y * 0.30, torso_size.z * 0.20)
+	shoulder_block.rotation.x = deg_to_rad(-6.0)
+	shoulder_block.set_surface_override_material(0, dark_mat)
+	torso_pivot.add_child(shoulder_block)
+
+	# Cyan seam down the centre of the chevron — emissive line
+	# tracing the prow ridge. Visible at distance.
+	var seam := MeshInstance3D.new()
+	var seam_box := BoxMesh.new()
+	seam_box.size = Vector3(0.05, torso_size.y * 0.50, torso_size.z * 0.95)
+	seam.mesh = seam_box
+	seam.position = Vector3(0.0, torso_size.y * 0.55, -torso_size.z * 0.05)
+	seam.set_surface_override_material(0, accent_mat)
+	torso_pivot.add_child(seam)
+
+	# Wedge head — sharply forward-pointing pyramid replacing the
+	# boxy/spherical Anvil cockpit. Two slim slabs meeting at a
+	# centerline so the head silhouette reads as a "blade" pointing
+	# at the enemy.
+	var head_y: float = torso_size.y + head_size.y * 0.5
+	var wedge_mat := _make_metal_mat(base_color.darkened(0.10))
+	mats.append(wedge_mat)
+	var wedge_l := MeshInstance3D.new()
+	var wedge_box := BoxMesh.new()
+	wedge_box.size = Vector3(head_size.x * 0.55, head_size.y * 0.85, head_size.z * 1.1)
+	wedge_l.mesh = wedge_box
+	wedge_l.position = Vector3(-head_size.x * 0.18, head_y, -head_size.z * 0.10)
+	wedge_l.rotation.y = deg_to_rad(22.0)
+	wedge_l.set_surface_override_material(0, wedge_mat)
+	torso_pivot.add_child(wedge_l)
+	var wedge_r := MeshInstance3D.new()
+	wedge_r.mesh = wedge_box
+	wedge_r.position = Vector3(head_size.x * 0.18, head_y, -head_size.z * 0.10)
+	wedge_r.rotation.y = deg_to_rad(-22.0)
+	wedge_r.set_surface_override_material(0, wedge_mat)
+	torso_pivot.add_child(wedge_r)
+
+	# Cyan visor strip running across the wedge prow — narrow horizontal
+	# slit, the only "eye" the chassis has.
+	var visor := MeshInstance3D.new()
+	var visor_box := BoxMesh.new()
+	visor_box.size = Vector3(head_size.x * 0.65, head_size.y * 0.13, 0.04)
+	visor.mesh = visor_box
+	visor.position = Vector3(0.0, head_y + head_size.y * 0.05, -head_size.z * 0.55)
+	visor.set_surface_override_material(0, accent_mat)
+	torso_pivot.add_child(visor)
+
+	# Sensor spire — single tall thin antenna rising off the rear
+	# shoulder block. Critical silhouette element: the Sable Mesh.
+	var spire := MeshInstance3D.new()
+	var spire_box := BoxMesh.new()
+	var spire_h: float = (torso_size.y + head_size.y) * 1.4
+	spire_box.size = Vector3(0.10, spire_h, 0.10)
+	spire.mesh = spire_box
+	spire.position = Vector3(
+		torso_size.x * 0.32,
+		torso_size.y * 0.55 + spire_h * 0.5,
+		torso_size.z * 0.30,
+	)
+	spire.rotation.z = deg_to_rad(-4.0)
+	spire.set_surface_override_material(0, _make_metal_mat(base_color.darkened(0.25)))
+	torso_pivot.add_child(spire)
+
+	# Tip cap on the spire — small cyan emitter so the antenna
+	# silhouette has a punctuating glow point.
+	var tip := MeshInstance3D.new()
+	var tip_box := BoxMesh.new()
+	tip_box.size = Vector3(0.18, 0.12, 0.18)
+	tip.mesh = tip_box
+	tip.position = Vector3(0.0, spire_h * 0.5 + 0.06, 0.0)
+	tip.set_surface_override_material(0, accent_mat)
+	spire.add_child(tip)
 
 
 func _build_legs(member: Node3D, shape: Dictionary, mats: Array[StandardMaterial3D], kind: String) -> Dictionary:

@@ -707,7 +707,7 @@ func play_voice_attacked() -> void:
 		return
 	_vl_attacked.stream = stream
 	# Match the per-faction volume bias used in `_play_voiceline`.
-	_vl_attacked.volume_db = 2.0 if fid == 0 else -3.0
+	_vl_attacked.volume_db = 2.0 if fid == 0 else -6.0
 	_vl_attacked.pitch_scale = 1.0
 	# Same radio crackle treatment as the routine voicelines — the
 	# attacked stinger should still feel like it's coming through
@@ -824,7 +824,7 @@ func _play_voiceline(category: String) -> void:
 	# delivery vs Sable's processed corpo whisper, so a small +2 dB
 	# bump on Anvil and a -1 on Sable lands them at a similar
 	# perceived loudness through the radio bus.
-	_vl_player.volume_db = 2.0 if fid == 0 else -3.0
+	_vl_player.volume_db = 2.0 if fid == 0 else -6.0
 	_vl_player.pitch_scale = 1.0
 	# Radio "tuning in" crackle right before the line starts — a quick
 	# noise burst on the same bus, so it gets the same band-pass / lofi
