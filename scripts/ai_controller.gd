@@ -81,8 +81,50 @@ var _agg_mul: float = 1.0
 func _enter_tree() -> void:
 	var settings: Node = get_node_or_null("/root/MatchSettings")
 	if settings:
-		_econ_mul = settings.get_ai_economy_multiplier()
-		_agg_mul = settings.get_ai_aggression_multiplier()
+		# Per-AI difficulty override if the menu set one for this slot;
+		# otherwise the global match difficulty.
+		if settings.has_method("get_ai_difficulty"):
+			var d: int = settings.get_ai_difficulty(owner_id)
+			_econ_mul = _econ_mul_for_difficulty(d)
+			_agg_mul = _agg_mul_for_difficulty(d)
+		else:
+			_econ_mul = settings.get_ai_economy_multiplier()
+			_agg_mul = settings.get_ai_aggression_multiplier()
+
+
+func _econ_mul_for_difficulty(d: int) -> float:
+	# Mirror MatchSettings.get_ai_economy_multiplier mapping.
+	match d:
+		0: return 0.6  # EASY
+		2: return 1.6  # HARD
+		_: return 1.0
+
+
+func _agg_mul_for_difficulty(d: int) -> float:
+	match d:
+		0: return 0.7
+		2: return 1.4
+		_: return 1.0
+
+
+func _resolve_strategy_from_settings() -> int:
+	## Honours MatchSettings.get_ai_personality(owner_id) when set, with
+	## RANDOM falling back to the original randi() roll. Maps the
+	## menu's AiPersonality enum onto the local Strategy enum.
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if settings and settings.has_method("get_ai_personality"):
+		var pick: int = settings.get_ai_personality(owner_id)
+		# AiPersonality: RANDOM=0, BALANCED=1, TURRET_HEAVY=2, ECONOMY_HEAVY=3, RUSH=4
+		# Strategy:                 BALANCED=0, TURRET_HEAVY=1, ECONOMY_HEAVY=2, RUSH=3
+		if pick == 1:
+			return Strategy.BALANCED
+		elif pick == 2:
+			return Strategy.TURRET_HEAVY
+		elif pick == 3:
+			return Strategy.ECONOMY_HEAVY
+		elif pick == 4:
+			return Strategy.RUSH
+	return randi() % Strategy.size()
 
 
 func _ready() -> void:
@@ -131,7 +173,9 @@ func _roll_strategy_and_layout() -> void:
 	## within the archetype's footprint shape. Resource buildings (generator,
 	## foundry, salvage_yard) are always present; what changes is *where*
 	## they sit and *when* the secondary buildings come online.
-	_strategy = randi() % Strategy.size()
+	## Honours `MatchSettings.ai_personalities[owner_id]` if the menu set
+	## an override; otherwise rolls random.
+	_strategy = _resolve_strategy_from_settings()
 
 	# Archetype-specific footprint character. Pull radii drive how far each
 	# building sits from the HQ; the angle is randomised per-call so even
@@ -159,6 +203,11 @@ func _roll_strategy_and_layout() -> void:
 		"generator2": base_angle - randf_range(0.55, 0.85),
 		"turret": base_angle + PI * 1.5 + randf_range(-0.4, 0.4),
 		"adv_foundry": base_angle + PI + randf_range(0.6, 1.0),
+		# Air production goes opposite the basic foundry (so the cluster
+		# spreads). SAM site sits forward like the turret but a bit
+		# further out and on a different angle slot.
+		"aerodrome": base_angle + randf_range(-0.5, -0.2),
+		"sam_site": base_angle + PI * 1.5 + randf_range(0.4, 0.8),
 	}
 	# Per-building radius jitter so the cluster isn't a perfect ring.
 	for key: String in slot_angles.keys():
@@ -254,39 +303,53 @@ func _process_economy() -> void:
 	_try_place("foundry", "res://resources/buildings/basic_foundry.tres", _offset_for("foundry", Vector3(-15, 0, 10)))
 	_try_place("salvage_yard", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard", Vector3(0, 0, 22)))
 
-	# Phase 2+ — secondary buildings, ordered + gated by archetype. Each
-	# branch still ultimately constructs the same building set; what
-	# changes is the wave threshold (timing) and emphasis.
+	# Phase 2+ — secondary buildings, ordered by archetype. The wave-
+	# count gate that previously held back turrets / adv foundry until
+	# `_wave_count >= 1` was the reason the player never saw the AI
+	# build them: most matches don't last long enough for the AI to
+	# complete a full attack-and-die cycle, and `_wave_count` only
+	# increments at the END of a wave. Secondary buildings now queue
+	# as soon as the basic three are placed, and the personality just
+	# chooses the ORDER and which extras (turret / aerodrome / SAM)
+	# come early. _try_place internally serialises through the single
+	# engineer + the AI's salvage budget, so the calls below act as
+	# a priority queue — the highest-priority unbuilt structure that
+	# the AI can currently afford gets placed each tick.
+	#
+	# Aerodrome + SAM site were missing from every personality's plan
+	# entirely, so the AI never built air or anti-air. Now wired in.
 	match _strategy:
 		Strategy.TURRET_HEAVY:
-			# Defensive opener: turret first (even before second generator),
-			# then the second generator to power it, then advanced foundry.
-			if _wave_count >= 1:
-				_try_place("turret", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret", Vector3(0, 0, -14)))
-				_try_place("generator2", "res://resources/buildings/basic_generator.tres", _offset_for("generator2", Vector3(22, 0, 18)))
-			if _wave_count >= 2:
-				_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
+			# Defensive opener: turret first, then a second generator,
+			# then SAM site for AA, then advanced foundry, then aerodrome.
+			_try_place("turret", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret", Vector3(0, 0, -14)))
+			_try_place("generator2", "res://resources/buildings/basic_generator.tres", _offset_for("generator2", Vector3(22, 0, 18)))
+			_try_place("sam_site", "res://resources/buildings/sam_site.tres", _offset_for("sam_site", Vector3(0, 0, -22)))
+			_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
+			_try_place("aerodrome", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome", Vector3(28, 0, -8)))
 		Strategy.ECONOMY_HEAVY:
-			# Eco opener: extra generator early, advanced foundry before
-			# the turret. Turret comes last (just-in-case defense).
-			if _wave_count >= 1:
-				_try_place("generator2", "res://resources/buildings/basic_generator.tres", _offset_for("generator2", Vector3(22, 0, 18)))
-				_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
-			if _wave_count >= 3:
-				_try_place("turret", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret", Vector3(0, 0, -14)))
+			# Eco opener: extra generator + advanced foundry early,
+			# then aerodrome (extra production), then defensive structures.
+			_try_place("generator2", "res://resources/buildings/basic_generator.tres", _offset_for("generator2", Vector3(22, 0, 18)))
+			_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
+			_try_place("aerodrome", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome", Vector3(28, 0, -8)))
+			_try_place("turret", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret", Vector3(0, 0, -14)))
+			_try_place("sam_site", "res://resources/buildings/sam_site.tres", _offset_for("sam_site", Vector3(0, 0, -22)))
 		Strategy.RUSH:
-			# Aggressive: skip the turret entirely (defense via mobile
-			# units), get the second generator + advanced foundry asap.
-			if _wave_count >= 1:
-				_try_place("generator2", "res://resources/buildings/basic_generator.tres", _offset_for("generator2", Vector3(22, 0, 18)))
-				_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
+			# Aggressive: extra production fast (gen + adv foundry +
+			# aerodrome for air rush), no turret, SAM only as
+			# afterthought against player air.
+			_try_place("generator2", "res://resources/buildings/basic_generator.tres", _offset_for("generator2", Vector3(22, 0, 18)))
+			_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
+			_try_place("aerodrome", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome", Vector3(28, 0, -8)))
+			_try_place("sam_site", "res://resources/buildings/sam_site.tres", _offset_for("sam_site", Vector3(0, 0, -22)))
 		_:
-			# BALANCED — original v1 ordering.
-			if _wave_count >= 1:
-				_try_place("generator2", "res://resources/buildings/basic_generator.tres", _offset_for("generator2", Vector3(22, 0, 18)))
-				_try_place("turret", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret", Vector3(0, 0, -14)))
-			if _wave_count >= 2:
-				_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
+			# BALANCED — covers everything in a stable order.
+			_try_place("generator2", "res://resources/buildings/basic_generator.tres", _offset_for("generator2", Vector3(22, 0, 18)))
+			_try_place("turret", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret", Vector3(0, 0, -14)))
+			_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
+			_try_place("aerodrome", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome", Vector3(28, 0, -8)))
+			_try_place("sam_site", "res://resources/buildings/sam_site.tres", _offset_for("sam_site", Vector3(0, 0, -22)))
 
 	if _state_timer >= ECONOMY_DURATION:
 		_state = AIState.ARMY

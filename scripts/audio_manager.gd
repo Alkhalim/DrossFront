@@ -118,6 +118,11 @@ func _ensure_sfx_bus() -> void:
 	AudioServer.add_bus(idx)
 	AudioServer.set_bus_name(idx, "SFX")
 	AudioServer.set_bus_send(idx, "Master")
+	# SFX overall volume — combat sounds (gunfire, explosions, deaths)
+	# were too loud relative to VO. -3 dB pulls them under so the
+	# voicelines come through without ducking. Settings UI can later
+	# expose this to the player as a slider.
+	AudioServer.set_bus_volume_db(idx, -3.0)
 
 
 func _ensure_music_bus() -> void:
@@ -269,11 +274,11 @@ func _setup_voiceline_bus() -> void:
 		chorus.set_voice_rate_hz(0, 0.7)
 		chorus.set_voice_level_db(0, -6.0)
 	AudioServer.add_bus_effect(idx, chorus)
-	# Bus level — pushed slightly above unity (+2 dB) so the lo-fi
-	# bandpass-attenuated VO actually competes with combat SFX. The
-	# bandpass + distortion strip a lot of low-end energy so even at
-	# +2 the VO sits at a reasonable perceived loudness.
-	AudioServer.set_bus_volume_db(idx, 2.0)
+	# Bus level — pushed +5 dB so the bandpass-attenuated VO is
+	# clearly audible against the combat SFX that's been turned down
+	# (-3 dB on SFX bus). Per-faction tweaks happen at the per-call
+	# level (Anvil VO gets a small extra dB boost in `_play_voiceline`).
+	AudioServer.set_bus_volume_db(idx, 5.0)
 	_vl_bus_idx = idx
 
 
@@ -701,7 +706,8 @@ func play_voice_attacked() -> void:
 	if not stream:
 		return
 	_vl_attacked.stream = stream
-	_vl_attacked.volume_db = 0.0
+	# Match the per-faction volume bias used in `_play_voiceline`.
+	_vl_attacked.volume_db = 2.0 if fid == 0 else -1.0
 	_vl_attacked.pitch_scale = 1.0
 	# Same radio crackle treatment as the routine voicelines — the
 	# attacked stinger should still feel like it's coming through
@@ -749,9 +755,10 @@ func _play_radio_crackle(kind: String) -> void:
 		return
 	var stream: AudioStreamWAV = _generate_radio_crackle(kind)
 	player.stream = stream
-	# Bus already gets the bandpass+distortion. Crackle was too loud —
-	# pulled back so it brackets the line without competing with it.
-	player.volume_db = randf_range(-14.0, -10.0)
+	# Crackle volume — quiet bracketing, not a competing layer. Was
+	# previously too prominent at -10ish; pulled further down so the
+	# click reads but doesn't fight the VO.
+	player.volume_db = randf_range(-20.0, -16.0)
 	# Pitch-jitter so back-to-back voicelines don't have identical clicks.
 	player.pitch_scale = randf_range(0.85, 1.15)
 	player.play()
@@ -813,7 +820,11 @@ func _play_voiceline(category: String) -> void:
 	if not stream:
 		return
 	_vl_player.stream = stream
-	_vl_player.volume_db = 0.0
+	# Anvil VO carries slightly louder than Sable — gravelly grunt
+	# delivery vs Sable's processed corpo whisper, so a small +2 dB
+	# bump on Anvil and a -1 on Sable lands them at a similar
+	# perceived loudness through the radio bus.
+	_vl_player.volume_db = 2.0 if fid == 0 else -1.0
 	_vl_player.pitch_scale = 1.0
 	# Radio "tuning in" crackle right before the line starts — a quick
 	# noise burst on the same bus, so it gets the same band-pass / lofi
