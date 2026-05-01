@@ -326,8 +326,11 @@ func _ready() -> void:
 		# baked navmesh only carves 1.5u clearance — agents oscillated
 		# against ramp walls and tight building corridors instead of
 		# walking through. Tighter avoidance gets the agent through.
+		# Capped at the navmesh bake's agent_radius so heavy mechs
+		# don't request more clearance than the navmesh provides
+		# (which strands them against terrain corners).
 		var torso_w: float = (shape["torso"] as Vector3).x
-		_nav_agent.radius = torso_w * 0.5 + 0.4
+		_nav_agent.radius = minf(torso_w * 0.5 + 0.4, 1.4)
 		_init_hp()
 		_build_squad_visuals()
 		_build_hp_bar()
@@ -394,10 +397,17 @@ func _build_squad_visuals() -> void:
 	var col_node: CollisionShape3D = get_node_or_null("CollisionShape3D") as CollisionShape3D
 	if col_node:
 		var col_shape := BoxShape3D.new()
-		# Footprint = formation extent + one mech's body width, with a small margin.
-		var formation_radius: float = spacing if squad > 1 else 0.0
-		var squad_width: float = formation_radius * 2.0 + torso_size.x + 0.4
-		col_shape.size = Vector3(squad_width, total_h, squad_width)
+		# Collision shape tracks the LEADER body only — not the whole
+		# formation. Heavies were getting wedged in narrow corridors
+		# because the bounding box was sized to the squad spread (e.g.
+		# Bulwark = ~6u wide), much wider than the navmesh's planning
+		# clearance (1.5u). Shrinking the box to ~ the leader's torso
+		# means heavy squads thread through the same paths the planner
+		# routed for them; squad members are visual orbiters with no
+		# collision of their own, so this doesn't make them clip
+		# anything physically meaningful.
+		var leader_box: float = maxf(torso_size.x, torso_size.z) + 0.4
+		col_shape.size = Vector3(leader_box, total_h, leader_box)
 		col_node.shape = col_shape
 		col_node.position.y = total_h / 2.0
 

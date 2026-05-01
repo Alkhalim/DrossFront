@@ -2298,11 +2298,20 @@ func _apply_sable_building_silhouette() -> void:
 			or stats.building_id == &"aerodrome" \
 			or stats.building_id == &"sam_site":
 		return
-	var spire_h: float = fs.y * 1.2 + maxf(fs.x, fs.z) * 0.22
+	# Spire size scales with the building footprint so a defensive
+	# turret (~3u wide) gets a small whip antenna while a salvage
+	# yard (~7u wide) gets a real comm tower. Was a fixed thickness
+	# (0.18) that read as a flagpole on the smaller hulls.
+	var avg_extent: float = (fs.x + fs.z) * 0.5
+	var size_scale: float = clampf(avg_extent / 6.0, 0.45, 1.20)
+	var spire_h: float = (fs.y * 1.2 + avg_extent * 0.22) * size_scale
+	var spire_thick: float = 0.18 * size_scale
+	var tip_w: float = 0.30 * size_scale
+	var tip_h: float = 0.16 * size_scale
 	for spire_idx: int in 2:
 		var spire := MeshInstance3D.new()
 		var spire_box := BoxMesh.new()
-		spire_box.size = Vector3(0.18, spire_h, 0.18)
+		spire_box.size = Vector3(spire_thick, spire_h, spire_thick)
 		spire.mesh = spire_box
 		var sx: float = fs.x * 0.16 if spire_idx == 0 else -fs.x * 0.16
 		var sz: float = fs.z * 0.18
@@ -2313,9 +2322,9 @@ func _apply_sable_building_silhouette() -> void:
 		# Cyan tip light — single pulse point at the spire crown.
 		var tip := MeshInstance3D.new()
 		var tip_box := BoxMesh.new()
-		tip_box.size = Vector3(0.30, 0.16, 0.30)
+		tip_box.size = Vector3(tip_w, tip_h, tip_w)
 		tip.mesh = tip_box
-		tip.position = Vector3(0.0, spire_h * 0.5 + 0.08, 0.0)
+		tip.position = Vector3(0.0, spire_h * 0.5 + tip_h * 0.5, 0.0)
 		tip.set_surface_override_material(0, seam_mat)
 		spire.add_child(tip)
 
