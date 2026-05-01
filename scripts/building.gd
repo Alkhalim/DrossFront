@@ -1345,7 +1345,11 @@ func _apply_placeholder_shape() -> void:
 	_mesh.position.y = fs.y / 2.0
 
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = stats.placeholder_color
+	# Sable buildings render with the matte-black corpo cyberpunk
+	# treatment — same hull shape as Anvil but desaturated and pulled
+	# darker + cooler. Player team color still appears via the team
+	# ring band, so faction identity reads alongside the team identity.
+	mat.albedo_color = _faction_tint_building_chassis(stats.placeholder_color)
 	# Same grime overlay as the detail metal so the main hull doesn't
 	# read as flat colour while every doorway / vent / ladder around it
 	# does. uv1_scale tuned to the larger surface area — bigger hull
@@ -1355,6 +1359,10 @@ func _apply_placeholder_shape() -> void:
 	mat.uv1_offset = Vector3(randf(), randf(), 0.0)
 	mat.uv1_scale = Vector3(2.5, 2.5, 1.0)
 	mat.roughness = 0.9
+	# Sable hulls are metallic-ish to lean into the corpo specops feel.
+	if _resolve_faction_id() == 1:
+		mat.metallic = 0.4
+		mat.roughness = 0.55
 	if not is_constructed:
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		mat.albedo_color.a = 0.5
@@ -1435,6 +1443,9 @@ func _apply_team_ring() -> void:
 ## infrastructure is the same shape that future factions (Sable / Synod /
 ## Inheritors) will swap their own accent material into.
 const ANVIL_BRASS := Color(0.78, 0.62, 0.18, 1.0)
+## Sable's faction-identity accent — pale neon cyan glow line. Replaces
+## the brass band on Sable buildings.
+const SABLE_NEON := Color(0.45, 0.95, 1.0, 1.0)
 var _brass_band: MeshInstance3D = null
 
 
@@ -1546,20 +1557,32 @@ func _apply_function_roof_cap() -> void:
 
 
 func _apply_anvil_brass_band() -> void:
+	## Faction-identity accent on the front face. Anvil ships a horizontal
+	## brass band; Sable replaces it with a thin neon-cyan emissive line
+	## plus a vertical kicker so the silhouette reads as cyberpunk-corpo
+	## instead of soviet-industrial. Despite the function name (kept for
+	## backward compatibility), this also applies the Sable variant.
 	if _brass_band and is_instance_valid(_brass_band):
 		_brass_band.queue_free()
 		_brass_band = null
 	if not stats:
 		return
-	# Skip the construction foundation — only show the brass once the
-	# building visual is real.
+	var faction_id: int = _resolve_faction_id()
 	_brass_band = MeshInstance3D.new()
 	var box := BoxMesh.new()
-	box.size = Vector3(
-		stats.footprint_size.x * 0.55,
-		stats.footprint_size.y * 0.06,
-		0.05,
-	)
+	if faction_id == 1:
+		# Sable — thinner emissive cyan line.
+		box.size = Vector3(
+			stats.footprint_size.x * 0.50,
+			stats.footprint_size.y * 0.04,
+			0.05,
+		)
+	else:
+		box.size = Vector3(
+			stats.footprint_size.x * 0.55,
+			stats.footprint_size.y * 0.06,
+			0.05,
+		)
 	_brass_band.mesh = box
 	_brass_band.position = Vector3(
 		0.0,
@@ -1567,14 +1590,38 @@ func _apply_anvil_brass_band() -> void:
 		-stats.footprint_size.z * 0.5 - 0.03,
 	)
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = ANVIL_BRASS
-	mat.emission_enabled = true
-	mat.emission = ANVIL_BRASS
-	mat.emission_energy_multiplier = 0.5
-	mat.metallic = 0.7
-	mat.roughness = 0.4
+	if faction_id == 1:
+		mat.albedo_color = SABLE_NEON
+		mat.emission_enabled = true
+		mat.emission = SABLE_NEON
+		mat.emission_energy_multiplier = 1.6
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	else:
+		mat.albedo_color = ANVIL_BRASS
+		mat.emission_enabled = true
+		mat.emission = ANVIL_BRASS
+		mat.emission_energy_multiplier = 0.5
+		mat.metallic = 0.7
+		mat.roughness = 0.4
 	_brass_band.set_surface_override_material(0, mat)
 	_attach_visual(_brass_band)
+	# Sable adds a second vertical accent slash off-centre.
+	if faction_id == 1:
+		var vert := MeshInstance3D.new()
+		var vbox := BoxMesh.new()
+		vbox.size = Vector3(
+			0.05,
+			stats.footprint_size.y * 0.32,
+			0.05,
+		)
+		vert.mesh = vbox
+		vert.position = Vector3(
+			stats.footprint_size.x * 0.20,
+			stats.footprint_size.y * 0.20,
+			-stats.footprint_size.z * 0.5 - 0.03,
+		)
+		vert.set_surface_override_material(0, mat)
+		_attach_visual(vert)
 
 
 func begin_construction() -> void:

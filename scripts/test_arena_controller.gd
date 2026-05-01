@@ -662,6 +662,14 @@ func _setup_player() -> void:
 				if child is Node3D:
 					(child as Node3D).global_position += hq_offset
 
+	# Faction-correct starter units. The .tscn-spawned Units node has
+	# Anvil mechs hardcoded; if the player picked a different faction
+	# we replace each starter with the matching role from their own
+	# roster so the opener doesn't include units that aren't in the
+	# faction's tech tree. Reuses each unit's existing world position
+	# and removes the old node before spawning the replacement.
+	_swap_starter_units_to_player_faction()
+
 	# Snap the camera so the match opens looking at the player's base
 	# instead of wherever the .tscn happened to leave the camera node.
 	# Reuses RTSCamera's pivot fields (same way the H hotkey does).
@@ -748,8 +756,16 @@ func _spawn_ai_player(player_id: int, display_name: String) -> void:
 	# inside the HQ collision (corner spawn → world +x went BACK into
 	# the building). Forward/right space puts every starter clearly out
 	# in open ground regardless of HQ corner.
-	var ratchet_stats: UnitStatResource = load("res://resources/units/anvil_ratchet.tres") as UnitStatResource
-	var rook_stats: UnitStatResource = load("res://resources/units/anvil_rook.tres") as UnitStatResource
+	# Faction-aware starter army — pick the engineer + medium mechs from
+	# whichever faction this AI plays. Sable AIs ship Riggers and Jackals
+	# instead of Ratchets and Rooks; Anvil AIs unchanged.
+	var ai_faction: int = _faction_id_for_player(player_id)
+	var ratchet_stats: UnitStatResource = _unit_for_role(ai_faction, "engineer")
+	var rook_stats: UnitStatResource = _unit_for_role(ai_faction, "medium")
+	if not ratchet_stats:
+		ratchet_stats = load("res://resources/units/anvil_ratchet.tres") as UnitStatResource
+	if not rook_stats:
+		rook_stats = load("res://resources/units/anvil_rook.tres") as UnitStatResource
 	var hq_pos: Vector3 = ai_hq.global_position
 	var fwd: Vector3 = Vector3.ZERO - hq_pos
 	fwd.y = 0.0
@@ -788,6 +804,101 @@ func _spawn_ai_unit(unit_stats: UnitStatResource, pos: Vector3, player_id: int =
 	else:
 		add_child(unit)
 	unit.global_position = pos
+
+
+## --- Faction roster lookup -----------------------------------------------
+
+## Maps a unit's `unit_class` (engineer / light / medium / heavy) to the
+## stat resource for that role in the given faction. Used to swap the
+## .tscn-spawned starter army into faction-correct equivalents and to
+## let the AI pick units that match its own faction.
+const _FACTION_ROSTER: Dictionary = {
+	# FactionId.ANVIL = 0
+	0: {
+		"engineer": "res://resources/units/anvil_ratchet.tres",
+		"light": "res://resources/units/anvil_hound.tres",
+		"medium": "res://resources/units/anvil_rook.tres",
+		"heavy": "res://resources/units/anvil_bulwark.tres",
+	},
+	# FactionId.SABLE = 1
+	1: {
+		"engineer": "res://resources/units/sable_rigger.tres",
+		"light": "res://resources/units/sable_specter.tres",
+		"medium": "res://resources/units/sable_jackal.tres",
+		"heavy": "res://resources/units/sable_harbinger.tres",
+	},
+}
+
+
+func _faction_id_for_player(player_id: int) -> int:
+	## Resolves which faction this player_id is meant to play. Allies of
+	## the local human play `player_faction`, enemies play `enemy_faction`.
+	## Falls back to ANVIL when MatchSettings isn't reachable.
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if not settings:
+		return 0
+	var roster: Array[Dictionary] = _current_roster()
+	var local_team: int = 0
+	var target_team: int = 0
+	for entry: Dictionary in roster:
+		if entry["human"] as bool:
+			local_team = entry["team"] as int
+		if (entry["id"] as int) == player_id:
+			target_team = entry["team"] as int
+	var pf: int = (settings.get("player_faction") as int) if "player_faction" in settings else 0
+	var ef: int = (settings.get("enemy_faction") as int) if "enemy_faction" in settings else 0
+	return pf if target_team == local_team else ef
+
+
+func _unit_for_role(faction_id: int, role: String) -> UnitStatResource:
+	## Loads the stat resource for the given role in the given faction.
+	## Returns null if either faction or role is unknown.
+	if not _FACTION_ROSTER.has(faction_id):
+		return null
+	var roster: Dictionary = _FACTION_ROSTER[faction_id] as Dictionary
+	var path: String = roster.get(role, "") as String
+	if path.is_empty():
+		return null
+	return load(path) as UnitStatResource
+
+
+func _role_for_unit_class(unit_class: StringName) -> String:
+	# StringName comparison — convert via String to keep the match cheap.
+	var c: String = String(unit_class).to_lower()
+	if c == "engineer" or c == "light" or c == "medium" or c == "heavy":
+		return c
+	return ""
+
+
+func _swap_starter_units_to_player_faction() -> void:
+	## Replaces the .tscn-hardcoded Anvil starter mechs with the matching
+	## role from the player's chosen faction. Reuses each unit's existing
+	## world position so the starter formation stays visually identical
+	## regardless of which faction the player picked.
+	var player_faction: int = _faction_id_for_player(0)
+	if player_faction == 0:
+		return  # Anvil = no swap needed; the .tscn already matches.
+	var units_node: Node = get_node_or_null("Units")
+	if not units_node:
+		return
+	var specs: Array[Dictionary] = []
+	for child: Node in units_node.get_children():
+		if not (child is Unit):
+			continue
+		var u: Unit = child as Unit
+		if not u.stats:
+			continue
+		var role: String = _role_for_unit_class(u.stats.unit_class)
+		if role.is_empty():
+			continue
+		specs.append({"pos": u.global_position, "role": role})
+		child.queue_free()
+	for spec: Dictionary in specs:
+		var role: String = spec["role"] as String
+		var new_stats: UnitStatResource = _unit_for_role(player_faction, role)
+		if not new_stats:
+			continue
+		_spawn_ai_unit(new_stats, spec["pos"] as Vector3, 0)
 
 
 func _setup_fuel_deposits() -> void:

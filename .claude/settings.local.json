@@ -7,7 +7,19 @@
       "Bash(mv scripts/salvage_yard_building.gd scripts/salvage_yard_component.gd)",
       "Bash(mv scripts/salvage_yard_building.gd.uid scripts/salvage_yard_component.gd.uid)",
       "Bash(git *)",
-      "Bash(command -v godot)"
+      "Bash(command -v godot)",
+      "Bash(awk '/^func / {print NR\": \"$0}' \"D:/Dokumente/Gamedesign/DrossFront/DrossFront/scripts/building.gd\")",
+      "Bash(awk -F\"[: \\(]\" '{print $4}')",
+      "Bash(grep -n \"^\\\\s*pass\\\\s*$\\\\|^\\\\s*func\\\\s*$\\\\|TODO\\\\|FIXME\\\\|XXX\" \"D:/Dokumente/Gamedesign/DrossFront/DrossFront/scripts/building.gd\")",
+      "Bash(awk *)",
+      "Bash(grep *)",
+      "Bash(xargs -I{} bash -c 'echo \"=== {} ===\"; head -5 \"{}\"')",
+      "Bash(python3 *)",
+      "Bash(where python *)",
+      "Bash(/g/Programme/Python/python.exe *)",
+      "Bash(population_cap)",
+      "Bash(xargs -I {} grep \"footprint_size\" {})",
+      "Bash(timeout 30 godot --headless --quit-after 60)"
     ]
   }
 }

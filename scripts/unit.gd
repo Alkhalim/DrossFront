@@ -157,6 +157,11 @@ const NEUTRAL_COLOR := Color(0.85, 0.7, 0.3, 1.0)
 ## team-color stripe per READABILITY_PASS.md §Task 7. When other factions
 ## land in v3+ this is replaced with a per-faction lookup.
 const ANVIL_BRASS := Color(0.78, 0.62, 0.18, 1.0)
+## Sable neon accent — pale cyan used for the faction identity strip on
+## Sable mechs. Distinguishes them from Anvil at a glance (matte black
+## chassis + single cool emissive line vs. Anvil's olive grey + warm
+## brass band).
+const SABLE_NEON := Color(0.45, 0.95, 1.0, 1.0)
 
 
 static func team_color_for(owner_idx: int) -> Color:
@@ -460,24 +465,52 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 	torso_pivot.add_child(stripe)
 	mats.append(stripe_mat)
 
-	# Anvil faction-identity brass band — small front-facing accent that
-	# layers on top of the team-color stripe without competing with it.
-	# Per READABILITY_PASS.md §Task 7, this primes the multi-faction
-	# accent system: every faction gets one identity tint here later.
-	var brass := MeshInstance3D.new()
-	var brass_box := BoxMesh.new()
-	brass_box.size = Vector3(torso_size.x * 0.55, torso_size.y * 0.08, 0.04)
-	brass.mesh = brass_box
-	brass.position = Vector3(0.0, torso_size.y * 0.18, -torso_size.z * 0.5 - 0.02)
-	var brass_mat := StandardMaterial3D.new()
-	brass_mat.albedo_color = ANVIL_BRASS
-	brass_mat.emission_enabled = true
-	brass_mat.emission = ANVIL_BRASS
-	brass_mat.emission_energy_multiplier = 0.5
-	brass_mat.metallic = 0.7
-	brass_mat.roughness = 0.4
-	brass.set_surface_override_material(0, brass_mat)
-	torso_pivot.add_child(brass)
+	# Faction identity strip on the chest. Anvil ships a horizontal warm
+	# brass band; Sable swaps it for a thin emissive cyan line and adds
+	# a vertical accent slash so the silhouette reads as "specops" at
+	# a glance instead of "industrial". Player team color stays on the
+	# diagonal stripe above; this strip is faction-only.
+	if _faction_id() == 1:
+		# Sable — thin horizontal cyan glow + a vertical kicker.
+		var horiz := MeshInstance3D.new()
+		var horiz_box := BoxMesh.new()
+		horiz_box.size = Vector3(torso_size.x * 0.50, torso_size.y * 0.05, 0.04)
+		horiz.mesh = horiz_box
+		horiz.position = Vector3(0.0, torso_size.y * 0.10, -torso_size.z * 0.5 - 0.02)
+		var horiz_mat := StandardMaterial3D.new()
+		horiz_mat.albedo_color = SABLE_NEON
+		horiz_mat.emission_enabled = true
+		horiz_mat.emission = SABLE_NEON
+		horiz_mat.emission_energy_multiplier = 1.6
+		horiz_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		horiz.set_surface_override_material(0, horiz_mat)
+		torso_pivot.add_child(horiz)
+		mats.append(horiz_mat)
+		# Vertical accent line off-centre so the chest doesn't read as
+		# perfectly symmetric — pure cyberpunk pin-stripe.
+		var vert := MeshInstance3D.new()
+		var vert_box := BoxMesh.new()
+		vert_box.size = Vector3(0.04, torso_size.y * 0.45, 0.04)
+		vert.mesh = vert_box
+		vert.position = Vector3(torso_size.x * 0.18, torso_size.y * 0.0, -torso_size.z * 0.5 - 0.02)
+		vert.set_surface_override_material(0, horiz_mat)
+		torso_pivot.add_child(vert)
+	else:
+		# Anvil — horizontal brass band.
+		var brass := MeshInstance3D.new()
+		var brass_box := BoxMesh.new()
+		brass_box.size = Vector3(torso_size.x * 0.55, torso_size.y * 0.08, 0.04)
+		brass.mesh = brass_box
+		brass.position = Vector3(0.0, torso_size.y * 0.18, -torso_size.z * 0.5 - 0.02)
+		var brass_mat := StandardMaterial3D.new()
+		brass_mat.albedo_color = ANVIL_BRASS
+		brass_mat.emission_enabled = true
+		brass_mat.emission = ANVIL_BRASS
+		brass_mat.emission_energy_multiplier = 0.5
+		brass_mat.metallic = 0.7
+		brass_mat.roughness = 0.4
+		brass.set_surface_override_material(0, brass_mat)
+		torso_pivot.add_child(brass)
 
 	# --- Surface details (chest grille + back vent) on every mech that doesn't
 	# already have its own elaborate hull (the Bulwark platform builds its own).
