@@ -164,19 +164,17 @@ func deselect() -> void:
 
 
 func _turn_toward(face_dir: Vector3, delta: float) -> void:
-	## Smooth yaw toward `face_dir` with the same surface as `Unit.
-	## _turn_toward`. Combat component calls this to make units face
-	## the target while firing — without it, combat falls back to
-	## Godot's `look_at(target, +Y)` which orients -Z toward the
-	## target. Aircraft visual is built with the nose along +Z (the
-	## V-formation places wingmen at -Z behind the leader), so the
-	## default look_at would rotate the model's back at the enemy.
-	## We flip by negating the desired direction here so +Z lands on
-	## the target instead.
+	## Smooth yaw toward `face_dir`. The aircraft visual is built with
+	## the nose along +Z (V-formation places wingmen at -Z behind the
+	## leader), so to make +Z point at the target we use
+	## `atan2(face_dir.x, face_dir.z)` directly. The previous version
+	## negated face_dir, which produced rotation that pointed the
+	## model's BACK (-Z) at the target — units fired tail-first.
+	## In Godot rotation.y semantics, atan2(x, z) sets +Z to align
+	## with the (x, z) direction, which is what we want.
 	if face_dir.length_squared() < 0.0001:
 		return
-	var flipped: Vector3 = -face_dir
-	var target_y: float = atan2(flipped.x, flipped.z)
+	var target_y: float = atan2(face_dir.x, face_dir.z)
 	var turn_speed: float = 5.0  # rad/s — aircraft turn slightly slower than light mechs
 	rotation.y = lerp_angle(rotation.y, target_y, clampf(turn_speed * delta, 0.0, 1.0))
 

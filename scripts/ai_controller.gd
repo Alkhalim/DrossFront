@@ -322,9 +322,15 @@ func _process_economy() -> void:
 		Strategy.TURRET_HEAVY:
 			# Defensive opener: turret first, then a second generator,
 			# then SAM site for AA, then advanced foundry, then aerodrome.
-			_try_place("turret", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret", Vector3(0, 0, -14)))
+			# TURRET_HEAVY wants MULTIPLE turrets (defensive perimeter),
+			# so we use unique slot keys ("turret_1" through "turret_3")
+			# instead of a single "turret" key — _try_place skips
+			# already-placed slots, but each slot here is independent.
+			_try_place("turret_1", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret", Vector3(0, 0, -14)))
 			_try_place("generator2", "res://resources/buildings/basic_generator.tres", _offset_for("generator2", Vector3(22, 0, 18)))
+			_try_place("turret_2", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret", Vector3(0, 0, -14)) + Vector3(10, 0, -2))
 			_try_place("sam_site", "res://resources/buildings/sam_site.tres", _offset_for("sam_site", Vector3(0, 0, -22)))
+			_try_place("turret_3", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret", Vector3(0, 0, -14)) + Vector3(-10, 0, -2))
 			_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
 			_try_place("aerodrome", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome", Vector3(28, 0, -8)))
 		Strategy.ECONOMY_HEAVY:

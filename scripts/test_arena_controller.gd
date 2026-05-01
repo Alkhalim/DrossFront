@@ -763,6 +763,12 @@ func _setup_player() -> void:
 	# faction's tech tree. Reuses each unit's existing world position
 	# and removes the old node before spawning the replacement.
 	_swap_starter_units_to_player_faction()
+	# Anvil players keep the original .tscn units (no swap happens),
+	# so their starter pop never went through the spawn path that
+	# adds_population. Walk the Units children and account for each
+	# living squad against the player's resource manager so the pop
+	# counter starts at the correct value rather than 0.
+	_account_starter_unit_population()
 
 	# Snap the camera so the match opens looking at the player's base
 	# instead of wherever the .tscn happened to leave the camera node.
@@ -898,6 +904,31 @@ func _spawn_ai_unit(unit_stats: UnitStatResource, pos: Vector3, player_id: int =
 	else:
 		add_child(unit)
 	unit.global_position = pos
+	# Population accounting — direct spawn path bypasses the building
+	# queue, so we have to manually add the unit's pop cost to the
+	# owner's resource manager. Without this, starter units (and AI
+	# starter army) never increment population, which made e.g. a
+	# Specter squad of population 8 register as 0 against the cap.
+	# remove_population fires at unit death so the bookkeeping closes.
+	var rm: Node = _resource_manager_for_owner(player_id)
+	if rm and rm.has_method("add_population"):
+		rm.add_population(unit_stats.population)
+
+
+func _resource_manager_for_owner(player_id: int) -> Node:
+	## Routes through PlayerRegistry to find the ResourceManager that
+	## tracks this owner's pop / salvage / fuel. Falls back to legacy
+	## node names if the registry is unreachable.
+	var registry: Node = get_node_or_null("PlayerRegistry")
+	if registry and registry.has_method("get_resource_manager"):
+		var rm: Node = registry.get_resource_manager(player_id)
+		if rm:
+			return rm
+	# Legacy fallback — covers the test arena being run directly without
+	# PlayerRegistry having registered all entries yet.
+	if player_id == 0:
+		return get_node_or_null("ResourceManager")
+	return get_node_or_null("AIResourceManager")
 
 
 ## --- Faction roster lookup -----------------------------------------------
@@ -968,6 +999,32 @@ func _role_for_unit_class(unit_class: StringName) -> String:
 	if c == "engineer" or c == "light" or c == "medium" or c == "heavy":
 		return c
 	return ""
+
+
+func _account_starter_unit_population() -> void:
+	## Walks the player-owned units already in the scene and adds each
+	## unit's population to the ResourceManager. The faction-swap
+	## function uses _spawn_ai_unit which already accounts; this covers
+	## the surviving .tscn-spawned units when no swap happens.
+	var rm: Node = _resource_manager_for_owner(0)
+	if not rm or not rm.has_method("add_population"):
+		return
+	# Reset to zero before re-adding so we don't double-count when the
+	# function is called after the swap (which already added pop for
+	# the new units).
+	rm.set("population", 0)
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node):
+			continue
+		var oid: int = (node.get("owner_id") as int) if "owner_id" in node else -1
+		if oid != 0:
+			continue
+		var stats_v: Variant = node.get("stats") if "stats" in node else null
+		if not stats_v:
+			continue
+		var pop: int = stats_v.get("population") as int
+		if pop > 0:
+			rm.add_population(pop)
 
 
 func _swap_starter_units_to_player_faction() -> void:

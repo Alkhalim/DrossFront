@@ -2218,6 +2218,25 @@ func _spawn_flash_at(world_pos: Vector3, color: Color, radius: float, lifetime: 
 
 ## --- HP and Damage ---
 
+func _damage_priority_order() -> Array[int]:
+	## Returns member indices ordered by squared distance from the
+	## squad centre, DESCENDING — outer members get hit first. Empty
+	## squads or single-member units return [0].
+	if not stats:
+		return [0]
+	var squad: int = stats.squad_size
+	var unit_offsets: Array = FORMATION_OFFSETS.get(squad, FORMATION_OFFSETS[1])
+	var indexed: Array = []
+	for i: int in member_hp.size():
+		var off: Vector2 = (unit_offsets[i] as Vector2) if i < unit_offsets.size() else Vector2.ZERO
+		indexed.append({"i": i, "d2": off.length_squared()})
+	indexed.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return (a["d2"] as float) > (b["d2"] as float))
+	var out: Array[int] = []
+	for entry: Variant in indexed:
+		out.append((entry as Dictionary)["i"] as int)
+	return out
+
+
 func take_damage(amount: int, attacker: Node3D = null) -> void:
 	if alive_count <= 0:
 		return
@@ -2234,9 +2253,14 @@ func take_damage(amount: int, attacker: Node3D = null) -> void:
 	var hp_before: int = get_total_hp()
 
 	# Damage carries across members so alive_count tracks the HP fraction:
-	# a 4-unit squad at 50% total HP shows 2 members alive.
+	# a 4-unit squad at 50% total HP shows 2 members alive. We apply
+	# damage to OUTER members first (sorted by formation distance from
+	# centre, descending), so a squad keeps coherency: the centre mech
+	# survives while the wings get picked off. Without this the squad
+	# disintegrates from a fixed iteration order regardless of layout.
+	var member_order: Array[int] = _damage_priority_order()
 	var remaining: int = amount
-	for i: int in member_hp.size():
+	for i: int in member_order:
 		if remaining <= 0:
 			break
 		if member_hp[i] <= 0:

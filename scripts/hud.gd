@@ -353,23 +353,38 @@ func _build_pause_overlay() -> void:
 	spacer.custom_minimum_size = Vector2(0, 18)
 	vbox.add_child(spacer)
 
-	# Volume slider — controls the master audio bus.
-	var vol_label := Label.new()
-	vol_label.text = "Master Volume"
-	vol_label.add_theme_font_size_override("font_size", 16)
-	vol_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85, 1.0))
-	vol_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vbox.add_child(vol_label)
-
-	var vol_slider := HSlider.new()
-	vol_slider.custom_minimum_size = Vector2(280, 22)
-	vol_slider.min_value = -40.0
-	vol_slider.max_value = 6.0
-	vol_slider.step = 1.0
-	vol_slider.value = AudioServer.get_bus_volume_db(0)
-	vol_slider.value_changed.connect(_on_volume_changed)
-	vol_slider.process_mode = Node.PROCESS_MODE_ALWAYS
-	vbox.add_child(vol_slider)
+	# Three bus sliders — SFX / Voices / Music — same controls the
+	# main menu Settings page exposes, accessible mid-match without
+	# leaving the game. Each slider binds directly to its bus's
+	# volume_db so the change is live.
+	for entry: Dictionary in [
+		{"label": "SFX", "bus": "SFX"},
+		{"label": "Voices", "bus": "Voiceline"},
+		{"label": "Music", "bus": "Music"},
+	]:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		row.process_mode = Node.PROCESS_MODE_ALWAYS
+		vbox.add_child(row)
+		var label := Label.new()
+		label.text = entry["label"] as String
+		label.add_theme_font_size_override("font_size", 16)
+		label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85, 1.0))
+		label.custom_minimum_size = Vector2(70, 22)
+		row.add_child(label)
+		var slider := HSlider.new()
+		slider.custom_minimum_size = Vector2(280, 22)
+		slider.min_value = -40.0
+		slider.max_value = 6.0
+		slider.step = 1.0
+		var bus_idx: int = AudioServer.get_bus_index(entry["bus"] as String)
+		if bus_idx >= 0:
+			slider.value = AudioServer.get_bus_volume_db(bus_idx)
+		else:
+			slider.value = 0.0
+		slider.value_changed.connect(_on_bus_volume_changed.bind(entry["bus"] as String))
+		slider.process_mode = Node.PROCESS_MODE_ALWAYS
+		row.add_child(slider)
 
 	# Spacer + return-to-menu button.
 	var menu_spacer := Control.new()
@@ -389,6 +404,12 @@ func _build_pause_overlay() -> void:
 func _on_return_to_menu() -> void:
 	get_tree().paused = false
 	get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
+
+
+func _on_bus_volume_changed(db: float, bus_name: String) -> void:
+	var idx: int = AudioServer.get_bus_index(bus_name)
+	if idx >= 0:
+		AudioServer.set_bus_volume_db(idx, db)
 
 
 func _on_volume_changed(db: float) -> void:
