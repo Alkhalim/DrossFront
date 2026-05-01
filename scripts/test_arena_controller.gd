@@ -2098,12 +2098,42 @@ func _spawn_plateau_ramp(plateau_center: Vector3, top_size: Vector2, height: flo
 	mesh_inst.material_override = share_mat
 	root.add_child(mesh_inst)
 
-	# Collision — convex hull from all 6 unique vertices.
+	# Collision — convex hull from all 6 unique vertices. Provides
+	# solid wedge for unit physics + falling damage etc.
 	var col := CollisionShape3D.new()
 	var hull := ConvexPolygonShape3D.new()
 	hull.points = PackedVector3Array([tA, tB, bA, bB, uA, uB])
 	col.shape = hull
 	root.add_child(col)
+
+	# Explicit walkable slope — a thin BoxShape3D rotated to match the
+	# slope angle. The bake recognises a flat box's top face as walkable
+	# more reliably than it does an arbitrary convex hull's slope face.
+	# Without this, plateau ramps were rendering correctly but the bake
+	# omitted them from the navmesh, leaving units to grind against the
+	# plateau's vertical wall instead of routing up the slope.
+	var slope_col := CollisionShape3D.new()
+	var slope_box := BoxShape3D.new()
+	var slope_len: float = sqrt(run * run + height * height)
+	slope_box.size = Vector3(width, 0.4, slope_len)
+	slope_col.shape = slope_box
+	# Center the box at the slope's midpoint and rotate around the X
+	# axis (perpendicular to the slope direction) so its top face
+	# matches the wedge's slope.
+	var slope_mid_local: Vector3 = ((tA + tB) * 0.5 + (bA + bB) * 0.5) * 0.5
+	slope_col.position = slope_mid_local
+	# tilt direction depends on which side the ramp is on — face the
+	# slope so its +Y normal points the same direction as the wedge's
+	# slope face. Compute from tA→bB delta (a slope-aligned vector).
+	var slope_dir_world: Vector3 = ((bA + bB) * 0.5) - ((tA + tB) * 0.5)
+	# slope_dir_world.y is negative (drops from top to bottom).
+	# Rotation about world X (or local) to tilt the box.
+	var pitch_angle: float = atan2(-slope_dir_world.y, Vector2(slope_dir_world.x, slope_dir_world.z).length())
+	# Yaw component — orient the box length along the slope's horizontal
+	# direction.
+	var yaw_angle: float = atan2(slope_dir_world.x, slope_dir_world.z)
+	slope_col.rotation = Vector3(pitch_angle, yaw_angle, 0.0)
+	root.add_child(slope_col)
 
 	# Navmesh — sloped walking surface as 2 tris in world space. Vertices
 	# tA/tB sit exactly on the plateau top edge so the path planner sees
@@ -2112,29 +2142,15 @@ func _spawn_plateau_ramp(plateau_center: Vector3, top_size: Vector2, height: flo
 	_pending_nav_polys.append(PackedVector3Array([to_world.call(tA), to_world.call(tB), to_world.call(bB)]))
 	_pending_nav_polys.append(PackedVector3Array([to_world.call(tA), to_world.call(bB), to_world.call(bA)]))
 
-	# Backstop NavigationLink3D — connects the slope's TOP-EDGE midpoint
-	# to its BOTTOM-EDGE midpoint. Both endpoints sit ON valid navmesh
-	# polygons: the top edge is shared with the plateau-top fan, the
-	# bottom edge is shared with the ground rect just past the ramp.
-	# (The previous version had the top endpoint at plateau-center, which
-	# is mid-air for a ground unit on the wrong side of the plateau wall.
-	# This version anchors both endpoints at the ramp itself, so a unit
-	# instructed to walk to the link endpoint physically reaches it via
-	# normal walking + slope collision-climb.)
-	#
-	# The link is needed because Godot's edge merger sporadically fails
-	# to connect the slope poly to the ground rect even with dedup —
-	# manifests as "It's not expect to not find the most reachable
-	# polygons" warnings. With an explicit link the path planner has a
-	# guaranteed traversable route from ground to plateau top.
-	var slope_bottom_world: Vector3 = ((bA + bB) * 0.5) + plateau_center
-	var slope_top_world: Vector3 = ((tA + tB) * 0.5) + plateau_center
-	var link := NavigationLink3D.new()
-	link.start_position = slope_top_world
-	link.end_position = slope_bottom_world
-	link.bidirectional = true
-	link.enabled = true
-	add_child(link)
+	# (NavigationLink3D removed.) With the bake-based navmesh handling
+	# plateaus and ramps directly via the explicit walkable-slope
+	# collision above, the link becomes a path-planner trap: when a
+	# unit on the plateau top is told to leave, the planner picks the
+	# link's slope-TOP endpoint as its first waypoint, which the unit
+	# walks toward — straight off the plateau cliff. It then "uses" the
+	# link to teleport its path target to the slope BOTTOM, but the
+	# unit is still falling. Net effect: ordering a plateau-top unit
+	# anywhere off-plateau caused it to dive off the edge mid-air.
 
 
 ## Cached procedural alpha mask for ground patches. Generated once at first
