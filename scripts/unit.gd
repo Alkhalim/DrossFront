@@ -468,22 +468,42 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 	torso_pivot.add_child(torso)
 	mats.append(torso_mat)
 
-	# Team-color stripe across torso (emissive so it pops)
-	var stripe := MeshInstance3D.new()
-	var stripe_box := BoxMesh.new()
-	stripe_box.size = Vector3(torso_size.x + 0.02, torso_size.y * 0.18, torso_size.z + 0.02)
-	stripe.mesh = stripe_box
-	# Position is in torso_pivot's local space (which already sits at hip_y).
-	stripe.position.y = torso_size.y * 0.65
+	# Team-color band. Anvil mechs have a flat front/back/sides hull
+	# that the original wrap-around band reads cleanly across. Sable's
+	# faceted prow + canted shoulder block hides most of the band's
+	# flat faces, so a full-size band balloons out at the seams and
+	# reads as a slab of player-color on the chassis. For Sable we
+	# replace the wrap with two thin edge slivers on the LEFT and
+	# RIGHT sides only — they peek past the prow without dominating
+	# the silhouette.
 	var stripe_mat := StandardMaterial3D.new()
 	stripe_mat.albedo_color = team_color
 	stripe_mat.emission_enabled = true
 	stripe_mat.emission = team_color
 	stripe_mat.emission_energy_multiplier = 1.4
 	stripe_mat.roughness = 0.6
-	stripe.set_surface_override_material(0, stripe_mat)
-	torso_pivot.add_child(stripe)
-	mats.append(stripe_mat)
+	if _faction_id() == 1:
+		# Two slim edge slivers, one per side, just barely poking past
+		# the chassis silhouette so the team color reads at the edges.
+		for sliver_side: int in 2:
+			var sx: float = -torso_size.x * 0.5 - 0.03 if sliver_side == 0 else torso_size.x * 0.5 + 0.03
+			var sliver := MeshInstance3D.new()
+			var sl_box := BoxMesh.new()
+			sl_box.size = Vector3(0.06, torso_size.y * 0.32, torso_size.z * 0.55)
+			sliver.mesh = sl_box
+			sliver.position = Vector3(sx, torso_size.y * 0.58, 0.0)
+			sliver.set_surface_override_material(0, stripe_mat)
+			torso_pivot.add_child(sliver)
+		mats.append(stripe_mat)
+	else:
+		var stripe := MeshInstance3D.new()
+		var stripe_box := BoxMesh.new()
+		stripe_box.size = Vector3(torso_size.x + 0.02, torso_size.y * 0.18, torso_size.z + 0.02)
+		stripe.mesh = stripe_box
+		stripe.position.y = torso_size.y * 0.65
+		stripe.set_surface_override_material(0, stripe_mat)
+		torso_pivot.add_child(stripe)
+		mats.append(stripe_mat)
 
 	# Faction identity strip on the chest. Anvil ships a horizontal warm
 	# brass band; Sable swaps it for a thin emissive cyan line and adds
@@ -703,13 +723,33 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		var gun_y: float = torso_size.y * 0.55
 		var front_z: float = -torso_size.z * 0.5
 
-		# Mantlet — armored ball housing where barrel meets the chassis front.
+		# Faction-driven cross-section. Anvil's Bulwark uses round
+		# barrels + a domed mantlet (period-correct industrial cannon).
+		# Sable's Harbinger takes the same chassis but with hexagonal
+		# barrel sections and a faceted polyhedral mantlet — a cleaner
+		# multi-angular Sable read that stops short of just being a
+		# recolour of the same gun.
+		var is_sable_heavy: bool = _faction_id() == 1
+
+		# Mantlet — armored housing where barrel meets the chassis front.
 		var mantlet_radius: float = cannon_size.x * 2.4
 		var mantlet := MeshInstance3D.new()
-		var mantlet_mesh := SphereMesh.new()
-		mantlet_mesh.radius = mantlet_radius
-		mantlet_mesh.height = mantlet_radius * 1.9
-		mantlet.mesh = mantlet_mesh
+		if is_sable_heavy:
+			# Polyhedral block — roughly the same volume as the sphere
+			# but as a low-radial cylinder (8 sides, squashed) so the
+			# silhouette reads as faceted prism, not ball.
+			var mant_facet := CylinderMesh.new()
+			mant_facet.top_radius = mantlet_radius * 0.95
+			mant_facet.bottom_radius = mantlet_radius * 1.05
+			mant_facet.height = mantlet_radius * 1.7
+			mant_facet.radial_segments = 8
+			mantlet.mesh = mant_facet
+			mantlet.rotation.x = -PI / 2
+		else:
+			var mantlet_mesh := SphereMesh.new()
+			mantlet_mesh.radius = mantlet_radius
+			mantlet_mesh.height = mantlet_radius * 1.9
+			mantlet.mesh = mantlet_mesh
 		mantlet.position = Vector3(0, gun_y, front_z + 0.05)
 		var mantlet_mat := _make_metal_mat(base_color)
 		mantlet.set_surface_override_material(0, mantlet_mat)
@@ -722,14 +762,16 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		cannon_pivot.position = Vector3(0, gun_y, front_z - 0.05)
 		torso_pivot.add_child(cannon_pivot)
 
-		# Cylindrical main barrel — round, not boxy. CylinderMesh defaults to
-		# Y axis; rotate -PI/2 around X so its length aligns with -Z (forward).
+		# Main barrel — round for Anvil, hex prism for Sable. Both use
+		# the cylinder/-PI/2 X rotation so the length axis points -Z.
+		var barrel_segs: int = 6 if is_sable_heavy else 64
 		var barrel_len: float = cannon_size.z
 		var barrel := MeshInstance3D.new()
 		var barrel_cyl := CylinderMesh.new()
 		barrel_cyl.top_radius = cannon_size.x
 		barrel_cyl.bottom_radius = cannon_size.x * 1.05
 		barrel_cyl.height = barrel_len
+		barrel_cyl.radial_segments = barrel_segs
 		barrel.mesh = barrel_cyl
 		barrel.rotation.x = -PI / 2
 		barrel.position.z = -barrel_len * 0.5
@@ -738,28 +780,33 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		cannon_pivot.add_child(barrel)
 		mats.append(barrel_mat)
 
-		# Recoil sleeve — slightly wider cylinder near the breech end. Adds
-		# a "rifled" or "fume-extractor" look so the barrel isn't a single tube.
+		# Recoil sleeve — wider section near the breech. Sable rotates
+		# the hex an extra 22.5° on Z so the breech facets stagger
+		# against the barrel's, reading as separate machined parts.
 		var sleeve_len: float = barrel_len * 0.22
 		var sleeve := MeshInstance3D.new()
 		var sleeve_cyl := CylinderMesh.new()
 		sleeve_cyl.top_radius = cannon_size.x * 1.25
 		sleeve_cyl.bottom_radius = cannon_size.x * 1.25
 		sleeve_cyl.height = sleeve_len
+		sleeve_cyl.radial_segments = barrel_segs
 		sleeve.mesh = sleeve_cyl
 		sleeve.rotation.x = -PI / 2
+		if is_sable_heavy:
+			sleeve.rotation.z = deg_to_rad(22.5)
 		sleeve.position.z = -barrel_len * 0.55
 		var sleeve_mat := _make_metal_mat(darker)
 		sleeve.set_surface_override_material(0, sleeve_mat)
 		cannon_pivot.add_child(sleeve)
 		mats.append(sleeve_mat)
 
-		# Muzzle brake — short, slightly fatter cylinder at the tip.
+		# Muzzle brake — wider cap at the tip.
 		var muzzle := MeshInstance3D.new()
 		var muzzle_cyl := CylinderMesh.new()
 		muzzle_cyl.top_radius = cannon_size.x * 1.4
 		muzzle_cyl.bottom_radius = cannon_size.x * 1.25
 		muzzle_cyl.height = 0.15
+		muzzle_cyl.radial_segments = barrel_segs
 		muzzle.mesh = muzzle_cyl
 		muzzle.rotation.x = -PI / 2
 		muzzle.position.z = -barrel_len - 0.07
@@ -874,11 +921,23 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 
 	# --- Antenna ---
 	if antenna_h > 0.01:
+		# Sable mounts the antenna a bit higher and ends it in a violet
+		# tip that matches the rest of the faction's emissive accent —
+		# the previous warm-red tip clashed with the violet hull seams
+		# (red + purple living next to each other read as a colour bug,
+		# not a faction palette). Anvil keeps the warm red.
+		var is_sable: bool = _faction_id() == 1
+		var sable_lift: float = 0.20 if is_sable else 0.0
+		var ant_h_actual: float = antenna_h + sable_lift
 		var antenna := MeshInstance3D.new()
 		var ant_box := BoxMesh.new()
-		ant_box.size = Vector3(0.04, antenna_h, 0.04)
+		ant_box.size = Vector3(0.04, ant_h_actual, 0.04)
 		antenna.mesh = ant_box
-		antenna.position = Vector3(head_size.x * 0.3, torso_size.y + head_size.y + antenna_h / 2.0, head_fwd_offset)
+		antenna.position = Vector3(
+			head_size.x * 0.3,
+			torso_size.y + head_size.y + ant_h_actual / 2.0,
+			head_fwd_offset,
+		)
 		var ant_mat := _make_metal_mat(Color(0.15, 0.15, 0.18))
 		antenna.set_surface_override_material(0, ant_mat)
 		torso_pivot.add_child(antenna)
@@ -889,11 +948,16 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		tip_sph.radius = 0.05
 		tip_sph.height = 0.1
 		tip.mesh = tip_sph
-		tip.position = Vector3(head_size.x * 0.3, torso_size.y + head_size.y + antenna_h, head_fwd_offset)
+		tip.position = Vector3(
+			head_size.x * 0.3,
+			torso_size.y + head_size.y + ant_h_actual,
+			head_fwd_offset,
+		)
 		var tip_mat := StandardMaterial3D.new()
-		tip_mat.albedo_color = Color(1.0, 0.3, 0.2)
+		var tip_color: Color = SABLE_NEON if is_sable else Color(1.0, 0.3, 0.2)
+		tip_mat.albedo_color = tip_color
 		tip_mat.emission_enabled = true
-		tip_mat.emission = Color(1.0, 0.3, 0.2)
+		tip_mat.emission = tip_color
 		tip_mat.emission_energy_multiplier = 2.0
 		tip.set_surface_override_material(0, tip_mat)
 		torso_pivot.add_child(tip)
