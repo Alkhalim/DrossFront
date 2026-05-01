@@ -506,35 +506,35 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		mats.append(stripe_mat)
 
 	# Faction identity strip on the chest. Anvil ships a horizontal warm
-	# brass band; Sable swaps it for a thin emissive cyan line and adds
-	# a vertical accent slash so the silhouette reads as "specops" at
-	# a glance instead of "industrial". Player team color stays on the
-	# diagonal stripe above; this strip is faction-only.
+	# brass band; Sable replaces it with a single small glow point —
+	# the previous horizontal-line-plus-vertical-kicker formed an
+	# L-shape that read as a chunk of dominant violet across the
+	# already-narrow Sable prow. A simple core-glow with a low-energy
+	# light reads as Sable identity without taking over the silhouette.
 	if _faction_id() == 1:
-		# Sable — thin horizontal cyan glow + a vertical kicker.
-		var horiz := MeshInstance3D.new()
-		var horiz_box := BoxMesh.new()
-		horiz_box.size = Vector3(torso_size.x * 0.50, torso_size.y * 0.05, 0.04)
-		horiz.mesh = horiz_box
-		horiz.position = Vector3(0.0, torso_size.y * 0.10, -torso_size.z * 0.5 - 0.02)
-		var horiz_mat := StandardMaterial3D.new()
-		horiz_mat.albedo_color = SABLE_NEON
-		horiz_mat.emission_enabled = true
-		horiz_mat.emission = SABLE_NEON
-		horiz_mat.emission_energy_multiplier = 1.6
-		horiz_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		horiz.set_surface_override_material(0, horiz_mat)
-		torso_pivot.add_child(horiz)
-		mats.append(horiz_mat)
-		# Vertical accent line off-centre so the chest doesn't read as
-		# perfectly symmetric — pure cyberpunk pin-stripe.
-		var vert := MeshInstance3D.new()
-		var vert_box := BoxMesh.new()
-		vert_box.size = Vector3(0.04, torso_size.y * 0.45, 0.04)
-		vert.mesh = vert_box
-		vert.position = Vector3(torso_size.x * 0.18, torso_size.y * 0.0, -torso_size.z * 0.5 - 0.02)
-		vert.set_surface_override_material(0, horiz_mat)
-		torso_pivot.add_child(vert)
+		var glow_mat := StandardMaterial3D.new()
+		glow_mat.albedo_color = SABLE_NEON
+		glow_mat.emission_enabled = true
+		glow_mat.emission = SABLE_NEON
+		glow_mat.emission_energy_multiplier = 2.4
+		glow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		var glow := MeshInstance3D.new()
+		var glow_sphere := SphereMesh.new()
+		glow_sphere.radius = torso_size.x * 0.08
+		glow_sphere.height = torso_size.x * 0.16
+		glow.mesh = glow_sphere
+		glow.position = Vector3(0.0, torso_size.y * 0.50, -torso_size.z * 0.5 - 0.02)
+		glow.set_surface_override_material(0, glow_mat)
+		torso_pivot.add_child(glow)
+		mats.append(glow_mat)
+		# Tiny coloured light so the glow has bloom/spread on the
+		# surrounding chassis without painting a visible band.
+		var glow_light := OmniLight3D.new()
+		glow_light.light_color = SABLE_NEON
+		glow_light.light_energy = 0.55
+		glow_light.omni_range = torso_size.x * 1.4
+		glow_light.position = glow.position
+		torso_pivot.add_child(glow_light)
 	else:
 		# Anvil — horizontal brass band.
 		var brass := MeshInstance3D.new()
