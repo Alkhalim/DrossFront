@@ -98,6 +98,16 @@ var _cached_total_height: float = -1.0
 ## active. `play_shoot_anim` arms this for ~250ms (covers the 8/s decay).
 var _recoil_active_until_msec: int = 0
 
+## Camera cached for the animation-distance cull below. Lazy-init on
+## first use so we don't fight the scene boot order.
+var _camera_cached: Camera3D = null
+## Skip per-frame walk-bob, HP-bar repositioning, and dust spawning for
+## units further than this from the camera. Squared so we avoid sqrt on
+## the hot path. 80u covers most of the player's view at typical camera
+## zoom; units beyond that aren't visible enough for the animation cost
+## to be worth it.
+const ANIM_CULL_DIST_SQ: float = 80.0 * 80.0
+
 ## Engineer is currently working on a construction site. BuilderComponent toggles
 ## this; the visual claw animates and emits sparks while it's true.
 var is_building: bool = false
@@ -1509,6 +1519,15 @@ func _physics_process(delta: float) -> void:
 		move_and_slide()
 		return
 
+	# Camera-distance cull flag. AI / pathing / combat still run; only
+	# the per-frame cosmetic work (walk-bob, HP bar reposition, dust,
+	# recoil) skips when the unit is off-camera.
+	if not _camera_cached or not is_instance_valid(_camera_cached):
+		_camera_cached = get_viewport().get_camera_3d() if get_viewport() else null
+	var anim_culled: bool = false
+	if _camera_cached:
+		anim_culled = global_position.distance_squared_to(_camera_cached.global_position) > ANIM_CULL_DIST_SQ
+
 	# Walking animation. _anim_time only advances while moving so legs always
 	# resume from a clean stride; _idle_time runs continuously to drive the
 	# small standing sway.
@@ -1517,17 +1536,14 @@ func _physics_process(delta: float) -> void:
 		# `delta` here represents one physics frame (~16ms) but with the
 		# outer 1-in-3 stagger this branch only runs every 3rd frame —
 		# advance _anim_time by 3× delta so the leg phase keeps the
-		# same wall-clock cadence as before. Without this, legs would
-		# look like they're walking in slow motion.
+		# same wall-clock cadence as before.
 		_anim_time += delta * 8.0 * 3.0
-		# Walk-bob runs every time we hit this branch (the outer
-		# `_walk_bob_phase` stagger already gates the heavy block to
-		# the per-unit cadence). Previous code added a second `& 1`
-		# throttle that never matched for units whose phase was 2,
-		# which is why those units appeared to lose their leg
-		# animation entirely.
-		_apply_walk_bob()
-		_tick_walking_dust(delta * 3.0)
+		# Skip cosmetic work when the unit is off-camera. The animation
+		# state still advances so legs resume mid-stride when the
+		# camera pans back, but no per-leg sin / position writes fire.
+		if not anim_culled:
+			_apply_walk_bob()
+			_tick_walking_dust(delta * 3.0)
 	else:
 		_anim_time = 0.0
 		# Idle sway is invisibly subtle at 60Hz; throttle to ~15Hz with
@@ -1536,12 +1552,13 @@ func _physics_process(delta: float) -> void:
 		_idle_anim_throttle += 1
 		if _idle_anim_throttle >= IDLE_ANIM_THROTTLE_FRAMES:
 			_idle_anim_throttle = 0
-			_reset_walk_bob()
+			if not anim_culled:
+				_reset_walk_bob()
 
-	# Skip the recoil loop entirely when no member is recoiling — by far
-	# the common case. `play_shoot_anim` arms this; an idle unit pays
-	# nothing for the recoil subsystem.
-	if Time.get_ticks_msec() < _recoil_active_until_msec:
+	# Skip the recoil loop entirely when no member is recoiling, OR when
+	# the unit is off-camera (recoil is purely visual — the gun fires
+	# either way via combat_component).
+	if not anim_culled and Time.get_ticks_msec() < _recoil_active_until_msec:
 		_tick_recoil(delta)
 
 	if is_building:
@@ -1564,15 +1581,18 @@ func _physics_process(delta: float) -> void:
 		var should_show: bool = is_selected or damaged or hp_bar_hovered
 		if _hp_bar.visible != should_show:
 			_hp_bar.visible = should_show
-		if should_show:
+		# Skip the position / rotation update when off-camera (the bar
+		# is also invisible at that range so the math is wasted).
+		if should_show and not anim_culled:
 			# Use the cached total height (set in _ready). Falls back to
 			# the live computation if the cache wasn't populated for any
 			# reason — same answer, just one extra dict lookup.
 			var bar_height: float = (_cached_total_height if _cached_total_height > 0.0 else _mech_total_height()) + 0.4
 			_hp_bar.global_position = global_position + Vector3(0, bar_height, 0)
-			var cam: Camera3D = get_viewport().get_camera_3d()
-			if cam:
-				_hp_bar.global_rotation = cam.global_rotation
+			# Reuse the cached camera reference set above for the cull
+			# check — saves a get_viewport().get_camera_3d() per frame.
+			if _camera_cached:
+				_hp_bar.global_rotation = _camera_cached.global_rotation
 
 	# Gravity — keeps a unit pinned to the ground even when it ends up
 	# briefly above floor level (e.g. spawned with a slight Y offset, or

@@ -35,12 +35,14 @@ var _pending_ramp_clearance: Array[Rect2] = []
 
 
 func _ready() -> void:
-	# Hide navigation-debug overlays. With them on (Godot's editor default
-	# in some setups), the plateau-top fan + ramp slope navmesh polys
-	# render as semi-transparent overlays at the SAME Y as the plateau
-	# visual surface — causing the z-fighting that looks like camera-
-	# dependent flicker on the plateau sides and ramps.
-	NavigationServer3D.set_debug_enabled(false)
+	# Toggle for the in-game navmesh debug overlay. Set to true and
+	# reload to see polygon outlines (walkable cells in green, ramp
+	# slopes outlined, link endpoints as dots) — useful for diagnosing
+	# pathing bugs like "invisible wall" reports. Off by default
+	# because the overlay also draws nav polys at the plateau-top Y,
+	# which z-fights with the visible plateau surface.
+	const NAV_DEBUG_OVERLAY: bool = false
+	NavigationServer3D.set_debug_enabled(NAV_DEBUG_OVERLAY)
 
 	# Manual strip-decomposition navmesh has dense polygon adjacency
 	# (every blocker contributes both X and Z cuts, so 4-way corners
