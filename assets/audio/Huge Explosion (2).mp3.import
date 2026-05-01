@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://c77n1emikeu6s"
+path="res://.godot/imported/Huge Explosion (2).mp3-c92b76cde3d74b355b9507be6fbbaf61.mp3str"
+
+[deps]
+
+source_file="res://assets/audio/Huge Explosion (2).mp3"
+dest_files=["res://.godot/imported/Huge Explosion (2).mp3-c92b76cde3d74b355b9507be6fbbaf61.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

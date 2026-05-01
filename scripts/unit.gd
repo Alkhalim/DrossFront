@@ -2330,7 +2330,13 @@ func _die() -> void:
 
 	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
 	if audio and audio.has_method("play_unit_destroyed"):
-		audio.play_unit_destroyed(global_position)
+		# Heavy mechs (Bulwark, Harbinger, etc.) trigger the larger
+		# explosion bank so a Bulwark squad's death reads weightier
+		# than a Hound's. unit_class string is checked rather than
+		# armor since some lights have heavy armor (e.g., Hound
+		# variants) but their squad death should still feel light.
+		var heavy: bool = stats != null and (stats.unit_class == &"heavy" or stats.unit_class == &"apex")
+		audio.play_unit_destroyed(global_position, heavy)
 
 	queue_free()
 

@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://ccllqkvc7tdgt"
+path="res://.godot/imported/Missile Launch (1).mp3-03a5a84e75388f14a4e304212f40c689.mp3str"
+
+[deps]
+
+source_file="res://assets/audio/Missile Launch (1).mp3"
+dest_files=["res://.godot/imported/Missile Launch (1).mp3-03a5a84e75388f14a4e304212f40c689.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

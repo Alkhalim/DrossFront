@@ -158,7 +158,12 @@ func _explode() -> void:
 	# self-contained without reaching into Unit internals.
 	_spawn_explosion_vfx(pos)
 	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
-	if audio and audio.has_method("play_weapon_impact"):
+	if audio and audio.has_method("play_huge_explosion"):
+		# Ammo dump going up is a CATASTROPHIC event — play the huge
+		# explosion bank rather than the small impact clang the dump
+		# was using before.
+		audio.play_huge_explosion(pos)
+	elif audio and audio.has_method("play_weapon_impact"):
 		audio.play_weapon_impact(pos)
 	queue_free()
 

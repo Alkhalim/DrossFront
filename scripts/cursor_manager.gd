@@ -1,33 +1,59 @@
 class_name CursorManager
 extends Node
-## Industrial-themed mouse cursors that switch based on what's under
-## the pointer. Generated procedurally at scene start so we don't need
-## external image assets — each cursor is a small bitmap drawn in code.
+## Industrial-themed mouse cursors built procedurally at scene start.
+## All variants share a single base silhouette — a slightly-rounded
+## chunky arrow rendered in gunmetal grey with a soft highlight along
+## the inner edge — and differ via colour tint plus a small accent
+## glyph attached to the arrow's lower-right shoulder.
 ##
 ## Kinds:
-##   DEFAULT — chunky angular arrow with a rivet, neutral pointer
-##   ATTACK  — red crosshair reticle for enemy units / buildings
-##   REPAIR  — green wrench when an engineer is hovered over an ally
-##   BUILD   — blue brick + cross when in build-placement mode
-##   MOVE    — yellow direction chevron when right-clicking ground
+##   DEFAULT — gunmetal grey, no glyph
+##   ATTACK  — red tint, crosshair-bracket glyph
+##   REPAIR  — green tint, wrench glyph
+##   BUILD   — cyan tint, brick glyph
+##   MOVE    — amber tint, chevron glyph
 ##
 ## SelectionManager calls `set_kind()` whenever its hover state changes.
+## Static helper `apply_default_cursor(tree)` lets the main menu / boot
+## scenes set the gunmetal cursor without spinning up a full manager.
 
 enum Kind { DEFAULT, ATTACK, REPAIR, BUILD, MOVE }
 
 const _SIZE: int = 28
+
+# Base palette — gunmetal grey body + cooler highlight + dark outline.
+const _BODY_BASE: Color = Color(0.34, 0.36, 0.40, 1.0)
+const _HIGHLIGHT_BASE: Color = Color(0.62, 0.65, 0.68, 1.0)
+const _OUTLINE: Color = Color(0.06, 0.07, 0.08, 1.0)
+const _RIVET: Color = Color(0.18, 0.20, 0.22, 1.0)
 
 var _textures: Dictionary = {}
 var _current: int = -1
 
 
 func _ready() -> void:
-	_textures[Kind.DEFAULT] = _make_default()
-	_textures[Kind.ATTACK] = _make_attack()
-	_textures[Kind.REPAIR] = _make_repair()
-	_textures[Kind.BUILD] = _make_build()
-	_textures[Kind.MOVE] = _make_move()
+	_textures[Kind.DEFAULT] = _make_arrow(_BODY_BASE, _HIGHLIGHT_BASE, Kind.DEFAULT)
+	_textures[Kind.ATTACK] = _make_arrow(
+		Color(0.55, 0.18, 0.18, 1.0), Color(0.95, 0.45, 0.40, 1.0), Kind.ATTACK
+	)
+	_textures[Kind.REPAIR] = _make_arrow(
+		Color(0.20, 0.45, 0.25, 1.0), Color(0.50, 0.92, 0.55, 1.0), Kind.REPAIR
+	)
+	_textures[Kind.BUILD] = _make_arrow(
+		Color(0.18, 0.40, 0.50, 1.0), Color(0.55, 0.90, 1.00, 1.0), Kind.BUILD
+	)
+	_textures[Kind.MOVE] = _make_arrow(
+		Color(0.55, 0.42, 0.12, 1.0), Color(1.00, 0.85, 0.32, 1.0), Kind.MOVE
+	)
 	set_kind(Kind.DEFAULT)
+
+
+## Used by main menu / boot scenes to install the default gunmetal
+## cursor without creating a full CursorManager instance. Generates the
+## arrow once and applies it via Input.set_custom_mouse_cursor.
+static func apply_default_cursor() -> void:
+	var tex: ImageTexture = _build_arrow_static(_BODY_BASE, _HIGHLIGHT_BASE, Kind.DEFAULT)
+	Input.set_custom_mouse_cursor(tex, Input.CURSOR_ARROW, Vector2(2, 2))
 
 
 ## Static lookup so any system can switch cursors via the scene-level
@@ -48,154 +74,141 @@ func set_kind(kind: int) -> void:
 	var tex: ImageTexture = _textures.get(kind) as ImageTexture
 	if not tex:
 		return
-	# Hotspot — most cursor shapes anchor at the top-left so the click
-	# point lines up with the visual tip / center of the reticle.
-	var hotspot: Vector2 = Vector2(2, 2)
-	if kind == Kind.ATTACK or kind == Kind.MOVE:
-		# Crosshair / direction chevron read better when anchored to the
-		# centre so the click lands on what the player sees.
-		hotspot = Vector2(_SIZE * 0.5, _SIZE * 0.5)
-	Input.set_custom_mouse_cursor(tex, Input.CURSOR_ARROW, hotspot)
+	# All variants anchor at the arrow tip (top-left). The accent
+	# glyph hangs off the arrow's lower-right shoulder so the click
+	# point doesn't drift between cursor kinds.
+	Input.set_custom_mouse_cursor(tex, Input.CURSOR_ARROW, Vector2(2, 2))
 
 
 ## --- Procedural cursor generators ----------------------------------------
 
-func _new_image() -> Image:
-	# Transparent canvas. set_pixel writes opaque colors to the shapes;
-	# untouched pixels stay alpha=0.
-	return Image.create(_SIZE, _SIZE, false, Image.FORMAT_RGBA8)
+func _make_arrow(body: Color, highlight: Color, kind: int) -> ImageTexture:
+	return _build_arrow_static(body, highlight, kind)
 
 
-func _make_default() -> ImageTexture:
-	# Chunky angular arrow pointing up-left — the dieselpunk pointer.
-	# White interior, dark outline, single rivet near the base.
-	var img: Image = _new_image()
-	var fg := Color(0.92, 0.92, 0.88, 1.0)   # off-white plate
-	var ol := Color(0.05, 0.05, 0.05, 1.0)   # near-black outline
-	var rivet := Color(0.55, 0.50, 0.45, 1.0)
-	# Arrow body — a triangle with a flag tail. Built row-by-row so
-	# the silhouette stays sharp at 28px.
+static func _build_arrow_static(body: Color, highlight: Color, kind: int) -> ImageTexture:
+	## Draws the shared arrow silhouette tinted with `body` and inner
+	## highlight `highlight`, then overlays the per-kind glyph at the
+	## arrow's lower-right shoulder.
+	var img := Image.create(_SIZE, _SIZE, false, Image.FORMAT_RGBA8)
+	# Slightly-rounded chunky arrow — built row-by-row. The shape is
+	# the same as a standard pointer but the corners taper smoothly
+	# instead of going to single-pixel points.
 	for y: int in _SIZE:
-		# Triangle width grows down to row ~14, then narrows back to a
-		# thin tail.
-		var width: int
-		if y < 14:
-			width = y / 2 + 2
-		else:
-			width = maxi(20 - y, 2)
-		# Outline pass — one pixel wider than the body.
-		for x: int in _SIZE:
-			if x >= 2 and x < width + 2:
-				if x == 2 or x == width + 1 or y == 0 or y == 27:
-					img.set_pixel(x, y, ol)
-				else:
-					img.set_pixel(x, y, fg)
-	# Rivet at the arrow's base — small dark dot for industrial flavor.
+		var width: int = _arrow_width(y)
+		if width <= 0:
+			continue
+		for x: int in width + 2:
+			var px: int = 2 + x
+			if px >= _SIZE:
+				continue
+			# Outline at the silhouette boundary.
+			var on_outline: bool = (x == 0 or x == width + 1 or y == 0 or y == _SIZE - 1)
+			# Edge softening — top-left and bottom-left corners get a
+			# rounded slope so the cursor reads as cast metal rather
+			# than CRT pixel art.
+			if y < 2 and x > width - 1:
+				continue
+			if y > 19 and x > maxi(width - (y - 19) * 2, 1):
+				continue
+			if on_outline:
+				img.set_pixel(px, y, _OUTLINE)
+			elif x <= 1:
+				# Inner highlight — runs along the leading (left) edge.
+				img.set_pixel(px, y, highlight)
+			else:
+				# Body fill, slightly darker toward the trailing edge.
+				var t: float = float(x) / float(maxi(width, 1))
+				img.set_pixel(px, y, body.lerp(_OUTLINE, t * 0.35))
+	# Dark rivet near the arrow's base for industrial flavor.
 	for dx: int in 2:
 		for dy: int in 2:
-			img.set_pixel(5 + dx, 18 + dy, rivet)
+			img.set_pixel(5 + dx, 16 + dy, _RIVET)
+	# Per-kind accent glyph attached to the lower-right shoulder. The
+	# arrow ends around y=22, so glyph sits in y=14..22 range.
+	match kind:
+		Kind.ATTACK:
+			_draw_glyph_crosshair(img, Color(1.0, 0.30, 0.25, 1.0))
+		Kind.REPAIR:
+			_draw_glyph_wrench(img, Color(0.55, 1.0, 0.55, 1.0))
+		Kind.BUILD:
+			_draw_glyph_brick(img, Color(0.65, 0.95, 1.0, 1.0))
+		Kind.MOVE:
+			_draw_glyph_chevron(img, Color(1.0, 0.85, 0.30, 1.0))
+		_:
+			pass  # DEFAULT — no glyph
 	return ImageTexture.create_from_image(img)
 
 
-func _make_attack() -> ImageTexture:
-	# Red crosshair reticle — angular brackets at four corners of a
-	# central diamond, with a small dot at the centre.
-	var img: Image = _new_image()
-	var red := Color(1.0, 0.25, 0.20, 1.0)
-	var dark_red := Color(0.35, 0.05, 0.05, 1.0)
-	var center: int = _SIZE / 2
-	# Outer corner brackets (4 L-shaped ticks).
-	var bracket_len: int = 6
-	var bracket_offset: int = 11
-	for i: int in bracket_len:
-		# Top-left bracket — vertical + horizontal ticks meeting near
-		# top-left corner.
-		img.set_pixel(center - bracket_offset, center - bracket_offset + i, red)
-		img.set_pixel(center - bracket_offset + i, center - bracket_offset, red)
-		# Top-right.
-		img.set_pixel(center + bracket_offset, center - bracket_offset + i, red)
-		img.set_pixel(center + bracket_offset - i, center - bracket_offset, red)
-		# Bottom-left.
-		img.set_pixel(center - bracket_offset, center + bracket_offset - i, red)
-		img.set_pixel(center - bracket_offset + i, center + bracket_offset, red)
-		# Bottom-right.
-		img.set_pixel(center + bracket_offset, center + bracket_offset - i, red)
-		img.set_pixel(center + bracket_offset - i, center + bracket_offset, red)
-	# Centre dot.
-	for dx: int in 2:
-		for dy: int in 2:
-			img.set_pixel(center + dx - 1, center + dy - 1, dark_red)
-	# Crosshair lines through the centre — short stubs.
-	for i: int in range(4, 9):
-		img.set_pixel(center + i, center, red)
-		img.set_pixel(center - i, center, red)
-		img.set_pixel(center, center + i, red)
-		img.set_pixel(center, center - i, red)
-	return ImageTexture.create_from_image(img)
+static func _arrow_width(y: int) -> int:
+	## Returns the row width of the arrow body at row `y`. Wider in
+	## the upper half (the arrow head), narrowing into a flag tail
+	## toward the bottom.
+	if y < 2:
+		return y + 1            # rounded tip
+	if y < 14:
+		return y / 2 + 2        # head expands
+	if y < 22:
+		return maxi(20 - y, 2)  # tail narrows
+	return 0
 
 
-func _make_repair() -> ImageTexture:
-	# Green wrench silhouette — shaft + open jaw at the head.
-	var img: Image = _new_image()
-	var green := Color(0.30, 0.92, 0.45, 1.0)
-	var dark_g := Color(0.10, 0.30, 0.15, 1.0)
-	# Shaft — diagonal rectangle from upper-left to lower-right.
-	for i: int in 18:
-		var x: int = 4 + i
-		var y: int = 4 + i
-		img.set_pixel(x, y, green)
-		img.set_pixel(x + 1, y, green)
-		img.set_pixel(x, y + 1, green)
-		img.set_pixel(x + 1, y + 1, dark_g)
-	# Wrench head — chunkier rectangle + open jaw at the upper-left end.
-	for dx: int in 6:
-		for dy: int in 6:
-			if dx < 5 and dy < 5:
-				img.set_pixel(2 + dx, 2 + dy, green)
-	# Jaw opening — a 2x2 transparent cut into the head.
-	for dx: int in 2:
-		for dy: int in 2:
-			img.set_pixel(3 + dx, 3 + dy, Color(0, 0, 0, 0))
-	return ImageTexture.create_from_image(img)
+## --- Glyphs ---
+##
+## Each glyph is small (5-7px) and sits in the bottom-right area of the
+## cursor texture so it doesn't disrupt the silhouette but is readable
+## alongside the colored arrow.
+
+static func _draw_glyph_crosshair(img: Image, color: Color) -> void:
+	# Tiny corner brackets + centre dot.
+	var cx: int = 20
+	var cy: int = 18
+	for i: int in 4:
+		img.set_pixel(cx - 3, cy - 3 + i, color)
+		img.set_pixel(cx - 3 + i, cy - 3, color)
+		img.set_pixel(cx + 3, cy - 3 + i, color)
+		img.set_pixel(cx + 3 - i, cy - 3, color)
+		img.set_pixel(cx - 3, cy + 3 - i, color)
+		img.set_pixel(cx - 3 + i, cy + 3, color)
+		img.set_pixel(cx + 3, cy + 3 - i, color)
+		img.set_pixel(cx + 3 - i, cy + 3, color)
+	img.set_pixel(cx, cy, color)
 
 
-func _make_build() -> ImageTexture:
-	# Cyan brick + cross — placement marker. Small square brick outline
-	# with a cross overlay indicating "place here".
-	var img: Image = _new_image()
-	var cyan := Color(0.50, 0.90, 1.0, 1.0)
-	var dark_c := Color(0.08, 0.20, 0.30, 1.0)
-	# Brick — 14x14 outlined square.
-	var origin: int = 7
-	var sq: int = 14
-	for i: int in sq:
-		img.set_pixel(origin + i, origin, cyan)         # top
-		img.set_pixel(origin + i, origin + sq - 1, cyan)  # bottom
-		img.set_pixel(origin, origin + i, cyan)         # left
-		img.set_pixel(origin + sq - 1, origin + i, cyan)  # right
-	# Cross overlay through the center.
-	var center: int = _SIZE / 2
-	for i: int in 9:
-		img.set_pixel(center + i - 4, center, dark_c)
-		img.set_pixel(center, center + i - 4, dark_c)
-	return ImageTexture.create_from_image(img)
+static func _draw_glyph_wrench(img: Image, color: Color) -> void:
+	# Diagonal shaft + 3x3 head with a 1px notch (jaw).
+	var ox: int = 16
+	var oy: int = 14
+	for i: int in 7:
+		img.set_pixel(ox + i, oy + i, color)
+		img.set_pixel(ox + i + 1, oy + i, color)
+	# Wrench head at the upper-left end.
+	for dx: int in 4:
+		for dy: int in 4:
+			img.set_pixel(ox - 1 + dx, oy - 1 + dy, color)
+	# Notch (jaw opening) — 1×1 transparent gap.
+	img.set_pixel(ox, oy, Color(0, 0, 0, 0))
 
 
-func _make_move() -> ImageTexture:
-	# Yellow direction chevron — three stacked V-shapes pointing down,
-	# evoking "head this way."
-	var img: Image = _new_image()
-	var amber := Color(1.0, 0.85, 0.30, 1.0)
-	var dark_a := Color(0.40, 0.30, 0.05, 1.0)
-	var center: int = _SIZE / 2
-	# Three chevrons at increasing Y, each a V of pixels.
-	for ch: int in 3:
-		var y: int = 6 + ch * 6
-		for i: int in 6:
-			img.set_pixel(center - i, y + i, amber)
-			img.set_pixel(center + i, y + i, amber)
-			# Soft inner shadow.
-			if i > 0:
-				img.set_pixel(center - i + 1, y + i, dark_a)
-				img.set_pixel(center + i - 1, y + i, dark_a)
-	return ImageTexture.create_from_image(img)
+static func _draw_glyph_brick(img: Image, color: Color) -> void:
+	# 6x6 outlined brick — placement marker.
+	var ox: int = 16
+	var oy: int = 16
+	for i: int in 6:
+		img.set_pixel(ox + i, oy, color)
+		img.set_pixel(ox + i, oy + 5, color)
+		img.set_pixel(ox, oy + i, color)
+		img.set_pixel(ox + 5, oy + i, color)
+	# Small cross inside the brick.
+	for i: int in 3:
+		img.set_pixel(ox + 1 + i, oy + 2, color)
+		img.set_pixel(ox + 2, oy + 1 + i, color)
+
+
+static func _draw_glyph_chevron(img: Image, color: Color) -> void:
+	# Two stacked chevrons pointing down.
+	for ch: int in 2:
+		var y: int = 16 + ch * 4
+		for i: int in 4:
+			img.set_pixel(18 - i, y + i, color)
+			img.set_pixel(18 + i, y + i, color)

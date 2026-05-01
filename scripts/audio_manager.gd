@@ -24,6 +24,22 @@ var _sfx_artillery: Array[AudioStream] = []
 var _sfx_laser: Array[AudioStream] = []
 var _sfx_plasma: Array[AudioStream] = []
 var _sfx_explosion: Array[AudioStream] = []
+## Missile-launch bank — used for any weapon whose rof_tier produces a
+## missile projectile (single / slow / volley).
+var _sfx_missile_launch: Array[AudioStream] = []
+## Heavier explosion bank for full unit deaths — beefier than the
+## generic explosion used for bullet impacts.
+var _sfx_explosion_large: Array[AudioStream] = []
+## Catastrophic explosion bank — ammo dumps, HQ destruction.
+var _sfx_explosion_huge: Array[AudioStream] = []
+## Crumbling masonry / steel — when a building is destroyed.
+var _sfx_building_collapse: Array[AudioStream] = []
+## Defeat stinger — match-end loss.
+var _sfx_defeat: Array[AudioStream] = []
+## Error / invalid-command bank.
+var _sfx_error: Array[AudioStream] = []
+## UI confirm — replaces the procedural beep on select / command issue.
+var _sfx_confirm: Array[AudioStream] = []
 ## When set to a non-INF position, the next batch of `_play_tone` /
 ## `_play_thump` / etc. internal calls route to a 3D player at that
 ## position instead of the 2D pool. Public "play X at" methods stash
@@ -91,6 +107,41 @@ func _load_sfx_banks() -> void:
 		"res://assets/audio/Explosion, Rts Sfx (2).mp3",
 		"res://assets/audio/Explosion, Rts Sfx (3).mp3",
 	])
+	_sfx_missile_launch = _load_bank([
+		"res://assets/audio/Missile Launch.mp3",
+		"res://assets/audio/Missile Launch (1).mp3",
+		"res://assets/audio/Missile Launch (2).mp3",
+		"res://assets/audio/Missile Launch (3).mp3",
+		"res://assets/audio/Missile Launch (4).mp3",
+		"res://assets/audio/Missile Launch (5).mp3",
+	])
+	_sfx_explosion_large = _load_bank([
+		"res://assets/audio/Explosion large.mp3",
+		"res://assets/audio/Explosion large (2).mp3",
+		"res://assets/audio/Explosion large (3).mp3",
+	])
+	_sfx_explosion_huge = _load_bank([
+		"res://assets/audio/Huge Explosion.mp3",
+		"res://assets/audio/Huge Explosion (1).mp3",
+		"res://assets/audio/Huge Explosion (2).mp3",
+		"res://assets/audio/Huge Explosion (3).mp3",
+	])
+	_sfx_building_collapse = _load_bank([
+		"res://assets/audio/Building Collapse.mp3",
+		"res://assets/audio/Building Collapse (1).mp3",
+		"res://assets/audio/Building Collapse (2).mp3",
+	])
+	_sfx_defeat = _load_bank([
+		"res://assets/audio/Defeat Sound.mp3",
+		"res://assets/audio/Sad Defeat.mp3",
+	])
+	_sfx_error = _load_bank([
+		"res://assets/audio/Error Sfx.mp3",
+	])
+	_sfx_confirm = _load_bank([
+		"res://assets/audio/Confirm UI Sfx Low.mp3",
+		"res://assets/audio/Confirm UI Sfx Low (1).mp3",
+	])
 
 
 func _load_bank(paths: Array) -> Array[AudioStream]:
@@ -145,13 +196,27 @@ func _play_3d_at(stream: AudioStream, world_pos: Vector3, volume_db: float = 0.0
 ## AudioStreamPlayer so layers actually mix instead of stomping each other.
 
 func play_command() -> void:
-	# Two-layer click: a high tick + a quick low body pulse.
-	var pitch: float = randf_range(255.0, 320.0)
-	_play_tone(pitch, randf_range(0.05, 0.07), randf_range(-12.0, -9.0), randf_range(1.0, 2.5))
-	_play_tone(pitch * 0.45, randf_range(0.04, 0.06), randf_range(-15.0, -12.0))
+	# Recorded confirm sample — pitched UP slightly so command-issue
+	# reads brighter than select. Falls back to procedural beep if no
+	# bank loaded.
+	var stream: AudioStream = _pick(_sfx_confirm)
+	if stream:
+		var pitch: float = randf_range(1.05, 1.20)
+		_emit(stream, randf_range(-8.0, -5.0), pitch)
+		return
+	var pitch_proc: float = randf_range(255.0, 320.0)
+	_play_tone(pitch_proc, randf_range(0.05, 0.07), randf_range(-12.0, -9.0), randf_range(1.0, 2.5))
+	_play_tone(pitch_proc * 0.45, randf_range(0.04, 0.06), randf_range(-15.0, -12.0))
 
 func play_select() -> void:
-	# Two-layer ping: bright lead tone + a fifth above it for color.
+	# Same recorded confirm bank as command, but pitched DOWN so the
+	# two read distinctly — selection feels lower and softer than
+	# issuing an order.
+	var stream: AudioStream = _pick(_sfx_confirm)
+	if stream:
+		var pitch: float = randf_range(0.85, 0.95)
+		_emit(stream, randf_range(-12.0, -9.0), pitch)
+		return
 	var freq: float = randf_range(360.0, 460.0)
 	_play_tone(freq, randf_range(0.035, 0.05), randf_range(-15.0, -12.0))
 	if randf() < 0.6:
@@ -192,9 +257,65 @@ func play_construction_complete(at: Vector3 = Vector3.INF) -> void:
 	_spatial_pos = Vector3.INF
 
 func play_error() -> void:
-	# Low buzz with a slight detune wobble.
+	# Recorded error stinger when the bank is loaded; falls back to
+	# the layered procedural buzz otherwise. Pitch jitter even on a
+	# single-variant bank so repeated rejected commands don't sound
+	# identical.
+	var stream: AudioStream = _pick(_sfx_error)
+	if stream:
+		var pitch: float = randf_range(0.92, 1.08)
+		_emit(stream, randf_range(-7.0, -5.0), pitch)
+		return
 	_play_tone(randf_range(70.0, 82.0), randf_range(0.22, 0.28), -6.0, randf_range(-2.0, 2.0))
 	_play_filtered_noise(0.18, 800.0, -16.0)
+
+
+func play_huge_explosion(at: Vector3 = Vector3.INF) -> void:
+	## Catastrophic detonation — ammo dump or HQ destruction. Bigger
+	## sample + louder + slight pitch jitter so back-to-back booms
+	## (e.g. chain detonation) don't sound copy-pasted.
+	var stream: AudioStream = _pick(_sfx_explosion_huge)
+	if stream:
+		var pitch: float = randf_range(0.88, 1.08)
+		_spatial_pos = at
+		_emit(stream, randf_range(-1.0, 2.0), pitch)
+		_spatial_pos = Vector3.INF
+		return
+	# Fall back to the standard unit-destroyed bank if the huge bank
+	# isn't loaded — better than silence.
+	play_unit_destroyed(at)
+
+
+func play_building_collapse(at: Vector3 = Vector3.INF) -> void:
+	## Crumbling masonry / steel — distinct from the unit-death
+	## explosion so the player can hear "a building went down" vs
+	## "another squad died."
+	var stream: AudioStream = _pick(_sfx_building_collapse)
+	if stream:
+		var pitch: float = randf_range(0.92, 1.05)
+		_spatial_pos = at
+		_emit(stream, randf_range(-4.0, -1.0), pitch)
+		_spatial_pos = Vector3.INF
+		return
+	# Fall back to large explosion if no collapse bank is loaded.
+	if not _sfx_explosion_large.is_empty():
+		var alt: AudioStream = _pick(_sfx_explosion_large)
+		_spatial_pos = at
+		_emit(alt, randf_range(-3.0, 0.0), randf_range(0.85, 1.0))
+		_spatial_pos = Vector3.INF
+
+
+func play_defeat() -> void:
+	## Match-end loss stinger — UI-level (not spatial). Two variants
+	## random-pick so repeated playthroughs don't always hear the same
+	## one.
+	var stream: AudioStream = _pick(_sfx_defeat)
+	if stream:
+		# Light pitch jitter so the "Defeat Sound" / "Sad Defeat"
+		# choice plus a slight pitch shift gives 4-5 distinct flavours
+		# across runs.
+		var pitch: float = randf_range(0.96, 1.04)
+		_emit(stream, randf_range(-2.0, 1.0), pitch)
 
 
 func play_alert(severity: int = 0) -> void:
@@ -251,7 +372,14 @@ func _pick_weapon_fire_stream(weapon: WeaponResource) -> AudioStream:
 	var weight: float = _weapon_weight(weapon)
 	var rapid: float = _weapon_rapid_factor(weapon)
 	var role: StringName = weapon.role_tag
-	if role == &"AA" or weapon.rof_tier == &"continuous":
+	# Missile-tier weapons (single/slow/volley) launch visible missile
+	# projectiles — give them the missile-launch bank so the audio
+	# matches the visual. Checked first so it overrides the
+	# weight/role-based routing below.
+	var rof: StringName = weapon.rof_tier
+	if (rof == &"single" or rof == &"slow" or rof == &"volley") and not _sfx_missile_launch.is_empty():
+		return _pick(_sfx_missile_launch)
+	if role == &"AA" or rof == &"continuous":
 		return _pick(_sfx_laser)
 	if weight >= 0.7 and rapid < 0.3:
 		return _pick(_sfx_artillery)
@@ -361,16 +489,29 @@ func play_weapon_impact(at: Vector3 = Vector3.INF) -> void:
 	_spatial_pos = Vector3.INF
 
 
-func play_unit_destroyed(at: Vector3 = Vector3.INF) -> void:
-	# Full-volume recorded explosion. Procedural three-stage stack
-	# remains as fallback when no bank is loaded.
-	var stream: AudioStream = _pick(_sfx_explosion)
+func play_unit_destroyed(at: Vector3 = Vector3.INF, heavy: bool = false) -> void:
+	## Picks from the LARGE explosion bank for heavy units (Bulwarks,
+	## Harbingers, gunships), the standard bank for everything else.
+	## Combined with the per-call pitch jitter the player gets ~7
+	## distinct death sounds across the two banks instead of looping
+	## through 4. `heavy` is opt-in — Unit calls it from `_die` based
+	## on its unit_class.
+	var bank: Array[AudioStream] = _sfx_explosion
+	if heavy and not _sfx_explosion_large.is_empty():
+		bank = _sfx_explosion_large
+	var stream: AudioStream = _pick(bank)
 	if stream:
 		# Slight pitch-down so unit-deaths read heavier than impacts
 		# (which used the same bank pitched up).
 		var pitch: float = randf_range(0.85, 1.05)
 		_spatial_pos = at
-		_emit(stream, -3.0 + randf_range(-1.0, 1.0), pitch)
+		var vol_db: float = -3.0 + randf_range(-1.0, 1.0)
+		# Heavy explosions get a touch more volume and a wider pitch
+		# range so they feel weightier.
+		if heavy:
+			vol_db += 1.5
+			pitch = randf_range(0.80, 1.0)
+		_emit(stream, vol_db, pitch)
 		_spatial_pos = Vector3.INF
 		return
 	_spatial_pos = at

@@ -158,6 +158,11 @@ func _on_building_destroyed(owner_id: int) -> void:
 func _end_match(victory: bool) -> void:
 	_match_ended = true
 	match_over.emit(victory)
+	# Defeat stinger — only on loss for now (no victory sample yet).
+	if not victory:
+		var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
+		if audio and audio.has_method("play_defeat"):
+			audio.play_defeat()
 	_show_end_screen(victory)
 
 

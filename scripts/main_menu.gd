@@ -20,6 +20,12 @@ var _settings_panel: VBoxContainer = null
 
 
 func _ready() -> void:
+	# Install the gunmetal cursor so the main menu shares the in-game
+	# cursor look. Loaded via preload to avoid the class-name lookup
+	# parsing window — the static helper builds the texture directly
+	# without instancing a CursorManager node.
+	var cursor_script: GDScript = preload("res://scripts/cursor_manager.gd")
+	cursor_script.apply_default_cursor()
 	_apply_theme()
 	_build_layout()
 	_show_main()

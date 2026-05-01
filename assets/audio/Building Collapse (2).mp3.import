@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://bgxpt0wx8j5ek"
+path="res://.godot/imported/Building Collapse (2).mp3-dcefd932767a9b83fe88f234a8b08c81.mp3str"
+
+[deps]
+
+source_file="res://assets/audio/Building Collapse (2).mp3"
+dest_files=["res://.godot/imported/Building Collapse (2).mp3-dcefd932767a9b83fe88f234a8b08c81.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

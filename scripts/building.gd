@@ -2272,6 +2272,17 @@ func take_damage(amount: int, _attacker: Node3D = null) -> void:
 		_spawn_building_wreck()
 		if owner_id == 0:
 			_emit_player_destroyed_alert()
+		# Building destruction audio — distinct collapse sample (not the
+		# unit-death explosion) so the player can hear what kind of loss
+		# happened. HQs use the catastrophic huge-explosion bank instead;
+		# everything else collapses.
+		var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
+		if audio:
+			var is_hq: bool = stats and stats.building_id == &"headquarters"
+			if is_hq and audio.has_method("play_huge_explosion"):
+				audio.play_huge_explosion(global_position)
+			elif audio.has_method("play_building_collapse"):
+				audio.play_building_collapse(global_position)
 		destroyed.emit()
 		# Re-bake so units can walk through the now-empty footprint.
 		var arena_dead: Node = get_tree().current_scene
