@@ -169,17 +169,48 @@ func _build_visuals() -> void:
 	_hull.set_surface_override_material(0, hull_mat)
 	add_child(_hull)
 
-	# Tread blocks on each side.
+	# Tread layout — Anvil ships a single long tread per side with
+	# detailed plates, a visible drive sprocket up front, and an
+	# idler wheel at the rear. Sable uses TWO shorter tread sets per
+	# side ("bogie" pairs) for a quicker, more agile silhouette read.
+	# Both layouts emit detailed plate strips on top of the tread so
+	# the side panel doesn't look like a mono-coloured block.
+	var sable: bool = _faction_id() == 1
 	for side: int in 2:
 		var sx: float = -1.95 if side == 0 else 1.95
-		var tread := MeshInstance3D.new()
-		var tb := BoxMesh.new()
-		tb.size = Vector3(0.5, 0.7, 5.2)
-		tread.mesh = tb
-		tread.position = Vector3(sx, 0.4, 0)
-		var tread_mat := _make_metal(Color(0.18, 0.16, 0.14))
-		tread.set_surface_override_material(0, tread_mat)
-		add_child(tread)
+		if sable:
+			# Two bogie sets per side, staggered front + rear so the
+			# silhouette reads as multi-bogie (smaller, more wheels).
+			_build_tread_segment(sx, -1.6, 1.85)  # front bogie
+			_build_tread_segment(sx, 1.6, 1.85)   # rear bogie
+		else:
+			_build_tread_segment(sx, 0.0, 5.2)
+		# Drive sprocket up front (toothed wheel) — clearly the
+		# "front" of the vehicle. Shape uses a low-radial cylinder
+		# so the polygon edges read as gear teeth at distance.
+		var sprocket := MeshInstance3D.new()
+		var spr := CylinderMesh.new()
+		spr.top_radius = 0.42
+		spr.bottom_radius = 0.42
+		spr.height = 0.22
+		spr.radial_segments = 10
+		sprocket.mesh = spr
+		sprocket.rotation.z = PI * 0.5
+		sprocket.position = Vector3(sx, 0.42, -2.55)
+		sprocket.set_surface_override_material(0, _make_metal(Color(0.10, 0.10, 0.10)))
+		add_child(sprocket)
+		# Idler wheel at the rear — smooth round wheel, no teeth.
+		var idler := MeshInstance3D.new()
+		var idr := CylinderMesh.new()
+		idr.top_radius = 0.36
+		idr.bottom_radius = 0.36
+		idr.height = 0.22
+		idr.radial_segments = 16
+		idler.mesh = idr
+		idler.rotation.z = PI * 0.5
+		idler.position = Vector3(sx, 0.42, 2.55)
+		idler.set_surface_override_material(0, _make_metal(Color(0.18, 0.16, 0.14)))
+		add_child(idler)
 
 	# Workshop / cargo box on top of the hull.
 	var workshop := MeshInstance3D.new()
@@ -218,25 +249,50 @@ func _build_visuals() -> void:
 	nose.position = Vector3(0.0, 0.65, -2.1)
 	nose.set_surface_override_material(0, _make_metal(Color(0.22, 0.2, 0.18)))
 	add_child(nose)
-	# Headlight pair on the nose — emissive amber so the front reads even
-	# from a great distance.
+	# Headlight pair on the nose — emissive amber, brighter than v1
+	# so the front reads at any zoom.
 	for side: int in 2:
 		var hx: float = -0.85 if side == 0 else 0.85
 		var headlight := MeshInstance3D.new()
 		var hl_sphere := SphereMesh.new()
-		hl_sphere.radius = 0.13
-		hl_sphere.height = 0.26
+		hl_sphere.radius = 0.16
+		hl_sphere.height = 0.32
 		headlight.mesh = hl_sphere
-		headlight.position = Vector3(hx, 0.78, -2.55)
+		headlight.position = Vector3(hx, 0.82, -2.60)
 		var hl_mat := StandardMaterial3D.new()
-		hl_mat.albedo_color = Color(1.0, 0.75, 0.4)
+		hl_mat.albedo_color = Color(1.0, 0.78, 0.42)
 		hl_mat.emission_enabled = true
-		hl_mat.emission = Color(1.0, 0.75, 0.4)
-		hl_mat.emission_energy_multiplier = 2.0
+		hl_mat.emission = Color(1.0, 0.78, 0.42)
+		hl_mat.emission_energy_multiplier = 3.4
+		hl_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		headlight.set_surface_override_material(0, hl_mat)
 		add_child(headlight)
-	# Rear exhaust block — short stacks on the back of the chassis. Gives
-	# back of Crawler a clearly different silhouette from the front.
+	# Yellow-and-black hazard chevrons painted on the nose top —
+	# unmistakable forward indicator from the standard top-down RTS
+	# camera. Three V-shaped stripes pointing -Z (forward).
+	var chevron_mat := StandardMaterial3D.new()
+	chevron_mat.albedo_color = Color(0.95, 0.78, 0.18, 1.0)
+	chevron_mat.emission_enabled = true
+	chevron_mat.emission = Color(0.95, 0.78, 0.18, 1.0)
+	chevron_mat.emission_energy_multiplier = 0.55
+	chevron_mat.roughness = 0.6
+	for c_i: int in 3:
+		# Two short slabs forming a V; each pair is one chevron.
+		var z_offset: float = -1.65 - float(c_i) * 0.30
+		for slab_side: int in 2:
+			var slab := MeshInstance3D.new()
+			var sb := BoxMesh.new()
+			sb.size = Vector3(0.85, 0.04, 0.16)
+			slab.mesh = sb
+			var sx2: float = -0.45 if slab_side == 0 else 0.45
+			slab.position = Vector3(sx2, 0.92, z_offset)
+			slab.rotation.x = deg_to_rad(-22.0)
+			slab.rotation.y = deg_to_rad(28.0 if slab_side == 0 else -28.0)
+			slab.set_surface_override_material(0, chevron_mat)
+			add_child(slab)
+	# Rear exhaust block — short stacks on the back of the chassis,
+	# now joined by a pair of red taillights so the rear is just as
+	# legible as the front.
 	for side: int in 2:
 		var ex_x: float = -0.7 if side == 0 else 0.7
 		var exhaust := MeshInstance3D.new()
@@ -246,6 +302,22 @@ func _build_visuals() -> void:
 		exhaust.position = Vector3(ex_x, 1.4, 2.4)
 		exhaust.set_surface_override_material(0, _make_metal(Color(0.16, 0.14, 0.12)))
 		add_child(exhaust)
+	# Red taillights on the rear face, mirror of the headlight pair.
+	var tail_mat := StandardMaterial3D.new()
+	tail_mat.albedo_color = Color(0.95, 0.20, 0.15, 1.0)
+	tail_mat.emission_enabled = true
+	tail_mat.emission = Color(1.0, 0.25, 0.18, 1.0)
+	tail_mat.emission_energy_multiplier = 2.6
+	tail_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	for tail_side: int in 2:
+		var tx: float = -1.30 if tail_side == 0 else 1.30
+		var tail := MeshInstance3D.new()
+		var tail_box := BoxMesh.new()
+		tail_box.size = Vector3(0.22, 0.10, 0.06)
+		tail.mesh = tail_box
+		tail.position = Vector3(tx, 0.95, 2.55)
+		tail.set_surface_override_material(0, tail_mat)
+		add_child(tail)
 
 	# Cargo crane / armature on the back top.
 	var crane := MeshInstance3D.new()
@@ -389,6 +461,43 @@ func _build_visuals() -> void:
 	# replaces the cyan beacon with a violet pulse-cap.
 	if _faction_id() == 1:
 		_apply_sable_crawler_overlay()
+
+
+func _build_tread_segment(sx: float, z_center: float, length: float) -> void:
+	## A single visible tread segment: the dark slab + a row of small
+	## "track plate" ribs across its top + a thin upper-rail strip.
+	## Used twice per side for Sable (front/rear bogie pairs) and
+	## once per side for Anvil (single long tread).
+	var tread := MeshInstance3D.new()
+	var tb := BoxMesh.new()
+	tb.size = Vector3(0.50, 0.70, length)
+	tread.mesh = tb
+	tread.position = Vector3(sx, 0.40, z_center)
+	tread.set_surface_override_material(0, _make_metal(Color(0.18, 0.16, 0.14)))
+	add_child(tread)
+	# Track plates — one slim raised rib every ~0.4u along the top.
+	# Reads as actual moving track segments rather than a slab.
+	var plate_count: int = maxi(int(length / 0.40), 4)
+	var plate_mat := _make_metal(Color(0.10, 0.10, 0.10))
+	for p_i: int in plate_count:
+		var t: float = (float(p_i) + 0.5) / float(plate_count)
+		var pz: float = z_center - length * 0.5 + t * length
+		var plate := MeshInstance3D.new()
+		var plate_box := BoxMesh.new()
+		plate_box.size = Vector3(0.56, 0.10, 0.18)
+		plate.mesh = plate_box
+		plate.position = Vector3(sx, 0.78, pz)
+		plate.set_surface_override_material(0, plate_mat)
+		add_child(plate)
+	# Upper rail strip — thin strip running the length of the tread
+	# along its outer top edge. Adds an extra silhouette line.
+	var rail := MeshInstance3D.new()
+	var rail_box := BoxMesh.new()
+	rail_box.size = Vector3(0.10, 0.06, length * 0.96)
+	rail.mesh = rail_box
+	rail.position = Vector3(sx + (0.20 if sx > 0.0 else -0.20), 0.78, z_center)
+	rail.set_surface_override_material(0, _make_metal(Color(0.32, 0.28, 0.22)))
+	add_child(rail)
 
 
 ## --- Faction lookup (unit-style) ---------------------------------------
