@@ -445,9 +445,25 @@ func _setup_navigation() -> void:
 	var nav_mesh := NavigationMesh.new()
 	nav_mesh.cell_size = 0.5
 	nav_mesh.cell_height = 0.25
-	nav_mesh.agent_radius = 2.5
+	# agent_radius shrinks the walkable area by this distance from
+	# every obstacle edge. With 2.5u and a 7u-wide ramp, the walkable
+	# strip on the slope was only 2u — too narrow for the path planner
+	# to keep a connection to plateau top, leaving units stuck at the
+	# wall. Dropping to 1.5u gives a 4u walkable strip on a 7u ramp,
+	# which is enough for both light and heavy units to traverse.
+	nav_mesh.agent_radius = 1.5
 	nav_mesh.agent_height = 2.0
-	nav_mesh.agent_max_climb = 2.0
+	# agent_max_climb caps the vertical distance Recast will treat as
+	# a "step" between two adjacent walkable cells. Plateaus are 1.5-2u
+	# tall — if max_climb >= plateau height, the bake creates a direct
+	# adjacency from the ground navmesh to the plateau-top navmesh
+	# along the ENTIRE plateau perimeter, not just at the ramp. The
+	# path planner then picks "walk off the cliff" as the shortest
+	# route, which is exactly the "unit dives off the plateau and gets
+	# stuck mid-air" symptom the user reported. Cap at 0.5u so the
+	# bake only connects plateau-top to the ground via the ramp's
+	# walkable slope (which has a smooth gradient, not a 1.5u step).
+	nav_mesh.agent_max_climb = 0.5
 	nav_mesh.agent_max_slope = 30.0
 	# Pull source geometry from the "terrain" group + the ground
 	# collision (already in scene). The bake walks each shape, treats
