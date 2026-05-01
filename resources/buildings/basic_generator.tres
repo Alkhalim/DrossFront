@@ -11,5 +11,5 @@ cost_salvage = 180
 build_time = 21.0
 power_consumption = 0
 power_production = 30
-footprint_size = Vector3(3, 3, 3)
+footprint_size = Vector3(3, 4.5, 3)
 placeholder_color = Color(0.25, 0.3, 0.4, 1)

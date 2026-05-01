@@ -12,6 +12,41 @@ var _enemy_color := Color(1.0, 0.2, 0.15, 1.0)
 var _neutral_color := Color(0.85, 0.7, 0.3, 1.0)
 var _wreck_color := Color(0.4, 0.35, 0.25, 0.5)
 
+## Faction-coloured decorative border + ping flash overlay. Border is
+## drawn each frame around the actual map area; pings are short-lived
+## flash markers triggered by alert events.
+const BORDER_THICKNESS: float = 8.0
+var _border_accent: Color = Color(1.0, 0.82, 0.35, 1.0)  # Anvil brass; replaced at _ready
+
+## Active pings — list of {pos, t_start, color}. Pings live for
+## PING_LIFETIME seconds and pulse expanding rings.
+var _pings: Array[Dictionary] = []
+const PING_LIFETIME: float = 1.6
+const PING_MAX_RADIUS: float = 18.0
+
+
+func _ready() -> void:
+	# Resolve the player's faction once and cache the accent colour
+	# used for the border and corner ticks.
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if settings and "player_faction" in settings:
+		var fid: int = settings.get("player_faction") as int
+		if fid == 1:
+			_border_accent = Color(0.78, 0.45, 1.0, 1.0)  # Sable violet
+		else:
+			_border_accent = Color(1.0, 0.82, 0.35, 1.0)  # Anvil brass
+
+
+func ping(world_pos: Vector3, color: Color = Color.WHITE) -> void:
+	## Add a short-lived flash at the given world position. Other systems
+	## (alert manager, event handlers) call this to draw the player's
+	## eye to the minimap location of an event.
+	_pings.append({
+		"pos": world_pos,
+		"t_start": Time.get_ticks_msec() / 1000.0,
+		"color": color,
+	})
+
 
 func _color_for_owner(owner_idx: int) -> Color:
 	# Prefer the PlayerRegistry's perspective rule so 2v2 allies show in
@@ -43,12 +78,37 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
-	var map_size: Vector2 = size
+	# Decorative faction-themed margin lives in the outer
+	# BORDER_THICKNESS pixels; the actual map area is inset.
+	var full: Vector2 = size
+	var map_origin: Vector2 = Vector2(BORDER_THICKNESS, BORDER_THICKNESS)
+	var map_size: Vector2 = full - Vector2(BORDER_THICKNESS, BORDER_THICKNESS) * 2.0
 	var half_world: float = MAP_WORLD_SIZE / 2.0
 
-	# Background
-	draw_rect(Rect2(Vector2.ZERO, map_size), Color(0.08, 0.08, 0.07, 0.8))
-	draw_rect(Rect2(Vector2.ZERO, map_size), Color(0.3, 0.3, 0.3, 0.5), false, 1.0)
+	# Decorative border — outer dark frame + faction-coloured inner
+	# accent bands + corner ticks. Reads as a stamped insignia plate
+	# rather than a flat dark rectangle.
+	draw_rect(Rect2(Vector2.ZERO, full), Color(0.04, 0.04, 0.05, 0.95))
+	# Faction accent strip just inside the outer frame.
+	var inner_rect := Rect2(Vector2(2, 2), full - Vector2(4, 4))
+	draw_rect(inner_rect, Color.TRANSPARENT, false, 2.0)
+	draw_rect(inner_rect, _border_accent.darkened(0.30), false, 2.0)
+	# Corner ticks — small L-brackets in faction accent at each
+	# corner. Stops the frame from looking like a generic UI panel.
+	var tick_len: float = 14.0
+	var tick_thick: float = 2.0
+	for cx_i: int in 2:
+		for cy_i: int in 2:
+			var ox: float = 2.0 if cx_i == 0 else full.x - 2.0
+			var oy: float = 2.0 if cy_i == 0 else full.y - 2.0
+			var dir_x: int = 1 if cx_i == 0 else -1
+			var dir_y: int = 1 if cy_i == 0 else -1
+			draw_line(Vector2(ox, oy), Vector2(ox + dir_x * tick_len, oy), _border_accent, tick_thick)
+			draw_line(Vector2(ox, oy), Vector2(ox, oy + dir_y * tick_len), _border_accent, tick_thick)
+
+	# Map background — inset rectangle.
+	draw_rect(Rect2(map_origin, map_size), Color(0.08, 0.08, 0.07, 0.85))
+	draw_rect(Rect2(map_origin, map_size), Color(0.3, 0.3, 0.3, 0.55), false, 1.0)
 
 	# Draw buildings
 	var buildings: Array[Node] = get_tree().get_nodes_in_group("buildings")
@@ -115,11 +175,37 @@ func _draw() -> void:
 		)
 		draw_rect(view_rect, Color(1.0, 1.0, 1.0, 0.3), false, 1.0)
 
+	# Active pings — expanding rings + filled dot, fading over
+	# PING_LIFETIME seconds. Drawn last so they render on top of
+	# unit dots / camera rect.
+	var now_sec: float = Time.get_ticks_msec() / 1000.0
+	var i: int = _pings.size() - 1
+	while i >= 0:
+		var ping_data: Dictionary = _pings[i]
+		var elapsed: float = now_sec - (ping_data["t_start"] as float)
+		if elapsed > PING_LIFETIME:
+			_pings.remove_at(i)
+			i -= 1
+			continue
+		var t: float = elapsed / PING_LIFETIME
+		var ping_color: Color = ping_data["color"] as Color
+		ping_color.a = 1.0 - t
+		var ping_pos: Vector2 = _world_to_map(ping_data["pos"] as Vector3, map_size, half_world)
+		# Expanding outer ring.
+		draw_arc(ping_pos, PING_MAX_RADIUS * t, 0.0, TAU, 24, ping_color, 2.0, true)
+		# Bright core that decays slower.
+		var core_color: Color = ping_data["color"] as Color
+		core_color.a = clampf(1.0 - t * 0.6, 0.0, 1.0)
+		draw_circle(ping_pos, 3.5, core_color)
+		i -= 1
+
 
 func _world_to_map(world_pos: Vector3, map_size: Vector2, half_world: float) -> Vector2:
 	var nx: float = (world_pos.x + half_world) / (half_world * 2.0)
 	var nz: float = (world_pos.z + half_world) / (half_world * 2.0)
-	return Vector2(nx * map_size.x, nz * map_size.y)
+	# Offset by the decorative-border inset so dots land inside the
+	# map's actual draw area, not under the border.
+	return Vector2(BORDER_THICKNESS + nx * map_size.x, BORDER_THICKNESS + nz * map_size.y)
 
 
 var _is_panning: bool = false

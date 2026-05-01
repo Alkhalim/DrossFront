@@ -26,6 +26,18 @@ func emit_alert(message: String, severity: int = Severity.INFO, world_pos: Vecto
 			return
 		_channel_next_at[channel] = now + cooldown
 	alert_emitted.emit(message, severity, world_pos)
+	# Minimap ping flash at the alert's world position. Severity
+	# determines the colour: critical = red, warning = orange,
+	# info = teal. Ignored when world_pos is the default zero.
+	if world_pos != Vector3.ZERO:
+		var minimap: Node = get_tree().current_scene.get_node_or_null("HUD/Minimap") if get_tree() else null
+		if minimap and minimap.has_method("ping"):
+			var ping_color: Color = Color(0.4, 0.85, 1.0, 1.0)
+			if severity >= 2:
+				ping_color = Color(1.0, 0.30, 0.20, 1.0)
+			elif severity >= 1:
+				ping_color = Color(1.0, 0.65, 0.20, 1.0)
+			minimap.call("ping", world_pos, ping_color)
 	# Commander voiceline for combat alerts. Building damage / unit
 	# damage / unit destruction all surface as warning-or-critical
 	# alerts on dedicated channels — the channel cooldown above

@@ -91,6 +91,7 @@ func _ready() -> void:
 	_build_global_queue_panel()
 	_build_fps_counter()
 	_build_faction_watermark()
+	_apply_top_bar_faction_theme()
 	# Faster tooltip popups — Godot's default ~500ms is too slow for
 	# in-battle decisions where the player needs to verify costs /
 	# weapon roles in a couple of seconds. 0.18s feels responsive
@@ -976,6 +977,43 @@ func _build_fps_counter() -> void:
 	_fps_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_fps_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_fps_label)
+
+
+func _apply_top_bar_faction_theme() -> void:
+	## Adds a faction-coloured underline to the top resource bar so
+	## the bar itself signals which faction the player picked. Anvil
+	## gets warm brass, Sable gets violet. Drawn as a thin ColorRect
+	## anchored to the bottom edge of the TopBarBackdrop.
+	var backdrop: ColorRect = get_node_or_null("TopBarBackdrop") as ColorRect
+	if not backdrop:
+		return
+	var faction_id: int = 0
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if settings and "player_faction" in settings:
+		faction_id = settings.get("player_faction") as int
+	var accent: Color = Color(1.0, 0.82, 0.35, 1.0) if faction_id == 0 else Color(0.78, 0.45, 1.0, 1.0)
+	# Thin underline strip — 2px tall, full width, anchored to the
+	# bottom of the backdrop.
+	var underline := ColorRect.new()
+	underline.name = "TopBarFactionUnderline"
+	underline.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	underline.offset_top = -2
+	underline.offset_bottom = 0
+	underline.color = accent
+	underline.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	backdrop.add_child(underline)
+	# Pair of small faction-coloured corner caps so the bar reads
+	# as a properly framed strip rather than just a dark rectangle.
+	for side: int in 2:
+		var cap := ColorRect.new()
+		cap.set_anchors_preset(Control.PRESET_TOP_LEFT if side == 0 else Control.PRESET_TOP_RIGHT)
+		cap.offset_left = 0 if side == 0 else -64
+		cap.offset_right = 64 if side == 0 else 0
+		cap.offset_top = 0
+		cap.offset_bottom = 4
+		cap.color = accent.darkened(0.15)
+		cap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		backdrop.add_child(cap)
 
 
 func _build_faction_watermark() -> void:
