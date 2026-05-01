@@ -1715,7 +1715,13 @@ func _spawn_walkable_plateau(center: Vector3, top_size: Vector2, height: float, 
 	root.collision_layer = 4
 	root.collision_mask = 0
 	root.position = center
+	# "elevation" — used by other systems to identify plateaus.
+	# "terrain" — required so the navmesh bake walks this collision
+	# shape and recognises the plateau top + ramps as walkable surfaces.
+	# Without this the plateaus were entirely missing from the bake
+	# and units couldn't path on/off them.
 	root.add_to_group("elevation")
+	root.add_to_group("terrain")
 	add_child(root)
 
 	# Two materials — same wear texture, two albedo shades. The top
@@ -2041,7 +2047,11 @@ func _spawn_plateau_ramp(plateau_center: Vector3, top_size: Vector2, height: flo
 	root.collision_layer = 4
 	root.collision_mask = 0
 	root.position = plateau_center
+	# Both groups — see plateau body comment. The bake needs the
+	# convex-hull ramp to be in "terrain" so the slope poly becomes
+	# walkable navmesh.
 	root.add_to_group("elevation")
+	root.add_to_group("terrain")
 	add_child(root)
 
 	# Mesh — sloped top + two side triangles + underside. UVs on every

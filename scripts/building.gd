@@ -1322,6 +1322,13 @@ func _add_nav_obstacle() -> void:
 	])
 	obstacle.avoidance_enabled = true
 	obstacle.radius = sqrt(half_x * half_x + half_z * half_z) + 0.4
+	# Carve this obstacle out of any active navmesh so units re-plan
+	# paths around the building as it appears. Without this, buildings
+	# that the AI constructs after match start are invisible to the
+	# baked navmesh, and units path straight through them and oscillate
+	# against the collision wall — the "stuck on building" symptom.
+	if "affect_navigation_mesh" in obstacle:
+		obstacle.affect_navigation_mesh = true
 	add_child(obstacle)
 
 
