@@ -339,13 +339,13 @@ func _apply_map_visuals() -> void:
 	var world_env: WorldEnvironment = get_node_or_null("WorldEnvironment") as WorldEnvironment
 
 	if _is_ashplains():
-		# Ashplains — warm volcanic ash. Sunset-like sun, warm amber
-		# directional light, cool blue fill, dusty-orange ambient. Sky
-		# clear-color shifts to a hazy beige rather than near-black.
+		# Ashplains — warm volcanic ash, pushed harder into wasteland
+		# territory: deeper orange-red base tint, sunset sun, cool
+		# blue fill, hazy beige sky.
 		if ground:
 			var gmat: StandardMaterial3D = ground.get_surface_override_material(0) as StandardMaterial3D
 			if gmat:
-				gmat.albedo_color = Color(1.45, 1.10, 0.78, 1.0)  # multiplied with the noise — pulls greys toward warm tan
+				gmat.albedo_color = Color(1.85, 1.20, 0.72, 1.0)  # deeper warm wash so the desert reads as parched, not just cooler-tinted
 		if dir_light:
 			dir_light.light_color = Color(1.0, 0.78, 0.52, 1.0)
 			dir_light.light_energy = 1.35
@@ -383,11 +383,11 @@ func _apply_map_visuals() -> void:
 ## them). Player IDs 0/1 are team A, 3/4 are team B; 2 is reserved for the
 ## neutral pseudo-player so existing patrol code keeps working unchanged.
 const ROSTER_1V1: Array[Dictionary] = [
-	{"id": 0, "team": 0, "color": Color(0.15, 0.45, 0.9, 1.0), "human": true, "name": "Player"},
+	{"id": 0, "team": 0, "color": Color(0.10, 0.32, 1.0, 1.0), "human": true, "name": "Player"},
 	{"id": 1, "team": 1, "color": Color(0.85, 0.2, 0.15, 1.0), "human": false, "name": "AI Bravo"},
 ]
 const ROSTER_2V2: Array[Dictionary] = [
-	{"id": 0, "team": 0, "color": Color(0.15, 0.45, 0.9, 1.0), "human": true, "name": "Player"},
+	{"id": 0, "team": 0, "color": Color(0.10, 0.32, 1.0, 1.0), "human": true, "name": "Player"},
 	{"id": 1, "team": 0, "color": Color(0.2, 0.85, 0.5, 1.0), "human": false, "name": "AI Charlie"},
 	{"id": 3, "team": 1, "color": Color(0.85, 0.2, 0.15, 1.0), "human": false, "name": "AI Bravo"},
 	{"id": 4, "team": 1, "color": Color(0.95, 0.55, 0.2, 1.0), "human": false, "name": "AI Delta"},
@@ -2383,16 +2383,25 @@ func _setup_ground_patches() -> void:
 		biomes = [
 			# Pale-ash drift zones either side of the central ridge —
 			# wash out a wide swath of the open ground so it reads as
-			# "ash plains", not "grey field".
-			{"pos": Vector3(0.0, 0.025, 60.0), "size": 90.0, "tint": Color(0.42, 0.36, 0.27, 0.45), "rough": 1.0},
-			{"pos": Vector3(0.0, 0.025, -60.0), "size": 90.0, "tint": Color(0.42, 0.36, 0.27, 0.45), "rough": 1.0},
+			# "ash plains", not "grey field". Pushed warmer + more
+			# saturated so the sand has actual desert character.
+			{"pos": Vector3(0.0, 0.025, 60.0), "size": 90.0, "tint": Color(0.55, 0.42, 0.24, 0.62), "rough": 1.0},
+			{"pos": Vector3(0.0, 0.025, -60.0), "size": 90.0, "tint": Color(0.55, 0.42, 0.24, 0.62), "rough": 1.0},
 			# Volcanic scar that crosses the central deposit area —
 			# darker than the rest, marks where the heaviest fighting
 			# tends to happen.
-			{"pos": Vector3(0.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.10, 0.08, 0.07, 0.55), "rough": 1.0},
+			{"pos": Vector3(0.0, 0.025, 0.0), "size": 55.0, "tint": Color(0.08, 0.06, 0.05, 0.70), "rough": 1.0},
+			# Bleached bone-white salt-flat patches — distinctive
+			# wasteland read.
+			{"pos": Vector3(50.0, 0.025, 95.0), "size": 38.0, "tint": Color(0.78, 0.72, 0.55, 0.50), "rough": 1.0},
+			{"pos": Vector3(-50.0, 0.025, -95.0), "size": 38.0, "tint": Color(0.78, 0.72, 0.55, 0.50), "rough": 1.0},
+			# Cracked-earth dark zones — deep ferrous-rust tone that
+			# breaks up the warm sand belt.
+			{"pos": Vector3(70.0, 0.025, 30.0), "size": 42.0, "tint": Color(0.22, 0.13, 0.08, 0.65), "rough": 1.0},
+			{"pos": Vector3(-70.0, 0.025, -30.0), "size": 42.0, "tint": Color(0.22, 0.13, 0.08, 0.65), "rough": 1.0},
 			# Far-flank dust patches.
-			{"pos": Vector3(105.0, 0.025, 0.0), "size": 45.0, "tint": Color(0.36, 0.30, 0.20, 0.4), "rough": 1.0},
-			{"pos": Vector3(-105.0, 0.025, 0.0), "size": 45.0, "tint": Color(0.36, 0.30, 0.20, 0.4), "rough": 1.0},
+			{"pos": Vector3(115.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.52, 0.40, 0.22, 0.55), "rough": 1.0},
+			{"pos": Vector3(-115.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.52, 0.40, 0.22, 0.55), "rough": 1.0},
 		]
 	else:
 		biomes = [
@@ -2415,12 +2424,14 @@ func _setup_ground_patches() -> void:
 			false,
 		)
 
-	# Small detail patches — keep the count modest so the per-patch
-	# transparency cost stays bounded. ~30 with soft edges reads denser
-	# than 60 with hard edges did.
-	const DETAIL_COUNT: int = 32
+	# Small detail patches — denser than before so the eye reads the
+	# ground as patchy rather than uniform-noise. Map-aware roll so
+	# the desert gets cracked-earth and bleached-bone patches, while
+	# the foundry belt gets soot blots and oil spills.
+	var detail_count: int = 56
 	const MAP_HALF: float = 135.0
-	for i: int in DETAIL_COUNT:
+	var on_ash: bool = _is_ashplains()
+	for i: int in detail_count:
 		var pos := Vector3(
 			randf_range(-MAP_HALF, MAP_HALF),
 			0.03,
@@ -2430,16 +2441,34 @@ func _setup_ground_patches() -> void:
 		if absf(pos.x) < 12.0 and absf(pos.z) > 95.0:
 			continue
 		var roll: float = randf()
-		if roll < 0.55:
-			# Soot blot.
-			_spawn_soft_patch(pos, randf_range(5.0, 10.0), Color(0.05, 0.05, 0.05, randf_range(0.55, 0.8)), 1.0, false)
-		elif roll < 0.92:
-			# Sand smear.
-			_spawn_soft_patch(pos, randf_range(4.5, 8.5), Color(0.34, 0.27, 0.18, randf_range(0.45, 0.7)), 0.95, false)
+		if on_ash:
+			if roll < 0.30:
+				# Cracked-earth — dark warm patch with a slightly red
+				# undertone, reads as parched riverbed.
+				_spawn_soft_patch(pos, randf_range(4.0, 8.5), Color(0.22, 0.14, 0.09, randf_range(0.55, 0.78)), 1.0, false)
+			elif roll < 0.55:
+				# Bleached / salt-flat — pale tan-white wash.
+				_spawn_soft_patch(pos, randf_range(4.0, 9.0), Color(0.78, 0.72, 0.55, randf_range(0.40, 0.62)), 1.0, false)
+			elif roll < 0.85:
+				# Sand smear — warmer than the foundry version.
+				_spawn_soft_patch(pos, randf_range(4.5, 9.5), Color(0.50, 0.38, 0.22, randf_range(0.45, 0.7)), 0.95, false)
+			else:
+				# Volcanic-glass shard — small dark high-contrast spot.
+				_spawn_soft_patch(pos, randf_range(2.5, 5.0), Color(0.06, 0.04, 0.05, randf_range(0.65, 0.85)), 0.55, false)
 		else:
-			# Oil spill — gets its own multi-blob spawn so the silhouette
-			# reads as an irregular puddle, not a single-disc patch.
-			_spawn_oil_spill(pos)
+			if roll < 0.50:
+				# Soot blot.
+				_spawn_soft_patch(pos, randf_range(5.0, 10.0), Color(0.05, 0.05, 0.05, randf_range(0.55, 0.8)), 1.0, false)
+			elif roll < 0.85:
+				# Sand smear (cooler than the desert).
+				_spawn_soft_patch(pos, randf_range(4.5, 8.5), Color(0.34, 0.27, 0.18, randf_range(0.45, 0.7)), 0.95, false)
+			elif roll < 0.95:
+				# Oil spill — gets its own multi-blob spawn so the
+				# silhouette reads as an irregular puddle.
+				_spawn_oil_spill(pos)
+			else:
+				# Slag-grey patch — cool industrial residue.
+				_spawn_soft_patch(pos, randf_range(3.5, 6.5), Color(0.22, 0.22, 0.24, randf_range(0.45, 0.65)), 0.95, false)
 
 
 func _spawn_soft_patch(pos: Vector3, base_size: float, tint: Color, roughness: float, oil: bool) -> void:

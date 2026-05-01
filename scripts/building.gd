@@ -503,14 +503,27 @@ func _team_collar(width: float, height: float, depth: float, pos: Vector3) -> vo
 
 func _detail_headquarters() -> void:
 	var fs: Vector3 = stats.footprint_size
-	# Team collar at the base of the spire so the upper geometry stays readable.
-	_team_collar(fs.x * 0.32, 0.12, fs.z * 0.32, Vector3(0, fs.y + 0.06, 0))
+	# Roof base Y — Anvil's command tower sits on the placeholder hull
+	# (y ≈ fs.y); Sable adds a stepped tower overlay whose top spine
+	# reaches y ≈ fs.y * 1.10, so we push every rooftop element up by
+	# that delta to avoid the spire / dish being buried inside the
+	# Sable hull.
+	var roof_base_y: float = fs.y
+	if _resolve_faction_id() == 1:
+		roof_base_y = fs.y * 1.10
+	# Team collar wraps the base of the visible spire — same player
+	# color band the rest of the building gets, lifted to sit on the
+	# Sable hull's roof instead of hiding inside it.
+	_team_collar(fs.x * 0.32, 0.12, fs.z * 0.32, Vector3(0, roof_base_y + 0.06, 0))
 	# Central command spire — a tall thin tower rising from the roof.
+	# Lifted slightly above the roof_cap and brass disc so the spire's
+	# bottom face doesn't z-fight with their top faces (was visibly
+	# flickering between roof cap, brass disc, and spire base).
 	var spire := MeshInstance3D.new()
 	var sb := BoxMesh.new()
 	sb.size = Vector3(fs.x * 0.25, fs.y * 0.65, fs.z * 0.25)
 	spire.mesh = sb
-	spire.position = Vector3(0, fs.y + sb.size.y * 0.5, 0)
+	spire.position = Vector3(0, roof_base_y + 0.10 + sb.size.y * 0.5, 0)
 	spire.set_surface_override_material(0, _detail_dark_metal_mat())
 	_attach_visual(spire)
 
@@ -519,7 +532,7 @@ func _detail_headquarters() -> void:
 	# glowing dot or a tilted base around with it. The pivot rotates a
 	# parabolic dome + a feed horn that's structurally attached to the
 	# dome's back.
-	var dish_top_y: float = fs.y + sb.size.y + 0.55
+	var dish_top_y: float = roof_base_y + 0.10 + sb.size.y + 0.55
 	# Static base collar — small disc on top of the spire so the spire's
 	# square corners are hidden when the dish rotates.
 	var dish_collar := MeshInstance3D.new()
@@ -528,7 +541,7 @@ func _detail_headquarters() -> void:
 	collar_cyl.bottom_radius = fs.x * 0.22
 	collar_cyl.height = 0.1
 	dish_collar.mesh = collar_cyl
-	dish_collar.position = Vector3(0.0, fs.y + sb.size.y + 0.05, 0.0)
+	dish_collar.position = Vector3(0.0, roof_base_y + 0.10 + sb.size.y + 0.05, 0.0)
 	dish_collar.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.28, 0.26, 0.24)))
 	_attach_visual(dish_collar)
 	# Static vertical mast under the rotating dome — the dome sits on top
@@ -608,7 +621,7 @@ func _detail_headquarters() -> void:
 	beacon_sphere.radius = 0.12
 	beacon_sphere.height = 0.24
 	beacon.mesh = beacon_sphere
-	beacon.position = Vector3(0, fs.y + sb.size.y + 0.45, 0)
+	beacon.position = Vector3(0, roof_base_y + 0.10 + sb.size.y + 0.45, 0)
 	var beacon_mat: StandardMaterial3D = _detail_emissive_mat(Color(1.0, 0.4, 0.2), 2.5)
 	beacon.set_surface_override_material(0, beacon_mat)
 	_attach_visual(beacon)
@@ -699,29 +712,42 @@ func _detail_foundry(advanced: bool) -> void:
 	stack.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.15, 0.13, 0.12)))
 	_attach_visual(stack)
 
-	# Real 3D stack mouth — outer rim collar (slightly larger radius
-	# than the stack tube, with visible thickness) over a sunken
-	# molten core (smaller, hotter, sitting INSIDE the stack throat).
-	# Reads as a hollow chimney mouth instead of a glowing disc.
+	# Real 3D chimney mouth — annular rim (torus) over a recessed dark
+	# inner throat with the molten core sunk deep enough that the eye
+	# reads "looking down a hot chimney" instead of "glowing disc on
+	# top of a brick".
 	var rim := MeshInstance3D.new()
-	var rim_cyl := CylinderMesh.new()
-	rim_cyl.top_radius = stack_cyl.top_radius * 1.05
-	rim_cyl.bottom_radius = stack_cyl.top_radius * 1.05
-	rim_cyl.height = 0.18
-	rim.mesh = rim_cyl
-	rim.position = Vector3(stack.position.x, fs.y + stack_cyl.height + 0.09, stack.position.z)
+	var rim_torus := TorusMesh.new()
+	rim_torus.inner_radius = stack_cyl.top_radius * 0.85
+	rim_torus.outer_radius = stack_cyl.top_radius * 1.10
+	rim_torus.rings = 24
+	rim_torus.ring_segments = 8
+	rim.mesh = rim_torus
+	rim.position = Vector3(stack.position.x, fs.y + stack_cyl.height + 0.04, stack.position.z)
 	rim.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.10, 0.08, 0.07)))
 	_attach_visual(rim)
-	# Sunken molten core — sits below the rim's top edge so the
-	# heat appears recessed.
+	# Inner throat — dark cylinder sunk well below the rim so when
+	# the camera looks at the stack from anywhere but directly above,
+	# it sees a deep dark tube.
+	var throat := MeshInstance3D.new()
+	var throat_cyl := CylinderMesh.new()
+	throat_cyl.top_radius = stack_cyl.top_radius * 0.84
+	throat_cyl.bottom_radius = stack_cyl.top_radius * 0.84
+	throat_cyl.height = 0.45
+	throat.mesh = throat_cyl
+	throat.position = Vector3(stack.position.x, fs.y + stack_cyl.height - 0.20, stack.position.z)
+	throat.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.04, 0.03, 0.02)))
+	_attach_visual(throat)
+	# Molten core — small intense disc at the bottom of the throat so
+	# the heat reads as "deep inside" rather than at the lip.
 	var core := MeshInstance3D.new()
 	var core_cyl := CylinderMesh.new()
-	core_cyl.top_radius = stack_cyl.top_radius * 0.78
-	core_cyl.bottom_radius = stack_cyl.top_radius * 0.78
-	core_cyl.height = 0.10
+	core_cyl.top_radius = stack_cyl.top_radius * 0.70
+	core_cyl.bottom_radius = stack_cyl.top_radius * 0.70
+	core_cyl.height = 0.06
 	core.mesh = core_cyl
-	core.position = Vector3(stack.position.x, fs.y + stack_cyl.height + 0.05, stack.position.z)
-	core.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.45, 0.10), 3.4))
+	core.position = Vector3(stack.position.x, fs.y + stack_cyl.height - 0.36, stack.position.z)
+	core.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.45, 0.10), 3.6))
 	_attach_visual(core)
 	# Hot-orange light at the stack tip — sells the molten interior.
 	var stack_light := OmniLight3D.new()
@@ -1580,7 +1606,7 @@ func _apply_team_ring() -> void:
 const ANVIL_BRASS := Color(0.78, 0.62, 0.18, 1.0)
 ## Sable's faction-identity accent — pale neon cyan glow line. Replaces
 ## the brass band on Sable buildings.
-const SABLE_NEON := Color(0.45, 0.95, 1.0, 1.0)
+const SABLE_NEON := Color(0.78, 0.35, 1.0, 1.0)  # violet, paired with unit.gd
 var _brass_band: MeshInstance3D = null
 
 
@@ -2118,7 +2144,7 @@ func _apply_sable_building_silhouette() -> void:
 
 	var fs: Vector3 = stats.footprint_size
 	var hull_color: Color = _faction_tint_building_chassis(stats.placeholder_color).darkened(0.05)
-	var seam_color: Color = Color(0.45, 0.95, 1.0, 1.0)
+	var seam_color: Color = Color(0.78, 0.35, 1.0, 1.0)
 
 	# Stepped main hull — base box (full footprint, ~70% height),
 	# narrower middle setback (~80% width, +25% height), then a thin
@@ -2235,10 +2261,15 @@ func _apply_sable_building_silhouette() -> void:
 	# Sensor spires — tall thin antennas off opposing corners of the
 	# top spine. Critical Sable silhouette element. Heights scale with
 	# building footprint so the HQ towers higher than a generator.
-	# Skip on HQ: the standard headquarters detail already adds a tall
-	# central command tower + radar dish, and the corner spires were
-	# clipping into it.
-	if stats.building_id == &"headquarters":
+	# Skip for buildings that already have prominent rooftop hardware
+	# (HQ command tower + dish, foundry smokestacks, advanced foundry
+	# stacks, aerodrome control mast, SAM site missile rack) so the
+	# spires don't clip into them.
+	if stats.building_id == &"headquarters" \
+			or stats.building_id == &"basic_foundry" \
+			or stats.building_id == &"advanced_foundry" \
+			or stats.building_id == &"aerodrome" \
+			or stats.building_id == &"sam_site":
 		return
 	var spire_h: float = fs.y * 1.2 + maxf(fs.x, fs.z) * 0.22
 	for spire_idx: int in 2:
@@ -2285,18 +2316,24 @@ func _apply_anvil_brutalist_extras() -> void:
 	plinth.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.16, 0.14)))
 	_attach_visual(plinth)
 
-	# Corner pylons — square iron-clad concrete pillars at each corner,
-	# slightly proud of the wall. Reads as the structural skeleton of
-	# the building.
+	# Corner pylons — square iron-clad concrete pillars sitting just
+	# OUTSIDE the hull walls (not flush with them — overlapping faces
+	# at exactly the wall plane caused z-fighting flicker). The pylons
+	# read as the structural skeleton wrapping the building.
 	var pylon_color := Color(0.24, 0.22, 0.20)
+	var pylon_half_x: float = fs.x * 0.09
+	var pylon_half_z: float = fs.z * 0.09
+	# Each pylon's outer wall is offset from the hull by the pylon's
+	# own half-extent + a hair so its shadow plane never coincides
+	# with the hull's.
 	for px: int in 2:
 		for pz: int in 2:
 			var pylon := MeshInstance3D.new()
 			var pbox := BoxMesh.new()
 			pbox.size = Vector3(fs.x * 0.18, fs.y * 1.02, fs.z * 0.18)
 			pylon.mesh = pbox
-			var ppx: float = (-fs.x * 0.5 + fs.x * 0.09) if px == 0 else (fs.x * 0.5 - fs.x * 0.09)
-			var ppz: float = (-fs.z * 0.5 + fs.z * 0.09) if pz == 0 else (fs.z * 0.5 - fs.z * 0.09)
+			var ppx: float = (-fs.x * 0.5 - pylon_half_x - 0.02) if px == 0 else (fs.x * 0.5 + pylon_half_x + 0.02)
+			var ppz: float = (-fs.z * 0.5 - pylon_half_z - 0.02) if pz == 0 else (fs.z * 0.5 + pylon_half_z + 0.02)
 			pylon.position = Vector3(ppx, fs.y * 0.51, ppz)
 			pylon.set_surface_override_material(0, _detail_dark_metal_mat(pylon_color))
 			_attach_visual(pylon)
@@ -2304,7 +2341,7 @@ func _apply_anvil_brutalist_extras() -> void:
 			# face, reads as a maintenance grip / structural collar.
 			var strap := MeshInstance3D.new()
 			var sbox := BoxMesh.new()
-			sbox.size = Vector3(fs.x * 0.20, 0.10, fs.z * 0.20)
+			sbox.size = Vector3(fs.x * 0.22, 0.10, fs.z * 0.22)
 			strap.mesh = sbox
 			strap.position = Vector3(ppx, fs.y * 0.42, ppz)
 			strap.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.32, 0.26, 0.20)))
@@ -2492,8 +2529,20 @@ func _spawn_unit(unit_stats: UnitStatResource) -> void:
 	# Computing the spawn distance from the actual footprint guarantees
 	# a clean exit lane on every building size.
 	var safe_radius: float = maxf(stats.footprint_size.x, stats.footprint_size.z) * 0.65 + 2.2
+	# Spawn on the building's RALLY side rather than the .tscn-baked
+	# SpawnPoint marker. The marker sits at local +Z (the back face of
+	# the building from the map's perspective), which on the player's
+	# HQ at world (0,0,+110) was dropping freshly-produced engineers
+	# behind the HQ — they then had to path all the way around the
+	# obstacle to reach the rally point in front, and frequently got
+	# stuck. Spawning toward the rally point keeps the freshly-produced
+	# unit inside the same navmesh region as their destination.
 	var fwd: Vector3
-	if _spawn_marker:
+	var rally_dir: Vector3 = rally_point - global_position
+	rally_dir.y = 0.0
+	if rally_dir.length_squared() > 0.001:
+		fwd = rally_dir.normalized()
+	elif _spawn_marker:
 		var marker_dir: Vector3 = _spawn_marker.global_position - global_position
 		marker_dir.y = 0.0
 		if marker_dir.length_squared() > 0.001:

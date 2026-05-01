@@ -20,6 +20,15 @@ var _target_building: Building = null
 var _repair_target: Node3D = null
 var _unit: Unit = null
 
+## Time the engineer has spent trying (and failing) to reach the
+## current target_building approach point. If we never make progress
+## for this long, we give up on the build so the worker isn't
+## permanently stuck pathing into an unreachable spot.
+var _approach_stuck_timer: float = 0.0
+var _approach_last_dist: float = INF
+const APPROACH_GIVEUP_SEC: float = 20.0
+const APPROACH_PROGRESS_EPSILON: float = 0.5
+
 
 func _ready() -> void:
 	_unit = get_parent() as Unit
@@ -85,7 +94,25 @@ func _physics_process(delta: float) -> void:
 		# would trap the agent oscillating around the edge).
 		_unit.command_move(_approach_point())
 		_set_build_anim(false)
+		# Track progress — if we don't shrink the distance for too long
+		# the build site is probably unreachable (e.g. the player placed
+		# it behind their HQ in a corner the navmesh can't connect to).
+		# Drop the assignment so the engineer can take other work.
+		if dist + APPROACH_PROGRESS_EPSILON < _approach_last_dist:
+			_approach_last_dist = dist
+			_approach_stuck_timer = 0.0
+		else:
+			_approach_stuck_timer += delta
+			if _approach_stuck_timer >= APPROACH_GIVEUP_SEC:
+				_target_building = null
+				_approach_stuck_timer = 0.0
+				_approach_last_dist = INF
+				_unit.stop()
 		return
+
+	# Reset the stuck tracker once we're inside the build perimeter.
+	_approach_stuck_timer = 0.0
+	_approach_last_dist = INF
 
 	# In range — stop moving and build
 	_unit.stop()
@@ -224,6 +251,8 @@ func _set_build_anim(active: bool) -> void:
 
 func start_building(building: Building) -> void:
 	_target_building = building
+	_approach_stuck_timer = 0.0
+	_approach_last_dist = INF
 	construction_started.emit(building)
 	_unit.command_move(_approach_point())
 

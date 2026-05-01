@@ -44,6 +44,7 @@ const ALTITUDE_BOB_AMP: float = 0.45
 const ALTITUDE_BOB_FREQ: float = 1.1
 var _bob_phase: float = 0.0
 var _altitude_anim_time: float = 0.0
+var _smoke_trail_timer: float = 0.0
 
 ## Ground shadow blob — flat dark ellipse on the ground beneath the
 ## aircraft. Sells the "airborne" read at any camera angle (the directional
@@ -283,6 +284,20 @@ func _process(delta: float) -> void:
 	var speed: float = stats.flight_speed if stats else 14.0
 	velocity = dir * speed
 	global_position += velocity * delta
+
+	# Engine smoke trail — small periodic puff dropped behind the
+	# aircraft. Routed through the central GPU particle emitter so
+	# the per-puff cost is one ring-buffer write, not a fresh
+	# MeshInstance3D + Tween. Throttled to once every 0.18s and only
+	# when actually moving so a parked aircraft doesn't smoke.
+	_smoke_trail_timer -= delta
+	if _smoke_trail_timer <= 0.0 and speed > 0.5:
+		_smoke_trail_timer = randf_range(0.16, 0.22)
+		var trail_pos: Vector3 = global_position - dir * 1.3
+		trail_pos.y -= 0.20
+		var pem: Node = get_tree().current_scene.get_node_or_null("ParticleEmitterManager") if get_tree() else null
+		if pem and pem.has_method("emit_smoke"):
+			pem.emit_smoke(trail_pos, Vector3(0.0, 0.6, 0.0) - dir * 0.6, Color(0.25, 0.22, 0.20, 0.55))
 
 	# Face direction of travel. Godot's `look_at` aligns -Z to the
 	# target, but the aircraft V-formation places wingmen at local -Z
@@ -938,7 +953,7 @@ func _build_switchblade() -> void:
 	add_child(spine)
 
 
-const SABLE_NEON_PALE := Color(0.45, 0.95, 1.0, 1.0)
+const SABLE_NEON_PALE := Color(0.78, 0.35, 1.0, 1.0)  # violet, paired with unit/building Sable accent
 
 
 func _build_default_aircraft() -> void:

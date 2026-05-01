@@ -157,11 +157,11 @@ const NEUTRAL_COLOR := Color(0.85, 0.7, 0.3, 1.0)
 ## team-color stripe per READABILITY_PASS.md §Task 7. When other factions
 ## land in v3+ this is replaced with a per-faction lookup.
 const ANVIL_BRASS := Color(0.78, 0.62, 0.18, 1.0)
-## Sable neon accent — pale cyan used for the faction identity strip on
-## Sable mechs. Distinguishes them from Anvil at a glance (matte black
-## chassis + single cool emissive line vs. Anvil's olive grey + warm
-## brass band).
-const SABLE_NEON := Color(0.45, 0.95, 1.0, 1.0)
+## Sable neon accent — bright violet. Distinguishes Sable from Anvil
+## at a glance (matte black chassis + single violet emissive line vs.
+## Anvil's olive grey + warm brass band) and stays out of the player
+## team-blue's hue range so emission doesn't blend with team color.
+const SABLE_NEON := Color(0.78, 0.35, 1.0, 1.0)
 
 
 static func team_color_for(owner_idx: int) -> Color:
@@ -2728,5 +2728,3 @@ func _faction_tint_chassis(c: Color) -> Color:
 		clampf(palette.z + bias, 0.0, 1.0),
 		c.a,
 	)
-
-

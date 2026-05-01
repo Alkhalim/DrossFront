@@ -37,7 +37,7 @@ func _draw() -> void:
 		_draw_sable_icon(cx, cy, r)
 	# Selection ring — drawn on top, gold on Anvil / cyan on Sable.
 	if selected:
-		var ring_color: Color = Color(0.95, 0.78, 0.32, 1.0) if faction == Faction.ANVIL else Color(0.45, 0.95, 1.0, 1.0)
+		var ring_color: Color = Color(0.95, 0.78, 0.32, 1.0) if faction == Faction.ANVIL else Color(0.78, 0.35, 1.0, 1.0)
 		draw_arc(Vector2(cx, cy), r + 4, 0.0, TAU, 48, ring_color, 2.5, true)
 
 
@@ -96,8 +96,8 @@ func _draw_sable_icon(cx: float, cy: float, r: float) -> void:
 	# diagonally across the diamond face.
 	var c1: Vector2 = Vector2(cx - r * 0.45, cy + r * 0.10)
 	var c2: Vector2 = Vector2(cx + r * 0.55, cy - r * 0.40)
-	draw_line(c1, c2, Color(0.45, 0.95, 1.0, 1.0), 2.0)
+	draw_line(c1, c2, Color(0.78, 0.35, 1.0, 1.0), 2.0)
 	# Small vertical kicker stroke on the right side, same neon.
 	var k1: Vector2 = Vector2(cx + r * 0.22, cy + r * 0.05)
 	var k2: Vector2 = Vector2(cx + r * 0.22, cy + r * 0.45)
-	draw_line(k1, k2, Color(0.45, 0.95, 1.0, 1.0), 2.0)
+	draw_line(k1, k2, Color(0.78, 0.35, 1.0, 1.0), 2.0)
