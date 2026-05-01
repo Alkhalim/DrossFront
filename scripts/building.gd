@@ -1981,6 +1981,24 @@ func _resolve_faction_id() -> int:
 	return settings.get("enemy_faction") as int
 
 
+func _faction_tint_building_chassis(c: Color) -> Color:
+	## Anvil keeps its existing palette. Sable shifts the building hull
+	## darker + cooler so the corpo cyberpunk specops aesthetic reads
+	## even before the cyan accent strip catches the eye. Brightness
+	## contrast between buildings (basic_foundry vs salvage_yard etc.)
+	## is preserved by re-multiplying the input rather than replacing.
+	if _resolve_faction_id() != 1:
+		return c
+	var avg: float = (c.r + c.g + c.b) / 3.0
+	var darkened: float = avg * 0.4  # average building brightness ~0.10-0.18
+	return Color(
+		darkened * 0.95,
+		darkened * 1.0,
+		darkened * 1.20,
+		c.a,
+	)
+
+
 func _process(delta: float) -> void:
 	# Half-frame stagger for the cosmetic / damage-VFX work. Buildings
 	# don't need 60 Hz redraws — smoke timers, ember flicker, foundry
