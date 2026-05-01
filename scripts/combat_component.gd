@@ -416,6 +416,13 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	if muzzle_positions.is_empty() and _unit.has_method("get_member_positions"):
 		muzzle_positions = _unit.get_member_positions()
 
+	# Aim each projectile at a distinct enemy squad member rather than the
+	# squad's averaged center, so volleys don't visually stack on a single
+	# point and miss the outer formation members entirely.
+	var target_positions: Array[Vector3] = []
+	if _current_target.has_method("get_member_positions"):
+		target_positions = _current_target.get_member_positions()
+
 	# Shotgun-style weapons fire a cluster of small pellets per shot. Damage
 	# is applied once per shot (same as any other weapon), but the visual is
 	# a cone of pellets so a Ripper volley reads as buckshot, not a slug.
@@ -429,13 +436,19 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	for i: int in shots:
 		_current_target.take_damage(per_member_dmg, _unit)
 
+		# Pick a per-shot aim point: distribute shots across the live members
+		# of the target squad so projectiles arrive at different bodies.
+		var aim_pos: Vector3 = _current_target.global_position
+		if not target_positions.is_empty():
+			aim_pos = target_positions[i % target_positions.size()]
+
 		if proj_script:
 			var fire_pos: Vector3 = _unit.global_position
 			if i < muzzle_positions.size():
 				fire_pos = muzzle_positions[i]
 
 			if is_shotgun:
-				var to_target: Vector3 = _current_target.global_position - fire_pos
+				var to_target: Vector3 = aim_pos - fire_pos
 				to_target.y = 0.0
 				var base_dir: Vector3 = Vector3.FORWARD
 				if to_target.length_squared() > 0.01:
@@ -446,13 +459,13 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 					spread_dir.y += randf_range(-0.06, 0.06)
 					spread_dir = spread_dir.normalized()
 					var pellet_target: Vector3 = fire_pos + spread_dir * SHOTGUN_PELLET_RANGE
-					pellet_target.y = _current_target.global_position.y
+					pellet_target.y = aim_pos.y
 					# Force "fast" tier so Projectile renders these as bullet
 					# slugs regardless of the parent weapon's classification.
 					var pellet: Node3D = proj_script.create(fire_pos, pellet_target, weapon.role_tag, &"fast")
 					get_tree().current_scene.add_child(pellet)
 			else:
-				var proj: Node3D = proj_script.create(fire_pos, _current_target.global_position, weapon.role_tag, weapon.rof_tier, weapon.projectile_style)
+				var proj: Node3D = proj_script.create(fire_pos, aim_pos, weapon.role_tag, weapon.rof_tier, weapon.projectile_style)
 				get_tree().current_scene.add_child(proj)
 
 	# Muzzle flash on each member — colored by the weapon's role.

@@ -111,12 +111,26 @@ func _on_hq_destroyed(destroyed_node: Node) -> void:
 	if _match_ended:
 		return
 
+	# Was this the local player's own HQ? If so, defeat is immediate —
+	# losing your own HQ ends your game even if an ally is still alive.
+	var lost_was_local_player: bool = false
+	if _registry:
+		for entry: Dictionary in _hqs:
+			if entry["hq"] == destroyed_node:
+				if (entry["owner_id"] as int) == (_registry.get("local_player_id") as int):
+					lost_was_local_player = true
+				break
+
 	# Drop the entry for the fallen HQ.
 	var i: int = _hqs.size() - 1
 	while i >= 0:
 		if _hqs[i]["hq"] == destroyed_node:
 			_hqs.remove_at(i)
 		i -= 1
+
+	if lost_was_local_player:
+		_end_match(false)
+		return
 
 	# Tally surviving HQs per team. Match ends as soon as one team has
 	# zero HQs left.

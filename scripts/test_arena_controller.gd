@@ -1275,6 +1275,22 @@ func _setup_terrain_foundry_belt() -> void:
 	for c: Vector3 in cluster_centers:
 		_spawn_boulder_cluster(c)
 
+	# Neutral derelict structures — foundries that read as a defunct
+	# industrial site, plus a handful of automated turrets that still
+	# track threats in their kill zone. Owned by the neutral player so
+	# they're hostile to everyone; destroying them drops a wreck (35%
+	# salvage refund of build cost) which doubles as a reason to push
+	# into the mid-map.
+	var foundry_stats: BuildingStatResource = load("res://resources/buildings/basic_foundry.tres") as BuildingStatResource
+	if foundry_stats:
+		_spawn_neutral_building(foundry_stats, Vector3(38, 0, 22), 0.4)
+		_spawn_neutral_building(foundry_stats, Vector3(-38, 0, -22), -0.4)
+	var turret_stats: BuildingStatResource = load("res://resources/buildings/gun_emplacement.tres") as BuildingStatResource
+	if turret_stats:
+		_spawn_neutral_building(turret_stats, Vector3(0, 0, 0), 0.0)
+		_spawn_neutral_building(turret_stats, Vector3(70, 0, 8), 0.0)
+		_spawn_neutral_building(turret_stats, Vector3(-70, 0, -8), 0.0)
+
 
 func _setup_terrain_ashplains() -> void:
 	# Ashplains Crossing — volcanic ash flats. The "industrial plant
@@ -1346,6 +1362,24 @@ func _setup_terrain_ashplains() -> void:
 		pieces.append({"pos": sp, "size": Vector3(sx, sy, sz), "kind": "scrap_pile"})
 	for piece: Dictionary in pieces:
 		_spawn_terrain_piece(piece["pos"] as Vector3, piece["size"] as Vector3, piece["kind"] as String)
+
+	# Scattered abandoned reactors — neutral buildings dotting the ash
+	# flats. Visually they're basic_generator power buildings; tactically
+	# they're destructible salvage drops that give the desert map a
+	# narrative reason for the warm orange glow. Locations are mirrored
+	# across z=0 so neither side has an extra reactor to claim.
+	var reactor_stats: BuildingStatResource = load("res://resources/buildings/basic_generator.tres") as BuildingStatResource
+	if reactor_stats:
+		var reactor_positions: Array[Vector3] = [
+			Vector3(48, 0, 28),
+			Vector3(-48, 0, 28),
+			Vector3(48, 0, -28),
+			Vector3(-48, 0, -28),
+			Vector3(0, 0, 65),
+			Vector3(0, 0, -65),
+		]
+		for rp: Vector3 in reactor_positions:
+			_spawn_neutral_building(reactor_stats, rp, randf_range(-PI, PI))
 
 
 func _decorate_ruin_block(root: Node3D, piece_size: Vector3, center_offset: Vector3 = Vector3.ZERO, add_roof_details: bool = true) -> void:
@@ -2963,6 +2997,29 @@ func _setup_neutral_patrols() -> void:
 		]
 	for entry: Dictionary in patrols:
 		_spawn_neutral_unit(entry["stats"] as UnitStatResource, entry["pos"] as Vector3)
+
+
+func _spawn_neutral_building(b_stats: BuildingStatResource, pos: Vector3, y_rot: float) -> void:
+	## Drops a derelict / abandoned building into the map under the
+	## neutral player. Set is_constructed before _ready so the building
+	## skips the construction ramp and its components (turret, etc.)
+	## activate immediately. Neutral owner_id = 2 → hostile to both
+	## teams via the existing PlayerRegistry are_allied path; destroying
+	## one drops the standard 35%-of-cost wreck.
+	if not b_stats:
+		return
+	var building_scene: PackedScene = load("res://scenes/building.tscn") as PackedScene
+	if not building_scene:
+		return
+	var b: Building = building_scene.instantiate() as Building
+	if not b:
+		return
+	b.stats = b_stats
+	b.owner_id = 2  # PlayerRegistry.NEUTRAL_PLAYER_ID
+	b.is_constructed = true
+	add_child(b)
+	b.global_position = pos
+	b.rotation.y = y_rot
 
 
 func _spawn_neutral_unit(unit_stats: UnitStatResource, pos: Vector3) -> void:

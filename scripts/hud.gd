@@ -694,7 +694,15 @@ func _update_enemy_inspect_panel(target: Node3D) -> void:
 	_showing_build_buttons = false
 
 	var stats: UnitStatResource = target.get("stats") as UnitStatResource if "stats" in target else null
-	var hp_now: int = (target.get("current_hp") as int) if "current_hp" in target else 0
+	# Unit tracks HP via per-member arrays; the only public total is
+	# `get_total_hp()`. Aircraft also expose it as a method (returning
+	# `current_hp`). Falling through to the field for nodes without
+	# the method just to avoid crashes.
+	var hp_now: int = 0
+	if target.has_method("get_total_hp"):
+		hp_now = target.call("get_total_hp") as int
+	elif "current_hp" in target:
+		hp_now = target.get("current_hp") as int
 	var hp_max: int = stats.hp_total if stats else hp_now
 	var alive: int = (target.get("alive_count") as int) if "alive_count" in target else 1
 
@@ -1285,6 +1293,18 @@ func _rebuild_armory_buttons(_building: Building) -> void:
 		_action_label.text = "No commit manager"
 		return
 
+	# Faction-aware branch pick. The branch_a/b system was originally
+	# only wired up for Anvil's Hound. Sable mediums (Specter / Jackal)
+	# don't have branch stats defined yet, so for Sable owners we
+	# surface a placeholder instead of the Anvil Hound buttons.
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	var player_faction: int = 0
+	if settings and "player_faction" in settings:
+		player_faction = settings.get("player_faction") as int
+	if player_faction == 1:  # Sable
+		_action_label.text = "Sable branch upgrades not yet available"
+		return
+
 	var hound_stats: UnitStatResource = load("res://resources/units/anvil_hound.tres") as UnitStatResource
 	if not hound_stats or not hound_stats.branch_a_stats:
 		_action_label.text = "No branches available"
@@ -1649,15 +1669,17 @@ func _update_unit_panel(units: Array[Node3D]) -> void:
 		if unit.stats:
 			_name_label.text = unit.stats.unit_name
 			var hp_pct: float = float(unit.get_total_hp()) / float(maxi(unit.stats.hp_total, 1))
-			var dps: float = _compute_full_squad_dps(unit.stats)
-			_stats_label.text = "%s   HP %d / %d   Squad %d / %d   Armor %s   DPS %.0f" % [
+			var dps_ground: float = _compute_dps_vs(unit.stats, &"medium")
+			var dps_air: float = _compute_dps_vs(unit.stats, &"light_air")
+			_stats_label.text = "%s   HP %d / %d   Squad %d / %d   Armor %s   DPS %.0f vs Gnd / %.0f vs Air" % [
 				str(unit.stats.unit_class).capitalize(),
 				unit.get_total_hp(),
 				unit.stats.hp_total,
 				unit.alive_count,
 				unit.stats.squad_size,
 				str(unit.stats.armor_class).capitalize(),
-				dps,
+				dps_ground,
+				dps_air,
 			]
 			# Use HP bar to mirror the on-world HP — quick eyeball read in the panel.
 			var hp_color: Color = Color(0.4, 0.95, 0.4, 0.95)
@@ -1758,6 +1780,27 @@ func _compute_full_squad_dps(stat: UnitStatResource) -> float:
 	return dps
 
 
+func _compute_dps_vs(stat: UnitStatResource, armor_class: StringName) -> float:
+	## Effective DPS at full squad strength against the given armor class.
+	## Bakes in the role-vs-armor lookup so the displayed number actually
+	## reflects what the unit will do — AAir vs ground reads 0, AP vs heavy
+	## armor reads the reduced value, etc.
+	if not stat:
+		return 0.0
+	var dps: float = 0.0
+	var weapons: Array[WeaponResource] = []
+	if stat.primary_weapon:
+		weapons.append(stat.primary_weapon)
+	if stat.secondary_weapon:
+		weapons.append(stat.secondary_weapon)
+	for weapon: WeaponResource in weapons:
+		var raw: float = _weapon_dps(weapon) * float(stat.squad_size)
+		var role_mod: float = CombatTables.get_role_modifier(weapon.role_tag, armor_class)
+		var armor_red: float = CombatTables.get_armor_reduction(armor_class)
+		dps += raw * role_mod * (1.0 - armor_red)
+	return dps
+
+
 func _weapon_dps(weapon: WeaponResource) -> float:
 	if not weapon:
 		return 0.0
@@ -1778,8 +1821,12 @@ func _unit_tooltip(stat: UnitStatResource) -> String:
 		str(stat.armor_class).capitalize()
 	])
 	lines.append("HP %d   Squad %d   Pop %d" % [stat.hp_total, stat.squad_size, stat.population])
-	lines.append("Cost  %dS / %dF   Build %.1fs   DPS %.0f" % [
-		stat.cost_salvage, stat.cost_fuel, stat.build_time, _compute_full_squad_dps(stat)
+	lines.append("Cost  %dS / %dF   Build %.1fs" % [
+		stat.cost_salvage, stat.cost_fuel, stat.build_time
+	])
+	lines.append("DPS  %.0f vs Ground / %.0f vs Air" % [
+		_compute_dps_vs(stat, &"medium"),
+		_compute_dps_vs(stat, &"light_air"),
 	])
 	if stat.primary_weapon:
 		lines.append("Primary: %s (%s, %s)" % [

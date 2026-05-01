@@ -116,6 +116,13 @@ func _build_layout() -> void:
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bg)
 
+	# Tactical overview backdrop — procedurally-drawn command-center feel:
+	# fading scan grid, contour lines, scattered unit pips, and a slow
+	# sweeping radar arc. Sits between the flat backdrop and the menu
+	# widgets so the UI text stays cleanly readable on top.
+	var tactical_bg := _build_tactical_background()
+	add_child(tactical_bg)
+
 	# Centered column.
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -135,8 +142,8 @@ func _build_layout() -> void:
 	_root_vbox.add_child(title)
 
 	var subtitle := Label.new()
-	subtitle.text = "A real-time strategy on a dying industrial world"
-	subtitle.add_theme_font_size_override("font_size", 16)
+	subtitle.text = "Salvage what you can. Burn the rest."
+	subtitle.add_theme_font_size_override("font_size", 18)
 	subtitle.add_theme_color_override("font_color", COLOR_HINT)
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_root_vbox.add_child(subtitle)
@@ -664,3 +671,19 @@ func _on_bus_volume_changed(db: float, bus_name: String) -> void:
 
 func _start_match() -> void:
 	get_tree().change_scene_to_file(ARENA_SCENE)
+
+
+func _build_tactical_background() -> Control:
+	## A non-interactive Control that paints a slow tactical-overview
+	## scene behind the menu UI: a faint scan grid, soft contour
+	## blobs, scattered unit pips, and a sweeping radar arc that
+	## rotates over time. Built procedurally with Control._draw so it
+	## doesn't depend on any imported assets.
+	var script: GDScript = load("res://scripts/tactical_background.gd") as GDScript
+	var bg := Control.new()
+	bg.name = "TacticalBackground"
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if script:
+		bg.set_script(script)
+	return bg

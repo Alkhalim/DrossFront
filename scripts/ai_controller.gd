@@ -208,11 +208,24 @@ func _roll_strategy_and_layout() -> void:
 		# further out and on a different angle slot.
 		"aerodrome": base_angle + randf_range(-0.5, -0.2),
 		"sam_site": base_angle + PI * 1.5 + randf_range(0.4, 0.8),
+		# Three Turret-Heavy turret-cluster anchors. A is the home cluster
+		# (dead-front of HQ, same angle band as the regular turret slot).
+		# B and C deploy farther out on the forward flanks at separate
+		# bearings so their kill-zones cover distinct slices of the map
+		# rather than triple-stacking on one spot.
+		"turret_a": base_angle + PI * 1.5 + randf_range(-0.3, 0.3),
+		"turret_b": base_angle + PI * 1.5 + randf_range(0.55, 0.85),
+		"turret_c": base_angle + PI * 1.5 + randf_range(-0.85, -0.55),
 	}
 	# Per-building radius jitter so the cluster isn't a perfect ring.
 	for key: String in slot_angles.keys():
 		var ang: float = slot_angles[key] as float
 		var r: float = pull * randf_range(0.85, 1.15)
+		# Forward-flank turret groups sit deliberately far out — they're
+		# meant to extend the AI's range coverage past its base footprint,
+		# so we override the per-cluster radius with a much bigger pull.
+		if key == "turret_b" or key == "turret_c":
+			r = randf_range(45.0, 55.0)
 		_building_offsets[key] = Vector3(cos(ang) * r, 0.0, sin(ang) * r)
 
 
@@ -320,19 +333,33 @@ func _process_economy() -> void:
 	# entirely, so the AI never built air or anti-air. Now wired in.
 	match _strategy:
 		Strategy.TURRET_HEAVY:
-			# Defensive opener: turret first, then a second generator,
-			# then SAM site for AA, then advanced foundry, then aerodrome.
-			# TURRET_HEAVY wants MULTIPLE turrets (defensive perimeter),
-			# so we use unique slot keys ("turret_1" through "turret_3")
-			# instead of a single "turret" key — _try_place skips
-			# already-placed slots, but each slot here is independent.
-			_try_place("turret_1", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret", Vector3(0, 0, -14)))
+			# Defensive opener: three groups of three turrets at distinct
+			# sites. Group A clusters at the AI's home (in front of HQ),
+			# groups B and C deploy on opposite forward flanks far enough
+			# away that the cluster kill-zones don't overlap (~50u apart
+			# given the gun_emplacement's ~25u range), so each cluster
+			# covers a different slice of the map and contests scattered
+			# salvage targets instead of triple-stacking on one spot.
+			# Group A — home cluster, tight 3-turret triangle in front of HQ.
+			_try_place("turret_a1", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret_a", Vector3(0, 0, -14)))
+			_try_place("turret_a2", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret_a", Vector3(0, 0, -14)) + Vector3(8, 0, -2))
+			_try_place("turret_a3", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret_a", Vector3(0, 0, -14)) + Vector3(-8, 0, -2))
 			_try_place("generator2", "res://resources/buildings/basic_generator.tres", _offset_for("generator2", Vector3(22, 0, 18)))
-			_try_place("turret_2", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret", Vector3(0, 0, -14)) + Vector3(10, 0, -2))
 			_try_place("sam_site", "res://resources/buildings/sam_site.tres", _offset_for("sam_site", Vector3(0, 0, -22)))
-			_try_place("turret_3", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret", Vector3(0, 0, -14)) + Vector3(-10, 0, -2))
+			# Group B — forward right cluster. Far enough from Group A
+			# that the two range-circles don't kiss; protects the right-
+			# flank lane / scrap-pile cluster.
+			_try_place("turret_b1", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret_b", Vector3(35, 0, -45)))
+			_try_place("turret_b2", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret_b", Vector3(35, 0, -45)) + Vector3(7, 0, -3))
+			_try_place("turret_b3", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret_b", Vector3(35, 0, -45)) + Vector3(-3, 0, -7))
 			_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
 			_try_place("aerodrome", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome", Vector3(28, 0, -8)))
+			# Group C — forward left cluster, mirror of B. Holds the
+			# opposite flank so the AI's defensive footprint covers the
+			# whole front.
+			_try_place("turret_c1", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret_c", Vector3(-35, 0, -45)))
+			_try_place("turret_c2", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret_c", Vector3(-35, 0, -45)) + Vector3(-7, 0, -3))
+			_try_place("turret_c3", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret_c", Vector3(-35, 0, -45)) + Vector3(3, 0, -7))
 		Strategy.ECONOMY_HEAVY:
 			# Eco opener: extra generator + advanced foundry early,
 			# then aerodrome (extra production), then defensive structures.
@@ -422,14 +449,23 @@ func _process_attack() -> void:
 				continue
 		attack_units.append(node)
 
-	# Send attackers toward the chosen enemy HQ
-	for node: Node in attack_units:
+	# Send attackers toward the chosen enemy HQ. Spread the actual attack-move
+	# target across a small ring per unit so the squads don't all converge on
+	# the exact same point and pile up at the navmesh entry — visible as
+	# "huge clumps of units forming". Offsets are deterministic per unit
+	# (instance_id-derived) so repeated re-issues don't slosh the squad.
+	for n_idx: int in attack_units.size():
+		var node: Node = attack_units[n_idx]
 		if not is_instance_valid(node):
 			continue
 		var combat: Node = node.get_node_or_null("CombatComponent")
 		if combat and combat.has_method("command_attack_move"):
 			if combat.get("attack_move_target") == Vector3.INF:
-				combat.command_attack_move(_player_hq_pos)
+				var seed_id: int = node.get_instance_id()
+				var ring_angle: float = float(seed_id % 360) / 360.0 * TAU
+				var ring_radius: float = 4.0 + float((seed_id / 7) % 8)  # 4..11u
+				var spread: Vector3 = Vector3(cos(ring_angle), 0.0, sin(ring_angle)) * ring_radius
+				combat.command_attack_move(_player_hq_pos + spread)
 
 	# If most attackers are dead, rebuild
 	if attack_units.size() <= 1:
