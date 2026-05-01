@@ -8,8 +8,13 @@ extends StaticBody3D
 ## into a tactical play (bait the enemy past it, then shoot the dump).
 
 const MAX_HP: int = 220
-const EXPLOSION_RADIUS: float = 6.0
-const EXPLOSION_DAMAGE: int = 90
+## Explosion is meant to be a CATASTROPHIC event when a player
+## successfully shoots one — radius covers a meaningful chunk of map
+## and damage one-shots most light/medium squads caught in the blast.
+## Was 6u / 90 dmg which read as a small pop; bumped to make ammo
+## dumps a real strategic objective.
+const EXPLOSION_RADIUS: float = 14.0
+const EXPLOSION_DAMAGE: int = 280
 ## Owner sentinel — dumps are never on a player's team. Treated as
 ## neutral so combat hostility checks already see them as targetable.
 const NEUTRAL_OWNER: int = 2
@@ -163,33 +168,44 @@ func _spawn_explosion_vfx(pos: Vector3) -> void:
 	if not scene:
 		return
 	# Big explosion → multi-flash GPU particle burst + smoke cloud +
-	# sparks. Each emit_particle is one GPU-side particle; no
-	# allocation churn.
+	# sparks. Volume scales with EXPLOSION_RADIUS so a bigger blast
+	# reads as a bigger boom — flash count, smoke volume, and spark
+	# count all bumped to match the new 14u radius (was 6u).
 	var _pem_scene: Node = get_tree().current_scene
 	var pem: Node = _pem_scene.get_node_or_null("ParticleEmitterManager") if _pem_scene else null
 	if pem:
-		# 12 bright flash particles in a tight cluster — reads as one
-		# big detonation burst.
-		pem.emit_flash(pos + Vector3(0, 1.0, 0), Color(1.0, 0.5, 0.12, 1.0), 12)
-		# Trailing smoke cloud + sparks for the secondary fireworks.
-		for i: int in 6:
-			var off := Vector3(
-				randf_range(-1.0, 1.0),
-				randf_range(0.5, 2.0),
-				randf_range(-1.0, 1.0),
-			)
-			pem.emit_smoke(pos + off, Vector3(off.x * 0.3, 1.2, off.z * 0.3), Color(0.45, 0.30, 0.20, 0.8))
-		pem.emit_spark(pos + Vector3(0, 0.8, 0), 12)
+		# Center fireball — dense flash cluster at the dump's core.
+		pem.emit_flash(pos + Vector3(0, 1.5, 0), Color(1.0, 0.55, 0.15, 1.0), 28)
+		# Secondary flashes scattered out toward the explosion radius
+		# so the player's eye can SEE the radius — without these the
+		# damage area was invisible.
+		for i: int in 16:
+			var ang: float = float(i) / 16.0 * TAU
+			var r: float = EXPLOSION_RADIUS * randf_range(0.35, 0.85)
+			var off2 := Vector3(cos(ang) * r, randf_range(0.8, 2.4), sin(ang) * r)
+			pem.emit_flash(pos + off2, Color(1.0, 0.45, 0.12, 1.0), 1)
+		# Big rolling smoke cloud — 30 puffs spread across the radius
+		# rising and drifting outward. Persists long enough for the
+		# player to register where the boom went off.
+		for i: int in 30:
+			var ang2: float = randf() * TAU
+			var r2: float = randf_range(0.5, EXPLOSION_RADIUS * 0.9)
+			var smoke_pos: Vector3 = pos + Vector3(cos(ang2) * r2, randf_range(0.4, 2.5), sin(ang2) * r2)
+			var rise := Vector3(cos(ang2) * 0.6, randf_range(2.0, 3.5), sin(ang2) * 0.6)
+			pem.emit_smoke(smoke_pos, rise, Color(0.35, 0.22, 0.16, 0.85))
+		# Sparks — heavy spray to sell the detonation.
+		pem.emit_spark(pos + Vector3(0, 1.0, 0), 30)
 
 	# Brief omni light so the flash actually illuminates nearby units.
+	# Bigger range + brighter to match the larger explosion radius.
 	var light := OmniLight3D.new()
 	light.light_color = Color(1.0, 0.55, 0.18, 1.0)
-	light.light_energy = 5.5
-	light.omni_range = EXPLOSION_RADIUS * 1.5
+	light.light_energy = 9.0
+	light.omni_range = EXPLOSION_RADIUS * 1.8
 	scene.add_child(light)
-	light.global_position = pos + Vector3(0, 1.0, 0)
+	light.global_position = pos + Vector3(0, 1.5, 0)
 	var ltween := light.create_tween()
-	ltween.tween_property(light, "light_energy", 0.0, 0.45).set_ease(Tween.EASE_OUT)
+	ltween.tween_property(light, "light_energy", 0.0, 0.7).set_ease(Tween.EASE_OUT)
 	ltween.tween_callback(light.queue_free)
 
 

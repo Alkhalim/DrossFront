@@ -163,6 +163,24 @@ func deselect() -> void:
 	set_selected(false)
 
 
+func _turn_toward(face_dir: Vector3, delta: float) -> void:
+	## Smooth yaw toward `face_dir` with the same surface as `Unit.
+	## _turn_toward`. Combat component calls this to make units face
+	## the target while firing — without it, combat falls back to
+	## Godot's `look_at(target, +Y)` which orients -Z toward the
+	## target. Aircraft visual is built with the nose along +Z (the
+	## V-formation places wingmen at -Z behind the leader), so the
+	## default look_at would rotate the model's back at the enemy.
+	## We flip by negating the desired direction here so +Z lands on
+	## the target instead.
+	if face_dir.length_squared() < 0.0001:
+		return
+	var flipped: Vector3 = -face_dir
+	var target_y: float = atan2(flipped.x, flipped.z)
+	var turn_speed: float = 5.0  # rad/s — aircraft turn slightly slower than light mechs
+	rotation.y = lerp_angle(rotation.y, target_y, clampf(turn_speed * delta, 0.0, 1.0))
+
+
 ## Surface-compat wrapper — HUD's selection panel calls `get_builder` on
 ## whatever Node3D ends up in `_selected_units`. Aircraft don't build,
 ## so this accessor returns null. `get_total_hp` is already defined
@@ -373,7 +391,8 @@ func _v_formation_offsets(n: int, spacing: float) -> Array[Vector3]:
 
 
 func _build_anvil_drone(parent: Node3D, team: Color, body_color: Color, s: float) -> void:
-	# Squat blocky drone — Anvil utilitarian.
+	# Squat blocky drone — Anvil utilitarian. Forward direction = +Z
+	# (matches the aircraft.look_at flip).
 	var body := MeshInstance3D.new()
 	body.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var body_box := BoxMesh.new()
@@ -381,6 +400,32 @@ func _build_anvil_drone(parent: Node3D, team: Color, body_color: Color, s: float
 	body.mesh = body_box
 	body.set_surface_override_material(0, _aircraft_metal_mat(body_color))
 	parent.add_child(body)
+
+	# Nose taper — smaller box at the front of the body for a slightly
+	# pointed silhouette instead of a pure brick.
+	var nose := MeshInstance3D.new()
+	nose.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var nose_box := BoxMesh.new()
+	nose_box.size = Vector3(s * 0.65, s * 0.35, s * 0.35)
+	nose.mesh = nose_box
+	nose.position = Vector3(0, s * 0.0, s * 0.75)
+	nose.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.08)))
+	parent.add_child(nose)
+
+	# Cockpit canopy — small dark bubble on top of the nose.
+	var canopy := MeshInstance3D.new()
+	canopy.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var canopy_sph := SphereMesh.new()
+	canopy_sph.radius = s * 0.12
+	canopy_sph.height = s * 0.2
+	canopy.mesh = canopy_sph
+	canopy.position = Vector3(0, s * 0.22, s * 0.5)
+	var canopy_mat := StandardMaterial3D.new()
+	canopy_mat.albedo_color = Color(0.06, 0.08, 0.12, 1.0)
+	canopy_mat.metallic = 0.85
+	canopy_mat.roughness = 0.15
+	canopy.set_surface_override_material(0, canopy_mat)
+	parent.add_child(canopy)
 
 	# Stubby wings.
 	var wing := MeshInstance3D.new()
@@ -390,6 +435,40 @@ func _build_anvil_drone(parent: Node3D, team: Color, body_color: Color, s: float
 	wing.mesh = wing_box
 	wing.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.15)))
 	parent.add_child(wing)
+
+	# Wingtip running lights — small emissive dots at each wing end.
+	for side: int in 2:
+		var light_dot := MeshInstance3D.new()
+		light_dot.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var light_sph := SphereMesh.new()
+		light_sph.radius = s * 0.07
+		light_sph.height = s * 0.14
+		light_dot.mesh = light_sph
+		var sign_x: float = 1.0 if side == 0 else -1.0
+		light_dot.position = Vector3(sign_x * s * 0.9, 0, 0)
+		var ld_mat := StandardMaterial3D.new()
+		# Red on right wing, green on left — aviation convention.
+		ld_mat.albedo_color = Color(0.9, 0.1, 0.1, 1.0) if side == 0 else Color(0.1, 0.9, 0.4, 1.0)
+		ld_mat.emission_enabled = true
+		ld_mat.emission = ld_mat.albedo_color
+		ld_mat.emission_energy_multiplier = 1.4
+		ld_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		light_dot.set_surface_override_material(0, ld_mat)
+		parent.add_child(light_dot)
+
+	# Hardpoint pylons under the wings — tiny cylindrical struts.
+	for side2: int in 2:
+		var pylon := MeshInstance3D.new()
+		pylon.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var pylon_cyl := CylinderMesh.new()
+		pylon_cyl.top_radius = s * 0.06
+		pylon_cyl.bottom_radius = s * 0.07
+		pylon_cyl.height = s * 0.18
+		pylon.mesh = pylon_cyl
+		var sign2: float = 1.0 if side2 == 0 else -1.0
+		pylon.position = Vector3(sign2 * s * 0.55, -s * 0.15, 0)
+		pylon.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.25)))
+		parent.add_child(pylon)
 
 	# Tail fin.
 	var fin := MeshInstance3D.new()
@@ -401,7 +480,26 @@ func _build_anvil_drone(parent: Node3D, team: Color, body_color: Color, s: float
 	fin.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.2)))
 	parent.add_child(fin)
 
-	# Team-color underbelly stripe + emissive engine glow at the rear.
+	# Engine exhaust nozzle at the rear — emissive orange glow.
+	var exhaust := MeshInstance3D.new()
+	exhaust.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var exhaust_cyl := CylinderMesh.new()
+	exhaust_cyl.top_radius = s * 0.16
+	exhaust_cyl.bottom_radius = s * 0.16
+	exhaust_cyl.height = s * 0.18
+	exhaust.mesh = exhaust_cyl
+	exhaust.rotation.x = PI / 2  # cylinder along +Z (rear)
+	exhaust.position = Vector3(0, 0, -s * 0.75)
+	var ex_mat := StandardMaterial3D.new()
+	ex_mat.albedo_color = Color(1.0, 0.45, 0.12, 1.0)
+	ex_mat.emission_enabled = true
+	ex_mat.emission = Color(1.0, 0.5, 0.15, 1.0)
+	ex_mat.emission_energy_multiplier = 1.8
+	ex_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	exhaust.set_surface_override_material(0, ex_mat)
+	parent.add_child(exhaust)
+
+	# Team-color underbelly stripe.
 	var stripe := MeshInstance3D.new()
 	stripe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var stripe_box := BoxMesh.new()
@@ -464,6 +562,53 @@ func _build_sable_drone(parent: Node3D, team: Color, body_color: Color, s: float
 	sensor_mat.emission_energy_multiplier = 2.0
 	sensor.set_surface_override_material(0, sensor_mat)
 	parent.add_child(sensor)
+
+	# Twin twin-mounted engine nozzles flanking the rear — tight pair
+	# of cyan-glowing exhausts gives the Sable drone a more menacing
+	# silhouette than a single underbelly stripe.
+	for side2: int in 2:
+		var sx2: float = 1.0 if side2 == 0 else -1.0
+		var nozzle := MeshInstance3D.new()
+		nozzle.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var noz_cyl := CylinderMesh.new()
+		noz_cyl.top_radius = s * 0.10
+		noz_cyl.bottom_radius = s * 0.10
+		noz_cyl.height = s * 0.20
+		nozzle.mesh = noz_cyl
+		nozzle.rotation.x = PI / 2
+		nozzle.position = Vector3(sx2 * s * 0.20, 0, -s * 0.85)
+		var noz_mat := StandardMaterial3D.new()
+		noz_mat.albedo_color = Color(0.50, 0.95, 1.0, 1.0)
+		noz_mat.emission_enabled = true
+		noz_mat.emission = Color(0.5, 0.95, 1.0, 1.0)
+		noz_mat.emission_energy_multiplier = 2.2
+		noz_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		nozzle.set_surface_override_material(0, noz_mat)
+		parent.add_child(nozzle)
+
+	# Canard fins on each side of the nose for an angular predator
+	# silhouette — small triangular kicker boxes rotated.
+	for side3: int in 2:
+		var sx3: float = 1.0 if side3 == 0 else -1.0
+		var canard := MeshInstance3D.new()
+		canard.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var c_box := BoxMesh.new()
+		c_box.size = Vector3(s * 0.45, s * 0.04, s * 0.20)
+		canard.mesh = c_box
+		canard.position = Vector3(sx3 * s * 0.30, s * 0.02, s * 0.60)
+		canard.rotation.y = sx3 * deg_to_rad(-18.0)
+		canard.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.18)))
+		parent.add_child(canard)
+
+	# Vertical tail fin — thin angular blade at the rear top.
+	var tail := MeshInstance3D.new()
+	tail.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var tail_box := BoxMesh.new()
+	tail_box.size = Vector3(s * 0.05, s * 0.42, s * 0.32)
+	tail.mesh = tail_box
+	tail.position = Vector3(0, s * 0.30, -s * 0.50)
+	tail.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.2)))
+	parent.add_child(tail)
 
 
 func _build_hammerhead() -> void:
