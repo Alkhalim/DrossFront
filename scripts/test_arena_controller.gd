@@ -1703,7 +1703,17 @@ func _spawn_terrain_piece(pos: Vector3, piece_size: Vector3, kind: String) -> vo
 
 	var mesh_inst := MeshInstance3D.new()
 	var box_mesh := BoxMesh.new()
-	box_mesh.size = piece_size
+	# For scrap piles, the dominant visual is the scattered chunk
+	# layer added below — the underlying base box was reading as a
+	# big flat rust slab on the ground. Shrink it to a thin "rust
+	# stain" footprint just barely above the floor; the chunks above
+	# carry the silhouette. Collision keeps the original size so
+	# units still treat the pile as a physical obstacle.
+	if kind == "scrap_pile":
+		box_mesh.size = Vector3(piece_size.x * 0.95, 0.20, piece_size.z * 0.95)
+		mesh_inst.position.y = -piece_size.y * 0.5 + 0.10
+	else:
+		box_mesh.size = piece_size
 	mesh_inst.mesh = box_mesh
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = base_color
@@ -1733,7 +1743,12 @@ func _spawn_terrain_piece(pos: Vector3, piece_size: Vector3, kind: String) -> vo
 	# ruins keep the existing one-debris-chunk shape so the silhouette
 	# stays grouped.
 	if kind == "scrap_pile":
-		var chunk_count: int = randi_range(5, 8)
+		# Scattered chunks sit on the buried-flat base (root is at
+		# y = piece_size.y * 0.5, base mesh is buried so the chunks
+		# are now the dominant silhouette). Anchor each chunk so its
+		# bottom rests near ground level — calculated relative to
+		# root rather than the original tall base.
+		var chunk_count: int = randi_range(7, 11)
 		for i: int in chunk_count:
 			var chunk := MeshInstance3D.new()
 			var chunk_box := BoxMesh.new()
@@ -1744,9 +1759,12 @@ func _spawn_terrain_piece(pos: Vector3, piece_size: Vector3, kind: String) -> vo
 				cs * randf_range(0.7, 1.3),
 			)
 			chunk.mesh = chunk_box
+			# Place each chunk so its bottom face sits at ground level
+			# (root y - piece_size.y * 0.5 = 0).
+			var chunk_y: float = -piece_size.y * 0.5 + chunk_box.size.y * 0.5
 			chunk.position = Vector3(
 				randf_range(-piece_size.x * 0.4, piece_size.x * 0.4),
-				piece_size.y * 0.5 + chunk_box.size.y * 0.4,
+				chunk_y,
 				randf_range(-piece_size.z * 0.4, piece_size.z * 0.4),
 			)
 			chunk.rotation = Vector3(
@@ -2428,7 +2446,7 @@ func _setup_ground_patches() -> void:
 	# ground as patchy rather than uniform-noise. Map-aware roll so
 	# the desert gets cracked-earth and bleached-bone patches, while
 	# the foundry belt gets soot blots and oil spills.
-	var detail_count: int = 56
+	var detail_count: int = 80
 	const MAP_HALF: float = 135.0
 	var on_ash: bool = _is_ashplains()
 	for i: int in detail_count:
@@ -2442,29 +2460,48 @@ func _setup_ground_patches() -> void:
 			continue
 		var roll: float = randf()
 		if on_ash:
-			if roll < 0.30:
+			if roll < 0.24:
 				# Cracked-earth — dark warm patch with a slightly red
 				# undertone, reads as parched riverbed.
 				_spawn_soft_patch(pos, randf_range(4.0, 8.5), Color(0.22, 0.14, 0.09, randf_range(0.55, 0.78)), 1.0, false)
-			elif roll < 0.55:
+			elif roll < 0.45:
 				# Bleached / salt-flat — pale tan-white wash.
 				_spawn_soft_patch(pos, randf_range(4.0, 9.0), Color(0.78, 0.72, 0.55, randf_range(0.40, 0.62)), 1.0, false)
-			elif roll < 0.85:
+			elif roll < 0.66:
 				# Sand smear — warmer than the foundry version.
 				_spawn_soft_patch(pos, randf_range(4.5, 9.5), Color(0.50, 0.38, 0.22, randf_range(0.45, 0.7)), 0.95, false)
-			else:
+			elif roll < 0.78:
+				# Dry-earth patch with reddish-clay tint.
+				_spawn_soft_patch(pos, randf_range(3.5, 7.5), Color(0.36, 0.20, 0.13, randf_range(0.50, 0.72)), 1.0, false)
+			elif roll < 0.86:
+				# Hardy moss — rare green patch where shade pools (small).
+				_spawn_soft_patch(pos, randf_range(2.5, 4.5), Color(0.20, 0.32, 0.16, randf_range(0.40, 0.62)), 1.0, false)
+			elif roll < 0.93:
 				# Volcanic-glass shard — small dark high-contrast spot.
 				_spawn_soft_patch(pos, randf_range(2.5, 5.0), Color(0.06, 0.04, 0.05, randf_range(0.65, 0.85)), 0.55, false)
+			else:
+				# Reflective oil spill — uncommon on the desert but
+				# they happen near old crash sites.
+				_spawn_oil_spill(pos)
 		else:
-			if roll < 0.50:
+			if roll < 0.32:
 				# Soot blot.
 				_spawn_soft_patch(pos, randf_range(5.0, 10.0), Color(0.05, 0.05, 0.05, randf_range(0.55, 0.8)), 1.0, false)
-			elif roll < 0.85:
+			elif roll < 0.55:
 				# Sand smear (cooler than the desert).
 				_spawn_soft_patch(pos, randf_range(4.5, 8.5), Color(0.34, 0.27, 0.18, randf_range(0.45, 0.7)), 0.95, false)
-			elif roll < 0.95:
-				# Oil spill — gets its own multi-blob spawn so the
-				# silhouette reads as an irregular puddle.
+			elif roll < 0.70:
+				# Dry-earth patch with cracking — reddish-brown.
+				_spawn_soft_patch(pos, randf_range(4.0, 8.0), Color(0.32, 0.22, 0.15, randf_range(0.50, 0.72)), 1.0, false)
+			elif roll < 0.82:
+				# Hardy moss / weed-grass tuft — cool green patch where
+				# the industrial belt has been left to itself for a while.
+				# Bigger range than the desert variant so it reads as
+				# actual green rather than a moss spot.
+				_spawn_soft_patch(pos, randf_range(3.5, 6.5), Color(0.22, 0.34, 0.18, randf_range(0.45, 0.65)), 1.0, false)
+			elif roll < 0.92:
+				# Reflective oil spill — multi-blob spawn for the puddle
+				# silhouette, low roughness for the wet-glint read.
 				_spawn_oil_spill(pos)
 			else:
 				# Slag-grey patch — cool industrial residue.

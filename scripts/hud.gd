@@ -1218,8 +1218,8 @@ func _rebuild_production_buttons(building: Building) -> void:
 		btn.tooltip_text = _unit_tooltip(unit_stat)
 		btn.pressed.connect(_on_production_button.bind(i))
 		_button_grid.add_child(btn)
-		_attach_cost_widget(btn, unit_stat.cost_salvage, unit_stat.cost_fuel, unit_stat.population)
-		_action_buttons.append({ "button": btn, "kind": "produce", "stat": unit_stat })
+		var chip_refs: Dictionary = _attach_cost_widget(btn, unit_stat.cost_salvage, unit_stat.cost_fuel, unit_stat.population)
+		_action_buttons.append({ "button": btn, "kind": "produce", "stat": unit_stat, "chips": chip_refs })
 
 
 func _on_production_button(index: int) -> void:
@@ -1235,11 +1235,15 @@ const RES_COLOR_FUEL: Color = Color(0.30, 0.85, 1.00, 1.0)     # cyan
 const RES_COLOR_POP: Color = Color(0.78, 0.95, 0.55, 1.0)      # green-tan
 
 
-func _attach_cost_widget(btn: Button, salvage: int, fuel: int, pop: int) -> void:
+func _attach_cost_widget(btn: Button, salvage: int, fuel: int, pop: int) -> Dictionary:
 	## Anchors a small colored cost-readout strip at the bottom of a
 	## production / build button. Each resource gets its own swatch
 	## (small ColorRect) and Label so the player can decode salvage
 	## vs fuel vs pop at a glance instead of squinting at S/F/P.
+	## Returns a dict mapping resource keys ("salvage" / "fuel" / "pop")
+	## to {swatch, label} so the affordability pass can tint the
+	## SPECIFIC chip red when that resource is the one running out,
+	## leaving the others coloured normally.
 	var hbox := HBoxContainer.new()
 	hbox.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	hbox.add_theme_constant_override("separation", 6)
@@ -1248,15 +1252,17 @@ func _attach_cost_widget(btn: Button, salvage: int, fuel: int, pop: int) -> void
 	hbox.offset_top = -16
 	hbox.offset_bottom = -3
 	btn.add_child(hbox)
+	var refs: Dictionary = {}
 	if salvage > 0:
-		_add_cost_chip(hbox, salvage, RES_COLOR_SALVAGE)
+		refs["salvage"] = _add_cost_chip(hbox, salvage, RES_COLOR_SALVAGE)
 	if fuel > 0:
-		_add_cost_chip(hbox, fuel, RES_COLOR_FUEL)
+		refs["fuel"] = _add_cost_chip(hbox, fuel, RES_COLOR_FUEL)
 	if pop > 0:
-		_add_cost_chip(hbox, pop, RES_COLOR_POP)
+		refs["pop"] = _add_cost_chip(hbox, pop, RES_COLOR_POP)
+	return refs
 
 
-func _add_cost_chip(parent: Container, amount: int, color: Color) -> void:
+func _add_cost_chip(parent: Container, amount: int, color: Color) -> Dictionary:
 	var chip := HBoxContainer.new()
 	chip.add_theme_constant_override("separation", 3)
 	chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1272,6 +1278,7 @@ func _add_cost_chip(parent: Container, amount: int, color: Color) -> void:
 	lbl.add_theme_font_size_override("font_size", 12)
 	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	chip.add_child(lbl)
+	return { "swatch": swatch, "label": lbl, "color": color }
 
 
 func _rebuild_turret_profile_buttons(building: Building) -> void:
@@ -1850,8 +1857,8 @@ func _rebuild_build_buttons() -> void:
 		# want a hotkey collision to pick the wrong building.
 		btn.pressed.connect(_on_build_button_for_stat.bind(bstat))
 		_button_grid.add_child(btn)
-		_attach_cost_widget(btn, bstat.cost_salvage, 0, 0)
-		_action_buttons.append({ "button": btn, "kind": "build", "stat": bstat, "locked": not prereqs_ok })
+		var chip_refs: Dictionary = _attach_cost_widget(btn, bstat.cost_salvage, 0, 0)
+		_action_buttons.append({ "button": btn, "kind": "build", "stat": bstat, "locked": not prereqs_ok, "chips": chip_refs })
 		visible_index += 1
 
 
@@ -1957,15 +1964,21 @@ func _update_button_affordability() -> void:
 			continue
 		var kind: String = entry["kind"] as String
 		var affordable: bool = true
+		# Per-resource shortfall flags so the cost chips can mark
+		# which specific resource the player is missing.
+		var lack_salvage: bool = false
+		var lack_fuel: bool = false
+		var lack_pop: bool = false
 		if kind == "produce":
 			var stat: UnitStatResource = entry["stat"] as UnitStatResource
-			affordable = (
-				_resource_manager.can_afford(stat.cost_salvage, stat.cost_fuel)
-				and _resource_manager.has_population(stat.population)
-			)
+			lack_salvage = _resource_manager.salvage < stat.cost_salvage
+			lack_fuel = _resource_manager.fuel < stat.cost_fuel
+			lack_pop = not _resource_manager.has_population(stat.population)
+			affordable = not (lack_salvage or lack_fuel or lack_pop)
 		elif kind == "build":
 			var bstat: BuildingStatResource = entry["stat"] as BuildingStatResource
-			affordable = _resource_manager.can_afford_salvage(bstat.cost_salvage)
+			lack_salvage = _resource_manager.salvage < bstat.cost_salvage
+			affordable = not lack_salvage
 			# Prereq-locked entries should stay disabled regardless of
 			# whether the player has the salvage to pay for them.
 			if entry.get("locked", false):
@@ -1974,9 +1987,32 @@ func _update_button_affordability() -> void:
 			# Tab row container — never tinted as un-affordable.
 			continue
 		btn.disabled = not affordable
-		# Default theme already paints a red border on disabled buttons; we additionally
-		# dim the font so the player's eye is drawn to the affordable options.
+		# Button itself uses the standard "disabled" style — same
+		# regardless of WHICH resource is missing, so the unclickable
+		# read is consistent. Per-resource tinting happens on the
+		# cost chips below.
 		btn.modulate = Color.WHITE if affordable else COLOR_AFFORD_BAD
+		var chips: Dictionary = entry.get("chips", {}) as Dictionary
+		_paint_cost_chip(chips.get("salvage", null) as Dictionary, lack_salvage)
+		_paint_cost_chip(chips.get("fuel", null) as Dictionary, lack_fuel)
+		_paint_cost_chip(chips.get("pop", null) as Dictionary, lack_pop)
+
+
+func _paint_cost_chip(chip: Dictionary, lacking: bool) -> void:
+	## Tints a single cost chip's swatch + label red when the player
+	## is short on that resource. When the resource is fine, restores
+	## the chip's stored neutral color. Safe to call with an empty
+	## dict (does nothing).
+	if chip.is_empty():
+		return
+	var swatch: ColorRect = chip.get("swatch", null) as ColorRect
+	var lbl: Label = chip.get("label", null) as Label
+	var base_color: Color = chip.get("color", Color.WHITE) as Color
+	if not is_instance_valid(swatch) or not is_instance_valid(lbl):
+		return
+	var paint: Color = COLOR_AFFORD_BAD if lacking else base_color
+	swatch.color = paint
+	lbl.add_theme_color_override("font_color", paint)
 
 
 ## --- Tooltips ---

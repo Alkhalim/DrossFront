@@ -3025,16 +3025,49 @@ func _build_damage_fire() -> void:
 
 
 func _spawn_building_wreck() -> void:
+	## A destroyed building drops a SCATTERED debris pile rather than a
+	## single huge slab — the previous spawn was a 0.8x footprint x 0.3
+	## height box that read as a flat grey rectangle on the ground (and
+	## triggered the unit wreck's Apex landmark, which is meant for
+	## downed capital mechs, not ruined factories). Now we drop 4-7
+	## medium-class wrecks distributed across the building footprint
+	## with random rotations + sizes so the silhouette reads as actual
+	## collapsed structure with exposed walls and toppled blocks.
 	if not stats or stats.cost_salvage <= 0:
 		return
-	var wreck := Wreck.new()
-	wreck.salvage_value = int(stats.cost_salvage * 0.35)
-	wreck.salvage_remaining = wreck.salvage_value
-	wreck.wreck_size = Vector3(
-		stats.footprint_size.x * 0.8,
-		stats.footprint_size.y * 0.3,
-		stats.footprint_size.z * 0.8
-	)
+	var total_salvage: int = int(stats.cost_salvage * 0.35)
+	var fs: Vector3 = stats.footprint_size
+	var area: float = fs.x * fs.z
+	# More chunks for bigger buildings — keeps each chunk medium-sized
+	# regardless of footprint, instead of one monstrous slab.
+	var chunk_count: int = clampi(int(area / 12.0) + 3, 4, 7)
+	# Distribute salvage. Round so the integer total still adds up
+	# correctly even with the per-chunk floor() truncations.
+	var per_chunk: int = maxi(int(total_salvage / chunk_count), 1)
+	var remainder: int = total_salvage - per_chunk * chunk_count
 	var wreck_pos: Vector3 = global_position
-	get_tree().current_scene.add_child(wreck)
-	wreck.global_position = wreck_pos
+	var scene_root: Node = get_tree().current_scene
+	for i: int in chunk_count:
+		var wreck := Wreck.new()
+		var w_value: int = per_chunk + (1 if i < remainder else 0)
+		wreck.salvage_value = w_value
+		wreck.salvage_remaining = w_value
+		# Per-chunk size jitter — most chunks medium (1.4u), a couple
+		# bigger pieces (1.9u). Cap below the apex threshold (2.2u)
+		# so building debris uses the standard wreck silhouette.
+		var base_extent: float = randf_range(1.2, 1.9)
+		var chunk_h: float = randf_range(0.35, 0.65)
+		wreck.wreck_size = Vector3(
+			base_extent,
+			chunk_h,
+			base_extent * randf_range(0.85, 1.15),
+		)
+		# Scatter inside the footprint with a small inset so debris
+		# stays on the original pad rather than spilling outside.
+		var inset: float = 0.7
+		var dx: float = randf_range(-fs.x * 0.5 + inset, fs.x * 0.5 - inset)
+		var dz: float = randf_range(-fs.z * 0.5 + inset, fs.z * 0.5 - inset)
+		scene_root.add_child(wreck)
+		wreck.global_position = wreck_pos + Vector3(dx, 0.0, dz)
+		# Random Y rotation — handled by Wreck._build_wreck_visuals
+		# itself, but explicitly nudging position only matters here.
