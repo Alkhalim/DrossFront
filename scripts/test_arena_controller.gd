@@ -35,13 +35,13 @@ var _pending_ramp_clearance: Array[Rect2] = []
 
 
 func _ready() -> void:
-	# Toggle for the in-game navmesh debug overlay. Set to true and
-	# reload to see polygon outlines (walkable cells in green, ramp
-	# slopes outlined, link endpoints as dots) — useful for diagnosing
-	# pathing bugs like "invisible wall" reports. Off by default
-	# because the overlay also draws nav polys at the plateau-top Y,
-	# which z-fights with the visible plateau surface.
-	const NAV_DEBUG_OVERLAY: bool = false
+	# Navmesh debug overlay — TEMPORARILY ON while diagnosing the
+	# "invisible wall" reports. Renders walkable cells as colored
+	# polygons; gaps in the overlay correspond directly to spots where
+	# the navmesh is broken. Will turn off again once the bug is fully
+	# squashed (z-fighting with the plateau visual is the only reason
+	# this isn't permanent).
+	const NAV_DEBUG_OVERLAY: bool = true
 	NavigationServer3D.set_debug_enabled(NAV_DEBUG_OVERLAY)
 
 	# Manual strip-decomposition navmesh has dense polygon adjacency
@@ -540,25 +540,37 @@ func _build_ground_triangulation() -> Array[PackedVector2Array]:
 
 	# Collect unique Z + X values across ALL blockers — every strip
 	# rectangle is then split at the same universal X cuts so adjacent
-	# strips (above/below) always share full edges. Without universal X
-	# cuts the strip above a ramp ends up with one big -150..150 rect,
-	# while the ramp itself ends at x=cx±half_width — coincident edges
-	# but no shared vertices, no path-planner connection.
+	# strips (above/below) always share full edges.
+	#
+	# CUT QUANTIZATION: blocker AABB edges are computed from many
+	# different sources (plateau body, ramp footprints, terrain pieces
+	# with NAV_INFLATION). Float arithmetic between those sources can
+	# leave the SAME logical edge as two slightly-different values in
+	# the cut set (e.g. 5.0000 from one path, 4.9999 from another).
+	# That caused two adjacent strips to be created with a sub-millimeter
+	# gap between them — invisible on the map but enough to keep the
+	# vertex-dedup hash from matching, splitting the navmesh into two
+	# disjoint islands and producing the "horizontal wall across the
+	# whole map" symptom. Quantizing every cut to 1mm collapses those
+	# duplicates so a single canonical Z (or X) value is used.
+	var QUANT: float = 1000.0
+	var quantize := func(v: float) -> float:
+		return roundf(v * QUANT) / QUANT
 	var z_set: Dictionary = {}
-	z_set[-MAP_HALF] = true
-	z_set[MAP_HALF] = true
+	z_set[quantize.call(-MAP_HALF)] = true
+	z_set[quantize.call(MAP_HALF)] = true
 	for r: Rect2 in rects:
-		z_set[r.position.y] = true
-		z_set[r.position.y + r.size.y] = true
+		z_set[quantize.call(r.position.y)] = true
+		z_set[quantize.call(r.position.y + r.size.y)] = true
 	var z_vals: Array = z_set.keys()
 	z_vals.sort()
 
 	var x_set: Dictionary = {}
-	x_set[-MAP_HALF] = true
-	x_set[MAP_HALF] = true
+	x_set[quantize.call(-MAP_HALF)] = true
+	x_set[quantize.call(MAP_HALF)] = true
 	for r: Rect2 in rects:
-		x_set[r.position.x] = true
-		x_set[r.position.x + r.size.x] = true
+		x_set[quantize.call(r.position.x)] = true
+		x_set[quantize.call(r.position.x + r.size.x)] = true
 	var x_vals: Array = x_set.keys()
 	x_vals.sort()
 
