@@ -925,12 +925,18 @@ const _FACTION_ROSTER: Dictionary = {
 
 
 func _faction_id_for_player(player_id: int) -> int:
-	## Resolves which faction this player_id is meant to play. Allies of
-	## the local human play `player_faction`, enemies play `enemy_faction`.
-	## Falls back to ANVIL when MatchSettings isn't reachable.
+	## Resolves which faction this player_id is meant to play. Per-AI
+	## override (set by the menu's per-AI faction dropdowns) wins; if
+	## none, allies play `player_faction` and enemies play
+	## `enemy_faction`. Falls back to ANVIL when MatchSettings isn't
+	## reachable.
 	var settings: Node = get_node_or_null("/root/MatchSettings")
 	if not settings:
 		return 0
+	# Per-AI override has the highest priority — the menu sets these
+	# from the per-AI faction dropdown.
+	if settings.has_method("has_ai_faction") and settings.has_ai_faction(player_id):
+		return settings.get_ai_faction(player_id) as int
 	var roster: Array[Dictionary] = _current_roster()
 	var local_team: int = 0
 	var target_team: int = 0

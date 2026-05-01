@@ -35,12 +35,14 @@ var player_faction: FactionId = FactionId.ANVIL
 ## Faction the AI opponent (or each AI enemy in 2v2) plays. ANVIL by
 ## default — Sable AI gets enabled once Sable's roster is wired up.
 var enemy_faction: FactionId = FactionId.ANVIL
-## Per-AI personality + difficulty overrides keyed by player_id.
-## When an entry exists for a given AI, the AIController uses it
-## instead of rolling random / inheriting the global difficulty.
-## Populated by the start-of-match menu's per-AI dropdowns.
-##   ai_personalities[player_id] : AiPersonality (RANDOM / BALANCED / ...)
-##   ai_difficulties[player_id]  : Difficulty   (EASY / NORMAL / HARD)
+## Per-AI overrides keyed by player_id. When an entry exists for a
+## given AI slot, that AI uses it; otherwise the AI falls back to
+## the team-based default (player_faction for allies, enemy_faction
+## for enemies; global difficulty; RANDOM personality).
+##   ai_factions[player_id]      : FactionId
+##   ai_personalities[player_id] : AiPersonality
+##   ai_difficulties[player_id]  : Difficulty
+var ai_factions: Dictionary = {}
 var ai_personalities: Dictionary = {}
 var ai_difficulties: Dictionary = {}
 
@@ -59,6 +61,19 @@ func get_ai_difficulty(player_id: int) -> Difficulty:
 	if ai_difficulties.has(player_id):
 		return ai_difficulties[player_id] as Difficulty
 	return difficulty
+
+
+func has_ai_faction(player_id: int) -> bool:
+	return ai_factions.has(player_id)
+
+
+func get_ai_faction(player_id: int) -> FactionId:
+	## Per-AI faction override. Callers should check has_ai_faction()
+	## first; if no override, the caller's team-based fallback (ally
+	## takes player_faction, enemy takes enemy_faction) still applies.
+	if ai_factions.has(player_id):
+		return ai_factions[player_id] as FactionId
+	return enemy_faction
 
 
 func get_faction_label(f: FactionId) -> String:

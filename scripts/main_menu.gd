@@ -30,13 +30,26 @@ var _selected_faction: int = MatchSettingsClass.FactionId.ANVIL
 
 # Setup-screen widgets so the mode toggle can rebuild the AI rows.
 var _mode_buttons: Array[Button] = []
-var _map_buttons: Array[Button] = []
-var _map_previews: Array[Control] = []
+var _map_dropdown: OptionButton = null
+var _map_preview: Control = null
+var _map_info_label: Label = null
 var _faction_buttons: Array[Button] = []
 var _faction_icons: Array[Control] = []
 var _ai_rows_container: VBoxContainer = null
+var _ai_faction_dropdowns: Dictionary = {}    # player_id → OptionButton
 var _ai_difficulty_dropdowns: Dictionary = {}  # player_id → OptionButton
 var _ai_personality_dropdowns: Dictionary = {}  # player_id → OptionButton
+
+const _MAP_INFO: Dictionary = {
+	MatchSettingsClass.MapId.FOUNDRY_BELT: {
+		"label": "Foundry Belt",
+		"blurb": "Cluttered industrial map.\nMultiple chokepoints, dense salvage,\nApex wreck objective.",
+	},
+	MatchSettingsClass.MapId.ASHPLAINS_CROSSING: {
+		"label": "Ashplains Crossing",
+		"blurb": "Volcanic ash flats with one elevated ridge.\nLong sightlines, sparse cover,\nfavours ranged combat.",
+	},
+}
 
 
 func _ready() -> void:
@@ -172,18 +185,34 @@ func _build_setup_panel() -> void:
 	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_setup_panel.add_child(heading)
 
-	_build_mode_section()
-	_build_map_section()
-	_build_faction_section()
-	_build_ai_section()
+	# Two-column layout — controls on the left (mode / faction / AI
+	# rows), map picker on the right (dropdown + preview thumbnail +
+	# info blurb stacked vertically).
+	var split := HBoxContainer.new()
+	split.add_theme_constant_override("separation", 28)
+	split.alignment = BoxContainer.ALIGNMENT_CENTER
+	_setup_panel.add_child(split)
+
+	var left_col := VBoxContainer.new()
+	left_col.add_theme_constant_override("separation", 12)
+	split.add_child(left_col)
+
+	var right_col := VBoxContainer.new()
+	right_col.add_theme_constant_override("separation", 8)
+	right_col.alignment = BoxContainer.ALIGNMENT_CENTER
+	split.add_child(right_col)
+
+	_build_mode_section(left_col)
+	_build_faction_section(left_col)
+	_build_ai_section(left_col)
+	_build_map_section(right_col)
 	_build_setup_buttons()
 
 
-func _build_mode_section() -> void:
+func _build_mode_section(parent: Container) -> void:
 	var hbox := HBoxContainer.new()
 	hbox.add_theme_constant_override("separation", 8)
-	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	_setup_panel.add_child(hbox)
+	parent.add_child(hbox)
 
 	var label := Label.new()
 	label.text = "Match Format:"
@@ -205,53 +234,54 @@ func _build_mode_section() -> void:
 	_apply_mode_toggle_state()
 
 
-func _build_map_section() -> void:
+func _build_map_section(parent: Container) -> void:
 	var heading := Label.new()
 	heading.text = "Map:"
 	heading.add_theme_font_size_override("font_size", 16)
 	heading.add_theme_color_override("font_color", COLOR_HEADING)
-	_setup_panel.add_child(heading)
+	parent.add_child(heading)
 
-	var hbox := HBoxContainer.new()
-	hbox.add_theme_constant_override("separation", 12)
-	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	_setup_panel.add_child(hbox)
-
-	for entry: Dictionary in [
-		{ "value": MatchSettingsClass.MapId.FOUNDRY_BELT, "preview_id": MapPreviewScript.MapId.FOUNDRY_BELT },
-		{ "value": MatchSettingsClass.MapId.ASHPLAINS_CROSSING, "preview_id": MapPreviewScript.MapId.ASHPLAINS_CROSSING },
+	# Dropdown — pick a map by name. The preview image + info blurb
+	# below update automatically when selection changes.
+	_map_dropdown = OptionButton.new()
+	_map_dropdown.custom_minimum_size = Vector2(240, 32)
+	for map_id_v: int in [
+		MatchSettingsClass.MapId.FOUNDRY_BELT,
+		MatchSettingsClass.MapId.ASHPLAINS_CROSSING,
 	]:
-		var col := VBoxContainer.new()
-		col.add_theme_constant_override("separation", 4)
-		hbox.add_child(col)
+		var info: Dictionary = _MAP_INFO[map_id_v] as Dictionary
+		_map_dropdown.add_item(info["label"] as String, map_id_v)
+	_map_dropdown.selected = _map_dropdown.get_item_index(_selected_map)
+	_map_dropdown.item_selected.connect(_on_map_dropdown_selected)
+	parent.add_child(_map_dropdown)
 
-		# Procedural preview thumbnail + click button below.
-		var preview: Control = MapPreviewScript.new()
-		preview.map_id = entry["preview_id"]
-		_map_previews.append(preview)
-		col.add_child(preview)
+	# Procedural map preview thumbnail.
+	_map_preview = MapPreviewScript.new()
+	_map_preview.map_id = _selected_map
+	_map_preview.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	parent.add_child(_map_preview)
 
-		var btn := Button.new()
-		btn.text = "Foundry Belt" if entry["value"] == MatchSettingsClass.MapId.FOUNDRY_BELT else "Ashplains Crossing"
-		btn.toggle_mode = true
-		btn.custom_minimum_size = Vector2(220, 36)
-		btn.pressed.connect(_on_map_toggle.bind(entry["value"] as int))
-		_map_buttons.append(btn)
-		col.add_child(btn)
-	_apply_map_toggle_state()
+	# Info blurb (multi-line label) under the preview.
+	_map_info_label = Label.new()
+	_map_info_label.add_theme_font_size_override("font_size", 14)
+	_map_info_label.add_theme_color_override("font_color", COLOR_HINT)
+	_map_info_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_map_info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_map_info_label.custom_minimum_size = Vector2(240, 64)
+	parent.add_child(_map_info_label)
+	_apply_map_dropdown_state()
 
 
-func _build_faction_section() -> void:
+func _build_faction_section(parent: Container) -> void:
 	var heading := Label.new()
 	heading.text = "Your Faction:"
 	heading.add_theme_font_size_override("font_size", 16)
 	heading.add_theme_color_override("font_color", COLOR_HEADING)
-	_setup_panel.add_child(heading)
+	parent.add_child(heading)
 
 	var hbox := HBoxContainer.new()
 	hbox.add_theme_constant_override("separation", 12)
-	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	_setup_panel.add_child(hbox)
+	parent.add_child(hbox)
 
 	for entry: Dictionary in [
 		{ "value": MatchSettingsClass.FactionId.ANVIL,
@@ -285,25 +315,27 @@ func _build_faction_section() -> void:
 	_apply_faction_toggle_state()
 
 
-func _build_ai_section() -> void:
+func _build_ai_section(parent: Container) -> void:
 	var heading := Label.new()
 	heading.text = "AI Setup:"
 	heading.add_theme_font_size_override("font_size", 16)
 	heading.add_theme_color_override("font_color", COLOR_HEADING)
-	_setup_panel.add_child(heading)
+	parent.add_child(heading)
 
 	_ai_rows_container = VBoxContainer.new()
 	_ai_rows_container.add_theme_constant_override("separation", 6)
-	_setup_panel.add_child(_ai_rows_container)
+	parent.add_child(_ai_rows_container)
 	_rebuild_ai_rows()
 
 
 func _rebuild_ai_rows() -> void:
 	## Tear down + rebuild the AI dropdown rows whenever the mode
 	## toggle flips. 1v1 has one enemy AI; 2v2 has the ally + two
-	## enemies. Each row holds a difficulty + personality dropdown.
+	## enemies. Each row holds a faction + difficulty + personality
+	## dropdown.
 	for child: Node in _ai_rows_container.get_children():
 		child.queue_free()
+	_ai_faction_dropdowns.clear()
 	_ai_difficulty_dropdowns.clear()
 	_ai_personality_dropdowns.clear()
 	# Roster definitions match TestArenaController's roster constants.
@@ -326,7 +358,7 @@ func _build_ai_row(player_id: int, label_text: String, team: int) -> void:
 	var name_label := Label.new()
 	name_label.text = label_text
 	name_label.add_theme_font_size_override("font_size", 14)
-	name_label.custom_minimum_size = Vector2(200, 30)
+	name_label.custom_minimum_size = Vector2(140, 30)
 	# Ally rows tinted green, enemy rows red — same colour scheme as
 	# the minimap so the player reads at a glance which is which.
 	if team == 0:
@@ -335,8 +367,34 @@ func _build_ai_row(player_id: int, label_text: String, team: int) -> void:
 		name_label.add_theme_color_override("font_color", Color(1.0, 0.55, 0.50, 1.0))
 	row.add_child(name_label)
 
+	# Per-AI faction dropdown — defaults to the team-based fallback
+	# (ally takes player_faction, enemy takes the opposite). Selecting
+	# an explicit faction here writes ai_factions[player_id] on Start.
+	var fac_dropdown := OptionButton.new()
+	fac_dropdown.custom_minimum_size = Vector2(110, 32)
+	for fac_entry: Dictionary in [
+		{"label": "Anvil", "value": MatchSettingsClass.FactionId.ANVIL},
+		{"label": "Sable", "value": MatchSettingsClass.FactionId.SABLE},
+	]:
+		fac_dropdown.add_item(fac_entry["label"] as String, fac_entry["value"] as int)
+	# Default selection mirrors the team-based fallback so the player
+	# doesn't need to touch every dropdown if they're happy with the
+	# auto-pick: ally inherits the player's faction, enemy gets the
+	# opposite.
+	if team == 0:
+		fac_dropdown.selected = fac_dropdown.get_item_index(_selected_faction)
+	else:
+		var opp: int = (
+			MatchSettingsClass.FactionId.SABLE
+			if _selected_faction == MatchSettingsClass.FactionId.ANVIL
+			else MatchSettingsClass.FactionId.ANVIL
+		)
+		fac_dropdown.selected = fac_dropdown.get_item_index(opp)
+	row.add_child(fac_dropdown)
+	_ai_faction_dropdowns[player_id] = fac_dropdown
+
 	var diff_dropdown := OptionButton.new()
-	diff_dropdown.custom_minimum_size = Vector2(120, 32)
+	diff_dropdown.custom_minimum_size = Vector2(110, 32)
 	for diff_entry: Dictionary in [
 		{"label": "Easy", "value": MatchSettingsClass.Difficulty.EASY},
 		{"label": "Normal", "value": MatchSettingsClass.Difficulty.NORMAL},
@@ -348,7 +406,7 @@ func _build_ai_row(player_id: int, label_text: String, team: int) -> void:
 	_ai_difficulty_dropdowns[player_id] = diff_dropdown
 
 	var pers_dropdown := OptionButton.new()
-	pers_dropdown.custom_minimum_size = Vector2(160, 32)
+	pers_dropdown.custom_minimum_size = Vector2(150, 32)
 	for pers_entry: Dictionary in [
 		{"label": "Random", "value": MatchSettingsClass.AiPersonality.RANDOM},
 		{"label": "Balanced", "value": MatchSettingsClass.AiPersonality.BALANCED},
@@ -475,19 +533,23 @@ func _apply_mode_toggle_state() -> void:
 	_mode_buttons[1].button_pressed = (_selected_mode == MatchSettingsClass.Mode.TWO_V_TWO)
 
 
-func _on_map_toggle(value: int) -> void:
-	_selected_map = value
-	_apply_map_toggle_state()
-
-
-func _apply_map_toggle_state() -> void:
-	if _map_buttons.size() < 2:
+func _on_map_dropdown_selected(idx: int) -> void:
+	if not _map_dropdown:
 		return
-	_map_buttons[0].button_pressed = (_selected_map == MatchSettingsClass.MapId.FOUNDRY_BELT)
-	_map_buttons[1].button_pressed = (_selected_map == MatchSettingsClass.MapId.ASHPLAINS_CROSSING)
-	if _map_previews.size() >= 2:
-		_map_previews[0].selected = _map_buttons[0].button_pressed
-		_map_previews[1].selected = _map_buttons[1].button_pressed
+	_selected_map = _map_dropdown.get_item_id(idx)
+	_apply_map_dropdown_state()
+
+
+func _apply_map_dropdown_state() -> void:
+	if _map_dropdown:
+		var dropdown_idx: int = _map_dropdown.get_item_index(_selected_map)
+		if dropdown_idx >= 0:
+			_map_dropdown.selected = dropdown_idx
+	if _map_preview:
+		_map_preview.map_id = _selected_map
+	if _map_info_label:
+		var info: Dictionary = _MAP_INFO.get(_selected_map, {}) as Dictionary
+		_map_info_label.text = info.get("blurb", "") as String
 
 
 func _on_faction_toggle(value: int) -> void:
@@ -522,6 +584,7 @@ func _on_tutorial_pressed() -> void:
 	MatchSettings.enemy_faction = MatchSettingsClass.FactionId.ANVIL
 	MatchSettings.ai_personalities = {}
 	MatchSettings.ai_difficulties = {}
+	MatchSettings.ai_factions = {}
 	_start_match()
 
 
@@ -548,6 +611,7 @@ func _on_start_match_pressed() -> void:
 	# Read each AI's per-row dropdown selection.
 	var diffs: Dictionary = {}
 	var pers: Dictionary = {}
+	var facs: Dictionary = {}
 	for player_id_v: Variant in _ai_difficulty_dropdowns.keys():
 		var pid: int = player_id_v as int
 		var dropdown: OptionButton = _ai_difficulty_dropdowns[pid] as OptionButton
@@ -558,8 +622,14 @@ func _on_start_match_pressed() -> void:
 		var dropdown: OptionButton = _ai_personality_dropdowns[pid] as OptionButton
 		if dropdown:
 			pers[pid] = dropdown.get_selected_id()
+	for player_id_v: Variant in _ai_faction_dropdowns.keys():
+		var pid: int = player_id_v as int
+		var dropdown: OptionButton = _ai_faction_dropdowns[pid] as OptionButton
+		if dropdown:
+			facs[pid] = dropdown.get_selected_id()
 	MatchSettings.ai_difficulties = diffs
 	MatchSettings.ai_personalities = pers
+	MatchSettings.ai_factions = facs
 	# Legacy `difficulty` field used for any AI without a per-slot
 	# override — set to whichever difficulty appears most often in
 	# the per-AI selections (defaults to Normal).
