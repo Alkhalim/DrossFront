@@ -1446,12 +1446,16 @@ func _unhighlight_wreck(id: int) -> void:
 		_highlighted_wrecks.erase(id)
 		return
 	var data: Dictionary = entry as Dictionary
-	# `as Node3D` on a stored Variant errors when the object has been
-	# freed since it was highlighted (wrecks can despawn while still
-	# in the highlight dict). Pull the raw value, validate, and only
-	# then proceed to the per-mesh restore loop.
+	# `is Node3D` errors with "Left operand of 'is' is a previously
+	# freed instance" when the wreck has despawned since being
+	# highlighted. is_instance_valid MUST come first — it safely
+	# handles freed Variants. Only after validity passes do we use
+	# `is` for the type narrowing.
 	var wreck_var: Variant = data.get("wreck")
-	if not (wreck_var is Node3D) or not is_instance_valid(wreck_var):
+	if not is_instance_valid(wreck_var):
+		_highlighted_wrecks.erase(id)
+		return
+	if not (wreck_var is Node3D):
 		_highlighted_wrecks.erase(id)
 		return
 	var wreck: Node3D = wreck_var
