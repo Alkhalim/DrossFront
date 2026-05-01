@@ -1516,6 +1516,12 @@ func _apply_placeholder_shape() -> void:
 	# treatment downstream.
 	if _resolve_faction_id() == 1 and stats.building_id != &"basic_generator":
 		_apply_sable_building_silhouette()
+	# Anvil brutalist treatment — heavy concrete corner pylons, a
+	# raised plinth at the base, and a crenellated parapet on top.
+	# Reads as Soviet-monolith industrial vs Sable's clean tower
+	# proportions.
+	if _resolve_faction_id() == 0 and stats.building_id != &"basic_generator" and stats.building_id != &"gun_emplacement":
+		_apply_anvil_brutalist_extras()
 
 
 func _apply_team_ring() -> void:
@@ -2160,6 +2166,40 @@ func _apply_sable_building_silhouette() -> void:
 	prow_r.set_surface_override_material(0, prow_mat)
 	_visual_root.add_child(prow_r)
 
+	# Vertical glass fins along each side wall — slim emissive blades
+	# running floor to ceiling. Sable uses these where Anvil uses
+	# concrete pylons; signals "data-corp HQ" vs "industrial bunker".
+	var fin_glow_mat := StandardMaterial3D.new()
+	fin_glow_mat.albedo_color = Color(0.05, 0.10, 0.15, 1.0)
+	fin_glow_mat.emission_enabled = true
+	fin_glow_mat.emission = seam_color
+	fin_glow_mat.emission_energy_multiplier = 0.65
+	fin_glow_mat.metallic = 0.6
+	fin_glow_mat.roughness = 0.35
+	for fin_side: int in 2:
+		var fsx: float = -fs.x * 0.5 - 0.04 if fin_side == 0 else fs.x * 0.5 + 0.04
+		for slot: int in 3:
+			var slot_z: float = (float(slot) - 1.0) * fs.z * 0.30
+			var fin := MeshInstance3D.new()
+			var fbox := BoxMesh.new()
+			fbox.size = Vector3(0.10, fs.y * 0.85, 0.20)
+			fin.mesh = fbox
+			fin.position = Vector3(fsx, fs.y * 0.45, slot_z)
+			fin.set_surface_override_material(0, fin_glow_mat)
+			_visual_root.add_child(fin)
+
+	# Cantilevered upper eave — a thin overhanging slab at the top of
+	# the base block. Stronger architectural read than just a setback,
+	# and casts a shadow line that distinguishes Sable's silhouette
+	# from any Anvil rooftop in any lighting.
+	var eave := MeshInstance3D.new()
+	var eave_box := BoxMesh.new()
+	eave_box.size = Vector3(fs.x * 1.08, 0.08, fs.z * 1.08)
+	eave.mesh = eave_box
+	eave.position.y = fs.y * 0.62
+	eave.set_surface_override_material(0, _make_sable_hull_mat(hull_color.darkened(0.20)))
+	_visual_root.add_child(eave)
+
 	# Cyan emissive seams along the edge where each setback meets — a
 	# horizontal line at base/mid joint and another at mid/spine joint.
 	var seam_mat := StandardMaterial3D.new()
@@ -2220,6 +2260,88 @@ func _apply_sable_building_silhouette() -> void:
 		tip.position = Vector3(0.0, spire_h * 0.5 + 0.08, 0.0)
 		tip.set_surface_override_material(0, seam_mat)
 		spire.add_child(tip)
+
+
+func _apply_anvil_brutalist_extras() -> void:
+	## Layers Soviet/post-industrial architectural elements over the
+	## standard Anvil placeholder hull: thick concrete corner pylons, a
+	## raised plinth ringing the base, and a crenellated parapet around
+	## the rooftop edge. Sable buildings skip this and use the stepped
+	## tower silhouette instead, so a Sable structure looks corp-clean
+	## while an Anvil structure looks like a poured-concrete fortress.
+	if not stats or not _visual_root:
+		return
+	var fs: Vector3 = stats.footprint_size
+
+	# Concrete plinth — a wider, shorter slab at the base of the
+	# building. The hull sits on top of it, reading as a poured-concrete
+	# foundation pad. Slightly darker than the hull so the seam is
+	# visible from any angle.
+	var plinth := MeshInstance3D.new()
+	var plinth_box := BoxMesh.new()
+	plinth_box.size = Vector3(fs.x * 1.10, fs.y * 0.10, fs.z * 1.10)
+	plinth.mesh = plinth_box
+	plinth.position.y = fs.y * 0.05
+	plinth.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.16, 0.14)))
+	_attach_visual(plinth)
+
+	# Corner pylons — square iron-clad concrete pillars at each corner,
+	# slightly proud of the wall. Reads as the structural skeleton of
+	# the building.
+	var pylon_color := Color(0.24, 0.22, 0.20)
+	for px: int in 2:
+		for pz: int in 2:
+			var pylon := MeshInstance3D.new()
+			var pbox := BoxMesh.new()
+			pbox.size = Vector3(fs.x * 0.18, fs.y * 1.02, fs.z * 0.18)
+			pylon.mesh = pbox
+			var ppx: float = (-fs.x * 0.5 + fs.x * 0.09) if px == 0 else (fs.x * 0.5 - fs.x * 0.09)
+			var ppz: float = (-fs.z * 0.5 + fs.z * 0.09) if pz == 0 else (fs.z * 0.5 - fs.z * 0.09)
+			pylon.position = Vector3(ppx, fs.y * 0.51, ppz)
+			pylon.set_surface_override_material(0, _detail_dark_metal_mat(pylon_color))
+			_attach_visual(pylon)
+			# Iron strap mid-height — a slim band wrapping the pylon
+			# face, reads as a maintenance grip / structural collar.
+			var strap := MeshInstance3D.new()
+			var sbox := BoxMesh.new()
+			sbox.size = Vector3(fs.x * 0.20, 0.10, fs.z * 0.20)
+			strap.mesh = sbox
+			strap.position = Vector3(ppx, fs.y * 0.42, ppz)
+			strap.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.32, 0.26, 0.20)))
+			_attach_visual(strap)
+
+	# Crenellated parapet — small square blocks ringing the roof edge
+	# every fixed pitch. Brutalist battlement read.
+	var parapet_color := Color(0.22, 0.20, 0.17)
+	var perim_pitch: float = 0.85
+	# Top + bottom edges along Z
+	var x_count: int = maxi(int(fs.x / perim_pitch), 2)
+	for i: int in x_count + 1:
+		var px2: float = -fs.x * 0.5 + (fs.x / float(x_count)) * float(i)
+		for sign: int in 2:
+			var pz2: float = fs.z * 0.5 if sign == 0 else -fs.z * 0.5
+			var crenel := MeshInstance3D.new()
+			var cbox := BoxMesh.new()
+			cbox.size = Vector3(0.32, 0.30, 0.22)
+			crenel.mesh = cbox
+			crenel.position = Vector3(px2, fs.y * 1.02 + 0.15, pz2)
+			crenel.set_surface_override_material(0, _detail_dark_metal_mat(parapet_color))
+			_attach_visual(crenel)
+	var z_count: int = maxi(int(fs.z / perim_pitch), 2)
+	for i: int in z_count + 1:
+		var pz3: float = -fs.z * 0.5 + (fs.z / float(z_count)) * float(i)
+		for sign2: int in 2:
+			var px3: float = fs.x * 0.5 if sign2 == 0 else -fs.x * 0.5
+			# Skip the corners (already covered by the X-axis pass).
+			if i == 0 or i == z_count:
+				continue
+			var crenel2 := MeshInstance3D.new()
+			var cbox2 := BoxMesh.new()
+			cbox2.size = Vector3(0.22, 0.30, 0.32)
+			crenel2.mesh = cbox2
+			crenel2.position = Vector3(px3, fs.y * 1.02 + 0.15, pz3)
+			crenel2.set_surface_override_material(0, _detail_dark_metal_mat(parapet_color))
+			_attach_visual(crenel2)
 
 
 func _make_sable_hull_mat(c: Color) -> StandardMaterial3D:

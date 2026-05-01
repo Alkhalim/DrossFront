@@ -612,14 +612,17 @@ func _build_sable_drone(parent: Node3D, team: Color, body_color: Color, s: float
 func _build_hammerhead() -> void:
 	# Heavy gunship — wide low-profile body, weapon pods underneath,
 	# tail rotor + twin engine nacelles. Anvil's flagship aircraft.
+	# v3 polish: scaled ~25% smaller and densified with cockpit canopy,
+	# intake grilles, panel-line strips, antenna mast, and ventral fin
+	# so the silhouette doesn't read as a single chunky box.
 	var team: Color = _team_color()
 	var body_color := Color(0.32, 0.30, 0.27, 1.0)
 
-	# Wide hull.
+	# Wide hull (smaller than v1 — was 2.6x0.7x4.5).
 	var hull := MeshInstance3D.new()
 	hull.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var hull_box := BoxMesh.new()
-	hull_box.size = Vector3(2.6, 0.7, 4.5)
+	hull_box.size = Vector3(2.0, 0.55, 3.4)
 	hull.mesh = hull_box
 	hull.set_surface_override_material(0, _aircraft_metal_mat(body_color))
 	add_child(hull)
@@ -628,12 +631,31 @@ func _build_hammerhead() -> void:
 	var nose := MeshInstance3D.new()
 	nose.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var nose_box := BoxMesh.new()
-	nose_box.size = Vector3(2.0, 0.55, 1.2)
+	nose_box.size = Vector3(1.5, 0.45, 0.95)
 	nose.mesh = nose_box
-	nose.position = Vector3(0, -0.05, 2.6)
-	nose.rotation.x = -0.18
+	nose.position = Vector3(0, -0.04, 2.0)
+	nose.rotation.x = -0.20
 	nose.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.05)))
 	add_child(nose)
+
+	# Cockpit canopy — small angled bubble on top of the nose. Adds
+	# silhouette focal point near the front + reads as a real cockpit.
+	var canopy := MeshInstance3D.new()
+	canopy.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var canopy_box := BoxMesh.new()
+	canopy_box.size = Vector3(0.85, 0.30, 0.85)
+	canopy.mesh = canopy_box
+	canopy.position = Vector3(0, 0.32, 1.55)
+	canopy.rotation.x = -0.16
+	var canopy_mat := StandardMaterial3D.new()
+	canopy_mat.albedo_color = Color(0.05, 0.10, 0.18, 1.0)
+	canopy_mat.emission_enabled = true
+	canopy_mat.emission = Color(0.30, 0.55, 0.85, 1.0)
+	canopy_mat.emission_energy_multiplier = 0.8
+	canopy_mat.metallic = 0.7
+	canopy_mat.roughness = 0.20
+	canopy.set_surface_override_material(0, canopy_mat)
+	add_child(canopy)
 
 	# Twin engine nacelles flanking the body.
 	for side: int in 2:
@@ -641,19 +663,40 @@ func _build_hammerhead() -> void:
 		var nacelle := MeshInstance3D.new()
 		nacelle.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var nacelle_box := BoxMesh.new()
-		nacelle_box.size = Vector3(0.6, 0.7, 2.6)
+		nacelle_box.size = Vector3(0.50, 0.55, 2.0)
 		nacelle.mesh = nacelle_box
-		nacelle.position = Vector3(sx * 1.7, 0.0, -0.3)
+		nacelle.position = Vector3(sx * 1.30, 0.0, -0.30)
 		nacelle.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.1)))
 		add_child(nacelle)
+
+		# Intake grille on the nacelle face — shallow recess + cross-bars
+		# so the front of the engine reads as an air intake, not a brick.
+		var intake := MeshInstance3D.new()
+		intake.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var intake_box := BoxMesh.new()
+		intake_box.size = Vector3(0.36, 0.42, 0.20)
+		intake.mesh = intake_box
+		intake.position = Vector3(sx * 1.30, 0.0, 0.78)
+		intake.set_surface_override_material(0, _aircraft_metal_mat(Color(0.05, 0.05, 0.06, 1.0)))
+		add_child(intake)
+		for bar_i: int in 3:
+			var bar := MeshInstance3D.new()
+			bar.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var bar_box := BoxMesh.new()
+			bar_box.size = Vector3(0.42, 0.04, 0.04)
+			bar.mesh = bar_box
+			var by: float = (float(bar_i) - 1.0) * 0.14
+			bar.position = Vector3(sx * 1.30, by, 0.86)
+			bar.set_surface_override_material(0, _aircraft_metal_mat(Color(0.18, 0.18, 0.18, 1.0)))
+			add_child(bar)
 
 		# Engine exhaust — emissive at the back of each nacelle.
 		var exhaust := MeshInstance3D.new()
 		exhaust.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var exh_box := BoxMesh.new()
-		exh_box.size = Vector3(0.45, 0.4, 0.2)
+		exh_box.size = Vector3(0.34, 0.32, 0.16)
 		exhaust.mesh = exh_box
-		exhaust.position = Vector3(sx * 1.7, 0.0, -1.7)
+		exhaust.position = Vector3(sx * 1.30, 0.0, -1.30)
 		var exh_mat := StandardMaterial3D.new()
 		exh_mat.albedo_color = Color(1.0, 0.45, 0.15, 1.0)
 		exh_mat.emission_enabled = true
@@ -662,45 +705,86 @@ func _build_hammerhead() -> void:
 		exhaust.set_surface_override_material(0, exh_mat)
 		add_child(exhaust)
 
-	# Underwing weapon pods (missile racks).
+	# Underwing weapon pods (missile racks). Now with visible missile
+	# tubes on the front face for fine detail at zoom.
 	for side: int in 2:
 		var sx: float = 1.0 if side == 0 else -1.0
 		var pod := MeshInstance3D.new()
 		pod.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var pod_box := BoxMesh.new()
-		pod_box.size = Vector3(0.45, 0.35, 1.5)
+		pod_box.size = Vector3(0.36, 0.28, 1.20)
 		pod.mesh = pod_box
-		pod.position = Vector3(sx * 1.0, -0.45, 0.5)
+		pod.position = Vector3(sx * 0.78, -0.36, 0.40)
 		pod.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.15)))
 		add_child(pod)
+		# Three missile tube ends visible on the front face of each pod.
+		for tube_i: int in 3:
+			var tube := MeshInstance3D.new()
+			tube.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var tube_cyl := CylinderMesh.new()
+			tube_cyl.top_radius = 0.06
+			tube_cyl.bottom_radius = 0.06
+			tube_cyl.height = 0.08
+			tube.mesh = tube_cyl
+			tube.rotation.x = PI * 0.5
+			var tx: float = sx * 0.78 + (float(tube_i) - 1.0) * 0.10
+			tube.position = Vector3(tx, -0.36, 1.04)
+			tube.set_surface_override_material(0, _aircraft_metal_mat(Color(0.10, 0.10, 0.10, 1.0)))
+			add_child(tube)
 
 	# Chin cannon — single stub barrel under the nose.
 	var cannon := MeshInstance3D.new()
 	cannon.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var cannon_box := BoxMesh.new()
-	cannon_box.size = Vector3(0.4, 0.4, 1.1)
+	cannon_box.size = Vector3(0.32, 0.32, 0.85)
 	cannon.mesh = cannon_box
-	cannon.position = Vector3(0, -0.5, 2.0)
+	cannon.position = Vector3(0, -0.40, 1.55)
 	cannon.set_surface_override_material(0, _aircraft_metal_mat(Color(0.18, 0.18, 0.20)))
 	add_child(cannon)
 
-	# Tail fin.
+	# Tail fin + horizontal stabilizers — cruciform tail for silhouette.
 	var fin := MeshInstance3D.new()
 	fin.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var fin_box := BoxMesh.new()
-	fin_box.size = Vector3(0.18, 1.0, 0.9)
+	fin_box.size = Vector3(0.14, 0.75, 0.65)
 	fin.mesh = fin_box
-	fin.position = Vector3(0, 0.5, -2.0)
+	fin.position = Vector3(0, 0.40, -1.55)
 	fin.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.1)))
 	add_child(fin)
+	# Horizontal stabilizers — two short wings off the rear hull.
+	for stab_side: int in 2:
+		var ssx: float = 1.0 if stab_side == 0 else -1.0
+		var stab := MeshInstance3D.new()
+		stab.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var stab_box := BoxMesh.new()
+		stab_box.size = Vector3(0.85, 0.06, 0.45)
+		stab.mesh = stab_box
+		stab.position = Vector3(ssx * 0.55, 0.18, -1.50)
+		stab.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.1)))
+		add_child(stab)
+
+	# Hull panel lines — two thin recessed strips running fore/aft along
+	# each side of the hull. Reads as armor-plate seams at distance.
+	for line_side: int in 2:
+		var lsx: float = 1.0 if line_side == 0 else -1.0
+		for line_y: int in 2:
+			var line := MeshInstance3D.new()
+			line.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var line_box := BoxMesh.new()
+			line_box.size = Vector3(0.04, 0.04, 2.5)
+			line.mesh = line_box
+			var ly: float = 0.15 if line_y == 0 else -0.10
+			line.position = Vector3(lsx * 0.95, ly, 0.0)
+			line.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.30)))
+			add_child(line)
 
 	# Cockpit + team-color stripe along the spine.
 	var spine := MeshInstance3D.new()
 	spine.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var spine_box := BoxMesh.new()
-	spine_box.size = Vector3(0.6, 0.18, 3.6)
+	spine_box.size = Vector3(0.45, 0.14, 2.8)
 	spine.mesh = spine_box
-	spine.position.y = 0.42
+	spine.position.y = 0.34
 	var spine_mat := StandardMaterial3D.new()
 	spine_mat.albedo_color = team
 	spine_mat.emission_enabled = true
@@ -708,6 +792,16 @@ func _build_hammerhead() -> void:
 	spine_mat.emission_energy_multiplier = 1.4
 	spine.set_surface_override_material(0, spine_mat)
 	add_child(spine)
+
+	# Slim antenna mast on the spine — tiny silhouette punctuation.
+	var ant := MeshInstance3D.new()
+	ant.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var ant_box := BoxMesh.new()
+	ant_box.size = Vector3(0.05, 0.45, 0.05)
+	ant.mesh = ant_box
+	ant.position = Vector3(0, 0.65, -0.40)
+	ant.set_surface_override_material(0, _aircraft_metal_mat(Color(0.12, 0.12, 0.12, 1.0)))
+	add_child(ant)
 
 
 func _build_switchblade() -> void:
@@ -800,6 +894,51 @@ func _build_switchblade() -> void:
 	exh_mat.emission_energy_multiplier = 3.0
 	exhaust.set_surface_override_material(0, exh_mat)
 	add_child(exhaust)
+
+	# Detail polish: wingtip nav lights + nose air intake + spine panel
+	# strip. Fills out the silhouette beyond a few flat slabs.
+	var nav_mat := StandardMaterial3D.new()
+	nav_mat.albedo_color = SABLE_NEON_PALE
+	nav_mat.emission_enabled = true
+	nav_mat.emission = SABLE_NEON_PALE
+	nav_mat.emission_energy_multiplier = 2.6
+	nav_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	for nav_side: int in 2:
+		var nsx: float = 1.0 if nav_side == 0 else -1.0
+		var nav := MeshInstance3D.new()
+		nav.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var nav_box := BoxMesh.new()
+		nav_box.size = Vector3(0.10, 0.06, 0.10)
+		nav.mesh = nav_box
+		nav.position = Vector3(nsx * 1.62, 0.02, -0.20)
+		nav.set_surface_override_material(0, nav_mat)
+		add_child(nav)
+	# Nose intake — recessed dark slit at the front of the nose cone.
+	var intake := MeshInstance3D.new()
+	intake.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var intake_box := BoxMesh.new()
+	intake_box.size = Vector3(0.34, 0.10, 0.20)
+	intake.mesh = intake_box
+	intake.position = Vector3(0, -0.12, 2.32)
+	intake.set_surface_override_material(0, _aircraft_metal_mat(Color(0.04, 0.04, 0.06, 1.0)))
+	add_child(intake)
+	# Spine — short emissive cyan strip running the upper fuselage.
+	var spine := MeshInstance3D.new()
+	spine.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var spine_box := BoxMesh.new()
+	spine_box.size = Vector3(0.06, 0.04, 1.5)
+	spine.mesh = spine_box
+	spine.position = Vector3(0, 0.27, -0.4)
+	var spine_mat := StandardMaterial3D.new()
+	spine_mat.albedo_color = SABLE_NEON_PALE
+	spine_mat.emission_enabled = true
+	spine_mat.emission = SABLE_NEON_PALE
+	spine_mat.emission_energy_multiplier = 1.8
+	spine.set_surface_override_material(0, spine_mat)
+	add_child(spine)
+
+
+const SABLE_NEON_PALE := Color(0.45, 0.95, 1.0, 1.0)
 
 
 func _build_default_aircraft() -> void:
