@@ -1225,20 +1225,105 @@ func _detail_aerodrome() -> void:
 	else:
 		_build_aerodrome_tower_anvil(fs)
 
-	# Hangar opening — large dark recess on the front face. Same for
-	# both factions; the production gate is the unifying read.
-	var hangar := MeshInstance3D.new()
-	var hangar_box := BoxMesh.new()
-	hangar_box.size = Vector3(fs.x * 0.5, fs.y * 0.7, 0.1)
-	hangar.mesh = hangar_box
-	hangar.position = Vector3(0, fs.y * 0.4, fs.z * 0.5 + 0.05)
-	var hangar_mat := StandardMaterial3D.new()
-	hangar_mat.albedo_color = Color(0.06, 0.06, 0.08, 1.0)
-	hangar_mat.emission_enabled = true
-	hangar_mat.emission = Color(0.95, 0.55, 0.18, 1.0)
-	hangar_mat.emission_energy_multiplier = 0.35
-	hangar.set_surface_override_material(0, hangar_mat)
-	_attach_visual(hangar)
+	# Hangar opening — proper recessed entrance with header beam,
+	# jamb posts, hanging segmented blast doors, and amber interior
+	# glow. Reads as a real production gate rather than a flat
+	# decal stuck on the front face.
+	var hangar_w: float = fs.x * 0.55
+	var hangar_h: float = fs.y * 0.70
+	var front_z: float = fs.z * 0.5
+	# Deep dark interior cavity — most of it sits inside the wall;
+	# only a sliver pokes out so the cavity edge reads.
+	var cavity_depth: float = 0.85
+	var cavity := MeshInstance3D.new()
+	var cb := BoxMesh.new()
+	cb.size = Vector3(hangar_w, hangar_h, cavity_depth)
+	cavity.mesh = cb
+	cavity.position = Vector3(0, hangar_h * 0.5 + 0.05, front_z - cavity_depth * 0.4)
+	var cavity_mat := StandardMaterial3D.new()
+	cavity_mat.albedo_color = Color(0.04, 0.03, 0.02, 1.0)
+	cavity_mat.emission_enabled = true
+	cavity_mat.emission = Color(0.95, 0.55, 0.18, 1.0)
+	cavity_mat.emission_energy_multiplier = 0.45
+	cavity.set_surface_override_material(0, cavity_mat)
+	_attach_visual(cavity)
+	# Heavy header beam across the top of the gate, sticking out
+	# from the wall so it casts a ledge shadow over the cavity.
+	var header := MeshInstance3D.new()
+	var hb := BoxMesh.new()
+	hb.size = Vector3(hangar_w + 0.50, 0.32, 0.45)
+	header.mesh = hb
+	header.position = Vector3(0, hangar_h + 0.21, front_z + 0.18)
+	header.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.32, 0.28, 0.22, 1.0)))
+	_attach_visual(header)
+	# Hazard chevrons on the header — alternating angled slabs in
+	# warning yellow so the gate reads as restricted entry.
+	var chev_mat := StandardMaterial3D.new()
+	chev_mat.albedo_color = Color(0.95, 0.78, 0.18, 1.0)
+	chev_mat.emission_enabled = true
+	chev_mat.emission = Color(0.95, 0.78, 0.18, 1.0)
+	chev_mat.emission_energy_multiplier = 0.55
+	chev_mat.roughness = 0.6
+	var chev_count: int = 5
+	for c_i: int in chev_count:
+		var chev := MeshInstance3D.new()
+		var cbox := BoxMesh.new()
+		cbox.size = Vector3(0.30, 0.06, 0.06)
+		chev.mesh = cbox
+		var ct: float = (float(c_i) + 0.5) / float(chev_count)
+		var cx: float = -hangar_w * 0.5 + ct * hangar_w
+		chev.position = Vector3(cx, hangar_h + 0.34, front_z + 0.42)
+		chev.rotation.z = deg_to_rad(35.0 if c_i % 2 == 0 else -35.0)
+		chev.set_surface_override_material(0, chev_mat)
+		_attach_visual(chev)
+	# Jamb posts framing the opening.
+	var jamb_mat: StandardMaterial3D = _detail_dark_metal_mat(Color(0.28, 0.24, 0.20, 1.0))
+	for side: int in 2:
+		var jx: float = -hangar_w * 0.5 - 0.12 if side == 0 else hangar_w * 0.5 + 0.12
+		var jamb := MeshInstance3D.new()
+		var jb := BoxMesh.new()
+		jb.size = Vector3(0.24, hangar_h + 0.10, 0.45)
+		jamb.mesh = jb
+		jamb.position = Vector3(jx, (hangar_h + 0.10) * 0.5 + 0.05, front_z + 0.18)
+		jamb.set_surface_override_material(0, jamb_mat)
+		_attach_visual(jamb)
+	# Two segmented blast-door panels hanging from the header — the
+	# door is "open" but the panels are still visible above the
+	# cavity, suggesting it can close.
+	for door_i: int in 2:
+		var door := MeshInstance3D.new()
+		var db := BoxMesh.new()
+		db.size = Vector3(hangar_w * 0.48, 0.40, 0.08)
+		door.mesh = db
+		var dx: float = -hangar_w * 0.25 if door_i == 0 else hangar_w * 0.25
+		door.position = Vector3(dx, hangar_h - 0.16, front_z + 0.06)
+		door.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.16, 0.14, 1.0)))
+		_attach_visual(door)
+	# Floor markings on the hangar approach — short bright strips
+	# leading INTO the gate, on the ground.
+	for f_i: int in 3:
+		var floor_mark := MeshInstance3D.new()
+		var fmb := BoxMesh.new()
+		fmb.size = Vector3(0.40, 0.04, 0.18)
+		floor_mark.mesh = fmb
+		var ft: float = (float(f_i) + 0.5) / 3.0
+		var fmx: float = -hangar_w * 0.18 + ft * hangar_w * 0.36
+		floor_mark.position = Vector3(fmx, 0.05, front_z + 0.55)
+		floor_mark.set_surface_override_material(0, chev_mat)
+		_attach_visual(floor_mark)
+	# Pair of amber interior pillar lamps deep in the cavity.
+	for lamp_i: int in 2:
+		var lamp := MeshInstance3D.new()
+		var lcyl := CylinderMesh.new()
+		lcyl.top_radius = 0.10
+		lcyl.bottom_radius = 0.10
+		lcyl.height = 0.06
+		lamp.mesh = lcyl
+		lamp.rotation.x = PI * 0.5
+		var lx: float = -hangar_w * 0.30 if lamp_i == 0 else hangar_w * 0.30
+		lamp.position = Vector3(lx, hangar_h * 0.85, front_z - 0.05)
+		lamp.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.65, 0.20), 1.6))
+		_attach_visual(lamp)
 
 
 func _build_aerodrome_tower_anvil(fs: Vector3) -> void:

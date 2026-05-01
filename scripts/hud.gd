@@ -2274,7 +2274,9 @@ func _building_tooltip(stat: BuildingStatResource) -> String:
 	if not stat:
 		return ""
 	var lines: PackedStringArray = PackedStringArray()
-	lines.append(stat.building_name)
+	# Header: name + a one-line role hint so the player knows WHAT the
+	# building is FOR before parsing the cost numbers.
+	lines.append("%s — %s" % [stat.building_name, _building_role_hint(stat)])
 	lines.append("HP %d   Cost %dS   Build %.1fs" % [stat.hp, stat.cost_salvage, stat.build_time])
 	if stat.power_production > 0:
 		lines.append("Power: +%d" % stat.power_production)
@@ -2286,4 +2288,53 @@ func _building_tooltip(stat: BuildingStatResource) -> String:
 			if u:
 				unit_names.append(u.unit_name)
 		lines.append("Produces: %s" % ", ".join(unit_names))
+	# Long-form description — strategic context the player needs to
+	# decide WHEN to build this. Sourced from a per-building lookup
+	# rather than the .tres so we can iterate copy without touching
+	# resource files.
+	var blurb: String = _building_description(stat.building_id)
+	if not blurb.is_empty():
+		lines.append("")
+		lines.append(blurb)
 	return "\n".join(lines)
+
+
+func _building_role_hint(stat: BuildingStatResource) -> String:
+	## One-line role summary so the player can identify what the
+	## building does at a glance. Maps building_id to a short label.
+	match stat.building_id:
+		&"headquarters": return "Command Center"
+		&"basic_foundry": return "Mech Production"
+		&"advanced_foundry": return "Heavy Mech Production"
+		&"basic_generator": return "Power Source"
+		&"basic_armory": return "Tech Upgrades"
+		&"salvage_yard": return "Static Salvage Harvester"
+		&"gun_emplacement": return "Defensive Turret"
+		&"aerodrome": return "Aircraft Production"
+		&"sam_site": return "Anti-Air Defense"
+	return "Structure"
+
+
+func _building_description(id: StringName) -> String:
+	## Strategic blurb for each building. Tells the player when to
+	## build it, what it competes against, and any caveats.
+	match id:
+		&"headquarters":
+			return "Your command center. Trains engineers, holds rally point. Losing it is a loss condition."
+		&"basic_foundry":
+			return "Trains light + medium ground mechs. You'll want at least one early; multiple foundries let you produce in parallel."
+		&"advanced_foundry":
+			return "Unlocks heavy ground units (Bulwark / Harbinger). Requires a basic foundry."
+		&"basic_generator":
+			return "Provides power. Power-starved buildings produce more slowly, so build a generator before stacking foundries."
+		&"basic_armory":
+			return "Hosts branch upgrades for your existing unit lines. Branch commits are irreversible."
+		&"salvage_yard":
+			return "Stationary harvester with a fixed work radius. Crawlers go further but are slower; yards are best on dense scrap fields."
+		&"gun_emplacement":
+			return "Manned turret. Choose a profile (anti-light / anti-heavy / anti-air / balanced) after construction."
+		&"aerodrome":
+			return "Trains aircraft (Phalanx Drone, Hammerhead Gunship). Aircraft only fall to AAir-tagged weapons or SAM Sites."
+		&"sam_site":
+			return "Anti-air missile rack. Heavy damage vs aircraft, near-zero vs ground. Pair with turrets to cover both axes."
+	return ""
