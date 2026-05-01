@@ -1098,19 +1098,14 @@ func _detail_salvage_yard() -> void:
 
 func _detail_aerodrome() -> void:
 	## Aerodrome — landing pad with hangar entrance + control tower.
-	## V3 §"Pillar 3" production building for aircraft. Roof reads as
-	## a corrugated metal deck (Wellblech ribs) instead of a flat
-	## white slab; landing strip is diagonal so it gets the longest
-	## possible run across the rooftop. Team color is restricted to
-	## small accent points (corner caps + a slim rear band) instead
-	## of a full-footprint slab.
+	## V3 §"Pillar 3" production building for aircraft.
 	var fs: Vector3 = stats.footprint_size
 	var sable: bool = _resolve_faction_id() == 1
 	var team_color: Color = _resolve_team_color()
 
-	# Corrugated metal roof deck — base flat plate plus a row of slim
-	# ribs running across the long axis, evenly spaced. Reads as
-	# Wellblech instead of a featureless white roof.
+	# Plain dark roof deck — featureless metal, the corrugation lives
+	# on the control tower's top cap instead of being plastered
+	# across the entire building roof.
 	var roof_color: Color = Color(0.30, 0.32, 0.36, 1.0)
 	if sable:
 		roof_color = Color(0.18, 0.16, 0.22, 1.0)
@@ -1121,61 +1116,76 @@ func _detail_aerodrome() -> void:
 	roof.position = Vector3(0, fs.y + 0.05, 0)
 	roof.set_surface_override_material(0, _detail_dark_metal_mat(roof_color))
 	_attach_visual(roof)
-	# Wellblech ribs — slim raised strips parallel to the X axis,
-	# repeating every ~0.55u along Z. Strong horizontal striping
-	# breaks up the roof and reads as corrugated steel from the
-	# top-down RTS camera.
-	var rib_color: Color = roof_color.darkened(0.20)
-	var rib_count: int = maxi(int(fs.z / 0.55), 6)
-	for r_i: int in rib_count:
-		var rib := MeshInstance3D.new()
-		var rb := BoxMesh.new()
-		rb.size = Vector3(fs.x * 0.94, 0.08, 0.16)
-		rib.mesh = rb
-		var t: float = (float(r_i) + 0.5) / float(rib_count)
-		var rz: float = -fs.z * 0.47 + t * (fs.z * 0.94)
-		rib.position = Vector3(0, fs.y + 0.14, rz)
-		rib.set_surface_override_material(0, _detail_dark_metal_mat(rib_color))
-		_attach_visual(rib)
 
-	# Diagonal landing strip — runs corner-to-corner so the deck
-	# gets the longest possible runway. Built as a thin oriented box
-	# rotated 45° around Y, with bright dashes painted along its
-	# length and approach chevrons at the entry end.
-	var strip_diag_len: float = sqrt(fs.x * fs.x + fs.z * fs.z) * 0.78
-	var strip_width: float = 1.6
+	# Diagonal landing strip — corner-to-corner. The diagonal axis
+	# is now the OPPOSITE of the previous version (front-left to
+	# rear-right is the canonical runway here). Slightly wider hull
+	# + thinner yellow centre dashes + blinking edge lights spaced
+	# along the runway.
+	var strip_diag_len: float = sqrt(fs.x * fs.x + fs.z * fs.z) * 0.86
+	var strip_width: float = 2.20
 	var strip := MeshInstance3D.new()
 	var strip_box := BoxMesh.new()
 	strip_box.size = Vector3(strip_width, 0.06, strip_diag_len)
 	strip.mesh = strip_box
-	strip.position = Vector3(0, fs.y + 0.20, 0)
-	strip.rotation.y = deg_to_rad(45.0 if sable else -45.0)
+	strip.position = Vector3(0, fs.y + 0.12, 0)
+	# Front-left corner -> rear-right corner. Same direction for both
+	# factions for consistency; the visible distinction lives in the
+	# tower silhouette and the seam pattern.
+	var strip_angle_deg: float = 45.0
+	strip.rotation.y = deg_to_rad(strip_angle_deg)
 	strip.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.12, 0.13, 0.16, 1.0)))
 	_attach_visual(strip)
-	# Centerline dashes on the strip — short slabs spaced out so the
-	# strip reads as a proper runway.
+	# Thin yellow centerline dashes — narrower than v1 so they read
+	# as "stripes painted on the tarmac" instead of a wide warning
+	# stripe. Emissive enough to catch the eye.
 	var dash_color: Color = Color(0.95, 0.85, 0.30, 1.0)
 	var dash_mat := StandardMaterial3D.new()
 	dash_mat.albedo_color = dash_color
 	dash_mat.emission_enabled = true
 	dash_mat.emission = dash_color
-	dash_mat.emission_energy_multiplier = 0.55
+	dash_mat.emission_energy_multiplier = 0.65
 	dash_mat.roughness = 0.55
-	var dash_count: int = 5
+	var dash_count: int = 7
+	var ang: float = deg_to_rad(strip_angle_deg)
 	for d_i: int in dash_count:
 		var dash := MeshInstance3D.new()
 		var db := BoxMesh.new()
-		db.size = Vector3(0.22, 0.03, strip_diag_len * 0.10)
+		db.size = Vector3(0.10, 0.03, strip_diag_len * 0.08)
 		dash.mesh = db
 		var dt: float = (float(d_i) + 0.5) / float(dash_count)
 		var local_z: float = -strip_diag_len * 0.5 + dt * strip_diag_len
-		# Position is in the rotated strip's local frame — apply the
-		# same 45° around Y.
-		var ang: float = deg_to_rad(45.0 if sable else -45.0)
-		dash.position = Vector3(sin(ang) * local_z, fs.y + 0.24, cos(ang) * local_z)
+		dash.position = Vector3(sin(ang) * local_z, fs.y + 0.16, cos(ang) * local_z)
 		dash.rotation.y = ang
 		dash.set_surface_override_material(0, dash_mat)
 		_attach_visual(dash)
+	# Blinking edge lights — small emissive points spaced along
+	# both edges of the runway. The atmos-anim system on the
+	# building processes phase-pulsed materials each tick; we add
+	# our own materials list so each light fires independently.
+	var light_count: int = 10
+	for l_i: int in light_count:
+		var t: float = (float(l_i) + 0.5) / float(light_count)
+		var local_z: float = -strip_diag_len * 0.5 + t * strip_diag_len
+		for edge: int in 2:
+			var lateral: float = strip_width * 0.5 * (1.0 if edge == 0 else -1.0)
+			var lx: float = sin(ang) * local_z + cos(ang) * lateral
+			var lz: float = cos(ang) * local_z - sin(ang) * lateral
+			var lamp := MeshInstance3D.new()
+			var lb := BoxMesh.new()
+			lb.size = Vector3(0.10, 0.06, 0.10)
+			lamp.mesh = lb
+			lamp.position = Vector3(lx, fs.y + 0.18, lz)
+			var lamp_color: Color = Color(0.95, 0.55, 0.20, 1.0) if not sable else Color(0.78, 0.35, 1.0, 1.0)
+			var lamp_mat: StandardMaterial3D = _detail_emissive_mat(lamp_color, 1.6)
+			lamp.set_surface_override_material(0, lamp_mat)
+			_attach_visual(lamp)
+			# Phase-shifted blink so adjacent lamps don't all flash
+			# in lockstep — produces the chasing-runway-light read.
+			var phase: float = (float(l_i) * 0.6 + float(edge) * 0.3)
+			_atmos_indicator_mats.append({
+				"mat": lamp_mat, "phase": phase, "base": 1.6,
+			})
 
 	# Team-color accent points — TWO small corner caps (front-left +
 	# rear-right or matching pair) plus a slim band along the rear
@@ -1242,7 +1252,7 @@ func _build_aerodrome_tower_anvil(fs: Vector3) -> void:
 	tower.position = Vector3(-fs.x * 0.30, fs.y + tower_box.size.y * 0.5, -fs.z * 0.30)
 	tower.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.32, 0.30, 0.27, 1.0)))
 	_attach_visual(tower)
-	# Slatted observation deck — a wider cap with horizontal louvre
+	# Slatted observation deck — wider cap with horizontal louvre
 	# slits for that brutalist control-room read.
 	var cap_y: float = fs.y + tower_box.size.y + 0.18
 	var cap := MeshInstance3D.new()
@@ -1252,6 +1262,23 @@ func _build_aerodrome_tower_anvil(fs: Vector3) -> void:
 	cap.position = Vector3(-fs.x * 0.30, cap_y, -fs.z * 0.30)
 	cap.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.42, 0.36, 0.28, 1.0)))
 	_attach_visual(cap)
+	# Corrugated Wellblech roof on the tower cap — the actual
+	# intended home for the corrugation pattern. Series of slim
+	# raised ribs across the cap top.
+	var rib_color: Color = Color(0.32, 0.28, 0.22, 1.0)
+	var cap_w: float = fs.x * 0.46
+	var cap_d: float = fs.z * 0.46
+	var rib_count: int = 6
+	for r_i: int in rib_count:
+		var rib := MeshInstance3D.new()
+		var rb := BoxMesh.new()
+		rb.size = Vector3(cap_w * 0.95, 0.08, 0.10)
+		rib.mesh = rb
+		var t_rib: float = (float(r_i) + 0.5) / float(rib_count)
+		var rz: float = -cap_d * 0.45 + t_rib * (cap_d * 0.90)
+		rib.position = Vector3(-fs.x * 0.30, cap_y + 0.18, -fs.z * 0.30 + rz)
+		rib.set_surface_override_material(0, _detail_dark_metal_mat(rib_color))
+		_attach_visual(rib)
 	# Two louvre slits across the cap front — emissive amber so the
 	# control room reads as occupied.
 	var slit_mat := StandardMaterial3D.new()

@@ -15,6 +15,15 @@ var _build_tab: String = "basic"
 ## itself so just-unlocked Advanced entries become enabled live.
 var _build_prereq_hash: int = -1
 
+## Persistent tab row for the build menu. Lives in ActionSection
+## above ButtonGrid so the buttons in the grid don't shift around
+## when basic/advanced is swapped (the tab row used to be a child
+## of the grid, which tossed the buttons by one cell on every
+## tab change).
+var _build_tab_row: HBoxContainer = null
+var _build_tab_basic: Button = null
+var _build_tab_advanced: Button = null
+
 ## Track what we're showing to avoid rebuilding buttons every frame.
 var _last_building_id: int = -1
 var _last_unit_ids: Array[int] = []
@@ -1263,7 +1272,10 @@ func _rebuild_production_buttons(building: Building) -> void:
 		var hotkey: String = hotkeys[i] if i < hotkeys.size() else str(i + 1)
 
 		var btn := Button.new()
-		btn.custom_minimum_size = Vector2(96, 52)
+		btn.custom_minimum_size = Vector2(108, 56)
+		btn.size_flags_horizontal = Control.SIZE_FILL
+		btn.size_flags_vertical = Control.SIZE_FILL
+		btn.clip_text = true
 		btn.text = "[%s] %s" % [hotkey, unit_stat.unit_name]
 		btn.tooltip_text = _unit_tooltip(unit_stat)
 		btn.pressed.connect(_on_production_button.bind(i))
@@ -1860,28 +1872,16 @@ func _rebuild_build_buttons() -> void:
 	if not _selection_manager:
 		return
 
-	# Tabs (Basic / Advanced) rendered as a small row of toggle buttons
-	# above the build grid. Implemented inline as Buttons because we
-	# already manage the grid manually and TabContainer would require
-	# re-parenting the existing _button_grid.
-	var tab_row := HBoxContainer.new()
-	tab_row.add_theme_constant_override("separation", 6)
-	_button_grid.add_child(tab_row)
-	_action_buttons.append({ "button": tab_row, "kind": "build_tab_row" })
-	var tab_basic := Button.new()
-	tab_basic.text = "Basic"
-	tab_basic.custom_minimum_size = Vector2(72, 26)
-	tab_basic.toggle_mode = true
-	tab_basic.button_pressed = _build_tab == "basic"
-	tab_basic.pressed.connect(_on_build_tab_pressed.bind("basic"))
-	tab_row.add_child(tab_basic)
-	var tab_adv := Button.new()
-	tab_adv.text = "Advanced"
-	tab_adv.custom_minimum_size = Vector2(86, 26)
-	tab_adv.toggle_mode = true
-	tab_adv.button_pressed = _build_tab == "advanced"
-	tab_adv.pressed.connect(_on_build_tab_pressed.bind("advanced"))
-	tab_row.add_child(tab_adv)
+	# Tab row lives ABOVE the grid, not inside it. Lazily created
+	# once + reused so the grid only contains the actual build
+	# buttons (uniform-sized cells, no shift when tab swaps).
+	_ensure_build_tab_row()
+	if _build_tab_row:
+		_build_tab_row.visible = true
+		if _build_tab_basic:
+			_build_tab_basic.button_pressed = _build_tab == "basic"
+		if _build_tab_advanced:
+			_build_tab_advanced.button_pressed = _build_tab == "advanced"
 
 	_action_label.text = "Build — %s" % _build_tab.capitalize()
 	var built_ids: Dictionary = _local_player_built_ids()
@@ -1895,7 +1895,10 @@ func _rebuild_build_buttons() -> void:
 			continue
 		var prereqs_ok: bool = _prerequisites_met(bstat, built_ids)
 		var btn := Button.new()
-		btn.custom_minimum_size = Vector2(96, 52)
+		btn.custom_minimum_size = Vector2(108, 56)
+		btn.size_flags_horizontal = Control.SIZE_FILL
+		btn.size_flags_vertical = Control.SIZE_FILL
+		btn.clip_text = true
 		var label_text: String = "[%d] %s" % [visible_index + 1, bstat.building_name]
 		if not prereqs_ok:
 			label_text = "[Locked] %s" % bstat.building_name
@@ -1910,6 +1913,43 @@ func _rebuild_build_buttons() -> void:
 		var chip_refs: Dictionary = _attach_cost_widget(btn, bstat.cost_salvage, 0, 0)
 		_action_buttons.append({ "button": btn, "kind": "build", "stat": bstat, "locked": not prereqs_ok, "chips": chip_refs })
 		visible_index += 1
+
+
+func _ensure_build_tab_row() -> void:
+	## Lazily creates the persistent tab row (Basic / Advanced) and
+	## inserts it into ActionSection right above the button grid.
+	## Created once; subsequent rebuilds just re-use it. Keeping the
+	## tab row OUT of the grid means the grid's auto-flow layout
+	## isn't perturbed when we swap tabs.
+	if _build_tab_row and is_instance_valid(_build_tab_row):
+		return
+	var section: Node = _button_grid.get_parent() if _button_grid else null
+	if not section:
+		return
+	var row := HBoxContainer.new()
+	row.name = "BuildTabRow"
+	row.add_theme_constant_override("separation", 6)
+	row.alignment = BoxContainer.ALIGNMENT_BEGIN
+	# Insert the row right BEFORE the grid in ActionSection so it
+	# appears above the buttons. ActionSection is a VBoxContainer so
+	# child order = visual top-to-bottom.
+	section.add_child(row)
+	section.move_child(row, _button_grid.get_index())
+	_build_tab_row = row
+	_build_tab_basic = Button.new()
+	_build_tab_basic.text = "Basic"
+	_build_tab_basic.custom_minimum_size = Vector2(72, 26)
+	_build_tab_basic.toggle_mode = true
+	_build_tab_basic.button_pressed = _build_tab == "basic"
+	_build_tab_basic.pressed.connect(_on_build_tab_pressed.bind("basic"))
+	row.add_child(_build_tab_basic)
+	_build_tab_advanced = Button.new()
+	_build_tab_advanced.text = "Advanced"
+	_build_tab_advanced.custom_minimum_size = Vector2(86, 26)
+	_build_tab_advanced.toggle_mode = true
+	_build_tab_advanced.button_pressed = _build_tab == "advanced"
+	_build_tab_advanced.pressed.connect(_on_build_tab_pressed.bind("advanced"))
+	row.add_child(_build_tab_advanced)
 
 
 func _on_build_tab_pressed(tab: String) -> void:
@@ -2001,6 +2041,10 @@ func _clear_buttons() -> void:
 	for child: Node in _button_grid.get_children():
 		child.queue_free()
 	_action_buttons.clear()
+	# Hide the build tab row when leaving build mode (production /
+	# armory / turret button rebuilds reach this same path).
+	if _build_tab_row and is_instance_valid(_build_tab_row):
+		_build_tab_row.visible = false
 
 
 ## --- Affordability tint ---

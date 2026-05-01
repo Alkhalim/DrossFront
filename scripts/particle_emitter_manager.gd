@@ -132,6 +132,13 @@ func _build_smoke_emitter() -> GPUParticles3D:
 	# emission is suppressed by setting amount_ratio to 0.
 	p.amount_ratio = 0.0
 	p.fixed_fps = 30
+	# emit_particle drops particles into world-space at any position;
+	# the GPUParticles3D node itself stays at origin. Without an
+	# explicit visibility_aabb the engine culls particles that sit
+	# far outside the node's transform — which on a 300x300 map was
+	# every smoke puff fired more than ~10u from origin. Generous
+	# AABB makes the puffs visible regardless of emit position.
+	p.visibility_aabb = AABB(Vector3(-200, -10, -200), Vector3(400, 60, 400))
 	p.draw_pass_1 = _smoke_mesh()
 
 	var pm := ParticleProcessMaterial.new()
@@ -184,6 +191,13 @@ func _build_flash_emitter() -> GPUParticles3D:
 	p.emitting = true
 	p.amount_ratio = 0.0
 	p.fixed_fps = 30
+	# emit_particle drops particles into world-space at any position;
+	# the GPUParticles3D node itself stays at origin. Without an
+	# explicit visibility_aabb the engine culls particles that sit
+	# far outside the node's transform — which on a 300x300 map was
+	# every smoke puff fired more than ~10u from origin. Generous
+	# AABB makes the puffs visible regardless of emit position.
+	p.visibility_aabb = AABB(Vector3(-200, -10, -200), Vector3(400, 60, 400))
 	p.draw_pass_1 = _flash_mesh()
 
 	var pm := ParticleProcessMaterial.new()
@@ -228,6 +242,13 @@ func _build_dust_emitter() -> GPUParticles3D:
 	p.emitting = true
 	p.amount_ratio = 0.0
 	p.fixed_fps = 30
+	# emit_particle drops particles into world-space at any position;
+	# the GPUParticles3D node itself stays at origin. Without an
+	# explicit visibility_aabb the engine culls particles that sit
+	# far outside the node's transform — which on a 300x300 map was
+	# every smoke puff fired more than ~10u from origin. Generous
+	# AABB makes the puffs visible regardless of emit position.
+	p.visibility_aabb = AABB(Vector3(-200, -10, -200), Vector3(400, 60, 400))
 	p.draw_pass_1 = _dust_mesh()
 
 	var pm := ParticleProcessMaterial.new()
@@ -272,6 +293,13 @@ func _build_spark_emitter() -> GPUParticles3D:
 	p.emitting = true
 	p.amount_ratio = 0.0
 	p.fixed_fps = 30
+	# emit_particle drops particles into world-space at any position;
+	# the GPUParticles3D node itself stays at origin. Without an
+	# explicit visibility_aabb the engine culls particles that sit
+	# far outside the node's transform — which on a 300x300 map was
+	# every smoke puff fired more than ~10u from origin. Generous
+	# AABB makes the puffs visible regardless of emit position.
+	p.visibility_aabb = AABB(Vector3(-200, -10, -200), Vector3(400, 60, 400))
 	p.draw_pass_1 = _spark_mesh()
 
 	var pm := ParticleProcessMaterial.new()
