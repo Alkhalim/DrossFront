@@ -1688,11 +1688,15 @@ func _update_unit_panel(units: Array[Node3D]) -> void:
 	if units.size() == 1:
 		var unit: Node3D = units[0]
 		if unit.stats:
-			_name_label.text = unit.stats.unit_name
+			_name_label.text = "%s — %s" % [unit.stats.unit_name, _role_hint_for(unit.stats)]
 			var hp_pct: float = float(unit.get_total_hp()) / float(maxi(unit.stats.hp_total, 1))
 			var dps_ground: float = _compute_dps_vs(unit.stats, &"medium")
 			var dps_air: float = _compute_dps_vs(unit.stats, &"light_air")
-			_stats_label.text = "%s   HP %d / %d   Squad %d / %d   Armor %s   DPS %.0f vs Gnd / %.0f vs Air" % [
+			# Two stacked lines: combat readout on top, mobility / cost
+			# / weapon character on the bottom. Each is parseable on its
+			# own, together they cover what the player needs to know about
+			# this unit's role at a glance.
+			var line1: String = "%s   HP %d / %d   Squad %d / %d   Armor %s   DPS %.0f vs Gnd / %.0f vs Air" % [
 				str(unit.stats.unit_class).capitalize(),
 				unit.get_total_hp(),
 				unit.stats.hp_total,
@@ -1702,6 +1706,16 @@ func _update_unit_panel(units: Array[Node3D]) -> void:
 				dps_ground,
 				dps_air,
 			]
+			var range_u: float = _max_weapon_range(unit.stats)
+			var line2: String = "%s   Range %.0fu   %s   Pop %d   %dS / %dF" % [
+				_speed_label(unit.stats.speed_tier),
+				range_u,
+				_weapon_summary(unit.stats),
+				unit.stats.population,
+				unit.stats.cost_salvage,
+				unit.stats.cost_fuel,
+			]
+			_stats_label.text = line1 + "\n" + line2
 			# Use HP bar to mirror the on-world HP — quick eyeball read in the panel.
 			var hp_color: Color = Color(0.4, 0.95, 0.4, 0.95)
 			if hp_pct < 0.5: hp_color = Color(0.95, 0.78, 0.32, 0.95)
@@ -1944,6 +1958,76 @@ func _compute_dps_vs(stat: UnitStatResource, armor_class: StringName) -> float:
 	return dps
 
 
+func _max_weapon_range(stat: UnitStatResource) -> float:
+	## Returns the longer of the unit's primary / secondary weapon
+	## ranges. Lets the player tell at a glance whether this is a
+	## brawler (short) or a sniper (long) without opening the tooltip.
+	if not stat:
+		return 0.0
+	var r: float = 0.0
+	if stat.primary_weapon:
+		r = maxf(r, CombatTables.get_range(stat.primary_weapon.range_tier))
+	if stat.secondary_weapon:
+		r = maxf(r, CombatTables.get_range(stat.secondary_weapon.range_tier))
+	return r
+
+
+func _speed_label(tier: StringName) -> String:
+	## Maps the speed-tier StringName to a human-readable label so the
+	## inspect panel reads "Fast" / "Slow" instead of "&\"slow\"".
+	var s: String = String(tier).replace("_", " ")
+	if s.is_empty():
+		return "Speed —"
+	return "Speed " + s.capitalize()
+
+
+func _weapon_summary(stat: UnitStatResource) -> String:
+	## Compact one-liner about the unit's weapon: primary role tag + a
+	## marker for any secondary. Captures whether this is e.g. an
+	## anti-air specialist or a universal brawler without spelling out
+	## the full WeaponResource.
+	if not stat:
+		return ""
+	if not stat.primary_weapon:
+		return "Unarmed"
+	var role: String = String(stat.primary_weapon.role_tag)
+	if stat.secondary_weapon:
+		role += " + " + String(stat.secondary_weapon.role_tag)
+	return "Wpn " + role
+
+
+func _role_hint_for(stat: UnitStatResource) -> String:
+	## One-word tactical role classifier so the unit name tells the
+	## player WHAT the unit is for. Derived from the primary weapon's
+	## role tag and the unit class — leans toward what the player
+	## should send this unit to fight, not what it technically is.
+	if not stat:
+		return "Unit"
+	var cls: String = String(stat.unit_class)
+	if cls == "engineer":
+		return "Engineer / Builder"
+	var role: StringName = &"Universal"
+	if stat.primary_weapon:
+		role = stat.primary_weapon.role_tag
+	match role:
+		&"AAir":
+			return "Anti-Air Specialist"
+		&"AA":
+			return "Anti-Armor"
+		&"AP":
+			if cls == "heavy":
+				return "Heavy Brawler"
+			return "Anti-Personnel"
+		&"AS":
+			return "Siege / Anti-Structure"
+		_:
+			if cls == "light":
+				return "Scout / Skirmisher"
+			if cls == "heavy":
+				return "Heavy Line"
+			return "Frontline"
+
+
 func _weapon_dps(weapon: WeaponResource) -> float:
 	if not weapon:
 		return 0.0
@@ -1958,12 +2042,18 @@ func _unit_tooltip(stat: UnitStatResource) -> String:
 	if not stat:
 		return ""
 	var lines: PackedStringArray = PackedStringArray()
-	lines.append(stat.unit_name)
-	lines.append("Class: %s    Armor: %s" % [
+	# Header: name + tactical role hint so the player can read what
+	# this unit is FOR before parsing the numbers.
+	lines.append("%s — %s" % [stat.unit_name, _role_hint_for(stat)])
+	lines.append("Class: %s    Armor: %s    %s" % [
 		str(stat.unit_class).capitalize(),
-		str(stat.armor_class).capitalize()
+		str(stat.armor_class).capitalize(),
+		_speed_label(stat.speed_tier),
 	])
-	lines.append("HP %d   Squad %d   Pop %d" % [stat.hp_total, stat.squad_size, stat.population])
+	lines.append("HP %d   Squad %d   Pop %d   Range %.0fu" % [
+		stat.hp_total, stat.squad_size, stat.population,
+		_max_weapon_range(stat),
+	])
 	lines.append("Cost  %dS / %dF   Build %.1fs" % [
 		stat.cost_salvage, stat.cost_fuel, stat.build_time
 	])
@@ -1972,14 +2062,21 @@ func _unit_tooltip(stat: UnitStatResource) -> String:
 		_compute_dps_vs(stat, &"light_air"),
 	])
 	if stat.primary_weapon:
-		lines.append("Primary: %s (%s, %s)" % [
+		lines.append("Primary: %s — %s, %s, %s" % [
+			stat.primary_weapon.weapon_name if stat.primary_weapon.weapon_name else "Cannon",
 			str(stat.primary_weapon.role_tag),
 			str(stat.primary_weapon.range_tier),
-			str(stat.primary_weapon.damage_tier)
+			str(stat.primary_weapon.damage_tier),
 		])
 	if stat.secondary_weapon:
-		lines.append("Secondary: %s" % str(stat.secondary_weapon.role_tag))
+		lines.append("Secondary: %s — %s" % [
+			stat.secondary_weapon.weapon_name if stat.secondary_weapon.weapon_name else "Backup",
+			str(stat.secondary_weapon.role_tag),
+		])
+	if stat.squad_strength_bonus > 0.0:
+		lines.append("Full-strength accuracy bonus: +%d%%" % int(stat.squad_strength_bonus * 100.0))
 	if stat.special_description != "":
+		lines.append("")
 		lines.append(stat.special_description)
 	return "\n".join(lines)
 
