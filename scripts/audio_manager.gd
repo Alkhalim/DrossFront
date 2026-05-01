@@ -84,14 +84,22 @@ const POSITIONAL_MAX_DISTANCE: float = 130.0
 
 
 func _ready() -> void:
+	# Set up the three top-level buses (SFX / Voiceline / Music) BEFORE
+	# pools so all players route into the correct one. Voiceline bus
+	# has its filter chain installed in `_setup_voiceline_bus`; SFX
+	# and Music are clean (just volume control).
+	_ensure_sfx_bus()
+	# Music bus is created here in advance so the future music system
+	# routes into a slider that already exists.
+	_ensure_music_bus()
 	for i: int in POOL_SIZE:
 		var player := AudioStreamPlayer.new()
-		player.bus = "Master"
+		player.bus = "SFX"
 		add_child(player)
 		_players.append(player)
 
 		var p3d := AudioStreamPlayer3D.new()
-		p3d.bus = "Master"
+		p3d.bus = "SFX"
 		p3d.unit_size = POSITIONAL_UNIT_SIZE
 		p3d.max_distance = POSITIONAL_MAX_DISTANCE
 		p3d.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
@@ -99,6 +107,26 @@ func _ready() -> void:
 		_players_3d.append(p3d)
 
 	_load_sfx_banks()
+
+
+## --- SFX / Music bus setup ------------------------------------------------
+
+func _ensure_sfx_bus() -> void:
+	if AudioServer.get_bus_index("SFX") >= 0:
+		return
+	var idx: int = AudioServer.bus_count
+	AudioServer.add_bus(idx)
+	AudioServer.set_bus_name(idx, "SFX")
+	AudioServer.set_bus_send(idx, "Master")
+
+
+func _ensure_music_bus() -> void:
+	if AudioServer.get_bus_index("Music") >= 0:
+		return
+	var idx: int = AudioServer.bus_count
+	AudioServer.add_bus(idx)
+	AudioServer.set_bus_name(idx, "Music")
+	AudioServer.set_bus_send(idx, "Master")
 
 
 func _load_sfx_banks() -> void:
@@ -241,10 +269,11 @@ func _setup_voiceline_bus() -> void:
 		chorus.set_voice_rate_hz(0, 0.7)
 		chorus.set_voice_level_db(0, -6.0)
 	AudioServer.add_bus_effect(idx, chorus)
-	# Bus level — pulled back from the previous -8 dB so voicelines
-	# are clearly audible. The crunchy bandpass + lofi distortion
-	# already keep them mixed-feeling against the dry combat SFX.
-	AudioServer.set_bus_volume_db(idx, -2.0)
+	# Bus level — pushed slightly above unity (+2 dB) so the lo-fi
+	# bandpass-attenuated VO actually competes with combat SFX. The
+	# bandpass + distortion strip a lot of low-end energy so even at
+	# +2 the VO sits at a reasonable perceived loudness.
+	AudioServer.set_bus_volume_db(idx, 2.0)
 	_vl_bus_idx = idx
 
 
@@ -720,9 +749,9 @@ func _play_radio_crackle(kind: String) -> void:
 		return
 	var stream: AudioStreamWAV = _generate_radio_crackle(kind)
 	player.stream = stream
-	# Bus already gets the bandpass+distortion. Crackle volume slightly
-	# louder than voiceline neutral so the click reads clearly.
-	player.volume_db = randf_range(-2.0, 1.0)
+	# Bus already gets the bandpass+distortion. Crackle was too loud —
+	# pulled back so it brackets the line without competing with it.
+	player.volume_db = randf_range(-14.0, -10.0)
 	# Pitch-jitter so back-to-back voicelines don't have identical clicks.
 	player.pitch_scale = randf_range(0.85, 1.15)
 	player.play()
