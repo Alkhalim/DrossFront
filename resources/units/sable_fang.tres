@@ -1,0 +1,36 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_micro_missile"]
+script = ExtResource("2")
+weapon_name = "Micro-Missile Cluster"
+role_tag = &"AP"
+damage_tier = &"low"
+range_tier = &"medium"
+rof_tier = &"fast"
+
+[resource]
+script = ExtResource("1")
+unit_name = "Fang Drone"
+unit_class = &"aircraft"
+hp_total = 700
+hp_per_unit = 70
+armor_class = &"light_air"
+speed_tier = &"very_fast"
+sight_tier = &"medium"
+squad_size = 10
+population = 12
+cost_salvage = 280
+cost_fuel = 35
+build_time = 24.0
+built_at = &"aerodrome"
+primary_weapon = SubResource("weapon_micro_missile")
+squad_strength_bonus = 0.10
+special_description = "Sable swarm of 10 light drones. Branch A: Hunter (AT micro-missiles). Branch B: Harasser (anti-worker, salvage disruption)."
+branch_a_name = "Hunter"
+branch_b_name = "Harasser"
+is_aircraft = true
+flight_altitude = 5.5
+flight_speed = 18.0

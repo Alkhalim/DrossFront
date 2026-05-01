@@ -58,6 +58,19 @@ var _expansion_timer: float = 0.0
 
 var _salvage_accumulator: float = 0.0
 
+## --- Per-match strategy variation ---------------------------------------
+## Each AIController rolls a strategy archetype + jittered building offsets
+## at _setup time so two runs of the same match (or two AIs in 2v2) don't
+## produce visually identical bases. Resource buildings are NEVER skipped —
+## every archetype builds a generator, foundry, and salvage yard early.
+## The archetype shifts the *secondary* timing and footprint shape.
+enum Strategy { BALANCED, TURRET_HEAVY, ECONOMY_HEAVY, RUSH }
+var _strategy: int = Strategy.BALANCED
+## World-space offsets from HQ for each placed building. Filled at _setup
+## with randomly jittered values keyed by the same string the build flow
+## uses ("generator", "foundry", "salvage_yard", etc.).
+var _building_offsets: Dictionary = {}
+
 ## Cached difficulty multipliers from the MatchSettings autoload (defaults to
 ## Normal if the autoload isn't present, e.g. when running the test arena
 ## scene directly from the editor).
@@ -98,6 +111,11 @@ func _setup() -> void:
 	if not _ai_resource_manager:
 		_ai_resource_manager = get_parent().get_node_or_null("AIResourceManager")
 
+	# Roll personality + base layout for this match. Done here (not in
+	# _enter_tree) so each AI's RNG draw is independent and a 2v2 scene
+	# gets two AIs with different archetypes / offsets.
+	_roll_strategy_and_layout()
+
 	# Transition out of SETUP into ECONOMY now that we have a HQ. Without
 	# this, the state machine sits in SETUP forever and `_process`'s
 	# match block has no case for SETUP — so the AI does literally
@@ -106,6 +124,47 @@ func _setup() -> void:
 	if _hq:
 		_state = AIState.ECONOMY
 		_state_timer = 0.0
+
+
+func _roll_strategy_and_layout() -> void:
+	## Picks one of four archetypes and generates jittered building offsets
+	## within the archetype's footprint shape. Resource buildings (generator,
+	## foundry, salvage_yard) are always present; what changes is *where*
+	## they sit and *when* the secondary buildings come online.
+	_strategy = randi() % Strategy.size()
+
+	# Archetype-specific footprint character. Pull radii drive how far each
+	# building sits from the HQ; the angle is randomised per-call so even
+	# two AIs that roll BALANCED look different.
+	var pull: float
+	match _strategy:
+		Strategy.TURRET_HEAVY:
+			pull = randf_range(13.0, 17.0)  # tighter cluster, room out front for turrets
+		Strategy.ECONOMY_HEAVY:
+			pull = randf_range(20.0, 26.0)  # wider footprint to fit extra yards
+		Strategy.RUSH:
+			pull = randf_range(12.0, 16.0)  # tight + forward, no defensive ring
+		_:
+			pull = randf_range(15.0, 20.0)  # balanced default
+
+	# Generate offsets on a randomly-rotated cardinal cross + back/front
+	# slots. The whole layout is rotated by a random angle so it isn't
+	# always axis-aligned (a foundry on the left vs the right vs behind
+	# the HQ reads as a meaningfully different base at a glance).
+	var base_angle: float = randf_range(0.0, TAU)
+	var slot_angles: Dictionary = {
+		"generator": base_angle + randf_range(0.55, 0.85),
+		"foundry": base_angle + PI + randf_range(-0.30, 0.30),
+		"salvage_yard": base_angle + PI * 0.5 + randf_range(-0.25, 0.25),
+		"generator2": base_angle - randf_range(0.55, 0.85),
+		"turret": base_angle + PI * 1.5 + randf_range(-0.4, 0.4),
+		"adv_foundry": base_angle + PI + randf_range(0.6, 1.0),
+	}
+	# Per-building radius jitter so the cluster isn't a perfect ring.
+	for key: String in slot_angles.keys():
+		var ang: float = slot_angles[key] as float
+		var r: float = pull * randf_range(0.85, 1.15)
+		_building_offsets[key] = Vector3(cos(ang) * r, 0.0, sin(ang) * r)
 
 
 func _find_nearest_enemy_hq_pos(buildings: Array[Node]) -> Vector3:
@@ -188,20 +247,46 @@ func _process_economy() -> void:
 	# Queue and pilot a Crawler.
 	_maintain_crawlers()
 
-	# Phase 1: Basic buildings — offsets pushed out so the AI base lays
-	# out as a real footprint with units able to thread between
-	# buildings instead of getting wedged against tight 5u clearances.
-	_try_place("generator", "res://resources/buildings/basic_generator.tres", Vector3(9, 0, 6))
-	_try_place("foundry", "res://resources/buildings/basic_foundry.tres", Vector3(-9, 0, 6))
-	_try_place("salvage_yard", "res://resources/buildings/salvage_yard.tres", Vector3(0, 0, 13))
+	# Phase 1 — resource trio (generator + foundry + salvage yard). Always
+	# placed regardless of archetype; only their offsets vary per match
+	# (filled in by `_roll_strategy_and_layout`).
+	_try_place("generator", "res://resources/buildings/basic_generator.tres", _offset_for("generator", Vector3(15, 0, 10)))
+	_try_place("foundry", "res://resources/buildings/basic_foundry.tres", _offset_for("foundry", Vector3(-15, 0, 10)))
+	_try_place("salvage_yard", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard", Vector3(0, 0, 22)))
 
-	# Phase 2: After first wave, build advanced structures
-	if _wave_count >= 1:
-		_try_place("generator2", "res://resources/buildings/basic_generator.tres", Vector3(13, 0, 13))
-		_try_place("turret", "res://resources/buildings/gun_emplacement.tres", Vector3(0, 0, -9))
-
-	if _wave_count >= 2:
-		_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", Vector3(-13, 0, 13))
+	# Phase 2+ — secondary buildings, ordered + gated by archetype. Each
+	# branch still ultimately constructs the same building set; what
+	# changes is the wave threshold (timing) and emphasis.
+	match _strategy:
+		Strategy.TURRET_HEAVY:
+			# Defensive opener: turret first (even before second generator),
+			# then the second generator to power it, then advanced foundry.
+			if _wave_count >= 1:
+				_try_place("turret", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret", Vector3(0, 0, -14)))
+				_try_place("generator2", "res://resources/buildings/basic_generator.tres", _offset_for("generator2", Vector3(22, 0, 18)))
+			if _wave_count >= 2:
+				_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
+		Strategy.ECONOMY_HEAVY:
+			# Eco opener: extra generator early, advanced foundry before
+			# the turret. Turret comes last (just-in-case defense).
+			if _wave_count >= 1:
+				_try_place("generator2", "res://resources/buildings/basic_generator.tres", _offset_for("generator2", Vector3(22, 0, 18)))
+				_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
+			if _wave_count >= 3:
+				_try_place("turret", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret", Vector3(0, 0, -14)))
+		Strategy.RUSH:
+			# Aggressive: skip the turret entirely (defense via mobile
+			# units), get the second generator + advanced foundry asap.
+			if _wave_count >= 1:
+				_try_place("generator2", "res://resources/buildings/basic_generator.tres", _offset_for("generator2", Vector3(22, 0, 18)))
+				_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
+		_:
+			# BALANCED — original v1 ordering.
+			if _wave_count >= 1:
+				_try_place("generator2", "res://resources/buildings/basic_generator.tres", _offset_for("generator2", Vector3(22, 0, 18)))
+				_try_place("turret", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret", Vector3(0, 0, -14)))
+			if _wave_count >= 2:
+				_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
 
 	if _state_timer >= ECONOMY_DURATION:
 		_state = AIState.ARMY
@@ -288,6 +373,15 @@ func _process_rebuild() -> void:
 	if _state_timer >= REBUILD_DURATION:
 		_state = AIState.ECONOMY
 		_state_timer = 0.0
+
+
+func _offset_for(key: String, fallback: Vector3) -> Vector3:
+	## Returns the per-match jittered offset for `key`, or `fallback` if the
+	## strategy roller didn't produce one (e.g. a key was added later and
+	## `_roll_strategy_and_layout` doesn't know about it yet).
+	if _building_offsets.has(key):
+		return _building_offsets[key] as Vector3
+	return fallback
 
 
 func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
@@ -787,11 +881,14 @@ func _find_building_at(pos: Vector3, footprint: Vector3) -> Node:
 func _find_clear_placement(desired: Vector3, footprint: Vector3) -> Vector3:
 	if _is_placement_clear(desired, footprint):
 		return desired
-	# Spiral search — expanding rings around the desired anchor.
+	# Spiral search — expanding rings around the desired anchor. Step
+	# bumped from 2.5u → 4.0u so adjacent rings actually clear the
+	# wider PLACEMENT_GAP and the AI doesn't end up nestling buildings
+	# right next to each other once the desired spot is taken.
 	for ring: int in range(1, 8):
 		for step: int in 12:
 			var ang: float = float(step) / 12.0 * TAU
-			var test_offset := Vector3(cos(ang), 0.0, sin(ang)) * float(ring) * 2.5
+			var test_offset := Vector3(cos(ang), 0.0, sin(ang)) * float(ring) * 4.0
 			var pos: Vector3 = desired + test_offset
 			if _is_placement_clear(pos, footprint):
 				return pos
@@ -799,11 +896,10 @@ func _find_clear_placement(desired: Vector3, footprint: Vector3) -> Vector3:
 
 
 ## Required clear gap between adjacent buildings — keeps AI bases from looking
-## visually packed even when AABBs technically don't overlap.
-## Same rationale as selection_manager.gd's BUILD_PLACEMENT_GAP — wide
-## enough that a unit's collision capsule fits through the gap between
-## two adjacent buildings without wedging.
-const PLACEMENT_GAP: float = 2.6
+## visually packed and gives Crawlers room to drive out of the base. Wider
+## than the player's BUILD_PLACEMENT_GAP because the AI's foundation grid is
+## tighter and a Crawler that can't egress its spawn corner is dead weight.
+const PLACEMENT_GAP: float = 5.5
 
 
 ## How far units / fuel deposits / wrecks must be from the placement footprint.
@@ -899,14 +995,37 @@ func _try_queue_at(foundry_node: Node) -> void:
 	var hound_stats: UnitStatResource = load("res://resources/units/anvil_hound.tres") as UnitStatResource
 	var bulwark_stats: UnitStatResource = load("res://resources/units/anvil_bulwark.tres") as UnitStatResource
 
-	# Choose unit type based on wave count and randomness
-	var unit_stats: UnitStatResource = rook_stats
-	var roll: int = randi() % 10
+	# Strategy archetypes bias the unit roll. The Rook / Hound / Bulwark
+	# weights below sum to 10 so a `randi() % 10` lookup picks the right
+	# stats for that archetype's character. Bulwarks are gated on
+	# `_wave_count >= 2` everywhere — early waves can't field heavies
+	# regardless of roll.
+	var weights: Dictionary
+	match _strategy:
+		Strategy.TURRET_HEAVY:
+			# Defensive doctrine — heavies anchor the line, with
+			# Hounds as second-line and very few Rooks.
+			weights = {"rook": 2, "hound": 4, "bulwark": 4}
+		Strategy.RUSH:
+			# Speed-focused — flood Rooks early, very few heavies.
+			weights = {"rook": 7, "hound": 3, "bulwark": 0}
+		Strategy.ECONOMY_HEAVY:
+			# Late-tech doctrine — Hound spam mid-game, Bulwarks
+			# once the advanced foundry is online.
+			weights = {"rook": 3, "hound": 5, "bulwark": 2}
+		_:
+			# Balanced — current v1 default.
+			weights = {"rook": 5, "hound": 3, "bulwark": 2}
 
-	if _wave_count >= 2 and bulwark_stats and roll < 2:
-		unit_stats = bulwark_stats
-	elif hound_stats and roll < 5:
+	var roll: int = randi() % 10
+	var unit_stats: UnitStatResource = rook_stats
+	var cumulative: int = 0
+	cumulative += weights.get("rook", 0) as int
+	if roll >= cumulative and hound_stats:
 		unit_stats = hound_stats
+	cumulative += weights.get("hound", 0) as int
+	if roll >= cumulative and _wave_count >= 2 and bulwark_stats:
+		unit_stats = bulwark_stats
 
 	if not unit_stats:
 		return

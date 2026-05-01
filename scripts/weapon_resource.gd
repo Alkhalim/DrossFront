@@ -16,3 +16,10 @@ extends Resource
 
 ## Rate of fire tier: "single", "slow", "moderate", "fast", "volley", "continuous"
 @export var rof_tier: StringName = &"moderate"
+
+## Optional override for the projectile visual style. By default the projectile
+## type is inferred from rof_tier (slow → missile, fast → bullet, continuous →
+## beam). Set this to "bullet", "missile", or "beam" to force a specific look
+## independent of fire rate — used e.g. for the Ratchet's cutting laser, which
+## should read as a beam even though it fires at a slow cadence.
+@export var projectile_style: StringName = &""

@@ -1,4 +1,4 @@
-[gd_scene load_steps=22 format=3]
+[gd_scene load_steps=27 format=3]
 
 [ext_resource type="Script" path="res://scripts/rts_camera.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/unit.tscn" id="2"]
@@ -21,12 +21,63 @@
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
 size = Vector2(320, 320)
+subdivide_width = 1
+subdivide_depth = 1
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_albedo"]
+noise_type = 3
+seed = 7
+frequency = 0.012
+fractal_type = 1
+fractal_octaves = 5
+fractal_lacunarity = 2.4
+fractal_gain = 0.6
+
+[sub_resource type="Gradient" id="Gradient_ground"]
+offsets = PackedFloat32Array(0.0, 0.35, 0.7, 1.0)
+colors = PackedColorArray(0.10, 0.10, 0.10, 1, 0.16, 0.15, 0.13, 1, 0.22, 0.19, 0.15, 1, 0.30, 0.24, 0.17, 1)
+
+[sub_resource type="NoiseTexture2D" id="NoiseTexture2D_albedo"]
+width = 1024
+height = 1024
+seamless = true
+seamless_blend_skirt = 0.2
+color_ramp = SubResource("Gradient_ground")
+noise = SubResource("FastNoiseLite_albedo")
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_normal"]
+noise_type = 3
+seed = 31
+frequency = 0.045
+fractal_type = 1
+fractal_octaves = 4
+fractal_lacunarity = 2.2
+fractal_gain = 0.55
+
+[sub_resource type="NoiseTexture2D" id="NoiseTexture2D_normal"]
+width = 1024
+height = 1024
+seamless = true
+seamless_blend_skirt = 0.1
+as_normal_map = true
+bump_strength = 8.0
+noise = SubResource("FastNoiseLite_normal")
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
-albedo_color = Color(0.13, 0.15, 0.17, 1)
-roughness = 0.95
+albedo_color = Color(1, 1, 1, 1)
+albedo_texture = SubResource("NoiseTexture2D_albedo")
+roughness = 1.0
+metallic = 0.0
+metallic_specular = 0.05
+normal_enabled = true
+normal_scale = 0.85
+normal_texture = SubResource("NoiseTexture2D_normal")
+texture_filter = 3
+uv1_scale = Vector3(8, 8, 1)
+uv1_triplanar = false
 
-[sub_resource type="WorldBoundaryShape3D" id="WorldBoundaryShape3D_ground"]
+[sub_resource type="BoxShape3D" id="BoxShape3D_ground"]
+size = Vector3(320, 1, 320)
 
 [sub_resource type="Environment" id="Environment_world"]
 background_mode = 1
@@ -46,13 +97,18 @@ surface_material_override/0 = SubResource("StandardMaterial3D_ground")
 [node name="GroundCollision" type="StaticBody3D" parent="."]
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="GroundCollision"]
-shape = SubResource("WorldBoundaryShape3D_ground")
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+shape = SubResource("BoxShape3D_ground")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 transform = Transform3D(0.866, -0.354, 0.354, 0, 0.707, 0.707, -0.5, -0.612, 0.612, 0, 40, 0)
 light_color = Color(0.95, 0.9, 0.8, 1)
 light_energy = 1.2
 shadow_enabled = true
+directional_shadow_max_distance = 70.0
+directional_shadow_split_1 = 0.15
+directional_shadow_split_2 = 0.4
+directional_shadow_split_3 = 0.7
 
 [node name="FillLight" type="DirectionalLight3D" parent="."]
 transform = Transform3D(0.866, 0.354, -0.354, 0, 0.707, -0.707, 0.5, 0.612, -0.612, 0, 20, 0)

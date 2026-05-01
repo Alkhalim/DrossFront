@@ -37,6 +37,13 @@ signal player_eliminated(player_id: int)
 
 var _players_by_id: Dictionary = {}        # int -> PlayerState
 var _resource_mgr_by_id: Dictionary = {}   # int -> Node (ResourceManager)
+## Cache for `are_allied` results keyed on the encoded (a_id, b_id) pair.
+## Hostility is fixed for the whole match (no team-switching), so once a
+## pair is resolved we can hand back the cached bool. Profiling showed
+## these getters being called 3000-7000 times per frame at high unit
+## counts; the dict lookup is far cheaper than the `get_state` chain it
+## avoids.
+var _allied_cache: Dictionary = {}
 
 
 func register(state: PlayerState, resource_manager: Node = null) -> void:
@@ -70,11 +77,23 @@ func are_allied(a_id: int, b_id: int) -> bool:
 	# anyone — they're a separate team that engages everything.
 	if a_id == b_id:
 		return true
+	# Encode the unordered pair as a single int — small player ids fit
+	# easily into the lower / upper halves of a 32-bit value. Symmetric
+	# under swap so (a,b) and (b,a) hit the same cache slot.
+	var lo: int = a_id if a_id < b_id else b_id
+	var hi: int = b_id if a_id < b_id else a_id
+	var key: int = (hi << 16) | (lo & 0xFFFF)
+	if _allied_cache.has(key):
+		return _allied_cache[key] as bool
 	var ta: int = get_team(a_id)
 	var tb: int = get_team(b_id)
+	var result: bool
 	if ta == NEUTRAL_TEAM_ID or tb == NEUTRAL_TEAM_ID:
-		return false
-	return ta == tb
+		result = false
+	else:
+		result = ta == tb
+	_allied_cache[key] = result
+	return result
 
 
 func are_enemies(a_id: int, b_id: int) -> bool:

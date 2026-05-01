@@ -16,9 +16,23 @@ var _is_missile: bool = false
 var _flight_time: float = 0.0
 var _total_flight_time: float = 1.0
 var _arc_height: float = 4.0
+## Bullets only orient once (on first physics frame, after add_child puts them
+## in the tree); after that they fly straight and don't need re-aiming.
+var _bullet_oriented: bool = false
+## Hard lifetime safety cap — if for any reason the impact-distance check
+## fails to fire (target moved underground, target_pos slightly past the
+## reachable straight line, etc.) this guarantees the bullet self-destructs
+## instead of jittering around the impact point forever.
+var _life: float = 0.0
 ## How often to drop a smoke puff. ~30 puffs/sec at the default cadence
-## paints a continuous trail without flooding the scene.
-const MISSILE_TRAIL_INTERVAL: float = 0.035
+## would paint a continuous trail; we throttle to ~14/sec via the wider
+## interval below to keep the per-puff allocation+tween overhead in check.
+const MISSILE_TRAIL_INTERVAL: float = 0.07
+
+## Smoke puffs now route through the central GPU-particle emitter
+## (`ParticleEmitterManager.emit_smoke`). The emitter has its own ring
+## buffer (SMOKE_AMOUNT particles) so old particles overwrite new ones
+## automatically when the buffer fills — no per-process cap needed.
 
 const ROLE_COLORS: Dictionary = {
 	&"AP": Color(1.0, 0.8, 0.2, 1.0),
@@ -36,15 +50,23 @@ const ROF_STYLES: Dictionary = {
 }
 
 
-static func create(from: Vector3, to: Vector3, role_tag: StringName, rof_tier: StringName = &"moderate") -> Projectile:
+static func create(from: Vector3, to: Vector3, role_tag: StringName, rof_tier: StringName = &"moderate", style_override: StringName = &"") -> Projectile:
 	var proj := Projectile.new()
 	var fire_y: float = from.y + 1.0
 	proj.start_pos = Vector3(from.x, fire_y, from.z)
 	proj.target_pos = Vector3(to.x, to.y + 0.8, to.z)
-	proj.global_position = proj.start_pos
+	# Use `position` (local) here — the projectile isn't in the tree yet,
+	# and assigning `global_position` on an unparented Node3D triggers a
+	# `!is_inside_tree()` debug warning per call. The caller parents to
+	# the scene root (identity transform), so local == global.
+	proj.position = proj.start_pos
 
 	var color: Color = ROLE_COLORS.get(role_tag, Color(0.9, 0.6, 0.2, 1.0)) as Color
 	var style: String = ROF_STYLES.get(rof_tier, "bullet") as String
+	# Explicit override wins. Lets the Ratchet's "Light Pistol Gun" render as
+	# a cutting beam without forcing a faster RoF tier on it.
+	if style_override != &"":
+		style = String(style_override)
 
 	# Add slight random offset so squad projectiles don't perfectly overlap
 	proj.target_pos += Vector3(randf_range(-0.3, 0.3), 0, randf_range(-0.3, 0.3))
@@ -64,6 +86,16 @@ static func create(from: Vector3, to: Vector3, role_tag: StringName, rof_tier: S
 			# Faster bullets so the volley reads as actually shooting rather than
 			# floating across the field — important now that Rook fires bursts.
 			proj.speed = 95.0
+			# Orient the slug along the firing direction at spawn time. Using
+			# Transform3D.looking_at directly (rather than Node3D.look_at) so
+			# the rotation is correct on the very first frame, before the
+			# projectile is parented to the scene tree.
+			var aim_dir: Vector3 = proj.target_pos - proj.start_pos
+			if aim_dir.length_squared() > 0.0001:
+				var t := Transform3D()
+				t.origin = proj.start_pos
+				proj.transform = t.looking_at(proj.target_pos, Vector3.UP)
+			proj._bullet_oriented = true
 
 	return proj
 
@@ -72,6 +104,7 @@ func _create_bullet_mesh(color: Color) -> void:
 	# Slim slug shape rather than a round ball — a thin cylinder oriented
 	# along the travel direction reads as a tracer round, not a cannonball.
 	_mesh = MeshInstance3D.new()
+	_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var cyl := CylinderMesh.new()
 	cyl.top_radius = 0.04
 	cyl.bottom_radius = 0.05
@@ -92,6 +125,7 @@ func _create_bullet_mesh(color: Color) -> void:
 
 func _create_missile_mesh(color: Color) -> void:
 	_mesh = MeshInstance3D.new()
+	_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var cyl := CylinderMesh.new()
 	cyl.top_radius = 0.04   # nose
 	cyl.bottom_radius = 0.1 # exhaust
@@ -121,6 +155,7 @@ func _create_beam_mesh(color: Color, from: Vector3, to: Vector3) -> void:
 	var length: float = dir.length()
 
 	_mesh = MeshInstance3D.new()
+	_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var box := BoxMesh.new()
 	box.size = Vector3(0.05, 0.05, maxf(length, 0.1))
 	_mesh.mesh = box
@@ -131,12 +166,20 @@ func _create_beam_mesh(color: Color, from: Vector3, to: Vector3) -> void:
 	mat.emission_enabled = true
 	mat.emission = color
 	mat.emission_energy_multiplier = 5.0
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_mesh.set_surface_override_material(0, mat)
 
+	# Position + orient via Transform3D so the basis is correct on the very
+	# first frame, before the projectile is parented to the scene tree.
+	# (Node3D.look_at silently produces an identity orientation when called
+	# pre-tree, which made the beam render as a Z-aligned segment regardless
+	# of where it was supposed to fire.)
 	var mid: Vector3 = (from + to) * 0.5
-	global_position = mid
-	if dir.length() > 0.1:
-		look_at(to, Vector3.UP)
+	var xform := Transform3D()
+	xform.origin = mid
+	if length > 0.1:
+		xform = xform.looking_at(to, Vector3.UP)
+	transform = xform
 
 	add_child(_mesh)
 
@@ -189,95 +232,75 @@ func _process(delta: float) -> void:
 			queue_free()
 		return
 
-	# Bullet — straight line
+	# Bullet — straight line. Orient on the first frame so the slug
+	# cylinder points at the target. After that the basis stays put;
+	# bullets fly in a perfectly straight line and don't need per-frame
+	# look_at the way missiles do.
+	if not _bullet_oriented:
+		_bullet_oriented = true
+		if global_position.distance_to(target_pos) > 0.05:
+			look_at(target_pos, Vector3.UP)
+
+	# Lifetime safety: even at the lowest weapon range a bullet should reach
+	# its target in well under 1.5 seconds at 95u/s. If we ever exceed that,
+	# something has gone wrong with the impact-distance check — kill it
+	# silently instead of leaving a ghost projectile to flicker.
+	_life += delta
+	if _life > 1.5:
+		queue_free()
+		return
+
 	var to_target := target_pos - global_position
 	var dist := to_target.length()
+	var step: float = speed * delta
 
-	if dist < 0.5:
+	# Impact when this frame's travel would reach or overshoot the target.
+	# Without this, fast bullets overshoot the 0.5u threshold, the next
+	# frame they're flying back toward target, and the slug visibly
+	# oscillates around the impact point until it eventually lands inside
+	# the threshold band.
+	if step >= dist or dist < 0.1:
 		_spawn_impact()
 		queue_free()
 		return
 
 	var direction := to_target / dist
-	global_position += direction * speed * delta
+	global_position += direction * step
 
 
 func _spawn_trail_puff() -> void:
-	## Drops a small soft sphere behind the missile that expands and
-	## fades to alpha 0 over ~0.45s. Each puff is a sibling of the
-	## projectile (parented to the scene), so the trail persists after
-	## the missile flies past.
-	var scene: Node = get_tree().current_scene
-	if not scene:
+	## Routes the missile trail into the central GPU-particle emitter —
+	## one `emit_particle` call instead of allocating a fresh
+	## MeshInstance3D + StandardMaterial3D + Tween per puff. The emitter's
+	## ParticleProcessMaterial owns the lifetime / scale-over-life /
+	## fade animation, so all per-particle update work runs on the GPU.
+	var _pem_scene: Node = get_tree().current_scene
+	var pem: Node = _pem_scene.get_node_or_null("ParticleEmitterManager") if _pem_scene else null
+	if not pem:
 		return
-	var puff := MeshInstance3D.new()
-	var sphere := SphereMesh.new()
-	var start_radius: float = randf_range(0.10, 0.16)
-	sphere.radius = start_radius
-	sphere.height = start_radius * 2.0
-	puff.mesh = sphere
 	# Drop just behind the missile body. global_basis.z is the local +Z
-	# direction in world space, which is the missile's "backward" after
-	# look_at orients local -Z toward the target.
+	# direction in world space (missile's "backward" after look_at).
 	var rear_offset: Vector3 = global_basis.z.normalized() * randf_range(0.18, 0.32)
-	# Tiny lateral jitter so consecutive puffs aren't perfectly stacked.
 	rear_offset += Vector3(
 		randf_range(-0.05, 0.05),
 		randf_range(-0.05, 0.05),
 		randf_range(-0.05, 0.05),
 	)
-	puff.global_position = global_position + rear_offset
-	var mat := StandardMaterial3D.new()
-	# Warm-grey smoke with a faint amber tint near the engine.
-	mat.albedo_color = Color(0.6, 0.5, 0.4, 0.65)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.emission_enabled = true
-	mat.emission = Color(0.9, 0.5, 0.2, 1.0)
-	mat.emission_energy_multiplier = 0.4
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	puff.set_surface_override_material(0, mat)
-	scene.add_child(puff)
-
-	var lifetime: float = randf_range(0.35, 0.55)
-	var grow: float = randf_range(2.4, 3.4)
 	var drift: Vector3 = Vector3(
-		randf_range(-0.1, 0.1),
-		randf_range(0.05, 0.2),
-		randf_range(-0.1, 0.1),
+		randf_range(-0.15, 0.15),
+		randf_range(0.1, 0.4),
+		randf_range(-0.15, 0.15),
 	)
-	var tween := puff.create_tween()
-	tween.set_parallel(true)
-	tween.tween_property(puff, "global_position", puff.global_position + drift, lifetime)
-	tween.tween_property(puff, "scale", Vector3(grow, grow, grow), lifetime)
-	tween.tween_property(mat, "albedo_color:a", 0.0, lifetime).set_ease(Tween.EASE_IN)
-	tween.tween_property(mat, "emission_energy_multiplier", 0.0, lifetime * 0.6)
-	tween.chain().tween_callback(puff.queue_free)
+	pem.emit_smoke(global_position + rear_offset, drift, Color(0.65, 0.5, 0.4, 0.7))
 
 
 func _spawn_impact() -> void:
-	var flash := MeshInstance3D.new()
-	var sphere := SphereMesh.new()
-	sphere.radius = 0.3
-	sphere.height = 0.6
-	flash.mesh = sphere
-	flash.global_position = global_position
-
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(1.0, 0.7, 0.2, 0.8)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.emission_enabled = true
-	mat.emission = Color(1.0, 0.5, 0.1, 1.0)
-	mat.emission_energy_multiplier = 5.0
-	flash.set_surface_override_material(0, mat)
-
-	get_tree().current_scene.add_child(flash)
-
-	var timer := Timer.new()
-	timer.wait_time = 0.1
-	timer.one_shot = true
-	timer.autostart = true
-	timer.timeout.connect(flash.queue_free)
-	flash.add_child(timer)
+	# Impact flash routed through the GPU-particle emitter — same
+	# bright-orange burst, no per-impact MeshInstance3D allocation.
+	var _pem_scene: Node = get_tree().current_scene
+	var pem: Node = _pem_scene.get_node_or_null("ParticleEmitterManager") if _pem_scene else null
+	if pem:
+		pem.emit_flash(global_position, Color(1.0, 0.6, 0.18, 0.9))
 
 	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
 	if audio and audio.has_method("play_weapon_impact"):

@@ -1,0 +1,42 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_harbinger_railgun"]
+script = ExtResource("2")
+weapon_name = "Spinal Railgun"
+role_tag = &"AP"
+damage_tier = &"very_high"
+range_tier = &"long"
+rof_tier = &"slow"
+
+[sub_resource type="Resource" id="weapon_drone_swarm"]
+script = ExtResource("2")
+weapon_name = "Drone-Bay Releases"
+role_tag = &"Universal"
+damage_tier = &"moderate"
+range_tier = &"medium"
+rof_tier = &"moderate"
+
+[resource]
+script = ExtResource("1")
+unit_name = "Harbinger"
+unit_class = &"heavy"
+hp_total = 2080
+hp_per_unit = 1040
+armor_class = &"heavy"
+speed_tier = &"slow"
+sight_tier = &"long"
+squad_size = 2
+population = 18
+cost_salvage = 620
+cost_fuel = 80
+build_time = 36.0
+built_at = &"advanced_foundry"
+primary_weapon = SubResource("weapon_harbinger_railgun")
+secondary_weapon = SubResource("weapon_drone_swarm")
+squad_strength_bonus = 0.18
+special_description = "Sable heavy drone carrier (V3 §Pillar 1). Spinal railgun + drone bay releases. Requires Black Pylon to build. Branch A: Swarm Marshal (more drones). Branch B: Overseer (Mesh provider, +500m aura)."
+branch_a_name = "Swarm Marshal"
+branch_b_name = "Overseer"

@@ -27,7 +27,18 @@ func _color_for_owner(owner_idx: int) -> Color:
 	return _enemy_color
 
 
-func _process(_delta: float) -> void:
+var _redraw_timer: float = 0.0
+const REDRAW_INTERVAL: float = 0.066  # ~15 Hz; minimap glance-readability
+									   # doesn't need 60 Hz
+
+func _process(delta: float) -> void:
+	# Throttle minimap repaint to ~15 Hz. At 360+ units the per-frame
+	# `_draw` was eating ~2 ms; capping the rate cuts that to ~0.5 ms
+	# without any noticeable lag in unit dot positions.
+	_redraw_timer += delta
+	if _redraw_timer < REDRAW_INTERVAL:
+		return
+	_redraw_timer = 0.0
 	queue_redraw()
 
 
@@ -55,11 +66,16 @@ func _draw() -> void:
 			continue
 		var pos: Vector2 = _world_to_map(node.global_position, map_size, half_world)
 		var dep_owner: int = node.get("owner_id") if "owner_id" in node else -1
-		var color: Color = _neutral_color
-		if dep_owner == 0:
-			color = _player_color
-		elif dep_owner > 0:
-			color = _enemy_color
+		# Uncaptured deposits sit at owner_id == -1, which isn't a valid
+		# player id — keep the explicit neutral fallback for that case.
+		# Captured deposits go through the same perspective helper as
+		# units / buildings so 2v2 allies render green instead of the
+		# previous "any non-zero owner = red enemy" rule.
+		var color: Color
+		if dep_owner < 0:
+			color = _neutral_color
+		else:
+			color = _color_for_owner(dep_owner)
 		# Diamond shape for deposits
 		var pts := PackedVector2Array([
 			pos + Vector2(0, -DEPOSIT_SIZE),

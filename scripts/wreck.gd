@@ -130,6 +130,14 @@ func _build_wreck_visuals() -> void:
 func _make_wreck_material(c: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = c
+	# Same grime overlay as the unit/building chassis. A wreck IS the
+	# chassis of a destroyed mech, so it should look like a battered,
+	# weathered version of what it was — not a flat-shaded primitive.
+	# Higher uv1_scale than units because wrecks are smaller; this keeps
+	# the wear pattern at roughly the same physical size.
+	m.albedo_texture = SharedTextures.get_metal_wear_texture()
+	m.uv1_offset = Vector3(randf(), randf(), 0.0)
+	m.uv1_scale = Vector3(2.4, 2.4, 1.0)
 	m.roughness = 0.95
 	m.metallic = 0.15
 	return m
@@ -164,5 +172,9 @@ static func create_from_unit(unit_stats: UnitStatResource, pos: Vector3) -> Wrec
 		_:
 			wreck.wreck_size = Vector3(1.0, 0.4, 1.0)
 
-	wreck.global_position = pos
+	# Use local `position` here — the wreck isn't in the tree yet, and the
+	# caller parents it to the scene root (identity transform), so local
+	# == global. Avoids the !is_inside_tree() warning that was firing on
+	# every unit death (a high-frequency event during combat).
+	wreck.position = pos
 	return wreck

@@ -381,6 +381,12 @@ func _build_hp_bar() -> void:
 func _make_metal(c: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = c
+	# Subtle grime / wear overlay so the chassis reads as weathered
+	# industrial metal instead of flat colour. uv1_offset randomised so
+	# adjacent panels each pick a different patch of grime.
+	m.albedo_texture = SharedTextures.get_metal_wear_texture()
+	m.uv1_offset = Vector3(randf(), randf(), 0.0)
+	m.uv1_scale = Vector3(1.8, 1.8, 1.0)
 	m.roughness = 0.65
 	m.metallic = 0.4
 	return m
@@ -752,28 +758,12 @@ func _spawn_crush_burst(world_pos: Vector3, salvage_gained: int) -> void:
 	var scene: Node = get_tree().current_scene
 	if not scene:
 		return
-	# Dust puff cluster.
-	for i: int in 6:
-		var puff := MeshInstance3D.new()
-		var sph := SphereMesh.new()
-		sph.radius = randf_range(0.18, 0.32)
-		sph.height = sph.radius * 1.6
-		puff.mesh = sph
-		var mat := StandardMaterial3D.new()
-		mat.albedo_color = Color(0.55, 0.5, 0.42, 0.7)
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		puff.set_surface_override_material(0, mat)
-		puff.global_position = world_pos + Vector3(randf_range(-0.4, 0.4), 0.2, randf_range(-0.4, 0.4))
-		scene.add_child(puff)
-		var lifetime: float = randf_range(0.6, 0.9)
-		var rise: float = randf_range(0.4, 0.8)
-		var grow: float = randf_range(1.6, 2.0)
-		var tween := puff.create_tween()
-		tween.set_parallel(true)
-		tween.tween_property(puff, "global_position", puff.global_position + Vector3(randf_range(-0.4, 0.4), rise, randf_range(-0.4, 0.4)), lifetime)
-		tween.tween_property(puff, "scale", Vector3(grow, grow, grow), lifetime)
-		tween.tween_property(mat, "albedo_color:a", 0.0, lifetime).set_ease(Tween.EASE_IN)
-		tween.chain().tween_callback(puff.queue_free)
+	# Dust puff cluster → GPU particle burst. 6 emit_particle calls
+	# instead of 6 fresh MeshInstance3D + StandardMaterial3D + Tween.
+	var _pem_scene: Node = get_tree().current_scene
+	var pem: Node = _pem_scene.get_node_or_null("ParticleEmitterManager") if _pem_scene else null
+	if pem:
+		pem.emit_dust(world_pos + Vector3(0, 0.2, 0), 6, 1.2)
 	# Floating "+N" salvage popup so the player sees the bonus.
 	if salvage_gained <= 0:
 		return
@@ -786,11 +776,12 @@ func _spawn_crush_burst(world_pos: Vector3, salvage_gained: int) -> void:
 	label.modulate = Color(0.95, 0.78, 0.32, 1.0)
 	label.outline_size = 8
 	label.outline_modulate = Color(0, 0, 0, 1)
-	label.global_position = world_pos + Vector3(0, 1.2, 0)
+	var label_pos: Vector3 = world_pos + Vector3(0, 1.2, 0)
 	scene.add_child(label)
+	label.global_position = label_pos
 	var ltween := label.create_tween()
 	ltween.set_parallel(true)
-	ltween.tween_property(label, "global_position", label.global_position + Vector3(0, 1.2, 0), 0.8)
+	ltween.tween_property(label, "global_position", label_pos + Vector3(0, 1.2, 0), 0.8)
 	ltween.tween_property(label, "modulate:a", 0.0, 0.8).set_ease(Tween.EASE_IN)
 	ltween.chain().tween_callback(label.queue_free)
 

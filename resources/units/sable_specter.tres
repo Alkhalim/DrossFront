@@ -3,20 +3,20 @@
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
 
-[sub_resource type="Resource" id="weapon_twin_mg"]
+[sub_resource type="Resource" id="weapon_pulse_repeater"]
 script = ExtResource("2")
-weapon_name = "Twin Shoulder MGs"
+weapon_name = "Light Pulse Repeater"
 role_tag = &"AP"
-damage_tier = &"very_low"
+damage_tier = &"low"
 range_tier = &"medium"
 rof_tier = &"rapid"
 
 [resource]
 script = ExtResource("1")
-unit_name = "Rook"
+unit_name = "Specter"
 unit_class = &"light"
-hp_total = 1024
-hp_per_unit = 256
+hp_total = 880
+hp_per_unit = 220
 armor_class = &"light"
 speed_tier = &"fast"
 sight_tier = &"long"
@@ -24,10 +24,10 @@ squad_size = 4
 population = 8
 cost_salvage = 180
 cost_fuel = 0
-build_time = 15.4
+build_time = 14.5
 built_at = &"basic_foundry"
-primary_weapon = SubResource("weapon_twin_mg")
-squad_strength_bonus = 0.12
-special_description = "Squad strength bonus +12% accuracy at full strength."
-branch_a_name = "Spotter"
-branch_b_name = "Sapper"
+primary_weapon = SubResource("weapon_pulse_repeater")
+squad_strength_bonus = 0.10
+special_description = "Sable stealth scout. Can fire from concealment without breaking stealth (per V3 stealth rules). Branch A: Ghost (mobile camo). Branch B: Glitch (stealth detection + Mesh provider)."
+branch_a_name = "Ghost"
+branch_b_name = "Glitch"

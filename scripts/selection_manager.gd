@@ -7,12 +7,23 @@ extends Node
 const UNIT_LAYER: int = 2
 ## Layer mask for raycast against ground (layer 1).
 const GROUND_LAYER: int = 1
+## Surface raycast — ground (1) + terrain / elevation (4). Used by every
+## click-to-world conversion (move commands, build placement, etc.) so the
+## hit y reflects plateau tops, not the buried floor underneath. Without
+## this, placing a building on a plateau dropped its origin to y=0 and
+## the building rendered halfway sunken into the plateau.
+const SURFACE_RAYCAST_MASK: int = 1 | 4
 ## Layer mask for raycast against buildings (layer 4).
 const BUILDING_LAYER: int = 4
 ## Layer mask for raycast against wrecks (layer 8).
 const WRECK_LAYER: int = 8
 
-var _selected_units: Array[Unit] = []
+## Holds selected ground units (Unit) AND aircraft (Aircraft). Both
+## expose the same selection surface (`is_selected`, `set_selected`,
+## `command_move`, `command_attack_move`, `command_hold_position`,
+## `command_patrol`, `alive_count`), so the array is typed as the
+## common Node3D base and methods are dispatched via duck-typing.
+var _selected_units: Array[Node3D] = []
 ## Selected Crawlers. Crawlers aren't Unit instances (different base class), so
 ## they live in a parallel list, but selection / move / drag-select code now
 ## treats both lists as one combined "movables" set so the player can mix and
@@ -75,7 +86,10 @@ func _update_hover() -> void:
 	if not _camera or _build_mode:
 		_set_hover(null)
 		return
-	var hovered: Unit = _raycast_unit(get_viewport().get_mouse_position())
+	# Hover affects ground Units only (HP-bar reveal). Aircraft skip
+	# hover treatment for now — `as Unit` returns null for Aircraft so
+	# `_set_hover(null)` clears the previous hover cleanly.
+	var hovered: Unit = _raycast_unit(get_viewport().get_mouse_position()) as Unit
 	_set_hover(hovered)
 
 
@@ -126,7 +140,7 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 		# doing instead of replacing it. Only the plain move path supports
 		# queueing for now (attack / assist / rally still replace).
 		var queue: bool = event.ctrl_pressed
-		if _selected_building and _selected_building.stats and not _selected_building.stats.producible_units.is_empty() and _selection_movables_count() == 0:
+		if _selected_building and _selected_building.stats and not _selected_building.get_producible_units().is_empty() and _selection_movables_count() == 0:
 			_set_rally_point(event.position)
 		elif _attack_move_mode:
 			_command_attack_move(event.position)
@@ -154,7 +168,7 @@ func _selection_movables_count() -> int:
 	# right-click should issue a move or fall through to building rally-point
 	# / no-op behaviors.
 	var n: int = 0
-	for u: Unit in _selected_units:
+	for u: Node3D in _selected_units:
 		if is_instance_valid(u) and u.alive_count > 0:
 			n += 1
 	for c: SalvageCrawler in _selected_crawlers:
@@ -233,7 +247,7 @@ func _handle_build_hotkey(key: InputEventKey) -> void:
 	# Build placement hotkeys when an engineer is selected (1-7)
 	_prune_selection()
 	var has_engineer: bool = false
-	for unit: Unit in _selected_units:
+	for unit: Node3D in _selected_units:
 		if unit.get_builder():
 			has_engineer = true
 			break
@@ -370,11 +384,12 @@ func _show_wreck_readout(wreck: Wreck) -> void:
 	label.modulate = Color(0.95, 0.78, 0.32, 1.0)
 	label.outline_size = 8
 	label.outline_modulate = Color(0.0, 0.0, 0.0, 1.0)
-	label.global_position = wreck.global_position + Vector3(0.0, 1.4, 0.0)
+	var label_pos: Vector3 = wreck.global_position + Vector3(0.0, 1.4, 0.0)
 	get_tree().current_scene.add_child(label)
+	label.global_position = label_pos
 	var tween := label.create_tween()
 	tween.set_parallel(true)
-	tween.tween_property(label, "global_position", label.global_position + Vector3(0.0, 0.6, 0.0), 1.6)
+	tween.tween_property(label, "global_position", label_pos + Vector3(0.0, 0.6, 0.0), 1.6)
 	tween.tween_property(label, "modulate:a", 0.0, 1.6).set_ease(Tween.EASE_IN).set_delay(0.6)
 	tween.chain().tween_callback(label.queue_free)
 
@@ -393,15 +408,29 @@ func _finish_box_select(event: InputEventMouseButton) -> void:
 	var prev_unit_count: int = _selected_units.size()
 	var prev_crawler_count: int = _selected_crawlers.size()
 
-	# Check units against the screen-space rectangle
+	# Check units against the screen-space rectangle. The "units" group
+	# contains Units, Aircraft, SalvageCrawlers, and SalvageWorkers;
+	# only the first two are command-selectable via this path. Crawlers
+	# go through `_selected_crawlers` (handled below); workers aren't
+	# directly commandable. Filter accordingly.
 	var units := get_tree().get_nodes_in_group("units")
 	for node: Node in units:
-		var unit := node as Unit
-		if not unit:
+		var movable: Node3D = node as Node3D
+		if not movable:
 			continue
-		var screen_pos := _camera.unproject_position(unit.global_position)
+		# Only Unit or Aircraft (group "aircraft") are box-select targets.
+		var is_aircraft: bool = movable.is_in_group("aircraft")
+		if not (movable is Unit) and not is_aircraft:
+			continue
+		# Filter to the player's living units. owner_id and alive_count
+		# exist on both Unit and Aircraft.
+		if "owner_id" in movable and (movable.get("owner_id") as int) != 0:
+			continue
+		if "alive_count" in movable and (movable.get("alive_count") as int) <= 0:
+			continue
+		var screen_pos := _camera.unproject_position(movable.global_position)
 		if rect.has_point(screen_pos):
-			_add_to_selection(unit, false)
+			_add_to_selection(movable, false)
 
 	# Crawlers are scooped into the same drag rectangle so a sweep across the
 	# base picks up the harvester alongside its escorts.
@@ -441,7 +470,7 @@ func _command_move(screen_pos: Vector2, queue: bool = false) -> void:
 	_prune_selection()
 	# Combined movables list — units and crawlers both honor command_move(target).
 	var movables: Array = []
-	for u: Unit in _selected_units:
+	for u: Node3D in _selected_units:
 		if is_instance_valid(u) and u.alive_count > 0:
 			movables.append(u)
 	for c: SalvageCrawler in _selected_crawlers:
@@ -486,7 +515,7 @@ func _command_move(screen_pos: Vector2, queue: bool = false) -> void:
 
 func _command_assist_build(building: Building) -> void:
 	_prune_selection()
-	for unit: Unit in _selected_units:
+	for unit: Node3D in _selected_units:
 		var builder: Node = unit.get_builder()
 		if builder and builder.has_method("start_building"):
 			builder.start_building(building)
@@ -501,7 +530,7 @@ func _command_attack(target: Node3D) -> void:
 	_cancel_builder_tasks()
 	if _audio:
 		_audio.play_command()
-	for unit: Unit in _selected_units:
+	for unit: Node3D in _selected_units:
 		var combat: Node = unit.get_combat()
 		if combat and combat.has_method("set_target"):
 			combat.set_target(target)
@@ -520,7 +549,7 @@ func _command_attack_move(screen_pos: Vector2) -> void:
 	var ground_pos := _raycast_ground(screen_pos)
 	if ground_pos == Vector3.INF:
 		return
-	for unit: Unit in _selected_units:
+	for unit: Node3D in _selected_units:
 		var combat: Node = unit.get_combat()
 		if combat and combat.has_method("command_attack_move"):
 			combat.command_attack_move(ground_pos)
@@ -554,7 +583,7 @@ func command_hold_position_on_selection() -> void:
 	_cancel_builder_tasks()
 	if _audio:
 		_audio.play_command()
-	for unit: Unit in _selected_units:
+	for unit: Node3D in _selected_units:
 		if unit.has_method("command_hold_position"):
 			unit.command_hold_position()
 
@@ -569,39 +598,46 @@ func _command_patrol(screen_pos: Vector2) -> void:
 	var ground_pos := _raycast_ground(screen_pos)
 	if ground_pos == Vector3.INF:
 		return
-	for unit: Unit in _selected_units:
+	for unit: Node3D in _selected_units:
 		if unit.has_method("command_patrol"):
 			unit.command_patrol(ground_pos)
 
 
 func _find_enemy_at(screen_pos: Vector2) -> Node3D:
-	## Check if an enemy unit or building is under the click.
+	## Check if an *enemy* unit / Crawler / building is under the click.
+	## Hostility is resolved through PlayerRegistry so 2v2 allies are
+	## correctly skipped — `owner_id != 0` is not the right check, because
+	## the AI ally (player_id 1, team 0) also has owner_id != 0.
+	var registry: PlayerRegistry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
+
 	var unit := _raycast_unit(screen_pos)
-	if unit and unit.owner_id != 0:
+	if unit and _is_attack_target(unit.owner_id, registry):
 		return unit
 
 	# Check Crawlers — they aren't Unit instances and slip past
 	# `_raycast_unit`'s typed cast, so without this branch right-clicking
 	# an enemy Crawler did nothing and the player relied on auto-target.
 	var crawler := _raycast_crawler(screen_pos)
-	if crawler and crawler.owner_id != 0:
+	if crawler and _is_attack_target(crawler.owner_id, registry):
 		return crawler
 
-	# Check enemy buildings via screen projection
+	# Check enemy buildings via screen projection. Footprint comes from
+	# the BuildingStatResource if present, otherwise falls back to a
+	# fixed 1.5u radius so destructible structures without `stats` (like
+	# AmmoDump) are still right-clickable for manual attack.
 	var buildings: Array[Node] = get_tree().get_nodes_in_group("buildings")
 	for node: Node in buildings:
 		if not ("owner_id" in node):
 			continue
 		var bowner: int = node.get("owner_id")
-		if bowner == 0:
+		if not _is_attack_target(bowner, registry):
 			continue
-		if not ("stats" in node) or node.get("stats") == null:
-			continue
-		var bstats: BuildingStatResource = node.get("stats") as BuildingStatResource
-		if not bstats:
-			continue
+		var half_size: float = 1.5
+		if "stats" in node and node.get("stats") != null:
+			var bstats: BuildingStatResource = node.get("stats") as BuildingStatResource
+			if bstats:
+				half_size = maxf(bstats.footprint_size.x, bstats.footprint_size.z) * 0.5
 		var screen_center: Vector2 = _camera.unproject_position(node.global_position)
-		var half_size: float = maxf(bstats.footprint_size.x, bstats.footprint_size.z) * 0.5
 		var screen_edge: Vector2 = _camera.unproject_position(
 			node.global_position + Vector3(half_size, 0, 0)
 		)
@@ -610,6 +646,18 @@ func _find_enemy_at(screen_pos: Vector2) -> Node3D:
 			return node as Node3D
 
 	return null
+
+
+func _is_attack_target(target_owner: int, registry: PlayerRegistry) -> bool:
+	## Returns true when the local player can legitimately attack-command a
+	## unit/building owned by `target_owner` — i.e. it's not the local
+	## player and not an ally. Falls back to the v1 "anything not owner 0"
+	## rule when the registry isn't available (e.g. legacy scenes).
+	if target_owner == 0:
+		return false
+	if registry and registry.has_method("are_enemies"):
+		return registry.are_enemies(0, target_owner)
+	return true
 
 
 func _select_all_of_type(unit_name: String) -> void:
@@ -683,7 +731,7 @@ func _key_to_group_index(keycode: int) -> int:
 func _assign_control_group(index: int) -> void:
 	_prune_selection()
 	_control_groups[index] = []
-	for unit: Unit in _selected_units:
+	for unit: Node3D in _selected_units:
 		_control_groups[index].append(unit.get_instance_id())
 	if _audio:
 		_audio.play_select()
@@ -727,7 +775,7 @@ func _jump_camera_to_selection() -> void:
 	# empty (e.g. control group's units were all destroyed before recall).
 	var sum := Vector3.ZERO
 	var count: int = 0
-	for unit: Unit in _selected_units:
+	for unit: Node3D in _selected_units:
 		if not is_instance_valid(unit) or unit.alive_count <= 0:
 			continue
 		sum += unit.global_position
@@ -742,7 +790,9 @@ func _jump_camera_to_selection() -> void:
 	cam.set("_target_pivot", Vector3(centroid.x, 0.0, centroid.z))
 
 
-func get_selected_units() -> Array[Unit]:
+func get_selected_units() -> Array[Node3D]:
+	# Returns ground Units AND Aircraft both — same array. Callers that
+	# need Unit-specific behaviour should iterate with `if u is Unit:`.
 	return _selected_units
 
 
@@ -750,7 +800,7 @@ func get_buildable_stats() -> Array[BuildingStatResource]:
 	return _buildable_stats
 
 
-func _add_to_selection(unit: Unit, play_audio: bool = true) -> void:
+func _add_to_selection(unit: Node3D, play_audio: bool = true) -> void:
 	if not is_instance_valid(unit) or unit.owner_id != 0:
 		return
 	if unit in _selected_units:
@@ -761,14 +811,14 @@ func _add_to_selection(unit: Unit, play_audio: bool = true) -> void:
 		_audio.play_select()
 
 
-func _remove_from_selection(unit: Unit) -> void:
+func _remove_from_selection(unit: Node3D) -> void:
 	_selected_units.erase(unit)
 	if is_instance_valid(unit):
 		unit.deselect()
 
 
 func _clear_selection() -> void:
-	for unit: Unit in _selected_units:
+	for unit: Node3D in _selected_units:
 		if is_instance_valid(unit):
 			unit.deselect()
 	_selected_units.clear()
@@ -778,7 +828,7 @@ func _cancel_builder_tasks() -> void:
 	## Tell every selected engineer to drop its current build target so the
 	## subsequent move/attack command isn't immediately overridden by the
 	## builder dragging the unit back to the construction site.
-	for unit: Unit in _selected_units:
+	for unit: Node3D in _selected_units:
 		if not is_instance_valid(unit):
 			continue
 		var builder: Node = unit.get_builder()
@@ -791,8 +841,14 @@ func _prune_selection() -> void:
 	## iterators don't trip over stale references.
 	var i: int = _selected_units.size() - 1
 	while i >= 0:
-		var unit: Unit = _selected_units[i]
-		if not is_instance_valid(unit) or unit.alive_count <= 0:
+		var unit: Node3D = _selected_units[i]
+		# Validity FIRST — `in unit` on a freed object errors with
+		# "Invalid base object for 'in'", so we must guard before any
+		# property access. Both Unit and Aircraft expose alive_count.
+		var alive: int = 0
+		if is_instance_valid(unit):
+			alive = unit.get("alive_count") as int
+		if not is_instance_valid(unit) or alive <= 0:
 			_selected_units.remove_at(i)
 		i -= 1
 	var ci: int = _selected_crawlers.size() - 1
@@ -803,12 +859,23 @@ func _prune_selection() -> void:
 		ci -= 1
 
 
-func _raycast_unit(screen_pos: Vector2) -> Unit:
+func _raycast_unit(screen_pos: Vector2) -> Node3D:
+	# Returns either a `Unit` or an `Aircraft` — both share the
+	# selection / command surface and live in the same `units` group.
+	# Aircraft register their click hitbox via an `Area3D` child on
+	# UNIT_LAYER, so the ray hits the area and we walk up to recover
+	# the Aircraft node. Ground units' ray hits the unit's own
+	# collision shape directly.
 	var from := _camera.project_ray_origin(screen_pos)
 	var dir := _camera.project_ray_normal(screen_pos)
 
 	var space := get_viewport().world_3d.direct_space_state
 	var query := PhysicsRayQueryParameters3D.create(from, from + dir * 500.0, UNIT_LAYER)
+	# Aircraft register their click hitbox as an Area3D (no physics body);
+	# physics raycasts ignore Area3Ds by default, which is why aircraft
+	# couldn't be clicked even though they could be drag-selected.
+	# Enabling area collisions lets the ray hit the click area too.
+	query.collide_with_areas = true
 	var result := space.intersect_ray(query)
 
 	if result.is_empty():
@@ -817,11 +884,25 @@ func _raycast_unit(screen_pos: Vector2) -> Unit:
 	var collider: Object = result["collider"]
 	if collider is Unit:
 		return collider as Unit
-	# Walk up in case collider is a child
-	if collider is Node:
-		var parent: Node = (collider as Node).get_parent()
+	# Aircraft are detected via the "aircraft" group rather than
+	# `is Aircraft`. The class_name lookup was failing intermittently —
+	# group membership is set in `Aircraft._ready` and doesn't depend
+	# on Godot's global class registry being warm.
+	if collider is Node3D and (collider as Node3D).is_in_group("aircraft"):
+		return collider as Node3D
+	# Walk up — the collider may be a CollisionShape3D child of the
+	# aircraft's ClickArea (Area3D), which is itself a child of the
+	# Aircraft node. Both layers need traversal to find the Aircraft.
+	var node: Node = collider as Node
+	for _i: int in 3:
+		if not node:
+			break
+		var parent: Node = node.get_parent()
 		if parent is Unit:
 			return parent as Unit
+		if parent is Node3D and (parent as Node3D).is_in_group("aircraft"):
+			return parent as Node3D
+		node = parent
 	return null
 
 
@@ -850,7 +931,7 @@ func _raycast_ground(screen_pos: Vector2) -> Vector3:
 	var dir := _camera.project_ray_normal(screen_pos)
 
 	var space := get_viewport().world_3d.direct_space_state
-	var query := PhysicsRayQueryParameters3D.create(from, from + dir * 500.0, GROUND_LAYER)
+	var query := PhysicsRayQueryParameters3D.create(from, from + dir * 500.0, SURFACE_RAYCAST_MASK)
 	var result := space.intersect_ray(query)
 
 	if result.is_empty():
@@ -936,7 +1017,7 @@ func _select_building(building: Building) -> void:
 		_audio.play_select()
 
 	# Show rally point only for production buildings
-	if building.stats and not building.stats.producible_units.is_empty():
+	if building.stats and not building.get_producible_units().is_empty():
 		if building.rally_point != Vector3.ZERO:
 			_set_rally_point_visual(building.rally_point)
 	else:
@@ -1001,12 +1082,16 @@ func _show_yard_range(building: Building) -> void:
 	var yard: Node = building.get_node_or_null("SalvageYardComponent")
 	if yard and yard.has_method("show_range"):
 		yard.show_range()
+	# Also light up wrecks the yard could reach right now.
+	if yard and yard.has_method("get_collection_radius"):
+		_refresh_yard_wreck_highlights(building.global_position, yard.get_collection_radius())
 
 
 func _hide_yard_range(building: Building) -> void:
 	var yard: Node = building.get_node_or_null("SalvageYardComponent")
 	if yard and yard.has_method("hide_range"):
 		yard.hide_range()
+	_clear_yard_wreck_highlights()
 
 
 func _set_rally_point_visual(pos: Vector3) -> void:
@@ -1114,7 +1199,11 @@ var _last_queue_msec: Dictionary = {}
 func queue_unit_at_building(index: int) -> void:
 	if not _selected_building or not _selected_building.stats:
 		return
-	if index < 0 or index >= _selected_building.stats.producible_units.size():
+	# Faction-aware producible list — same source as the HUD buttons,
+	# so the index passed in (mapped from a button click or hotkey)
+	# resolves to the right Sable / Anvil unit.
+	var selected_producible: Array[UnitStatResource] = _selected_building.get_producible_units()
+	if index < 0 or index >= selected_producible.size():
 		return
 
 	# Pick the cohort member with the smallest current queue. With a
@@ -1126,6 +1215,16 @@ func queue_unit_at_building(index: int) -> void:
 	if not target:
 		return
 
+	# Reject queue actions on a building that hasn't finished construction
+	# yet. Without this check we'd spend resources + reserve population,
+	# then `building.queue_unit` would silently return false (it gates on
+	# is_constructed too) and the player would lose the cost with nothing
+	# in the queue to show for it.
+	if not target.is_constructed:
+		if _audio:
+			_audio.play_error()
+		return
+
 	var bid: int = target.get_instance_id()
 	var now: int = Time.get_ticks_msec()
 	var prev: int = (_last_queue_msec.get(bid, 0) as int)
@@ -1133,7 +1232,10 @@ func queue_unit_at_building(index: int) -> void:
 		return
 	_last_queue_msec[bid] = now
 
-	var unit_stats: UnitStatResource = target.stats.producible_units[index]
+	var target_producible: Array[UnitStatResource] = target.get_producible_units()
+	if index >= target_producible.size():
+		return
+	var unit_stats: UnitStatResource = target_producible[index]
 	var resource_mgr: ResourceManager = get_tree().current_scene.get_node("ResourceManager") as ResourceManager
 	if not resource_mgr:
 		return
@@ -1239,6 +1341,12 @@ func start_build_placement(bstat: BuildingStatResource) -> void:
 	if bstat.building_id == &"gun_emplacement":
 		_attach_range_ring(ghost, TurretComponent.TURRET_RANGE, Color(0.95, 0.4, 0.35, 0.35))
 
+	# Salvage Yard / Crawler — show the worker harvest radius and highlight
+	# every wreck inside it so the player can see what they'd be feeding.
+	if bstat.building_id == &"salvage_yard":
+		_attach_range_ring(ghost, SalvageYardComponent.COLLECTION_RADIUS, Color(0.9, 0.7, 0.2, 0.30))
+		_refresh_yard_wreck_highlights(ghost.global_position, SalvageYardComponent.COLLECTION_RADIUS)
+
 
 func _attach_range_ring(parent: Node3D, radius: float, color: Color) -> void:
 	## Flat translucent disc parented to the placement ghost so the player
@@ -1269,6 +1377,119 @@ func cancel_build_placement() -> void:
 	if _build_ghost and is_instance_valid(_build_ghost):
 		_build_ghost.queue_free()
 	_build_ghost = null
+	_clear_yard_wreck_highlights()
+
+
+## --- Salvage Yard wreck highlighting -----------------------------------------
+## Tracks every wreck currently tinted by a yard's harvest preview, plus the
+## original albedo of each so the highlight can be cleared cleanly. Used both
+## for the placement ghost and for selecting an existing yard.
+
+const _YARD_WRECK_HIGHLIGHT_COLOR := Color(1.0, 0.85, 0.35, 1.0)
+var _highlighted_wrecks: Dictionary = {}
+
+
+func _refresh_yard_wreck_highlights(center: Vector3, radius: float) -> void:
+	# Recompute the highlight set for the current yard center / radius.
+	# Wrecks that are no longer in range get their original tint back; new
+	# wrecks in range get the highlight color.
+	var in_range: Dictionary = {}
+	var radius_sq: float = radius * radius
+	for node: Node in get_tree().get_nodes_in_group("wrecks"):
+		if not is_instance_valid(node):
+			continue
+		var wreck: Node3D = node as Node3D
+		if not wreck:
+			continue
+		var dx: float = wreck.global_position.x - center.x
+		var dz: float = wreck.global_position.z - center.z
+		if dx * dx + dz * dz <= radius_sq:
+			in_range[wreck.get_instance_id()] = wreck
+
+	# Remove highlights from wrecks that are no longer in range.
+	var to_drop: Array[int] = []
+	for id: int in _highlighted_wrecks.keys():
+		if not in_range.has(id):
+			to_drop.append(id)
+	for id: int in to_drop:
+		_unhighlight_wreck(id)
+
+	# Apply highlights to newly-in-range wrecks.
+	for id: int in in_range.keys():
+		if not _highlighted_wrecks.has(id):
+			_highlight_wreck(in_range[id] as Node3D)
+
+
+func _highlight_wreck(wreck: Node3D) -> void:
+	# Walk every MeshInstance3D under the wreck, save the current albedo on
+	# its material override, swap to the highlight tint. The wreck stores
+	# the saved colors keyed by mesh instance id so _unhighlight can revert.
+	var saved: Dictionary = {}
+	for mesh: MeshInstance3D in _collect_mesh_instances(wreck):
+		var mat: StandardMaterial3D = mesh.get_surface_override_material(0) as StandardMaterial3D
+		if not mat:
+			continue
+		saved[mesh.get_instance_id()] = mat.albedo_color
+		mat.albedo_color = mat.albedo_color.lerp(_YARD_WRECK_HIGHLIGHT_COLOR, 0.55)
+		mat.emission_enabled = true
+		mat.emission = _YARD_WRECK_HIGHLIGHT_COLOR
+		mat.emission_energy_multiplier = 0.6
+	_highlighted_wrecks[wreck.get_instance_id()] = {
+		"wreck": wreck,
+		"saved": saved,
+	}
+
+
+func _unhighlight_wreck(id: int) -> void:
+	var entry: Variant = _highlighted_wrecks.get(id)
+	if entry == null:
+		_highlighted_wrecks.erase(id)
+		return
+	var data: Dictionary = entry as Dictionary
+	# `as Node3D` on a stored Variant errors when the object has been
+	# freed since it was highlighted (wrecks can despawn while still
+	# in the highlight dict). Pull the raw value, validate, and only
+	# then proceed to the per-mesh restore loop.
+	var wreck_var: Variant = data.get("wreck")
+	if not (wreck_var is Node3D) or not is_instance_valid(wreck_var):
+		_highlighted_wrecks.erase(id)
+		return
+	var wreck: Node3D = wreck_var
+	var saved: Dictionary = data.get("saved") as Dictionary
+	for mesh: MeshInstance3D in _collect_mesh_instances(wreck):
+		# A child mesh may have been freed independently between the
+		# highlight call and this unhighlight (e.g. wreck collapsed
+		# mid-frame). Skip freed meshes before touching their material.
+		if not is_instance_valid(mesh):
+			continue
+		var mat: StandardMaterial3D = mesh.get_surface_override_material(0) as StandardMaterial3D
+		if not mat:
+			continue
+		var orig: Variant = saved.get(mesh.get_instance_id())
+		if orig != null:
+			mat.albedo_color = orig as Color
+		mat.emission_enabled = false
+		mat.emission_energy_multiplier = 0.0
+	_highlighted_wrecks.erase(id)
+
+
+func _clear_yard_wreck_highlights() -> void:
+	for id: int in _highlighted_wrecks.keys().duplicate():
+		_unhighlight_wreck(id)
+
+
+func _collect_mesh_instances(root: Node) -> Array[MeshInstance3D]:
+	var out: Array[MeshInstance3D] = []
+	for child: Node in root.get_children():
+		if child is MeshInstance3D:
+			out.append(child as MeshInstance3D)
+		# Wreck visuals are typically one level deep, but recurse one more
+		# level just in case a wreck script wraps mesh instances under a
+		# transform node.
+		for grandchild: Node in child.get_children():
+			if grandchild is MeshInstance3D:
+				out.append(grandchild as MeshInstance3D)
+	return out
 
 
 ## Margin added around units / terrain features when checking placement overlap.
@@ -1317,7 +1538,11 @@ func _is_valid_build_position(pos: Vector3) -> bool:
 			return false
 
 	# Fuel deposits, wrecks, and terrain pieces all block placement.
-	for group_name: String in ["fuel_deposits", "wrecks", "terrain", "elevation"]:
+	# Plateaus / elevation are walkable surfaces — building ON TOP of
+	# them is valid (the raycast already returned the plateau-top y).
+	# Only block elevation overlap when the building's base would sit
+	# at ground level (i.e., placement is below the plateau top).
+	for group_name: String in ["fuel_deposits", "wrecks", "terrain"]:
 		for node: Node in get_tree().get_nodes_in_group(group_name):
 			if not is_instance_valid(node):
 				continue
@@ -1362,10 +1587,15 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 		var motion: InputEventMouseMotion = event as InputEventMouseMotion
 		var ground_pos := _raycast_ground(motion.position)
 		if ground_pos != Vector3.INF and _build_ghost:
-			# The Building ghost's visual origin sits at ground level (its mesh
-			# is offset internally), so place the root at the ground.
-			_build_ghost.global_position = Vector3(ground_pos.x, 0.0, ground_pos.z)
+			# Ghost origin matches the actual hit y so building on a
+			# plateau places the building flush with the plateau top
+			# (not sunken into the floor underneath).
+			_build_ghost.global_position = ground_pos
 			_update_ghost_validity_tint(ground_pos)
+			# Salvage Yard ghost — refresh wreck highlights as the cursor
+			# moves so the player can see which clusters fall in range.
+			if _build_stats and _build_stats.building_id == &"salvage_yard":
+				_refresh_yard_wreck_highlights(_build_ghost.global_position, SalvageYardComponent.COLLECTION_RADIUS)
 
 	elif event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
@@ -1413,7 +1643,7 @@ func _confirm_build_placement(screen_pos: Vector2, keep_placing: bool = false) -
 	# Find the first selected engineer
 	_prune_selection()
 	var builder_unit: Unit = null
-	for unit: Unit in _selected_units:
+	for unit: Node3D in _selected_units:
 		if unit.get_builder():
 			builder_unit = unit
 			break
@@ -1429,7 +1659,7 @@ func _confirm_build_placement(screen_pos: Vector2, keep_placing: bool = false) -
 		# Every other selected engineer also walks over and builds — multiple
 		# Ratchets share the work so a squad gets the whole task instead of
 		# leaving three idle.
-		for unit: Unit in _selected_units:
+		for unit: Node3D in _selected_units:
 			if unit == builder_unit:
 				continue
 			var other_builder: Node = unit.get_builder()

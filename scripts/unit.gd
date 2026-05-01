@@ -63,6 +63,40 @@ var _hp_bar_bg: MeshInstance3D = null
 var _anim_time: float = 0.0
 ## Continuously advancing clock for idle sway (never resets, unlike _anim_time).
 var _idle_time: float = 0.0
+## Round-robin throttle for the idle-animation work. Stagger across units
+## (random init in _ready) so the perf cost spreads instead of clumping
+## on the same physics frame. _reset_walk_bob and the friend-spread idle
+## logic only run on the matching frame; off-frames just bump the counter.
+var _idle_anim_throttle: int = 0
+const IDLE_ANIM_THROTTLE_FRAMES: int = 4
+## Independent throttle for the slope-aware per-member surface raycast.
+## Increments every physics frame regardless of move/idle state, so a
+## moving unit on a ramp doesn't pay the full O(squad_size) raycast cost
+## at 60Hz — only every BOB_RAYCAST_THROTTLE_FRAMES tick. Stagger seeded
+## per-unit in _ready.
+var _bob_raycast_throttle: int = 0
+const BOB_RAYCAST_THROTTLE_FRAMES: int = 6
+
+## Walk-bob is the dominant per-frame cost on moving units (squad-member
+## leg sin updates + position writes). We halve it by running at 30Hz with
+## round-robin staggering — units with even ids update on even physics
+## frames, odd ids on odd frames. A 1-frame leg-pose lag is invisible.
+var _walk_bob_phase: int = 0
+var _physics_frame_counter: int = 0
+
+## Cache the CombatComponent reference so the per-frame idle/combat
+## branch in `_physics_process` doesn't pay a `get_node_or_null` lookup
+## every tick. Set in `_ready` (or stays null for combat-less engineers).
+var _combat_cached: Node = null
+
+## `_mech_total_height` is constant per unit (depends only on stats), so
+## the HP-bar repositioning block can read this cached value instead of
+## doing a CLASS_SHAPES dict lookup every frame.
+var _cached_total_height: float = -1.0
+
+## Bail out of `_tick_recoil`'s outer member loop when no recoil is
+## active. `play_shoot_anim` arms this for ~250ms (covers the 8/s decay).
+var _recoil_active_until_msec: int = 0
 
 ## Engineer is currently working on a construction site. BuilderComponent toggles
 ## this; the visual claw animates and emits sparks while it's true.
@@ -244,6 +278,15 @@ var _stride_speed: float = 0.0
 func _ready() -> void:
 	add_to_group("units")
 	add_to_group("owner_%d" % owner_id)
+	# Random offset so idle-animation work is staggered across units.
+	_idle_anim_throttle = randi() % IDLE_ANIM_THROTTLE_FRAMES
+	_bob_raycast_throttle = randi() % BOB_RAYCAST_THROTTLE_FRAMES
+	# Round-robin physics work across THREE-frame slots (~20Hz per unit
+	# instead of 60Hz). At 360+ active units, even a 30Hz half-frame
+	# stagger blew the frame budget on `Unit._physics_process` — bumping
+	# to a 1-in-3 cadence drops the per-frame batch from 180 units to
+	# 120 with no visible quality loss for movement / animation.
+	_walk_bob_phase = int(get_instance_id() % 3)
 	# Navigation agent for pathfinding
 	_nav_agent = NavigationAgent3D.new()
 	_nav_agent.name = "NavAgent"
@@ -277,6 +320,11 @@ func _ready() -> void:
 			var combat: Node = combat_script.new()
 			combat.name = "CombatComponent"
 			add_child(combat)
+			_combat_cached = combat
+		# `_mech_total_height` only depends on stats, so compute it once
+		# here and reuse from the HP-bar repositioning hot path instead
+		# of a CLASS_SHAPES lookup per frame.
+		_cached_total_height = _mech_total_height()
 
 
 func _init_hp() -> void:
@@ -344,7 +392,12 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 	var cannon_x: float = shape["cannon_x"] as float
 	var cannon_kind: String = shape["cannon_kind"] as String
 	var antenna_h: float = shape["antenna"] as float
-	var base_color: Color = shape["color"] as Color
+	var base_color_raw: Color = shape["color"] as Color
+	# Re-tint the per-class base color for Sable so units render with the
+	# faction's matte-black + cool-blue-white identity instead of Anvil's
+	# warm grey-amber palette (V3 §"Pillar 1"). Anvil units pass through
+	# unchanged.
+	var base_color: Color = _faction_tint_chassis(base_color_raw)
 	var leg_kind: String = shape.get("leg_kind", "biped") as String
 	var torso_lean: float = shape.get("torso_lean", 0.0) as float
 	var cannon_mount: String = shape.get("cannon_mount", "shoulder") as String
@@ -991,13 +1044,24 @@ func _build_legs_spider(member: Node3D, shape: Dictionary, mats: Array[StandardM
 
 
 func _build_legs_quadruped(member: Node3D, shape: Dictionary, mats: Array[StandardMaterial3D]) -> Dictionary:
-	## Four sturdy legs at the corners of the torso footprint. Trot gait —
-	## diagonal pairs swing together.
+	## Four articulated legs at the corners of the torso footprint. Each
+	## leg has a thigh + shin + foot with a forward-bending knee — gives
+	## the Bulwark a proper tank-mech stance instead of stiff sticks.
+	## Trot gait — diagonal pairs swing together.
 	var leg_size: Vector3 = shape["leg"] as Vector3
 	var hip_y: float = shape["hip_y"] as float
 	var leg_x: float = shape["leg_x"] as float
 	var torso_size: Vector3 = shape["torso"] as Vector3
 	var base_color: Color = shape["color"] as Color
+	# Thigh tilts outward slightly, shin angles back IN — knee points
+	# OUTWARD-AND-FORWARD on front legs, OUTWARD-AND-BACK on rear legs
+	# (animal-style stance). 2 segments × hip_y × 0.55 + small foot
+	# clearance roughly equals hip_y so the foot lands on the ground.
+	var thigh_len: float = hip_y * 0.55
+	var shin_len: float = hip_y * 0.55
+	var thigh_size: Vector3 = Vector3(leg_size.x, thigh_len, leg_size.z)
+	var shin_size: Vector3 = Vector3(leg_size.x * 0.82, shin_len, leg_size.z * 0.82)
+
 	# Front legs slightly forward, rear legs slightly back.
 	var leg_z: float = torso_size.z * 0.4
 	var corners: Array[Vector2] = [
@@ -1010,11 +1074,77 @@ func _build_legs_quadruped(member: Node3D, shape: Dictionary, mats: Array[Standa
 	var legs: Array[Node3D] = []
 	for i: int in corners.size():
 		var c: Vector2 = corners[i]
+		var is_front: bool = c.y > 0.0
 		var pivot := Node3D.new()
 		pivot.name = "LegPivot_%d" % i
 		pivot.position = Vector3(c.x, hip_y, c.y)
 		member.add_child(pivot)
-		_attach_leg_segment(pivot, leg_size, base_color, mats, true)
+
+		# Hip: thigh rotates OUTWARD slightly (knee away from body) and
+		# leans forward/back so each leg has a distinct stance silhouette.
+		var thigh_rot := Node3D.new()
+		# Pitch: front legs lean forward, rear legs lean backward.
+		thigh_rot.rotation.x = 0.32 if is_front else -0.32
+		# Roll outward just a touch so the legs splay.
+		thigh_rot.rotation.z = -0.12 if c.x < 0.0 else 0.12
+		pivot.add_child(thigh_rot)
+
+		var thigh_mesh := MeshInstance3D.new()
+		var thigh_box := BoxMesh.new()
+		thigh_box.size = thigh_size
+		thigh_mesh.mesh = thigh_box
+		thigh_mesh.position.y = -thigh_len * 0.5
+		var thigh_mat := _make_metal_mat(base_color)
+		thigh_mesh.set_surface_override_material(0, thigh_mat)
+		thigh_rot.add_child(thigh_mesh)
+		mats.append(thigh_mat)
+
+		# Knee — bottom of the thigh, where the shin pivots.
+		var knee := Node3D.new()
+		knee.position.y = -thigh_len
+		thigh_rot.add_child(knee)
+
+		# Shin counter-rotates so the leg's overall "world" angle ends
+		# near vertical — the foot lands roughly under the hip. Front
+		# legs bend back, rear legs bend forward (classic horse stance).
+		var shin_rot := Node3D.new()
+		shin_rot.rotation.x = -0.55 if is_front else 0.55
+		knee.add_child(shin_rot)
+
+		var shin_mesh := MeshInstance3D.new()
+		var shin_box := BoxMesh.new()
+		shin_box.size = shin_size
+		shin_mesh.mesh = shin_box
+		shin_mesh.position.y = -shin_len * 0.5
+		var shin_mat := _make_metal_mat(Color(base_color.r * 0.92, base_color.g * 0.92, base_color.b * 0.95))
+		shin_mesh.set_surface_override_material(0, shin_mat)
+		shin_rot.add_child(shin_mesh)
+		mats.append(shin_mat)
+
+		# Foot — wide pad slightly larger than the leg cross-section.
+		var foot := MeshInstance3D.new()
+		var foot_box := BoxMesh.new()
+		foot_box.size = Vector3(leg_size.x * 1.5, 0.10, leg_size.z * 1.7)
+		foot.mesh = foot_box
+		foot.position.y = -shin_len - 0.05
+		var foot_mat := _make_metal_mat(Color(base_color.r * 0.6, base_color.g * 0.6, base_color.b * 0.6))
+		foot.set_surface_override_material(0, foot_mat)
+		shin_rot.add_child(foot)
+		mats.append(foot_mat)
+
+		# Hip armor / shoulder cap — a small pauldron-like box sitting
+		# atop the hip pivot, so the corner reads as "armoured joint"
+		# rather than a bare cylinder.
+		var hip_cap := MeshInstance3D.new()
+		var hip_box := BoxMesh.new()
+		hip_box.size = Vector3(leg_size.x * 1.6, leg_size.x * 0.9, leg_size.z * 1.6)
+		hip_cap.mesh = hip_box
+		hip_cap.position = Vector3(0, leg_size.x * 0.2, 0)
+		var hip_mat := _make_metal_mat(Color(base_color.r * 0.85, base_color.g * 0.85, base_color.b * 0.85))
+		hip_cap.set_surface_override_material(0, hip_mat)
+		pivot.add_child(hip_cap)
+		mats.append(hip_mat)
+
 		legs.append(pivot)
 
 	# Trot: front-left + rear-right swing together (phase 0); other pair at PI.
@@ -1047,6 +1177,11 @@ func _attach_leg_segment(parent: Node3D, leg_size: Vector3, base_color: Color, m
 func _make_metal_mat(c: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = c
+	m.albedo_texture = SharedTextures.get_metal_wear_texture()
+	# Random uv offset so adjacent panels don't all sample the same patch
+	# of grime — each member's chassis ends up with its own wear pattern.
+	m.uv1_offset = Vector3(randf(), randf(), 0.0)
+	m.uv1_scale = Vector3(2.0, 2.0, 1.0)
 	m.roughness = 0.55
 	m.metallic = 0.45
 	return m
@@ -1352,25 +1487,62 @@ func stop() -> void:
 
 
 func _physics_process(delta: float) -> void:
-	# Damage flash countdown
+	# Damage flash countdown (cheap — runs every frame).
 	if _flash_timer > 0.0:
 		_flash_timer -= delta
 		if _flash_timer <= 0.0:
 			_restore_member_colors()
+
+	_physics_frame_counter += 1
+
+	# 1-in-3 frame stagger — each unit runs heavy work every 3rd physics
+	# frame (~20Hz) instead of every frame (60Hz). At 360+ units the
+	# half-frame stagger still ate the whole frame budget; tightening
+	# further drops the per-frame batch from 180 to ~120 units. Off
+	# frames just integrate velocity + gravity so motion stays smooth.
+	if (_physics_frame_counter % 3) != _walk_bob_phase:
+		# Gravity must run every frame to keep airborne units pinned.
+		if not is_on_floor():
+			velocity.y -= GRAVITY * delta
+		else:
+			velocity.y = 0.0
+		move_and_slide()
+		return
 
 	# Walking animation. _anim_time only advances while moving so legs always
 	# resume from a clean stride; _idle_time runs continuously to drive the
 	# small standing sway.
 	_idle_time += delta
 	if velocity.length_squared() > 1.0:
-		_anim_time += delta * 8.0
+		# `delta` here represents one physics frame (~16ms) but with the
+		# outer 1-in-3 stagger this branch only runs every 3rd frame —
+		# advance _anim_time by 3× delta so the leg phase keeps the
+		# same wall-clock cadence as before. Without this, legs would
+		# look like they're walking in slow motion.
+		_anim_time += delta * 8.0 * 3.0
+		# Walk-bob runs every time we hit this branch (the outer
+		# `_walk_bob_phase` stagger already gates the heavy block to
+		# the per-unit cadence). Previous code added a second `& 1`
+		# throttle that never matched for units whose phase was 2,
+		# which is why those units appeared to lose their leg
+		# animation entirely.
 		_apply_walk_bob()
-		_tick_walking_dust(delta)
+		_tick_walking_dust(delta * 3.0)
 	else:
 		_anim_time = 0.0
-		_reset_walk_bob()
+		# Idle sway is invisibly subtle at 60Hz; throttle to ~15Hz with
+		# round-robin staggering so 88 units don't all run reset_walk_bob
+		# in the same physics frame.
+		_idle_anim_throttle += 1
+		if _idle_anim_throttle >= IDLE_ANIM_THROTTLE_FRAMES:
+			_idle_anim_throttle = 0
+			_reset_walk_bob()
 
-	_tick_recoil(delta)
+	# Skip the recoil loop entirely when no member is recoiling — by far
+	# the common case. `play_shoot_anim` arms this; an idle unit pays
+	# nothing for the recoil subsystem.
+	if Time.get_ticks_msec() < _recoil_active_until_msec:
+		_tick_recoil(delta)
 
 	if is_building:
 		_animate_build_claw()
@@ -1382,13 +1554,21 @@ func _physics_process(delta: float) -> void:
 	# Position HP bar above unit (top_level so we set global_position).
 	# Visibility rule: shown when selected, when damaged, or when hovered. A
 	# healthy idle unit is invisible-bar so the battlefield isn't cluttered.
+	# When the bar is invisible we skip the position/rotation update entirely
+	# — that work is per-unit per-physics-frame, and at 80+ units it's the
+	# difference between 4ms and 0.4ms of HP-bar overhead.
 	if _hp_bar and is_instance_valid(_hp_bar):
 		var damaged: bool = false
 		if stats:
 			damaged = get_total_hp() < stats.hp_total
-		_hp_bar.visible = is_selected or damaged or hp_bar_hovered
-		if _hp_bar.visible:
-			var bar_height: float = _mech_total_height() + 0.4
+		var should_show: bool = is_selected or damaged or hp_bar_hovered
+		if _hp_bar.visible != should_show:
+			_hp_bar.visible = should_show
+		if should_show:
+			# Use the cached total height (set in _ready). Falls back to
+			# the live computation if the cache wasn't populated for any
+			# reason — same answer, just one extra dict lookup.
+			var bar_height: float = (_cached_total_height if _cached_total_height > 0.0 else _mech_total_height()) + 0.4
 			_hp_bar.global_position = global_position + Vector3(0, bar_height, 0)
 			var cam: Camera3D = get_viewport().get_camera_3d()
 			if cam:
@@ -1436,7 +1616,14 @@ func _physics_process(delta: float) -> void:
 			velocity.x = 0.0
 			velocity.z = 0.0
 		else:
-			_apply_idle_spread()
+			# Idle-spread is O(N) per call (iterates all units), and called
+			# per idle unit per physics frame that's O(N²) total. Throttle
+			# to share the work across frames using the same staggered
+			# counter as the walk-bob reset. Velocity persists between
+			# frames, so the unit keeps drifting in the previously-computed
+			# direction during the off frames.
+			if _idle_anim_throttle == 0:
+				_apply_idle_spread()
 		# Always run move_and_slide while idle — gravity needs to settle
 		# airborne units, and the spread velocity (when set) needs to
 		# actually move the body.
@@ -1616,6 +1803,22 @@ func _apply_walk_bob() -> void:
 	# Mech walk: swing each leg around its hip and bob the torso slightly.
 	# Per-member stride speed/phase/swing makes the squad feel like four
 	# individuals walking together rather than a parade.
+	#
+	# When the squad is on a slope (ramp or general elevation > 0.2u),
+	# each member's Y is snapped to the actual surface beneath via a
+	# physics raycast — without that snap the back/front members of the
+	# squad appear to float in air while the squad center rides the
+	# slope. Raycasts are throttled by `_bob_raycast_throttle` (an
+	# independent counter that ticks every physics frame, regardless of
+	# move/idle state), so a moving squad on a ramp pays the cost every
+	# BOB_RAYCAST_THROTTLE_FRAMES tick instead of 60Hz.
+	_bob_raycast_throttle += 1
+	if _bob_raycast_throttle >= BOB_RAYCAST_THROTTLE_FRAMES:
+		_bob_raycast_throttle = 0
+	var on_slope: bool = absf(velocity.y) > 0.05 or global_position.y > 0.2
+	var space: PhysicsDirectSpaceState3D = null
+	if on_slope and _bob_raycast_throttle == 0:
+		space = get_world_3d().direct_space_state
 	for i: int in _member_data.size():
 		var data: Dictionary = _member_data[i]
 		var member: Node3D = data["root"]
@@ -1635,7 +1838,24 @@ func _apply_walk_bob() -> void:
 				phase_offset = leg_phases[li] as float
 			leg.rotation.x = sin(phase + phase_offset) * swing
 		# Torso bob doubles per stride cycle (peaks when feet plant).
-		member.position.y = absf(sin(phase)) * (data["bob_amount"] as float)
+		var bob: float = absf(sin(phase)) * (data["bob_amount"] as float)
+		if space:
+			# Cast a short ray straight down from the member's current
+			# world position and snap it onto whatever surface is below.
+			# Layer 5 = ground (1) + terrain/elevation (4); covers
+			# ramps, plateau tops, and the regular ground plane.
+			var origin: Vector3 = member.global_position + Vector3(0, 2.0, 0)
+			var to: Vector3 = member.global_position + Vector3(0, -3.0, 0)
+			var query := PhysicsRayQueryParameters3D.create(origin, to, 5)
+			var hit := space.intersect_ray(query)
+			if hit.has("position"):
+				# Convert the world-space surface y into member-local y
+				# (relative to the parent unit) so it composes correctly
+				# with the bob offset.
+				var surface_world_y: float = (hit["position"] as Vector3).y
+				member.position.y = surface_world_y - global_position.y + bob
+				continue
+		member.position.y = bob
 
 
 func _reset_walk_bob() -> void:
@@ -1662,6 +1882,10 @@ func _reset_walk_bob() -> void:
 
 func play_shoot_anim() -> void:
 	## Kick all alive members' cannons backward; combat_component calls this on fire.
+	# Arm the recoil window so `_physics_process` actually invokes
+	# `_tick_recoil` for the next ~250ms (covers the 8/s decay back to
+	# rest). Idle squads with no shooting pay zero recoil cost.
+	_recoil_active_until_msec = Time.get_ticks_msec() + 260
 	for i: int in _member_data.size():
 		if i >= member_hp.size() or member_hp[i] <= 0:
 			continue
@@ -1724,8 +1948,11 @@ func _spawn_damage_number(amount: int) -> void:
 		_mech_total_height() + 0.7,
 		randf_range(-0.3, 0.3)
 	)
-	label.global_position = spawn_pos
+	# Add to tree FIRST, then assign global_position — Setting it pre-tree
+	# fires a !is_inside_tree() warning per damage tick and was a major
+	# contributor to the debugger error flood.
 	scene.add_child(label)
+	label.global_position = spawn_pos
 
 	var tween := label.create_tween()
 	tween.set_parallel(true)
@@ -1746,6 +1973,12 @@ func _tick_walking_dust(delta: float) -> void:
 	## Spawn dust puffs at random member feet while moving. Heavier mechs
 	## (bigger torso width) raise more frequent and bigger puffs; lights and
 	## engineers barely scuff the ground.
+	# Cheapest test first — `_dust_timer` is the dominant gate. The timer
+	# check happens every moving frame; only every ~0.18-0.7s does it
+	# expire and reach the heavier work below.
+	_dust_timer -= delta
+	if _dust_timer > 0.0:
+		return
 	if not stats:
 		return
 	var shape: Dictionary = CLASS_SHAPES.get(stats.unit_class, CLASS_SHAPES[&"medium"])
@@ -1755,9 +1988,6 @@ func _tick_walking_dust(delta: float) -> void:
 		return
 	# Bigger mechs trigger faster: ~0.45 s for medium, down to ~0.18 s for apex.
 	var interval: float = clampf(0.65 / torso_width, 0.18, 0.7)
-	_dust_timer -= delta
-	if _dust_timer > 0.0:
-		return
 	_dust_timer = interval
 
 	# Pick a random alive member and spawn a puff at its foot world position.
@@ -1781,31 +2011,14 @@ func _tick_walking_dust(delta: float) -> void:
 
 
 func _spawn_dust_puff(world_pos: Vector3, radius: float) -> void:
-	var scene: Node = get_tree().current_scene
-	if not scene:
-		return
-	var puff := MeshInstance3D.new()
-	var sph := SphereMesh.new()
-	sph.radius = radius
-	sph.height = radius * 1.4
-	puff.mesh = sph
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.55, 0.5, 0.42, 0.55)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	puff.set_surface_override_material(0, mat)
-	puff.global_position = world_pos + Vector3(randf_range(-0.2, 0.2), 0.05, randf_range(-0.2, 0.2))
-	scene.add_child(puff)
-
-	var lifetime: float = randf_range(0.55, 0.85)
-	var rise: float = randf_range(0.4, 0.7)
-	var grow: float = randf_range(1.4, 1.8)
-
-	var tween := puff.create_tween()
-	tween.set_parallel(true)
-	tween.tween_property(puff, "global_position", puff.global_position + Vector3(randf_range(-0.3, 0.3), rise, randf_range(-0.3, 0.3)), lifetime)
-	tween.tween_property(puff, "scale", Vector3(grow, grow, grow), lifetime)
-	tween.tween_property(mat, "albedo_color:a", 0.0, lifetime).set_ease(Tween.EASE_IN)
-	tween.chain().tween_callback(puff.queue_free)
+	# Walking dust → GPU particle. The `radius` arg used to size the
+	# legacy MeshInstance3D — now it scales the emitted particle's
+	# initial color saturation (used as a visual cue for big stomps vs
+	# small footsteps). One emit_particle call.
+	var _pem_scene: Node = get_tree().current_scene
+	var pem: Node = _pem_scene.get_node_or_null("ParticleEmitterManager") if _pem_scene else null
+	if pem:
+		pem.emit_dust(world_pos, 1, clampf(radius * 4.0, 0.5, 1.5))
 
 
 ## --- Build Animation ---
@@ -1826,9 +2039,12 @@ func _animate_build_claw() -> void:
 
 
 func _spawn_build_sparks() -> void:
-	## Small bright spark flashes at the claw tip to sell the welding effort.
-	var scene: Node = get_tree().current_scene
-	if not scene:
+	## Welding sparks → GPU particle emitter. One emit per active claw tip
+	## per build tick instead of allocating MeshInstance3D + Tween per
+	## spark.
+	var _pem_scene: Node = get_tree().current_scene
+	var pem: Node = _pem_scene.get_node_or_null("ParticleEmitterManager") if _pem_scene else null
+	if not pem:
 		return
 	for data: Dictionary in _member_data:
 		var cannons: Array = data["cannons"] as Array
@@ -1837,28 +2053,10 @@ func _spawn_build_sparks() -> void:
 		var pivot: Node3D = cannons[0]
 		if not is_instance_valid(pivot) or not pivot.visible:
 			continue
-		# Tip is roughly cannon_size.z forward of the pivot in pivot-local space.
 		var tip_world: Vector3 = pivot.global_transform * Vector3(0, 0, -0.55)
-		var spark := MeshInstance3D.new()
-		var sph := SphereMesh.new()
-		sph.radius = 0.05
-		sph.height = 0.1
-		spark.mesh = sph
-		var mat := StandardMaterial3D.new()
-		mat.albedo_color = Color(1.0, 0.85, 0.3, 0.9)
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.emission_enabled = true
-		mat.emission = Color(1.0, 0.7, 0.15)
-		mat.emission_energy_multiplier = 5.0
-		spark.set_surface_override_material(0, mat)
-		spark.global_position = tip_world + Vector3(randf_range(-0.05, 0.05), randf_range(-0.05, 0.05), randf_range(-0.05, 0.05))
-		scene.add_child(spark)
-
-		var tween := spark.create_tween()
-		tween.set_parallel(true)
-		tween.tween_property(spark, "scale", Vector3(0.2, 0.2, 0.2), 0.18).set_ease(Tween.EASE_IN)
-		tween.tween_property(mat, "albedo_color:a", 0.0, 0.18)
-		tween.chain().tween_callback(spark.queue_free)
+		# 2-3 sparks per tick gives the same visual density as the
+		# previous single-spark per member.
+		pem.emit_spark(tip_world, randi_range(2, 3))
 
 
 ## --- Destruction Animation ---
@@ -1895,8 +2093,9 @@ func _spawn_debris_burst(world_pos: Vector3, color: Color, count: int, speed: fl
 		mat.roughness = 0.9
 		mat.metallic = 0.4
 		chunk.set_surface_override_material(0, mat)
-		chunk.global_position = world_pos
+		chunk.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		scene.add_child(chunk)
+		chunk.global_position = world_pos
 
 		var dir := Vector3(
 			randf_range(-1.0, 1.0),
@@ -1929,31 +2128,22 @@ func _animate_debris(chunk: MeshInstance3D, velocity: Vector3, spin: Vector3, li
 
 
 func _spawn_flash_at(world_pos: Vector3, color: Color, radius: float, lifetime: float) -> void:
+	# Death-flash visual → GPU particle. `radius`/`lifetime` are ignored
+	# now (the emitter's process material owns the curves) — bigger
+	# explosions emit MORE particles instead of one bigger sphere,
+	# which actually reads better. The scene-light pop is kept on the
+	# CPU because it affects nearby unit shading.
+	var _pem_scene: Node = get_tree().current_scene
+	var pem: Node = _pem_scene.get_node_or_null("ParticleEmitterManager") if _pem_scene else null
+	if pem:
+		# Member-death (small radius) emits 1 flash; squad-death
+		# (radius >= 0.5 typically) emits a cluster.
+		var n: int = 6 if radius >= 0.5 else 1
+		pem.emit_flash(world_pos, Color(color.r, color.g, color.b, 0.95), n)
+
 	var scene: Node = get_tree().current_scene
 	if not scene:
 		return
-	var flash := MeshInstance3D.new()
-	var sph := SphereMesh.new()
-	sph.radius = radius
-	sph.height = radius * 2.0
-	flash.mesh = sph
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(color.r, color.g, color.b, 0.85)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.emission_enabled = true
-	mat.emission = color
-	mat.emission_energy_multiplier = 5.0
-	flash.set_surface_override_material(0, mat)
-	flash.global_position = world_pos
-	scene.add_child(flash)
-
-	# Tween bound to the flash itself so it's not killed when the unit frees.
-	var tween := flash.create_tween()
-	tween.set_parallel(true)
-	tween.tween_property(flash, "scale", Vector3(2.5, 2.5, 2.5), lifetime)
-	tween.tween_property(mat, "albedo_color:a", 0.0, lifetime)
-	tween.chain().tween_callback(flash.queue_free)
-
 	# Real OmniLight3D so the explosion bathes nearby geometry. Range scales
 	# with the flash radius (small radius = small flash on member death,
 	# bigger radius = full squad death explosion).
@@ -1961,8 +2151,8 @@ func _spawn_flash_at(world_pos: Vector3, color: Color, radius: float, lifetime: 
 	light.light_color = color
 	light.light_energy = 5.0
 	light.omni_range = radius * 6.0 + 2.0
-	light.global_position = world_pos
 	scene.add_child(light)
+	light.global_position = world_pos
 	var ltween := light.create_tween()
 	ltween.tween_property(light, "light_energy", 0.0, lifetime).set_ease(Tween.EASE_OUT)
 	ltween.tween_callback(light.queue_free)
@@ -2168,7 +2358,14 @@ func get_builder() -> Node:
 
 
 func get_combat() -> Node:
-	return get_node_or_null("CombatComponent")
+	# Cached in _ready. Re-resolve only if the cache went stale (combat
+	# component freed mid-match for some reason); otherwise the per-tick
+	# `get_node_or_null` lookup that was here used to be one of the
+	# bigger contributors to idle-unit `_physics_process` cost.
+	if _combat_cached and is_instance_valid(_combat_cached):
+		return _combat_cached
+	_combat_cached = get_node_or_null("CombatComponent")
+	return _combat_cached
 
 
 func get_member_positions() -> Array[Vector3]:
@@ -2220,3 +2417,41 @@ func get_muzzle_positions() -> Array[Vector3]:
 			muzzle_z = muzzle_zs[0] as float
 		positions.append(pivot.global_transform * Vector3(0, 0, -muzzle_z))
 	return positions
+
+
+## --- Faction-aware visual identity (V3 §"Pillar 1") ----------------------
+
+func _faction_id() -> int:
+	# Resolve the unit's faction by routing the owner_id through the
+	# match's MatchSettings. owner 0 = local player → player_faction;
+	# any non-self owner → enemy_faction. Neutral patrols (owner 2) get
+	# a deterministic fallback so cosmetic tinting stays stable.
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if not settings:
+		return 0  # default Anvil
+	if owner_id == 0:
+		return settings.get("player_faction") as int
+	# Neutral patrols read whichever faction the local player picked AS
+	# enemy — this keeps neutrals visually distinct from the player.
+	if owner_id == 2:
+		return settings.get("enemy_faction") as int
+	return settings.get("enemy_faction") as int
+
+
+func _faction_tint_chassis(c: Color) -> Color:
+	# Anvil keeps the v1 grey-tan palette unchanged. Sable shifts the
+	# chassis darker + cooler — matte black with anthracite undertones,
+	# matching `03_factions.md` §"Sable Network → Aesthetic". Hue shift
+	# is a multiplicative remap so the per-class brightness contrast
+	# (heavies darker than lights) survives the re-tint.
+	if _faction_id() != 1:  # not Sable → no change
+		return c
+	# Sable base palette — desaturate, darken, push slightly toward blue.
+	var avg: float = (c.r + c.g + c.b) / 3.0
+	var darkened: float = avg * 0.45  # average chassis brightness ~0.10-0.18
+	return Color(
+		darkened * 0.95,
+		darkened * 1.0,
+		darkened * 1.15,
+		c.a,
+	)

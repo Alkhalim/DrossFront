@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="FactionResource" load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/faction_resource.gd" id="1"]
+[ext_resource type="Resource" path="res://resources/units/sable_rigger.tres" id="2"]
+[ext_resource type="Resource" path="res://resources/units/sable_specter.tres" id="3"]
+[ext_resource type="Resource" path="res://resources/units/sable_jackal.tres" id="4"]
+[ext_resource type="Resource" path="res://resources/units/sable_harbinger.tres" id="5"]
+
+[resource]
+script = ExtResource("1")
+faction_name = &"Sable Concord"
+tagline = "Information warfare. Fast, fragile, deceptive."
+color_base = Color(0.10, 0.11, 0.13, 1)
+color_internal_glow = Color(0.55, 0.85, 1.0, 1)
+color_detail_accent = Color(0.85, 0.92, 0.98, 1)
+mechanic_id = &"neural_mesh"
+mechanic_display_name = "Neural Mesh"
+mechanic_description = "Sable forces share sensor data through a network of Mesh providers (Black Pylons + key unit branches). Units in Mesh range gain stacking accuracy and reload bonuses. Concentrated forces punch above their weight; killing Mesh providers degrades the whole army."
+faction_power_building_name = "Black Pylon"
+engineer_stats = ExtResource("2")
+light_mech_stats = ExtResource("3")
+medium_mech_stats = ExtResource("4")
+heavy_mech_stats = ExtResource("5")

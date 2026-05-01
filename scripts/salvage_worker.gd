@@ -32,6 +32,13 @@ var _carried_salvage: int = 0
 var _harvest_timer: float = 0.0
 var _move_target: Vector3 = Vector3.INF
 
+## Half-frame stagger phase. Salvage workers don't need 60Hz updates —
+## their state-machine ticks (find/harvest/return) are coarse-grained
+## enough that 30Hz is invisible. Spreading workers across alternating
+## physics frames halves their per-frame cost at high worker counts.
+var _phys_frame: int = 0
+var _phase: int = 0
+
 var _cargo_mat: StandardMaterial3D = null
 
 
@@ -43,11 +50,25 @@ func _ready() -> void:
 	collision_layer = 2  # unit layer
 	collision_mask = 1   # ground
 
+	# Round-robin half-frame stagger across worker fleet.
+	_phase = int(get_instance_id() & 1)
+
 	_build_visuals()
 
 
 func _build_visuals() -> void:
-	var team: Color = PLAYER_COLOR if owner_id == 0 else ENEMY_COLOR
+	# Use the registry's perspective coloring so 2v2 ally workers read
+	# as ALLY (green) instead of falling through to ENEMY (red). Owner
+	# 0 = self (blue), other team-0 owners = ally (green), team-1
+	# owners = enemy (red), team-2 = neutral (amber). When the registry
+	# isn't loaded yet (very early init) we fall back to the v1
+	# self-vs-enemy binary.
+	var team: Color
+	var registry: PlayerRegistry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry if get_tree() and get_tree().current_scene else null
+	if registry:
+		team = registry.get_perspective_color(owner_id)
+	else:
+		team = PLAYER_COLOR if owner_id == 0 else ENEMY_COLOR
 
 	# --- Chassis (low main body) ---
 	var chassis := MeshInstance3D.new()
@@ -133,6 +154,12 @@ func _build_visuals() -> void:
 func _make_metal(c: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = c
+	# Match the unit / building / Crawler chassis grime overlay so the
+	# salvage worker reads coherently with the rest of the war-mech fleet
+	# instead of as a smoothly-shaded oddball.
+	m.albedo_texture = SharedTextures.get_metal_wear_texture()
+	m.uv1_offset = Vector3(randf(), randf(), 0.0)
+	m.uv1_scale = Vector3(1.6, 1.6, 1.0)
 	m.roughness = 0.7
 	m.metallic = 0.4
 	return m
@@ -175,6 +202,16 @@ func drop_carried_salvage() -> int:
 func _physics_process(delta: float) -> void:
 	if alive_count <= 0:
 		return
+	# Stagger heavy state-machine work to ~30Hz; off frames just skip.
+	# Worker movement is coarse-grained (drive toward target, harvest,
+	# drop off) — sampling at 30Hz vs 60Hz is invisible during play.
+	_phys_frame += 1
+	if (_phys_frame & 1) != _phase:
+		return
+	# Off-frames skip work entirely; the halved delta means timers tick
+	# half as often, but we double the effective delta on heavy frames
+	# so cargo accumulation / movement progress remain at the same rate.
+	delta *= 2.0
 	match state:
 		State.IDLE:
 			_find_wreck()

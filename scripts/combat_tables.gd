@@ -41,21 +41,38 @@ const ARMOR_MAP: Dictionary = {
 	&"medium": 0.30,
 	&"heavy": 0.45,
 	&"structure": 0.30,
+	# V3 §"Pillar 3" — aircraft armor classes. Light Air = drones,
+	# interceptors. Heavy Air = bombers, gunships, Wraith.
+	&"light_air": 0.10,
+	&"heavy_air": 0.35,
 }
 
 ## Role tag effectiveness vs armor class. Nested: ROLE_VS_ARMOR[role][armor] -> float.
+## V3 adds the AAir tag — anti-air weapons that primarily target aircraft.
+## Most ground-targeting weapons have weak/zero effectiveness against aircraft;
+## AAir weapons are essentially the only way to reliably hit Light/Heavy Air.
 const ROLE_VS_ARMOR: Dictionary = {
 	&"AP": {
 		&"unarmored": 1.0, &"light": 1.0, &"medium": 0.7,
 		&"heavy": 0.3, &"structure": 0.5,
+		&"light_air": 0.2, &"heavy_air": 0.1,
 	},
 	&"AA": {
 		&"unarmored": 0.8, &"light": 0.5, &"medium": 0.8,
 		&"heavy": 1.2, &"structure": 0.6,
+		&"light_air": 0.3, &"heavy_air": 0.4,
+	},
+	&"AAir": {
+		# Anti-air specialists — strong vs aircraft, basically useless
+		# vs ground (so SAM sites etc. can't double as ground turrets).
+		&"unarmored": 0.0, &"light": 0.0, &"medium": 0.0,
+		&"heavy": 0.0, &"structure": 0.0,
+		&"light_air": 1.2, &"heavy_air": 1.0,
 	},
 	&"Universal": {
 		&"unarmored": 0.8, &"light": 0.8, &"medium": 0.8,
 		&"heavy": 0.8, &"structure": 0.8,
+		&"light_air": 0.4, &"heavy_air": 0.3,
 	},
 }
 

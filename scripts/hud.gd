@@ -168,14 +168,14 @@ func _check_tutorial_progress() -> void:
 	if not _selection_manager:
 		return
 
-	var units: Array[Unit] = _selection_manager.get_selected_units()
+	var units: Array[Node3D] = _selection_manager.get_selected_units()
 
 	# Each task is independent — once done, stays done.
 	if not _tutorial_progress.get("select_unit", false) and units.size() >= 1:
 		_mark_task_done("select_unit")
 
 	if not _tutorial_progress.get("issue_move", false):
-		for u: Unit in units:
+		for u: Node3D in units:
 			if is_instance_valid(u) and u.has_move_order:
 				_mark_task_done("issue_move")
 				break
@@ -184,7 +184,7 @@ func _check_tutorial_progress() -> void:
 		_mark_task_done("box_select")
 
 	if not _tutorial_progress.get("attack_move", false):
-		for u: Unit in units:
+		for u: Node3D in units:
 			if not is_instance_valid(u):
 				continue
 			var combat: Node = u.get_combat()
@@ -397,15 +397,26 @@ func _on_volume_changed(db: float) -> void:
 	AudioServer.set_bus_volume_db(0, db)
 
 
+var _hud_throttle: float = 0.0
+const HUD_REFRESH_INTERVAL: float = 0.066  # ~15 Hz; HUD readouts don't need 60Hz
+
 func _process(delta: float) -> void:
 	_match_time += delta
+	# FPS counter and resource display run every frame so the readout
+	# is responsive. The heavier panels (selection, buttons, tutorial,
+	# gift, queue) refresh ~15Hz — they only need to redraw when the
+	# underlying state changes, which is rare per frame anyway.
+	_refresh_fps_counter(delta)
 	_update_resource_display()
+	_hud_throttle += delta
+	if _hud_throttle < HUD_REFRESH_INTERVAL:
+		return
+	_hud_throttle = 0.0
 	_update_selection_display()
 	_update_button_affordability()
 	_check_tutorial_progress()
 	_refresh_gift_panel()
 	_refresh_global_queue()
-	_refresh_fps_counter(delta)
 
 
 ## --- Theme ---
@@ -603,7 +614,7 @@ func _update_selection_display() -> void:
 	var building: Building = _selection_manager.get_selected_building()
 	if building and not is_instance_valid(building):
 		building = null
-	var units: Array[Unit] = _selection_manager.get_selected_units()
+	var units: Array[Node3D] = _selection_manager.get_selected_units()
 	var crawler: SalvageCrawler = _selection_manager.get_selected_crawler()
 	if crawler and not is_instance_valid(crawler):
 		crawler = null
@@ -1127,15 +1138,17 @@ func _on_attack_move_button() -> void:
 func _rebuild_production_buttons(building: Building) -> void:
 	_clear_buttons()
 
-	if building.stats.producible_units.is_empty():
+	# Faction-aware producible list — Sable HQ shows Sable units, etc.
+	var producible: Array[UnitStatResource] = building.get_producible_units()
+	if producible.is_empty():
 		_action_label.text = "No production"
 		return
 
 	_action_label.text = "Train Units"
 	var hotkeys: Array[String] = ["Q", "W", "E", "R", "T"]
 
-	for i: int in building.stats.producible_units.size():
-		var unit_stat: UnitStatResource = building.stats.producible_units[i]
+	for i: int in producible.size():
+		var unit_stat: UnitStatResource = producible[i]
 		var hotkey: String = hotkeys[i] if i < hotkeys.size() else str(i + 1)
 
 		var btn := Button.new()
@@ -1547,11 +1560,15 @@ func _on_alert(message: String, severity: int, _world_pos: Vector3) -> void:
 
 ## --- Unit panel ---
 
-func _update_unit_panel(units: Array[Unit]) -> void:
-	# Filter out freed units
-	var valid_units: Array[Unit] = []
-	for unit: Unit in units:
-		if is_instance_valid(unit) and unit.alive_count > 0:
+func _update_unit_panel(units: Array[Node3D]) -> void:
+	# Filter out freed units. Mixed Unit + Aircraft selection — both
+	# share the duck-typed `alive_count` property.
+	var valid_units: Array[Node3D] = []
+	for unit: Node3D in units:
+		if not is_instance_valid(unit):
+			continue
+		var alive: int = (unit.get("alive_count") as int) if "alive_count" in unit else 0
+		if alive > 0:
 			valid_units.append(unit)
 	units = valid_units
 
@@ -1562,7 +1579,7 @@ func _update_unit_panel(units: Array[Unit]) -> void:
 
 	# Check if selection actually changed
 	var current_ids: Array[int] = []
-	for unit: Unit in units:
+	for unit: Node3D in units:
 		current_ids.append(unit.get_instance_id())
 
 	var selection_changed: bool = current_ids.size() != _last_unit_ids.size()
@@ -1578,7 +1595,7 @@ func _update_unit_panel(units: Array[Unit]) -> void:
 		_showing_build_buttons = false
 
 		var has_builder: bool = false
-		for unit: Unit in units:
+		for unit: Node3D in units:
 			if unit.get_builder():
 				has_builder = true
 				break
@@ -1596,7 +1613,7 @@ func _update_unit_panel(units: Array[Unit]) -> void:
 	_hide_progress()
 
 	if units.size() == 1:
-		var unit: Unit = units[0]
+		var unit: Node3D = units[0]
 		if unit.stats:
 			_name_label.text = unit.stats.unit_name
 			var hp_pct: float = float(unit.get_total_hp()) / float(maxi(unit.stats.hp_total, 1))
@@ -1622,7 +1639,7 @@ func _update_unit_panel(units: Array[Unit]) -> void:
 			_stats_label.text = ""
 	else:
 		var counts: Dictionary = {}
-		for unit: Unit in units:
+		for unit: Node3D in units:
 			var uname: String = unit.stats.unit_name if unit.stats else "Unknown"
 			if counts.has(uname):
 				counts[uname] += 1

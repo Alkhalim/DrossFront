@@ -42,7 +42,19 @@ const AUTO_REPAIR_RADIUS: float = 22.0
 const REPAIR_RATE_FACTOR: float = 0.5
 
 
+var _builder_phys_frame: int = 0
+
+
 func _physics_process(delta: float) -> void:
+	# Stagger builder logic across alternating physics frames. Repair /
+	# auto-assist scans iterate the buildings group and run distance
+	# checks — running at 60Hz is wasteful since the engineer's
+	# behaviour is gated by long timers (build_time ~5s+, repair tick
+	# ~0.5s). 30Hz update is invisible and halves the per-frame cost.
+	_builder_phys_frame += 1
+	if (_builder_phys_frame & 1) == 0:
+		return
+	delta *= 2.0
 	if not _target_building or not is_instance_valid(_target_building):
 		_target_building = null
 		_set_build_anim(false)
@@ -296,9 +308,12 @@ func place_building(building_stats: BuildingStatResource, position: Vector3, res
 	if _unit:
 		building.owner_id = _unit.owner_id
 	building.resource_manager = resource_mgr
-	building.global_position = position
 
+	# Add to tree FIRST, then set global_position. Pre-tree assignment
+	# triggers a !is_inside_tree() warning per call (and many bake spots
+	# would otherwise re-fire one warning per AI placement attempt).
 	get_tree().current_scene.add_child(building)
+	building.global_position = position
 
 	building.begin_construction()
 

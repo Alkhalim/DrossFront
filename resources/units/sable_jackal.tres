@@ -1,0 +1,42 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_jackal_smg"]
+script = ExtResource("2")
+weapon_name = "Twin Pulse SMGs"
+role_tag = &"AP"
+damage_tier = &"moderate"
+range_tier = &"medium"
+rof_tier = &"fast"
+
+[sub_resource type="Resource" id="weapon_jump_rockets"]
+script = ExtResource("2")
+weapon_name = "Jump-Pack Mini Rockets"
+role_tag = &"Universal"
+damage_tier = &"low"
+range_tier = &"short"
+rof_tier = &"volley"
+
+[resource]
+script = ExtResource("1")
+unit_name = "Jackal"
+unit_class = &"medium"
+hp_total = 1480
+hp_per_unit = 493
+armor_class = &"medium"
+speed_tier = &"fast"
+sight_tier = &"medium"
+squad_size = 3
+population = 12
+cost_salvage = 320
+cost_fuel = 18
+build_time = 22.5
+built_at = &"basic_foundry"
+primary_weapon = SubResource("weapon_jackal_smg")
+secondary_weapon = SubResource("weapon_jump_rockets")
+squad_strength_bonus = 0.12
+special_description = "Sable fast skirmisher with jump jets — hops over short obstacles to flank. Branch A: Striker (heavier guns, no jump). Branch B: Widow (longer-range needles + extended jump cooldown)."
+branch_a_name = "Striker"
+branch_b_name = "Widow"

@@ -18,6 +18,13 @@ var _registry: PlayerRegistry = null
 ## shots-per-second matches the underlying ROF tier.
 var _burst_count: int = 0
 
+## Half-frame stagger phase. Combat targeting and firing run at ~30 Hz
+## per unit instead of 60 Hz — fire cooldowns are tenths of a second at
+## fastest, target search is throttled to 0.5s, and the player can't tell
+## a one-frame delay on muzzle flash. Halves CombatComponent CPU cost.
+var _phys_frame: int = 0
+var _phase: int = 0
+
 const SEARCH_INTERVAL: float = 0.5
 
 ## Weapons whose ROF is at or below this threshold (seconds between shots)
@@ -43,12 +50,26 @@ var attack_move_target: Vector3 = Vector3.INF
 func _ready() -> void:
 	_unit = get_parent()
 	_registry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
+	# Round-robin half-frame stagger across the combat fleet. Fire
+	# cadence is well above 30 Hz (~3-10 shots/s at peak) so a 30 Hz
+	# combat tick is invisible.
+	_phase = int(get_instance_id() & 1)
 
 
 func _is_hostile(my_owner: int, target_owner: int) -> bool:
 	# Single shape used by the targeting and validation paths so a future
 	# alliance change (gifting / treason / 2v2 ally betrayal) only has to
 	# touch the registry rule.
+	#
+	# Lazy-fetch the registry — pre-placed units in the .tscn ready up
+	# before TestArenaController calls `_setup_player_registry`, leaving
+	# `_registry` null at first physics tick. Without this fallback, the
+	# `!= my_owner` rule treats 2v2 allies as enemies and the squad
+	# auto-targets its own ally.
+	if not _registry:
+		var scene: Node = get_tree().current_scene if get_tree() else null
+		if scene:
+			_registry = scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
 	if _registry:
 		return _registry.are_enemies(my_owner, target_owner)
 	return target_owner != my_owner
@@ -60,6 +81,14 @@ func _physics_process(delta: float) -> void:
 	var alive: int = _unit.get("alive_count")
 	if alive <= 0:
 		return
+
+	# Half-frame stagger — only run heavy targeting / fire logic on
+	# the assigned phase. Cooldowns advance via the doubled delta so
+	# fire rate is identical to an un-staggered tick.
+	_phys_frame += 1
+	if (_phys_frame & 1) != _phase:
+		return
+	delta *= 2.0
 
 	_fire_cooldown -= delta
 	_secondary_cooldown -= delta
@@ -157,6 +186,14 @@ func _physics_process(delta: float) -> void:
 
 
 func set_target(target: Node3D) -> void:
+	# Defensive: never accept an allied (or self-owned) target. The
+	# selection_manager click-path already filters by PlayerRegistry, but
+	# this guard covers attack-move sweeps and any future command that
+	# might surface a target via set_target without re-checking hostility.
+	if target and "owner_id" in target:
+		var my_owner: int = _unit.owner_id if "owner_id" in _unit else 0
+		if not _is_hostile(my_owner, target.get("owner_id") as int):
+			return
 	forced_target = target
 	_current_target = target
 	attack_move_target = Vector3.INF
@@ -219,6 +256,13 @@ func _find_nearest_enemy(max_range: float) -> Node3D:
 	var all_buildings: Array[Node] = get_tree().get_nodes_in_group("buildings")
 	for node: Node in all_buildings:
 		if not node.has_method("take_damage"):
+			continue
+		# Auto-target opt-out — destructible neutral structures (ammo
+		# dumps, etc.) sit in the "buildings" group so a right-click
+		# can still target them, but the player shouldn't have squads
+		# autonomously chip them down on patrol. Right-click → forced
+		# target bypasses this list entirely.
+		if "auto_targetable" in node and not node.get("auto_targetable"):
 			continue
 		var node_owner: int = node.get("owner_id")
 		if not _is_hostile(my_owner, node_owner):
@@ -372,6 +416,16 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	if muzzle_positions.is_empty() and _unit.has_method("get_member_positions"):
 		muzzle_positions = _unit.get_member_positions()
 
+	# Shotgun-style weapons fire a cluster of small pellets per shot. Damage
+	# is applied once per shot (same as any other weapon), but the visual is
+	# a cone of pellets so a Ripper volley reads as buckshot, not a slug.
+	var is_shotgun: bool = false
+	if weapon.weapon_name:
+		is_shotgun = weapon.weapon_name.to_lower().find("shotgun") != -1
+	const SHOTGUN_PELLETS: int = 5
+	const SHOTGUN_SPREAD_RAD: float = 0.157  # ~9 degrees
+	const SHOTGUN_PELLET_RANGE: float = 14.0
+
 	for i: int in shots:
 		_current_target.take_damage(per_member_dmg, _unit)
 
@@ -379,8 +433,27 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 			var fire_pos: Vector3 = _unit.global_position
 			if i < muzzle_positions.size():
 				fire_pos = muzzle_positions[i]
-			var proj: Node3D = proj_script.create(fire_pos, _current_target.global_position, weapon.role_tag, weapon.rof_tier)
-			get_tree().current_scene.add_child(proj)
+
+			if is_shotgun:
+				var to_target: Vector3 = _current_target.global_position - fire_pos
+				to_target.y = 0.0
+				var base_dir: Vector3 = Vector3.FORWARD
+				if to_target.length_squared() > 0.01:
+					base_dir = to_target.normalized()
+				for p: int in SHOTGUN_PELLETS:
+					var yaw: float = randf_range(-SHOTGUN_SPREAD_RAD, SHOTGUN_SPREAD_RAD)
+					var spread_dir: Vector3 = base_dir.rotated(Vector3.UP, yaw)
+					spread_dir.y += randf_range(-0.06, 0.06)
+					spread_dir = spread_dir.normalized()
+					var pellet_target: Vector3 = fire_pos + spread_dir * SHOTGUN_PELLET_RANGE
+					pellet_target.y = _current_target.global_position.y
+					# Force "fast" tier so Projectile renders these as bullet
+					# slugs regardless of the parent weapon's classification.
+					var pellet: Node3D = proj_script.create(fire_pos, pellet_target, weapon.role_tag, &"fast")
+					get_tree().current_scene.add_child(pellet)
+			else:
+				var proj: Node3D = proj_script.create(fire_pos, _current_target.global_position, weapon.role_tag, weapon.rof_tier, weapon.projectile_style)
+				get_tree().current_scene.add_child(proj)
 
 	# Muzzle flash on each member — colored by the weapon's role.
 	_spawn_squad_muzzle_flash(_muzzle_color_for(weapon))
@@ -431,31 +504,27 @@ func _spawn_squad_muzzle_flash(color: Color = Color(1.0, 0.7, 0.1, 1.0)) -> void
 
 
 func _create_flash_at(pos: Vector3, mat: StandardMaterial3D) -> void:
-	var flash := MeshInstance3D.new()
-	var sphere := SphereMesh.new()
-	sphere.radius = 0.15
-	sphere.height = 0.3
-	flash.mesh = sphere
-	flash.global_position = pos
-	flash.set_surface_override_material(0, mat)
-	get_tree().current_scene.add_child(flash)
+	# Muzzle flash → GPU particle emit. Color comes from the weapon's
+	# muzzle-color material. Extra OmniLight3D kept (light pop is the
+	# part that READS as muzzle flash from the ground), but the visible
+	# burst itself is now a GPU particle.
+	var _pem_scene: Node = get_tree().current_scene
+	var pem: Node = _pem_scene.get_node_or_null("ParticleEmitterManager") if _pem_scene else null
+	if pem:
+		var flash_color: Color = mat.emission if mat.emission_enabled else Color(1.0, 0.8, 0.3, 1.0)
+		flash_color.a = 0.95
+		pem.emit_flash(pos, flash_color)
 
-	var timer := Timer.new()
-	timer.wait_time = 0.07
-	timer.one_shot = true
-	timer.autostart = true
-	timer.timeout.connect(flash.queue_free)
-	flash.add_child(timer)
-
-	# Brief OmniLight3D so the muzzle flash actually casts light on the
-	# firing unit and nearby terrain. Owned independently from the mesh so
-	# its quick fade-out tween survives if the mesh gets freed first.
+	# Brief OmniLight3D — kept on the CPU side because its real-light
+	# contribution affects the unit + terrain shading, which can't be
+	# reproduced by a GPU particle. Single light per shot, lifetime
+	# 0.09s.
 	var light := OmniLight3D.new()
 	light.light_color = mat.emission if mat.emission_enabled else Color(1.0, 0.8, 0.3)
 	light.light_energy = 3.5
 	light.omni_range = 4.5
-	light.global_position = pos
 	get_tree().current_scene.add_child(light)
+	light.global_position = pos
 	var ltween := light.create_tween()
 	ltween.tween_property(light, "light_energy", 0.0, 0.09).set_ease(Tween.EASE_OUT)
 	ltween.tween_callback(light.queue_free)

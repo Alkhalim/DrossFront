@@ -84,6 +84,26 @@ var _damage_fire_light: OmniLight3D = null
 ## Continuously-advancing time used to animate damage VFX.
 var _damage_anim_time: float = 0.0
 
+## Four-stage damage progression keyed off `current_hp / stats.hp`:
+##   0 — undamaged    (HP > 75%)  : no effects
+##   1 — light damage (50-75%)    : occasional smoke wisps
+##   2 — moderate     (25-50%)    : steady smoke + a few flickering embers, slight albedo darkening
+##   3 — critical     (< 25%)     : heavy smoke + dense embers + orange fire light + noticeable darkening
+## Stage edges drive lazy build of the smoke/fire nodes and reapply the
+## per-stage albedo darken on every attached material.
+var _damage_stage: int = 0
+## Average seconds between smoke puffs at each stage. Stage 0 is unused.
+const _DAMAGE_SMOKE_INTERVAL_MIN: Array[float] = [0.0, 0.7, 0.28, 0.10]
+const _DAMAGE_SMOKE_INTERVAL_MAX: Array[float] = [0.0, 1.1, 0.55, 0.22]
+## How many of the 7 ember slots are visible at each stage.
+const _DAMAGE_EMBER_VISIBLE: Array[int] = [0, 0, 3, 7]
+## Albedo darken factor (multiplied as `1 - factor`) at each stage.
+const _DAMAGE_DARKEN: Array[float] = [0.0, 0.0, 0.10, 0.22]
+## Original albedo per material we've darkened, keyed by material instance_id.
+## Lets us restore + reapply when the stage changes (including healing back
+## up the chain) without compounding darken multipliers.
+var _damage_saved_albedo: Dictionary = {}
+
 ## Atmospheric idle animations — captured by detail builders if the type has
 ## something worth animating. All are optional; nulls are skipped.
 var _atmos_dish: Node3D = null                          # HQ radar — slow Y spin
@@ -95,6 +115,12 @@ var _atmos_generator_light: OmniLight3D = null          # Cyan reactor glow
 var _atmos_stack_lights: Array[OmniLight3D] = []        # Hot-orange stack-tip lights
 var _atmos_indicator_mats: Array = []                   # Foundry/armory front lights
 var _atmos_anim_time: float = 0.0
+
+## Half-frame stagger for the cosmetic smoke / fire / atmospheric loop.
+## Damage VFX flicker reads fine at 30Hz; halving the rate at high
+## building counts cuts Building._process roughly in half.
+var _process_phase: int = 0
+var _process_frame: int = 0
 var _atmos_smoke_timer: float = 0.0
 
 
@@ -112,6 +138,8 @@ func _ready() -> void:
 
 	add_to_group("buildings")
 	add_to_group("owner_%d" % owner_id)
+	# Round-robin phase for the half-frame stagger in `_process`.
+	_process_phase = int(get_instance_id() & 1)
 	if stats:
 		current_hp = stats.hp
 		rally_point = global_position + Vector3(0, 0, stats.footprint_size.z + 2.0)
@@ -137,6 +165,16 @@ func _ready() -> void:
 			var turret_script: GDScript = load("res://scripts/turret_component.gd") as GDScript
 			var turret: Node = turret_script.new()
 			turret.name = "TurretComponent"
+			add_child(turret)
+		elif stats.building_id == &"sam_site":
+			# V3 §"Pillar 4" — SAM Site uses the existing TurretComponent
+			# with the `anti_air` profile so it autocasts on aircraft
+			# only. Profile values (high damage, fast fire, AAir tag)
+			# come straight from PROFILES["anti_air"] in turret_component.
+			var turret_script: GDScript = load("res://scripts/turret_component.gd") as GDScript
+			var turret: Node = turret_script.new()
+			turret.name = "TurretComponent"
+			turret.set("profile", &"anti_air")
 			add_child(turret)
 
 
@@ -191,6 +229,8 @@ func _add_building_details() -> void:
 		&"basic_armory": _detail_armory()
 		&"salvage_yard": _detail_salvage_yard()
 		&"gun_emplacement": _detail_gun_emplacement()
+		&"aerodrome": _detail_aerodrome()
+		&"sam_site": _detail_sam_site()
 
 
 func _detail_universal_extras() -> void:
@@ -342,6 +382,11 @@ func _detail_universal_extras() -> void:
 func _detail_dark_metal_mat(c: Color = Color(0.18, 0.18, 0.2)) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = c
+	# Subtle grime/wear overlay — multiplied against the tint so the
+	# building reads as weathered industrial metal instead of flat colour.
+	m.albedo_texture = SharedTextures.get_metal_wear_texture()
+	m.uv1_offset = Vector3(randf(), randf(), 0.0)
+	m.uv1_scale = Vector3(1.5, 1.5, 1.0)
 	m.roughness = 0.85
 	m.metallic = 0.4
 	return m
@@ -912,6 +957,178 @@ func _detail_salvage_yard() -> void:
 	_attach_visual(strut)
 
 
+func _detail_aerodrome() -> void:
+	## Aerodrome — landing pad with hangar entrance + control tower.
+	## V3 §"Pillar 3" production building for aircraft.
+	var fs: Vector3 = stats.footprint_size
+	# Team collar around the base.
+	_team_collar(fs.x * 0.92, 0.1, fs.z * 0.92, Vector3(0, fs.y + 0.05, 0))
+
+	# Landing pad — large flat slab on top with hatched stripe markings.
+	var pad := MeshInstance3D.new()
+	var pad_box := BoxMesh.new()
+	pad_box.size = Vector3(fs.x * 0.85, 0.1, fs.z * 0.55)
+	pad.mesh = pad_box
+	pad.position = Vector3(0, fs.y + 0.06, fs.z * 0.05)
+	var pad_mat := _detail_dark_metal_mat(Color(0.18, 0.19, 0.22))
+	pad.set_surface_override_material(0, pad_mat)
+	_attach_visual(pad)
+
+	# Hatched landing stripes — alternating warning yellow strips.
+	for i: int in 4:
+		var stripe := MeshInstance3D.new()
+		var stripe_box := BoxMesh.new()
+		stripe_box.size = Vector3(fs.x * 0.7, 0.02, 0.18)
+		stripe.mesh = stripe_box
+		var z_offset: float = (float(i) - 1.5) * 0.55
+		stripe.position = Vector3(0, fs.y + 0.12, fs.z * 0.05 + z_offset)
+		var stripe_mat := StandardMaterial3D.new()
+		stripe_mat.albedo_color = Color(0.85, 0.65, 0.18, 1.0)
+		stripe_mat.emission_enabled = true
+		stripe_mat.emission = Color(0.95, 0.65, 0.15, 1.0)
+		stripe_mat.emission_energy_multiplier = 0.4
+		stripe.set_surface_override_material(0, stripe_mat)
+		_attach_visual(stripe)
+
+	# Control tower — taller box at one corner.
+	var tower := MeshInstance3D.new()
+	var tower_box := BoxMesh.new()
+	tower_box.size = Vector3(fs.x * 0.32, fs.y * 1.4, fs.z * 0.32)
+	tower.mesh = tower_box
+	tower.position = Vector3(-fs.x * 0.3, fs.y * 0.7 + fs.y, -fs.z * 0.3)
+	tower.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.30, 0.30, 0.34)))
+	_attach_visual(tower)
+
+	# Tower observation cap — emissive band on the top of the tower.
+	var cap := MeshInstance3D.new()
+	var cap_box := BoxMesh.new()
+	cap_box.size = Vector3(fs.x * 0.4, 0.18, fs.z * 0.4)
+	cap.mesh = cap_box
+	cap.position = Vector3(-fs.x * 0.3, fs.y * 1.45 + fs.y, -fs.z * 0.3)
+	var cap_mat := StandardMaterial3D.new()
+	cap_mat.albedo_color = Color(0.65, 0.85, 0.95, 1.0)
+	cap_mat.emission_enabled = true
+	cap_mat.emission = Color(0.55, 0.85, 1.0, 1.0)
+	cap_mat.emission_energy_multiplier = 1.4
+	cap.set_surface_override_material(0, cap_mat)
+	_attach_visual(cap)
+
+	# Tower antenna spire.
+	var antenna := MeshInstance3D.new()
+	var antenna_box := BoxMesh.new()
+	antenna_box.size = Vector3(0.08, 1.2, 0.08)
+	antenna.mesh = antenna_box
+	antenna.position = Vector3(-fs.x * 0.3, fs.y * 1.6 + fs.y + 0.6, -fs.z * 0.3)
+	antenna.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.18, 0.20)))
+	_attach_visual(antenna)
+
+	# Hangar opening — large dark recess on the front face.
+	var hangar := MeshInstance3D.new()
+	var hangar_box := BoxMesh.new()
+	hangar_box.size = Vector3(fs.x * 0.5, fs.y * 0.7, 0.1)
+	hangar.mesh = hangar_box
+	hangar.position = Vector3(0, fs.y * 0.4, fs.z * 0.5 + 0.05)
+	var hangar_mat := StandardMaterial3D.new()
+	hangar_mat.albedo_color = Color(0.06, 0.06, 0.08, 1.0)
+	hangar_mat.emission_enabled = true
+	hangar_mat.emission = Color(0.95, 0.55, 0.18, 1.0)
+	hangar_mat.emission_energy_multiplier = 0.35
+	hangar.set_surface_override_material(0, hangar_mat)
+	_attach_visual(hangar)
+
+
+func _detail_sam_site() -> void:
+	## SAM Site — bunker base with a tilted missile launcher rack on
+	## top. V3 §"Pillar 4" anti-air defense.
+	var fs: Vector3 = stats.footprint_size
+	_team_collar(fs.x * 0.95, 0.1, fs.z * 0.95, Vector3(0, fs.y + 0.05, 0))
+
+	# Rotating launcher base — a flat disc on top of the bunker.
+	var base_disc := MeshInstance3D.new()
+	var disc := CylinderMesh.new()
+	disc.top_radius = fs.x * 0.45
+	disc.bottom_radius = fs.x * 0.5
+	disc.height = 0.18
+	base_disc.mesh = disc
+	base_disc.position = Vector3(0, fs.y + 0.09, 0)
+	base_disc.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.20, 0.20, 0.22)))
+	_attach_visual(base_disc)
+
+	# Pivot for the launcher (used by TurretComponent for tracking).
+	var pivot := Node3D.new()
+	pivot.name = "TurretPivot"
+	pivot.position = Vector3(0, fs.y + 0.18, 0)
+	_attach_visual(pivot)
+	turret_pivot = pivot
+
+	# Tilted launcher rack — angled up at ~35° for sky targeting.
+	var rack_pivot := Node3D.new()
+	rack_pivot.rotation.x = -deg_to_rad(35.0)
+	pivot.add_child(rack_pivot)
+
+	# Spine of the launcher rack.
+	var rack := MeshInstance3D.new()
+	var rack_box := BoxMesh.new()
+	rack_box.size = Vector3(fs.x * 0.7, 0.18, 0.4)
+	rack.mesh = rack_box
+	rack.position = Vector3(0, 0.1, 0)
+	rack.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.23, 0.26)))
+	rack_pivot.add_child(rack)
+
+	# Four missiles in the rack — slim white-tipped tubes.
+	for i: int in 4:
+		var missile := MeshInstance3D.new()
+		var missile_box := BoxMesh.new()
+		missile_box.size = Vector3(0.16, 0.16, fs.z * 0.85)
+		missile.mesh = missile_box
+		missile.position = Vector3((float(i) - 1.5) * fs.x * 0.18, 0.18, fs.z * 0.4)
+		var missile_mat := StandardMaterial3D.new()
+		missile_mat.albedo_color = Color(0.78, 0.78, 0.80, 1.0)
+		missile_mat.roughness = 0.5
+		missile_mat.metallic = 0.4
+		missile.set_surface_override_material(0, missile_mat)
+		rack_pivot.add_child(missile)
+
+		# Red warhead tip.
+		var tip := MeshInstance3D.new()
+		var tip_box := BoxMesh.new()
+		tip_box.size = Vector3(0.14, 0.14, 0.18)
+		tip.mesh = tip_box
+		tip.position = Vector3(missile.position.x, missile.position.y, missile.position.z + fs.z * 0.42)
+		var tip_mat := StandardMaterial3D.new()
+		tip_mat.albedo_color = Color(0.85, 0.18, 0.15, 1.0)
+		tip_mat.emission_enabled = true
+		tip_mat.emission = Color(1.0, 0.25, 0.18, 1.0)
+		tip_mat.emission_energy_multiplier = 0.5
+		tip.set_surface_override_material(0, tip_mat)
+		rack_pivot.add_child(tip)
+
+	# Radar dish — tall mast with a small dish on top, behind the launcher.
+	var mast := MeshInstance3D.new()
+	var mast_box := BoxMesh.new()
+	mast_box.size = Vector3(0.1, fs.y * 0.6, 0.1)
+	mast.mesh = mast_box
+	mast.position = Vector3(0, fs.y + fs.y * 0.4, -fs.z * 0.4)
+	mast.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.18, 0.20)))
+	_attach_visual(mast)
+
+	var dish := MeshInstance3D.new()
+	var dish_cyl := CylinderMesh.new()
+	dish_cyl.top_radius = 0.4
+	dish_cyl.bottom_radius = 0.55
+	dish_cyl.height = 0.08
+	dish.mesh = dish_cyl
+	dish.position = Vector3(0, fs.y + fs.y * 0.7, -fs.z * 0.4)
+	dish.rotation.x = deg_to_rad(-30.0)
+	var dish_mat := StandardMaterial3D.new()
+	dish_mat.albedo_color = Color(0.30, 0.30, 0.34, 1.0)
+	dish_mat.emission_enabled = true
+	dish_mat.emission = Color(0.55, 0.85, 1.0, 1.0)
+	dish_mat.emission_energy_multiplier = 0.35
+	dish.set_surface_override_material(0, dish_mat)
+	_attach_visual(dish)
+
+
 func _detail_gun_emplacement() -> void:
 	var fs: Vector3 = stats.footprint_size
 	# Team collar around the base of the turret.
@@ -1083,17 +1300,28 @@ func rebuild_turret_visual(profile: StringName) -> void:
 func _add_nav_obstacle() -> void:
 	var obstacle := NavigationObstacle3D.new()
 	obstacle.name = "NavObstacle"
-	# Create a rectangular obstacle matching the building footprint
-	var half_x: float = stats.footprint_size.x * 0.6
-	var half_z: float = stats.footprint_size.z * 0.6
+	# Create a rectangular obstacle matching the building footprint, with
+	# extra padding so the 4 corners are covered by both the polygonal
+	# avoidance vertices AND the conservative circular fallback radius.
+	# The previous max(half_x, half_z) circle left building corners
+	# uncovered, so units routing diagonally past a foundry would catch
+	# on the corner.
+	var half_x: float = stats.footprint_size.x * 0.65
+	var half_z: float = stats.footprint_size.z * 0.65
+	# Vertices MUST be counter-clockwise from above (i.e. with +Y as
+	# the up axis Godot expects the polygon outline to wind CCW). The
+	# previous CW winding caused Godot to invert the "inside" of the
+	# obstacle, producing an effective avoidance region extending well
+	# beyond the building footprint — manifesting as an invisible wall
+	# running through the building when it was constructed.
 	obstacle.vertices = PackedVector3Array([
 		Vector3(-half_x, 0, -half_z),
-		Vector3(half_x, 0, -half_z),
-		Vector3(half_x, 0, half_z),
 		Vector3(-half_x, 0, half_z),
+		Vector3(half_x, 0, half_z),
+		Vector3(half_x, 0, -half_z),
 	])
 	obstacle.avoidance_enabled = true
-	obstacle.radius = maxf(half_x, half_z)
+	obstacle.radius = sqrt(half_x * half_x + half_z * half_z) + 0.4
 	add_child(obstacle)
 
 
@@ -1118,6 +1346,14 @@ func _apply_placeholder_shape() -> void:
 
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = stats.placeholder_color
+	# Same grime overlay as the detail metal so the main hull doesn't
+	# read as flat colour while every doorway / vent / ladder around it
+	# does. uv1_scale tuned to the larger surface area — bigger hull
+	# faces sample more pattern repeats so the wear stays at panel-line
+	# scale instead of stretching across the whole wall.
+	mat.albedo_texture = SharedTextures.get_metal_wear_texture()
+	mat.uv1_offset = Vector3(randf(), randf(), 0.0)
+	mat.uv1_scale = Vector3(2.5, 2.5, 1.0)
 	mat.roughness = 0.9
 	if not is_constructed:
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -1264,6 +1500,9 @@ func _apply_function_roof_cap() -> void:
 	var cap_color: Color = _roof_color_for_category()
 	var cap_mat := StandardMaterial3D.new()
 	cap_mat.albedo_color = cap_color
+	cap_mat.albedo_texture = SharedTextures.get_metal_wear_texture()
+	cap_mat.uv1_offset = Vector3(randf(), randf(), 0.0)
+	cap_mat.uv1_scale = Vector3(2.0, 2.0, 1.0)
 	cap_mat.roughness = 0.7
 	cap_mat.metallic = 0.3
 	_roof_cap.set_surface_override_material(0, cap_mat)
@@ -1376,6 +1615,15 @@ func _update_construction_rise() -> void:
 	_visual_root.position.y = -stats.footprint_size.y * 0.95 * (1.0 - pct)
 
 
+## Cache for the foundation-clear check. Recomputing across all units in
+## the scene every construction tick was the dominant `Building.*`
+## cost in the profiler (~62 µs per call × 32 building.advance calls/frame).
+## Caching for ~0.25 s between recomputes keeps the construction-pause
+## response feeling instant while cutting the per-frame cost ~10×.
+var _foundation_clear_cached: bool = true
+var _foundation_clear_recheck_at_msec: int = 0
+
+
 func _is_foundation_clear() -> bool:
 	## True when no unit's center is inside (or just at the edge of) the
 	## building's XZ footprint. Margin = 0.4 prevents construction completing
@@ -1383,6 +1631,10 @@ func _is_foundation_clear() -> bool:
 	## the moment collision activated.
 	if not stats:
 		return true
+	var now_msec: int = Time.get_ticks_msec()
+	if now_msec < _foundation_clear_recheck_at_msec:
+		return _foundation_clear_cached
+	_foundation_clear_recheck_at_msec = now_msec + 250
 	var half_x: float = stats.footprint_size.x * 0.5 + 0.4
 	var half_z: float = stats.footprint_size.z * 0.5 + 0.4
 	for node: Node in get_tree().get_nodes_in_group("units"):
@@ -1394,7 +1646,9 @@ func _is_foundation_clear() -> bool:
 		var dx: float = absf(node3d.global_position.x - global_position.x)
 		var dz: float = absf(node3d.global_position.z - global_position.z)
 		if dx < half_x and dz < half_z:
+			_foundation_clear_cached = false
 			return false
+	_foundation_clear_cached = true
 	return true
 
 
@@ -1605,13 +1859,91 @@ func cancel_queue_at(index: int) -> bool:
 func queue_unit(unit_stats: UnitStatResource) -> bool:
 	if not is_constructed:
 		return false
-	if not (unit_stats in stats.producible_units):
+	if not (unit_stats in get_producible_units()):
 		return false
 	_build_queue.append(unit_stats)
 	return true
 
 
+## Resolve the building's producible-unit list for the OWNER's faction.
+## Anvil owners see the BuildingStatResource's default `producible_units`
+## list (the Anvil baseline). Sable owners get a Sable-specific roster
+## per building_id, falling back to the Anvil list for tiers Sable
+## hasn't filled in yet (V3 incremental rollout — Sable engineer/light/
+## medium/heavy + air units exist; Crawler is shared with Anvil).
+func get_producible_units() -> Array[UnitStatResource]:
+	if not stats:
+		return []
+	var faction_id: int = _resolve_faction_id()
+	# 0 = Anvil (default), 1 = Sable per MatchSettingsClass.FactionId.
+	if faction_id != 1:
+		return stats.producible_units
+
+	# Sable lookup — keyed by building_id. Each entry is a list of
+	# resource paths that we lazy-load and resolve to UnitStatResources.
+	var sable_paths: Array[String] = []
+	match stats.building_id:
+		&"headquarters":
+			sable_paths = [
+				"res://resources/units/sable_rigger.tres",
+				# Crawler is shared across factions for now.
+				"res://resources/units/anvil_crawler.tres",
+			]
+		&"basic_foundry":
+			sable_paths = [
+				"res://resources/units/sable_specter.tres",
+				"res://resources/units/sable_jackal.tres",
+			]
+		&"advanced_foundry":
+			sable_paths = [
+				"res://resources/units/sable_harbinger.tres",
+			]
+		&"aerodrome":
+			sable_paths = [
+				"res://resources/units/sable_fang.tres",
+				"res://resources/units/sable_switchblade.tres",
+			]
+		_:
+			# Building type without a Sable-specific roster — fall back
+			# to the default list (e.g., salvage_yard has no produced
+			# units, gun emplacements aren't producers, etc.).
+			return stats.producible_units
+
+	var out: Array[UnitStatResource] = []
+	for path: String in sable_paths:
+		var s: UnitStatResource = load(path) as UnitStatResource
+		if s:
+			out.append(s)
+	# If every Sable path failed to load (file missing, typo) fall back
+	# rather than handing the player an empty production menu.
+	if out.is_empty():
+		return stats.producible_units
+	return out
+
+
+func _resolve_faction_id() -> int:
+	## Owner 0 (local human) reads MatchSettings.player_faction; any
+	## other owner reads MatchSettings.enemy_faction. Returns 0 (Anvil)
+	## when MatchSettings isn't loaded — keeps the .tscn-direct test
+	## arena working without the autoload.
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if not settings:
+		return 0
+	if owner_id == 0:
+		return settings.get("player_faction") as int
+	return settings.get("enemy_faction") as int
+
+
 func _process(delta: float) -> void:
+	# Half-frame stagger for the cosmetic / damage-VFX work. Buildings
+	# don't need 60 Hz redraws — smoke timers, ember flicker, foundry
+	# glow loops all read fine at 30 Hz. Phase is set at _enter_tree
+	# (instance-id parity) so a base of buildings all running their
+	# loops in lockstep doesn't all spike on the same physics frame.
+	_process_frame += 1
+	if (_process_frame & 1) != _process_phase:
+		return
+	delta *= 2.0
 	# Always-on damage VFX animation, even when nothing is in production.
 	_atmos_anim_time += delta
 	# Damage smoke — spawn rising sphere puffs at random anchors. Soft,
@@ -1620,7 +1952,12 @@ func _process(delta: float) -> void:
 		_damage_anim_time += delta
 		_damage_smoke_timer -= delta
 		if _damage_smoke_timer <= 0.0:
-			_damage_smoke_timer = randf_range(0.18, 0.32)
+			# Smoke cadence scales with damage stage — light wisps at
+			# stage 1, steady plume at stage 2, near-continuous at
+			# stage 3. Clamping in case _damage_stage is somehow 0
+			# (shouldn't be when the smoke node is visible).
+			var s: int = clampi(_damage_stage, 1, 3)
+			_damage_smoke_timer = randf_range(_DAMAGE_SMOKE_INTERVAL_MIN[s], _DAMAGE_SMOKE_INTERVAL_MAX[s])
 			var anchor: Node3D = _damage_smoke_anchors[randi() % _damage_smoke_anchors.size()]
 			if is_instance_valid(anchor):
 				_spawn_smoke_puff(anchor.global_position)
@@ -1672,11 +2009,17 @@ func _spawn_unit(unit_stats: UnitStatResource) -> void:
 		if committed:
 			actual_stats = committed
 
-	# Crawlers route through a dedicated scene; everything else uses the
-	# standard mech scene.
+	# Aircraft route through scenes/aircraft.tscn (V3 §"Pillar 3"),
+	# Crawlers through salvage_crawler.tscn, everything else through
+	# the standard unit.tscn. The flag-driven dispatch keeps the spawn
+	# path uniform — Aerodromes don't need a special spawn function.
 	var scene_path: String = "res://scenes/unit.tscn"
 	var is_crawler: bool = false
-	if "is_crawler" in actual_stats and actual_stats.is_crawler:
+	var is_aircraft: bool = false
+	if "is_aircraft" in actual_stats and actual_stats.is_aircraft:
+		scene_path = "res://scenes/aircraft.tscn"
+		is_aircraft = true
+	elif "is_crawler" in actual_stats and actual_stats.is_crawler:
 		scene_path = "res://scenes/salvage_crawler.tscn"
 		is_crawler = true
 
@@ -1687,12 +2030,31 @@ func _spawn_unit(unit_stats: UnitStatResource) -> void:
 	if is_crawler:
 		spawned.set("resource_manager", resource_manager)
 
-	var spawn_pos: Vector3
+	# Spawn position has to be OUTSIDE the building's NavigationObstacle3D
+	# avoidance radius — otherwise the new unit (especially a freshly-
+	# queued AI engineer) ends up inside the obstacle and the avoidance
+	# system pushes it back continuously, leaving it wedged against the
+	# HQ footprint. The fixed `SpawnPoint` marker at local z=6 isn't
+	# always far enough for larger footprints (HQ is 6×6 → obstacle
+	# radius ~5.9, marker at distance 6, jitter can pull it to 5.1).
+	# Computing the spawn distance from the actual footprint guarantees
+	# a clean exit lane on every building size.
+	var safe_radius: float = maxf(stats.footprint_size.x, stats.footprint_size.z) * 0.65 + 2.2
+	var fwd: Vector3
 	if _spawn_marker:
-		spawn_pos = _spawn_marker.global_position
+		var marker_dir: Vector3 = _spawn_marker.global_position - global_position
+		marker_dir.y = 0.0
+		if marker_dir.length_squared() > 0.001:
+			fwd = marker_dir.normalized()
+		else:
+			fwd = -global_transform.basis.z
 	else:
-		spawn_pos = global_position
-	spawn_pos += Vector3(randf_range(-1.0, 1.0), 0, randf_range(-1.0, 1.0))
+		fwd = -global_transform.basis.z
+	var spawn_pos: Vector3 = global_position + fwd * safe_radius
+	# Lateral jitter only (perpendicular to `fwd`) — random radial
+	# jitter could pull the spawn back inside the obstacle.
+	var lateral: Vector3 = Vector3(-fwd.z, 0.0, fwd.x)
+	spawn_pos += lateral * randf_range(-1.0, 1.0)
 
 	var units_node: Node = get_tree().current_scene.get_node_or_null("Units")
 	if units_node:
@@ -1875,23 +2237,96 @@ func _alert_label() -> String:
 
 
 func _update_damage_state() -> void:
-	## Show/hide smoke and fire based on the building's current HP ratio:
-	## damaged at 50%, critical at 25%.
+	## Resolve the 4-stage damage progression and re-apply visuals.
 	if not stats:
 		return
-	var ratio: float = float(current_hp) / float(maxi(stats.hp, 1))
-	var damaged: bool = ratio < 0.5 and current_hp > 0
-	var critical: bool = ratio < 0.25 and current_hp > 0
+	var new_stage: int = _compute_damage_stage()
+	if new_stage == _damage_stage:
+		return
+	_damage_stage = new_stage
 
-	if damaged and not _damage_smoke:
+	# Smoke — lazy-build at stage 1+, visible whenever stage > 0.
+	if _damage_stage >= 1 and not _damage_smoke:
 		_build_damage_smoke()
 	if _damage_smoke:
-		_damage_smoke.visible = damaged
+		_damage_smoke.visible = _damage_stage >= 1
 
-	if critical and not _damage_fire:
+	# Fire / embers — lazy-build at stage 2+. Stage 2 shows a subset of
+	# embers; stage 3 shows them all + the OmniLight3D at full strength.
+	if _damage_stage >= 2 and not _damage_fire:
 		_build_damage_fire()
 	if _damage_fire:
-		_damage_fire.visible = critical
+		_damage_fire.visible = _damage_stage >= 2
+		var visible_count: int = _DAMAGE_EMBER_VISIBLE[_damage_stage]
+		for i: int in _damage_embers.size():
+			var entry: Dictionary = _damage_embers[i] as Dictionary
+			var mesh: MeshInstance3D = entry.get("mesh") as MeshInstance3D
+			if is_instance_valid(mesh):
+				mesh.visible = i < visible_count
+		# Stage 3 cranks the fire light; stage 2 keeps it dim so embers
+		# don't flood the building with light when only a handful are
+		# burning.
+		if _damage_fire_light and is_instance_valid(_damage_fire_light):
+			_damage_fire_light.visible = _damage_stage >= 2
+			_damage_fire_light.light_energy = 2.5 if _damage_stage >= 3 else 1.0
+
+	# Material darkening — reset to originals, then reapply at the new
+	# factor. Cheap because we only touch our own VisualRoot tree.
+	_apply_damage_darken(_DAMAGE_DARKEN[_damage_stage])
+
+
+func _compute_damage_stage() -> int:
+	if not stats or current_hp <= 0:
+		return 0
+	var ratio: float = float(current_hp) / float(maxi(stats.hp, 1))
+	if ratio < 0.25:
+		return 3
+	if ratio < 0.5:
+		return 2
+	if ratio < 0.75:
+		return 1
+	return 0
+
+
+func _apply_damage_darken(factor: float) -> void:
+	## Multiply each visual material's albedo by (1 - factor). The first
+	## time we touch a material we cache its original albedo so subsequent
+	## stage changes (including repair healing) can restore the unmodified
+	## value before reapplying — otherwise repeated calls would compound
+	## the darkening into pitch black.
+	if not _visual_root:
+		return
+	for mat: StandardMaterial3D in _collect_damageable_materials():
+		if not mat:
+			continue
+		var mid: int = mat.get_instance_id()
+		if not _damage_saved_albedo.has(mid):
+			_damage_saved_albedo[mid] = mat.albedo_color
+		var orig: Color = _damage_saved_albedo[mid] as Color
+		var k: float = 1.0 - factor
+		mat.albedo_color = Color(orig.r * k, orig.g * k, orig.b * k, orig.a)
+
+
+func _collect_damageable_materials() -> Array[StandardMaterial3D]:
+	var out: Array[StandardMaterial3D] = []
+	if not _visual_root:
+		return out
+	_collect_damageable_materials_recursive(_visual_root, out)
+	return out
+
+
+func _collect_damageable_materials_recursive(node: Node, out: Array[StandardMaterial3D]) -> void:
+	# Skip the smoke/fire VFX subtrees so we don't darken our own embers
+	# or smoke puffs (which would defeat their visibility).
+	if node == _damage_smoke or node == _damage_fire:
+		return
+	if node is MeshInstance3D:
+		var mesh: MeshInstance3D = node as MeshInstance3D
+		var mat: StandardMaterial3D = mesh.get_surface_override_material(0) as StandardMaterial3D
+		if mat:
+			out.append(mat)
+	for c: Node in node.get_children():
+		_collect_damageable_materials_recursive(c, out)
 
 
 func _tick_atmospheric_animations(delta: float) -> void:
@@ -1943,36 +2378,23 @@ func _tick_atmospheric_animations(delta: float) -> void:
 
 
 func _spawn_smoke_puff(world_pos: Vector3) -> void:
-	## Tiny dark sphere that drifts upward, expands, and fades — the rolling
-	## smoke at a foundry stack tip.
-	var scene: Node = get_tree().current_scene
-	if not scene:
+	## Foundry stack smoke + damaged-building smoke → GPU particle.
+	## Routes through the central emitter which has SMOKE_AMOUNT
+	## particles in its ring buffer; old puffs auto-recycle as new
+	## ones come in. No CPU per-particle update.
+	var _pem_scene: Node = get_tree().current_scene
+	var pem: Node = _pem_scene.get_node_or_null("ParticleEmitterManager") if _pem_scene else null
+	if not pem:
 		return
-	var puff := MeshInstance3D.new()
-	var sph := SphereMesh.new()
-	sph.radius = randf_range(0.18, 0.28)
-	sph.height = sph.radius * 2.0
-	puff.mesh = sph
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.25, 0.22, 0.2, 0.65)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.emission_enabled = true
-	mat.emission = Color(0.05, 0.04, 0.04)
-	mat.emission_energy_multiplier = 0.05
-	puff.set_surface_override_material(0, mat)
-	puff.global_position = world_pos + Vector3(randf_range(-0.1, 0.1), 0.0, randf_range(-0.1, 0.1))
-	scene.add_child(puff)
-
-	var lifetime: float = randf_range(1.6, 2.4)
-	var rise: float = randf_range(2.5, 3.5)
-	var grow: float = randf_range(1.6, 2.2)
-
-	var tween := puff.create_tween()
-	tween.set_parallel(true)
-	tween.tween_property(puff, "global_position", puff.global_position + Vector3(randf_range(-0.4, 0.4), rise, randf_range(-0.4, 0.4)), lifetime)
-	tween.tween_property(puff, "scale", Vector3(grow, grow, grow), lifetime)
-	tween.tween_property(mat, "albedo_color:a", 0.0, lifetime).set_ease(Tween.EASE_IN)
-	tween.chain().tween_callback(puff.queue_free)
+	# Slightly darker tint than the missile-trail smoke so building
+	# stack output reads as oil-fed industrial soot instead of rocket
+	# exhaust.
+	var drift: Vector3 = Vector3(
+		randf_range(-0.2, 0.2),
+		randf_range(2.0, 3.2),
+		randf_range(-0.2, 0.2),
+	)
+	pem.emit_smoke(world_pos, drift, Color(0.30, 0.27, 0.24, 0.65))
 
 
 func _build_damage_smoke() -> void:
@@ -2065,5 +2487,6 @@ func _spawn_building_wreck() -> void:
 		stats.footprint_size.y * 0.3,
 		stats.footprint_size.z * 0.8
 	)
-	wreck.global_position = global_position
+	var wreck_pos: Vector3 = global_position
 	get_tree().current_scene.add_child(wreck)
+	wreck.global_position = wreck_pos

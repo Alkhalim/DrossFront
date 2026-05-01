@@ -1,0 +1,35 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_pulse_cannons"]
+script = ExtResource("2")
+weapon_name = "Twin Pulse Cannons"
+role_tag = &"AAir"
+damage_tier = &"high"
+range_tier = &"medium"
+rof_tier = &"fast"
+
+[resource]
+script = ExtResource("1")
+unit_name = "Switchblade Interceptor"
+unit_class = &"aircraft"
+hp_total = 950
+hp_per_unit = 475
+armor_class = &"light_air"
+speed_tier = &"very_fast"
+sight_tier = &"long"
+squad_size = 2
+population = 14
+cost_salvage = 380
+cost_fuel = 60
+build_time = 30.0
+built_at = &"aerodrome"
+primary_weapon = SubResource("weapon_pulse_cannons")
+special_description = "Fast Sable interceptor. Tuned for anti-air work but can ground-strafe with branch B. Branch A: Dogfighter (anti-air specialist). Branch B: Strafe Runner (anti-ground gun runs)."
+branch_a_name = "Dogfighter"
+branch_b_name = "Strafe Runner"
+is_aircraft = true
+flight_altitude = 7.0
+flight_speed = 22.0

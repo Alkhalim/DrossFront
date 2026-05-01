@@ -96,9 +96,10 @@ func _spawn_worker() -> void:
 	worker.owner_id = _building.get("owner_id") as int
 
 	var spawn_offset := Vector3(randf_range(-2.0, 2.0), 0, randf_range(-2.0, 2.0))
-	worker.global_position = _building.global_position + spawn_offset
+	var spawn_pos: Vector3 = _building.global_position + spawn_offset
 
 	get_tree().current_scene.add_child(worker)
+	worker.global_position = spawn_pos
 	_workers.append(worker)
 	_total_spawned += 1
 

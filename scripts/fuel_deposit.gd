@@ -44,8 +44,18 @@ func _ready() -> void:
 	_create_visuals()
 
 
+var _capture_throttle: float = 0.0
+const CAPTURE_INTERVAL: float = 0.1  # ~10 Hz; capture progress is multi-second
+
 func _process(delta: float) -> void:
-	_update_capture(delta)
+	# `_update_capture` iterates the whole units group every call —
+	# at 360 units × N deposits per frame that's the dominant deposit
+	# cost. Throttle to 10 Hz; capture progress is on the order of
+	# tens of seconds so the player can't tell the difference.
+	_capture_throttle += delta
+	if _capture_throttle >= CAPTURE_INTERVAL:
+		_update_capture(_capture_throttle)
+		_capture_throttle = 0.0
 	_generate_fuel(delta)
 	_update_visuals()
 

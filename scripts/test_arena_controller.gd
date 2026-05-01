@@ -10,24 +10,306 @@ extends Node3D
 ## without searching the scene tree.
 var _nav_region: NavigationRegion3D = null
 
+## Polygons queued by `_setup_elevation` (plateau tops + ramps) that
+## `_setup_navigation` then merges into the manual navmesh so units can
+## actually path onto raised ground.
+var _pending_nav_polys: Array[PackedVector3Array] = []
+
+## 2D footprints (XZ plane) of plateau bodies + ramp slopes — the ground
+## navmesh subtracts these so the perimeter of each blocked area becomes
+## walkable polygon edges. This is what shares ground vertices with the
+## ramp-bottom edges so a unit on a ramp can plan a path onto the ground
+## (and vice-versa) without `navigation finished` stuck-states at the
+## seam.
+var _pending_blocked_footprints: Array[PackedVector2Array] = []
+## Extra ground vertices that need to be welded into the ground
+## triangulation — typically the ramp bottom-edge endpoints, so the
+## triangulation puts the ground edge at the ramp's foot.
+var _pending_ground_vertex_marks: Array[Vector2] = []
+## Approach-lane footprints for every ramp — the ramp's own footprint
+## PLUS a 4u clearance zone extending in the ramp's outward direction.
+## Terrain spawn checks each piece against these and skips placement
+## that would obstruct a ramp's approach. Each entry is a Rect2 in
+## XZ-world coords.
+var _pending_ramp_clearance: Array[Rect2] = []
+
 
 func _ready() -> void:
-	_setup_navigation()
+	# Hide navigation-debug overlays. With them on (Godot's editor default
+	# in some setups), the plateau-top fan + ramp slope navmesh polys
+	# render as semi-transparent overlays at the SAME Y as the plateau
+	# visual surface — causing the z-fighting that looks like camera-
+	# dependent flicker on the plateau sides and ramps.
+	NavigationServer3D.set_debug_enabled(false)
+
+	# Manual strip-decomposition navmesh has dense polygon adjacency
+	# (every blocker contributes both X and Z cuts, so 4-way corners
+	# are common). Godot's default merge rasterizer cell scale of 1.0
+	# fires the "More than 2 edges occupy the same map rasterization
+	# space" warning hundreds of times per match for what are actually
+	# legitimate corner configurations. Lowering the scale shrinks the
+	# rasterizer cell so coincident edges don't collapse into a single
+	# spot, eliminating the noise without changing real connectivity.
+	# Disabling the warning is also safe — the underlying connectivity
+	# we care about is verified by manual vertex dedup.
+	if ProjectSettings.has_setting("navigation/3d/merge_rasterizer_cell_scale"):
+		ProjectSettings.set_setting("navigation/3d/merge_rasterizer_cell_scale", 0.1)
+	if ProjectSettings.has_setting("navigation/3d/warnings/navmesh_edge_merge_errors"):
+		ProjectSettings.set_setting("navigation/3d/warnings/navmesh_edge_merge_errors", false)
+
+	# Single GPU-particle hub used for smoke / muzzle flashes / dust /
+	# sparks. Replaces the per-particle MeshInstance3D + Tween churn
+	# that dominated the profiler under heavy combat. Loaded via preload
+	# rather than the class_name so the parser doesn't need the global
+	# class registry to be ready before this script compiles.
+	var pem_script: GDScript = preload("res://scripts/particle_emitter_manager.gd")
+	var pem: Node = pem_script.new()
+	pem.name = "ParticleEmitterManager"
+	add_child(pem)
+
+	_apply_map_visuals()
 	_setup_alerts()
 	_setup_player_registry()
 	_setup_player()
 	_setup_ai()
 	_setup_fuel_deposits()
-	_setup_terrain()
+	# Build elevation BEFORE terrain so terrain spawn knows where the
+	# plateau / ramp footprints are and can avoid placing rocks /
+	# ruins that obstruct ramp approach lanes.
 	_setup_elevation()
+	_setup_terrain()
+	_setup_map_signature_features()
 	_setup_skyline_features()
+	_setup_ground_patches()
 	_setup_neutral_patrols()
 	_setup_buildable_buildings()
-	# Bake last — once every static collider (HQs, terrain) is in place, so
-	# the navmesh actually routes around buildings rather than reporting
-	# "navigation finished" the moment a unit collides with one. Synchronous
-	# so the first pathfind requests after _ready already hit a real mesh.
+	# Navigation last — uses the queued plateau polys.
+	_setup_navigation()
 	_bake_navmesh_now()
+
+
+func _setup_map_signature_features() -> void:
+	# Per-map distinctive features that go beyond the shared
+	# terrain / plateau / skyline systems. Foundry Belt gets explosive
+	# ammo dumps that turn into tactical bait targets; Ashplains gets
+	# glowing volcanic fissures that block pathing across the open plain.
+	if _is_ashplains():
+		_setup_volcanic_fissures()
+	else:
+		_setup_ammo_dumps()
+
+
+## --- Foundry Belt ammo dumps ------------------------------------------------
+
+func _setup_ammo_dumps() -> void:
+	# 4 destructible ammo dumps placed around the contested mid lanes.
+	# Positioned so squads have to path NEAR them on the way to deposits
+	# / the Apex scar — creates the bait-the-enemy-past-it tactical play.
+	var dump_script: GDScript = load("res://scripts/ammo_dump.gd") as GDScript
+	if not dump_script:
+		return
+	var positions: Array[Vector3] = [
+		# Two flanking the central plateau, on the lanes between mid
+		# deposits and the plateau ramps.
+		Vector3(22.0, 0.0, 18.0),
+		Vector3(-22.0, 0.0, 18.0),
+		# Two near the back-door choke entrances — defenders walking up
+		# to retake will path past these.
+		Vector3(60.0, 0.0, -18.0),
+		Vector3(-60.0, 0.0, -18.0),
+	]
+	for pos: Vector3 in positions:
+		var dump: AmmoDump = dump_script.new() as AmmoDump
+		add_child(dump)
+		dump.global_position = pos
+		dump.rotation.y = randf_range(0.0, TAU)
+
+
+## --- Ashplains volcanic fissures --------------------------------------------
+
+func _setup_volcanic_fissures() -> void:
+	# Glowing fissures across the open plain. Each fissure is a thin,
+	# elongated obstacle: visible as a dark crack with orange emission
+	# glow, blocks movement (collision_layer 4), and pushes pathing via
+	# NavigationObstacle3D. They break up the otherwise frictionless
+	# plain into pathing corridors without blocking sightlines.
+	var fissures: Array[Dictionary] = [
+		# Long fissure paralleling the main ridge on its north side
+		# (forces units to approach the ridge in narrower lanes).
+		{"pos": Vector3(40.0, 0.0, 12.0), "size": Vector3(28.0, 0.4, 2.5), "rot": 0.05},
+		{"pos": Vector3(-40.0, 0.0, 12.0), "size": Vector3(28.0, 0.4, 2.5), "rot": -0.05},
+		# Smaller fissures near the safe deposits — funnels the
+		# initial expansion toward the edges.
+		{"pos": Vector3(15.0, 0.0, 55.0), "size": Vector3(14.0, 0.4, 2.0), "rot": 0.4},
+		{"pos": Vector3(-15.0, 0.0, 55.0), "size": Vector3(14.0, 0.4, 2.0), "rot": -0.4},
+		{"pos": Vector3(15.0, 0.0, -55.0), "size": Vector3(14.0, 0.4, 2.0), "rot": -0.4},
+		{"pos": Vector3(-15.0, 0.0, -55.0), "size": Vector3(14.0, 0.4, 2.0), "rot": 0.4},
+		# Far flank fissures — make the long sightlines slightly less
+		# uniform.
+		{"pos": Vector3(95.0, 0.0, -30.0), "size": Vector3(20.0, 0.4, 2.2), "rot": 1.2},
+		{"pos": Vector3(-95.0, 0.0, 30.0), "size": Vector3(20.0, 0.4, 2.2), "rot": 1.2},
+	]
+	for f: Dictionary in fissures:
+		_spawn_volcanic_fissure(
+			f["pos"] as Vector3,
+			f["size"] as Vector3,
+			f["rot"] as float,
+		)
+
+
+func _spawn_volcanic_fissure(pos: Vector3, fissure_size: Vector3, rot_y: float) -> void:
+	## A volcanic fissure is a CRACK in the ground — recessed below the
+	## surface, with a glow at the bottom. The previous version stuck a
+	## thin box ABOVE the ground which read as a wall, not a crack.
+	## This version:
+	##   - keeps an invisible thin collision slab so units still can't
+	##     cross (gameplay unchanged)
+	##   - emits 3-5 jittered dark wedge segments along the length, each
+	##     with slight per-segment width and rotation offsets so the
+	##     silhouette reads as a jagged organic split, not a ruler line
+	##   - sinks the orange emissive glow into the trench (negative y)
+	##     so we see the magma "down inside" the crack
+	var root := StaticBody3D.new()
+	root.collision_layer = 4
+	root.collision_mask = 0
+	root.position = pos
+	root.rotation.y = rot_y
+	root.add_to_group("terrain")
+	add_child(root)
+
+	# Invisible collision wall — only the slab a unit's body touches.
+	# Slightly taller than the visible crack so an off-axis unit can't
+	# slip through, but the box itself isn't rendered.
+	var col := CollisionShape3D.new()
+	var col_box := BoxShape3D.new()
+	col_box.size = Vector3(fissure_size.x, 0.6, fissure_size.z)
+	col.shape = col_box
+	col.position.y = 0.3
+	root.add_child(col)
+
+	# Recessed dark trench — a flattened box sunk just below the
+	# ground plane. Reads as a narrow ditch cut into the surface, not
+	# a slab perched on top of it. The emissive crack lives further
+	# down inside.
+	var seg_count: int = clampi(int(fissure_size.x / 4.5) + 1, 3, 6)
+	var seg_step: float = fissure_size.x / float(seg_count)
+	# Crack material reused across segments (one allocation per
+	# fissure rather than one per segment).
+	var crust_mat := StandardMaterial3D.new()
+	crust_mat.albedo_color = Color(0.05, 0.04, 0.04, 1.0)
+	crust_mat.albedo_texture = SharedTextures.get_metal_wear_texture()
+	crust_mat.uv1_offset = Vector3(randf(), randf(), 0.0)
+	crust_mat.uv1_scale = Vector3(2.4, 1.0, 1.0)
+	crust_mat.roughness = 1.0
+	var glow_mat := StandardMaterial3D.new()
+	glow_mat.albedo_color = Color(1.0, 0.4, 0.1, 1.0)
+	glow_mat.emission_enabled = true
+	glow_mat.emission = Color(1.0, 0.45, 0.12, 1.0)
+	glow_mat.emission_energy_multiplier = 2.5
+	glow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	for i: int in seg_count:
+		var t: float = float(i) - float(seg_count - 1) * 0.5  # centred
+		var seg_x: float = t * seg_step + randf_range(-seg_step * 0.15, seg_step * 0.15)
+		var seg_w: float = seg_step * randf_range(0.85, 1.05)
+		var seg_z_off: float = randf_range(-fissure_size.z * 0.35, fissure_size.z * 0.35)
+		# Each segment is wider than the next, kinked at small angles.
+		var width: float = fissure_size.z * randf_range(0.7, 1.3)
+		var seg_rot: float = randf_range(-0.2, 0.2)
+
+		# Trench wall — a wider, slightly-deeper dark patch around the
+		# glow, so the crack looks framed by a recessed shadow band.
+		var trench := MeshInstance3D.new()
+		var trench_box := BoxMesh.new()
+		trench_box.size = Vector3(seg_w * 1.1, 0.12, width)
+		trench.mesh = trench_box
+		trench.position = Vector3(seg_x, -0.04, seg_z_off)
+		trench.rotation.y = seg_rot
+		trench.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		trench.set_surface_override_material(0, crust_mat)
+		root.add_child(trench)
+
+		# Inner glow strip — narrower and recessed deeper into the
+		# trench so it reads as magma at the bottom of the fissure
+		# rather than a stripe pasted on the surface.
+		var glow := MeshInstance3D.new()
+		var glow_box := BoxMesh.new()
+		glow_box.size = Vector3(seg_w * randf_range(0.55, 0.8), 0.04, width * randf_range(0.25, 0.45))
+		glow.mesh = glow_box
+		glow.position = Vector3(seg_x + randf_range(-0.1, 0.1), -0.16, seg_z_off + randf_range(-0.05, 0.05))
+		glow.rotation.y = seg_rot + randf_range(-0.1, 0.1)
+		glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		glow.set_surface_override_material(0, glow_mat)
+		root.add_child(glow)
+
+	# Heat glow — soft warm omni light hovering just above the trench
+	# so the surrounding ash plain picks up the heat halo. Position is
+	# at ground level (y ~ 0) instead of the previous +0.4 stripe.
+	var light := OmniLight3D.new()
+	light.light_color = Color(1.0, 0.50, 0.15, 1.0)
+	light.light_energy = 1.6
+	light.omni_range = maxf(fissure_size.x, fissure_size.z) * 0.7 + 1.5
+	light.position.y = 0.05
+	root.add_child(light)
+
+	# RVO obstacle — pushes pathing away even before the wall is hit.
+	var nav_obstacle := NavigationObstacle3D.new()
+	nav_obstacle.radius = maxf(fissure_size.x, fissure_size.z) * 0.55 + 0.6
+	nav_obstacle.height = 1.0
+	nav_obstacle.avoidance_enabled = true
+	root.add_child(nav_obstacle)
+
+
+func _apply_map_visuals() -> void:
+	# Re-tint the ground / lighting / environment per map so Foundry Belt
+	# (cool grey industrial) and Ashplains (warm volcanic ash) actually
+	# feel different at a glance, not just "same map with less stuff".
+	#
+	# Both maps share the same noise texture; the per-map albedo tint
+	# multiplies it so the surface detail still reads but the overall
+	# colour shifts dramatically.
+	var ground: MeshInstance3D = get_node_or_null("Ground") as MeshInstance3D
+	var dir_light: DirectionalLight3D = get_node_or_null("DirectionalLight3D") as DirectionalLight3D
+	var fill_light: DirectionalLight3D = get_node_or_null("FillLight") as DirectionalLight3D
+	var world_env: WorldEnvironment = get_node_or_null("WorldEnvironment") as WorldEnvironment
+
+	if _is_ashplains():
+		# Ashplains — warm volcanic ash. Sunset-like sun, warm amber
+		# directional light, cool blue fill, dusty-orange ambient. Sky
+		# clear-color shifts to a hazy beige rather than near-black.
+		if ground:
+			var gmat: StandardMaterial3D = ground.get_surface_override_material(0) as StandardMaterial3D
+			if gmat:
+				gmat.albedo_color = Color(1.45, 1.10, 0.78, 1.0)  # multiplied with the noise — pulls greys toward warm tan
+		if dir_light:
+			dir_light.light_color = Color(1.0, 0.78, 0.52, 1.0)
+			dir_light.light_energy = 1.35
+		if fill_light:
+			fill_light.light_color = Color(0.42, 0.55, 0.78, 1.0)
+			fill_light.light_energy = 0.45
+		if world_env and world_env.environment:
+			var env: Environment = world_env.environment
+			env.background_color = Color(0.32, 0.22, 0.16, 1.0)
+			env.ambient_light_color = Color(0.55, 0.40, 0.28, 1.0)
+			env.ambient_light_energy = 0.7
+	else:
+		# Foundry Belt — cool grey industrial. Restore the .tscn
+		# defaults explicitly so switching back from Ashplains during
+		# the same session resets everything.
+		if ground:
+			var gmat: StandardMaterial3D = ground.get_surface_override_material(0) as StandardMaterial3D
+			if gmat:
+				gmat.albedo_color = Color(1, 1, 1, 1)
+		if dir_light:
+			dir_light.light_color = Color(0.95, 0.9, 0.8, 1.0)
+			dir_light.light_energy = 1.2
+		if fill_light:
+			fill_light.light_color = Color(0.6, 0.65, 0.75, 1.0)
+			fill_light.light_energy = 0.4
+		if world_env and world_env.environment:
+			var env: Environment = world_env.environment
+			env.background_color = Color(0.12, 0.12, 0.11, 1.0)
+			env.ambient_light_color = Color(0.3, 0.28, 0.25, 1.0)
+			env.ambient_light_energy = 0.5
 
 
 ## Per-mode roster definitions. Each entry seeds one PlayerState; AI
@@ -53,6 +335,21 @@ func _is_2v2() -> bool:
 		# MatchSettingsClass.Mode.TWO_V_TWO == 1
 		return mode == 1
 	return false
+
+
+## Returns the active V2 map id from MatchSettings. Defaults to
+## FOUNDRY_BELT (== 0) when the autoload is missing, e.g. running the
+## arena scene directly from the editor.
+func _map_id() -> int:
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if settings and "map_id" in settings:
+		return settings.get("map_id") as int
+	return 0
+
+
+func _is_ashplains() -> bool:
+	# MapId.ASHPLAINS_CROSSING == 1 in the autoload's enum.
+	return _map_id() == 1
 
 
 func _current_roster() -> Array[Dictionary]:
@@ -104,29 +401,205 @@ func _setup_alerts() -> void:
 
 
 func _setup_navigation() -> void:
-	# Flat manual navmesh — the bake-from-colliders version proved fragile
-	# (infinite WorldBoundaryShape3D + multi-layer walkable surfaces +
-	# async bake timing all combined to occasionally produce a degenerate
-	# navmesh that left every unit reporting "navigation finished" the
-	# moment a path query was issued). Until that's debugged properly,
-	# keep the simple ±150 quad and rely on stuck-rescue + RVO obstacles
-	# for the cases the bake was supposed to solve.
+	# Ground polygon = the big ±150 rectangle MINUS every queued
+	# plateau / ramp footprint. After clipping, each remaining piece is
+	# triangulated and added to the navmesh. Plateau top fans + ramp
+	# slope polys (queued in _pending_nav_polys) are appended as-is.
+	# Result: ramp bottom-edge endpoints coincide with ground polygon
+	# vertices (because clip_polygons emits the ramp footprint
+	# perimeter as part of the resulting ground polygon), so the ramp
+	# slope poly and the surrounding ground triangle share an edge —
+	# the path planner sees them as connected and a unit on a ramp can
+	# plan a path onto the ground (and vice-versa).
 	var nav_region := NavigationRegion3D.new()
 	nav_region.name = "NavigationRegion"
 
+	var verts := PackedVector3Array()
+	var polys: Array[PackedInt32Array] = []
+	# Vertex deduplication. Adjacent strip-decomposition rects share
+	# corner positions; without deduping the navmesh has 4 separate
+	# vertices at every shared corner, and the polygons appear to share
+	# an EDGE only via Godot's edge_connection_margin auto-merge — which
+	# can fail at long T-junctions and on near-but-not-quite-coincident
+	# float positions, leaving thin invisible barriers between adjacent
+	# walkable cells. Hashing on a quantised position guarantees true
+	# vertex sharing so polygon adjacency is explicit in the index list.
+	var vert_lookup: Dictionary = {}
+	var add_vert := func(v: Vector3) -> int:
+		# Quantise to mm so float jitter doesn't prevent dedup matches.
+		var key: Vector3i = Vector3i(roundi(v.x * 1000.0), roundi(v.y * 1000.0), roundi(v.z * 1000.0))
+		if vert_lookup.has(key):
+			return vert_lookup[key] as int
+		var idx: int = verts.size()
+		verts.append(v)
+		vert_lookup[key] = idx
+		return idx
+
+	# Build the ground decomposition — each piece is an axis-aligned
+	# CCW quad. Emit each as 2 navmesh triangles directly (no need to
+	# call triangulate_polygon for known rectangles).
+	var ground_polys: Array[PackedVector2Array] = _build_ground_triangulation()
+	for piece: PackedVector2Array in ground_polys:
+		if piece.size() < 4:
+			continue
+		var i0: int = add_vert.call(Vector3(piece[0].x, 0.0, piece[0].y))
+		var i1: int = add_vert.call(Vector3(piece[1].x, 0.0, piece[1].y))
+		var i2: int = add_vert.call(Vector3(piece[2].x, 0.0, piece[2].y))
+		var i3: int = add_vert.call(Vector3(piece[3].x, 0.0, piece[3].y))
+		polys.append(PackedInt32Array([i0, i1, i2]))
+		polys.append(PackedInt32Array([i0, i2, i3]))
+
+	# Merge plateau-top fan + ramp slope polys. Same dedup so a ramp's
+	# bottom-edge endpoints share indices with the ground rect they sit
+	# above (universal X-cuts ensure those positions match exactly).
+	for poly_verts: PackedVector3Array in _pending_nav_polys:
+		var indices: PackedInt32Array = PackedInt32Array()
+		for v: Vector3 in poly_verts:
+			indices.append(add_vert.call(v))
+		polys.append(indices)
+
 	var nav_mesh := NavigationMesh.new()
-	nav_mesh.vertices = PackedVector3Array([
-		Vector3(-150, 0, -150),
-		Vector3(150, 0, -150),
-		Vector3(150, 0, 150),
-		Vector3(-150, 0, 150),
-	])
-	nav_mesh.add_polygon(PackedInt32Array([0, 1, 2]))
-	nav_mesh.add_polygon(PackedInt32Array([0, 2, 3]))
+	nav_mesh.vertices = verts
+	for p: PackedInt32Array in polys:
+		nav_mesh.add_polygon(p)
+	# Agent radius 0 — we DON'T want the navmesh to shrink around
+	# obstacles. Heavy units' clearance is already baked into terrain
+	# footprint inflation (NAV_INFLATION in `_spawn_terrain_piece`).
+	nav_mesh.agent_radius = 0.0
 
 	nav_region.navigation_mesh = nav_mesh
 	add_child(nav_region)
 	_nav_region = nav_region
+
+	# Generous edge-connection margin as a backstop for any edge that
+	# slipped past vertex dedup (e.g. plateau-ramp T-junctions). The
+	# margin lives on the NavigationServer per-map, not on the mesh
+	# itself — set it after the region is in the tree so the map exists.
+	# Default 0.25 is too tight for the strip-decomp setup; 1.0 catches
+	# near-misses without spuriously joining unrelated polygons.
+	var nav_map: RID = nav_region.get_navigation_map()
+	if nav_map.is_valid():
+		NavigationServer3D.map_set_edge_connection_margin(nav_map, 1.0)
+
+
+func _overlaps_plateau_footprint(pos: Vector3, piece_size: Vector3, margin: float) -> bool:
+	# Returns true if a piece centered at `pos` with the given size would
+	# overlap any queued plateau / ramp footprint plus `margin` clearance.
+	# Used to keep terrain / skyline / detail spawns out of ramp approach
+	# lanes so ramps stay reachable.
+	var half_x: float = piece_size.x * 0.5 + margin
+	var half_z: float = piece_size.z * 0.5 + margin
+	var p_min: Vector2 = Vector2(pos.x - half_x, pos.z - half_z)
+	var p_max: Vector2 = Vector2(pos.x + half_x, pos.z + half_z)
+	for blocked: PackedVector2Array in _pending_blocked_footprints:
+		if blocked.is_empty():
+			continue
+		var b_aabb: Rect2 = Rect2(blocked[0], Vector2.ZERO)
+		for v: Vector2 in blocked:
+			b_aabb = b_aabb.expand(v)
+		if p_max.x < b_aabb.position.x:
+			continue
+		if p_min.x > b_aabb.position.x + b_aabb.size.x:
+			continue
+		if p_max.y < b_aabb.position.y:
+			continue
+		if p_min.y > b_aabb.position.y + b_aabb.size.y:
+			continue
+		return true
+	return false
+
+
+func _build_ground_triangulation() -> Array[PackedVector2Array]:
+	# Strip decomposition: split the ±150 ground into horizontal Z-bands
+	# at every plateau/ramp footprint edge, then in each band produce
+	# axis-aligned ground rectangles in the X-gaps between blockers.
+	# Every blocker corner becomes a strip rectangle corner, so plateau
+	# / ramp footprint perimeters fully share vertices with the
+	# surrounding ground polygons. That's what gives the ramp slope
+	# polys (whose bottom edge sits on a strip rectangle's edge) a
+	# proper navmesh edge to connect through.
+	const MAP_HALF: float = 150.0
+	var rects: Array[Rect2] = []
+	for blocked: PackedVector2Array in _pending_blocked_footprints:
+		if blocked.is_empty():
+			continue
+		var aabb: Rect2 = Rect2(blocked[0], Vector2.ZERO)
+		for v: Vector2 in blocked:
+			aabb = aabb.expand(v)
+		rects.append(aabb)
+
+	if rects.is_empty():
+		return [PackedVector2Array([
+			Vector2(-MAP_HALF, -MAP_HALF),
+			Vector2(MAP_HALF, -MAP_HALF),
+			Vector2(MAP_HALF, MAP_HALF),
+			Vector2(-MAP_HALF, MAP_HALF),
+		])]
+
+	# Collect unique Z + X values across ALL blockers — every strip
+	# rectangle is then split at the same universal X cuts so adjacent
+	# strips (above/below) always share full edges. Without universal X
+	# cuts the strip above a ramp ends up with one big -150..150 rect,
+	# while the ramp itself ends at x=cx±half_width — coincident edges
+	# but no shared vertices, no path-planner connection.
+	var z_set: Dictionary = {}
+	z_set[-MAP_HALF] = true
+	z_set[MAP_HALF] = true
+	for r: Rect2 in rects:
+		z_set[r.position.y] = true
+		z_set[r.position.y + r.size.y] = true
+	var z_vals: Array = z_set.keys()
+	z_vals.sort()
+
+	var x_set: Dictionary = {}
+	x_set[-MAP_HALF] = true
+	x_set[MAP_HALF] = true
+	for r: Rect2 in rects:
+		x_set[r.position.x] = true
+		x_set[r.position.x + r.size.x] = true
+	var x_vals: Array = x_set.keys()
+	x_vals.sort()
+
+	# Per-cell emission — every cell bounded by adjacent universal X/Z
+	# cuts becomes its own quad. The previous merge attempt introduced
+	# T-junctions between adjacent strips with different blocker
+	# patterns (one strip = one long polygon, the next strip split into
+	# 2-3 polygons), which produced exactly the kind of "wall in open
+	# ground" symptom the merge was trying to eliminate. Per-cell
+	# emission keeps every shared edge between two cells as a single
+	# index pair, which Godot's edge merger handles cleanly via the
+	# vertex-dedup pass in `_setup_navigation`. The 4-way-corner warnings
+	# this produces are silenced at scene start.
+	var polys: Array[PackedVector2Array] = []
+	for zi: int in range(z_vals.size() - 1):
+		var z_low: float = z_vals[zi] as float
+		var z_high: float = z_vals[zi + 1] as float
+		if z_high - z_low <= 0.01:
+			continue
+
+		for xi: int in range(x_vals.size() - 1):
+			var x_low: float = x_vals[xi] as float
+			var x_high: float = x_vals[xi + 1] as float
+			if x_high - x_low <= 0.01:
+				continue
+
+			# Skip cells fully covered by a blocker.
+			var cell_blocked: bool = false
+			for r: Rect2 in rects:
+				if r.position.x <= x_low + 0.005 and r.position.x + r.size.x >= x_high - 0.005 \
+				and r.position.y <= z_low + 0.005 and r.position.y + r.size.y >= z_high - 0.005:
+					cell_blocked = true
+					break
+			if cell_blocked:
+				continue
+
+			polys.append(PackedVector2Array([
+				Vector2(x_low, z_low),
+				Vector2(x_high, z_low),
+				Vector2(x_high, z_high),
+				Vector2(x_low, z_high),
+			]))
+	return polys
 
 
 func _bake_navmesh_now() -> void:
@@ -205,6 +678,25 @@ func _setup_player() -> void:
 
 	resource_manager.update_power()
 
+	# Starter Salvage Crawler. Smooths the early game — the player has
+	# a harvester out the gate instead of waiting for the first build
+	# cycle to produce one. Anchored just outside the HQ in the
+	# direction of map center so the crawler can immediately push out
+	# to the nearest wreck field.
+	if hq:
+		var crawler_scene: PackedScene = load("res://scenes/salvage_crawler.tscn") as PackedScene
+		if crawler_scene:
+			var crawler: Node3D = crawler_scene.instantiate() as Node3D
+			crawler.set("owner_id", 0)
+			add_child(crawler)
+			var fwd: Vector3 = Vector3.ZERO - hq.global_position
+			fwd.y = 0.0
+			if fwd.length_squared() > 0.0001:
+				fwd = fwd.normalized()
+			else:
+				fwd = Vector3(0.0, 0.0, -1.0)
+			crawler.global_position = hq.global_position + fwd * 11.0
+
 
 func _setup_ai() -> void:
 	# Spawn one AI HQ + starter army + AIController per non-human entry in
@@ -242,8 +734,8 @@ func _spawn_ai_player(player_id: int, display_name: String) -> void:
 	ai_hq.stats = hq_stats
 	ai_hq.owner_id = player_id
 	ai_hq.resource_manager = ai_res
-	ai_hq.global_position = _hq_position_for(player_id)
 	add_child(ai_hq)
+	ai_hq.global_position = _hq_position_for(player_id)
 	ai_hq.is_constructed = true
 	ai_hq._apply_placeholder_shape()
 
@@ -301,14 +793,32 @@ func _setup_fuel_deposits() -> void:
 	if not deposit_script:
 		return
 
-	var positions: Array[Vector3] = (
-		_deposit_positions_2v2() if _is_2v2() else _deposit_positions_1v1()
-	)
+	var positions: Array[Vector3]
+	if _is_ashplains():
+		# Ashplains has fewer deposits than Foundry Belt — sparser map,
+		# the central deposit is THE objective.
+		positions = _deposit_positions_ashplains_2v2() if _is_2v2() else _deposit_positions_ashplains_1v1()
+	else:
+		positions = _deposit_positions_2v2() if _is_2v2() else _deposit_positions_1v1()
 
 	for pos: Vector3 in positions:
 		var deposit: Node3D = deposit_script.new()
-		deposit.global_position = pos
 		add_child(deposit)
+		deposit.global_position = pos
+
+	# 2v2 only — extra small back-/side-of-base satellite deposits.
+	# Foundry Belt only — Ashplains is intentionally lean on resources.
+	if _is_2v2() and not _is_ashplains():
+		for pos: Vector3 in _small_deposit_positions_2v2():
+			var small: Node3D = deposit_script.new()
+			# Lower yield + smaller capture radius than the main deposits —
+			# rewards expansion without making them a primary fight.
+			small.fuel_per_second = 2.0
+			small.capture_radius = 8.0
+			small.capture_time = 18.0
+			small.scale = Vector3(0.65, 0.65, 0.65)
+			add_child(small)
+			small.global_position = pos
 
 
 func _deposit_positions_1v1() -> Array[Vector3]:
@@ -331,7 +841,8 @@ func _deposit_positions_2v2() -> Array[Vector3]:
 	# 2v2 layout — each of the four corner spawns gets a near-home deposit
 	# of its own so neither team feels starved on opening, plus a single
 	# central contested deposit that's the dominant mid-game objective.
-	# Total 5 (matches the V2 spec's "4-5 in 2v2" range).
+	# Plus four *small* satellite deposits to the side and back of each
+	# team (lower yield) so 2v2 has more economic surface than 1v1.
 	return [
 		Vector3(-30, 0, 70),    # Player NW safe
 		Vector3(30, 0, 70),     # Ally NE safe
@@ -341,7 +852,58 @@ func _deposit_positions_2v2() -> Array[Vector3]:
 	]
 
 
+## Ashplains Crossing 1v1 layout. Per the V2 spec: 1 safe-area deposit per
+## player + 1 large mid-map deposit (the primary objective, heavy patrol).
+## Map orientation matches Foundry Belt — player at +z, AI at -z.
+func _deposit_positions_ashplains_1v1() -> Array[Vector3]:
+	return [
+		Vector3(0, 0, 80),     # Player safe (north)
+		Vector3(0, 0, -80),    # AI safe (south)
+		Vector3(0, 0, 0),      # Central — the primary objective, Heavy patrol
+	]
+
+
+## Ashplains Crossing 2v2 layout. Per the spec: per-team safe deposits +
+## central + 1 deposit on each flank (Medium patrols).
+func _deposit_positions_ashplains_2v2() -> Array[Vector3]:
+	return [
+		Vector3(-30, 0, 70),    # Team A west safe
+		Vector3(30, 0, 70),     # Team A east safe
+		Vector3(-30, 0, -70),   # Team B west safe
+		Vector3(30, 0, -70),    # Team B east safe
+		Vector3(0, 0, 0),       # Central — primary objective
+		Vector3(70, 0, 0),      # East flank
+		Vector3(-70, 0, 0),     # West flank
+	]
+
+
+## Smaller back-/side-of-base deposits for 2v2. Returned separately so they
+## can be flagged as `small = true` on the deposit script (lower yield).
+func _small_deposit_positions_2v2() -> Array[Vector3]:
+	return [
+		# Behind / outboard of each team's base corner. Far enough out that
+		# they're a meaningful map-control commitment, not a free pickup.
+		Vector3(-95, 0, 110),    # Far west of team A back line
+		Vector3(95, 0, 110),     # Far east of team A back line
+		Vector3(-95, 0, -110),   # Far west of team B back line
+		Vector3(95, 0, -110),    # Far east of team B back line
+		# Side flanks — between safe and central, slightly off-axis so they
+		# read as side approaches rather than another mid-line objective.
+		Vector3(-80, 0, 35),     # West side of team A
+		Vector3(80, 0, 35),      # East side of team A
+		Vector3(-80, 0, -35),    # West side of team B
+		Vector3(80, 0, -35),     # East side of team B
+	]
+
+
 func _setup_terrain() -> void:
+	if _is_ashplains():
+		_setup_terrain_ashplains()
+		return
+	_setup_terrain_foundry_belt()
+
+
+func _setup_terrain_foundry_belt() -> void:
 	# Foundry Belt terrain: rusted ruins and rock outcrops scattered through
 	# the contested mid-map. Each piece blocks pathing (collision_layer 4 like
 	# buildings, so units' mask=5 covers them) and carries a NavigationObstacle3D
@@ -366,29 +928,24 @@ func _setup_terrain() -> void:
 		# AI-side flank features (mirrored z values).
 		{"pos": Vector3(50, 0, -40), "size": Vector3(3.0, 2.0, 3.5), "kind": "rock"},
 		{"pos": Vector3(-55, 0, -30), "size": Vector3(4.0, 3.0, 3.0), "kind": "ruin"},
-		# East back-door chokepoint at x ≈ 85.
-		{"pos": Vector3(85, 0, 6), "size": Vector3(8.0, 4.0, 8.0), "kind": "ruin"},
-		{"pos": Vector3(85, 0, -6), "size": Vector3(8.0, 4.0, 8.0), "kind": "ruin"},
-		# West back-door chokepoint mirror at x ≈ -85 — same narrow gap
-		# leading to the west back-door deposit at (-95, 0).
-		{"pos": Vector3(-85, 0, 6), "size": Vector3(8.0, 4.0, 8.0), "kind": "ruin"},
-		{"pos": Vector3(-85, 0, -6), "size": Vector3(8.0, 4.0, 8.0), "kind": "ruin"},
-		# Corner fillers — break up the visual emptiness of the four map
-		# corners without affecting the strategic lanes. Smaller and
-		# pushed near the camera-bound limits.
+		# Back-door chokepoint pieces — moved out + away from the ridge
+		# ramps (E ramp footprint x∈[78, 84], z∈[-4, +4]) so the ramp
+		# approach lanes stay open.
+		{"pos": Vector3(92, 0, 12), "size": Vector3(7.0, 4.0, 7.0), "kind": "ruin"},
+		{"pos": Vector3(92, 0, -12), "size": Vector3(7.0, 4.0, 7.0), "kind": "ruin"},
+		{"pos": Vector3(-92, 0, 12), "size": Vector3(7.0, 4.0, 7.0), "kind": "ruin"},
+		{"pos": Vector3(-92, 0, -12), "size": Vector3(7.0, 4.0, 7.0), "kind": "ruin"},
+		# Corner fillers.
 		{"pos": Vector3(120, 0, 120), "size": Vector3(4.5, 3.0, 4.5), "kind": "ruin"},
 		{"pos": Vector3(-120, 0, 120), "size": Vector3(5.0, 3.0, 4.0), "kind": "ruin"},
 		{"pos": Vector3(120, 0, -120), "size": Vector3(4.0, 3.0, 5.0), "kind": "ruin"},
 		{"pos": Vector3(-120, 0, -120), "size": Vector3(4.5, 2.5, 4.5), "kind": "ruin"},
-		# Mid-edge filler — the long horizontal flanks need something
-		# between the safe deposits and the corners.
+		# Mid-edge filler.
 		{"pos": Vector3(110, 0, 50), "size": Vector3(3.0, 2.5, 3.5), "kind": "rock"},
 		{"pos": Vector3(-110, 0, 55), "size": Vector3(3.5, 2.0, 3.0), "kind": "rock"},
 		{"pos": Vector3(110, 0, -50), "size": Vector3(3.5, 2.5, 3.0), "kind": "rock"},
 		{"pos": Vector3(-110, 0, -45), "size": Vector3(3.0, 2.0, 3.5), "kind": "rock"},
-		# Scrap-pile terrain: low + wide debris fields. Different
-		# silhouette from rocks/ruins (flatter, more chunks per piece)
-		# so the same area can mix variety.
+		# Scrap-pile terrain.
 		{"pos": Vector3(40, 0, 50), "size": Vector3(5.0, 1.0, 5.0), "kind": "scrap_pile"},
 		{"pos": Vector3(-40, 0, 50), "size": Vector3(4.5, 1.2, 5.5), "kind": "scrap_pile"},
 		{"pos": Vector3(40, 0, -50), "size": Vector3(4.5, 1.0, 5.0), "kind": "scrap_pile"},
@@ -398,7 +955,37 @@ func _setup_terrain() -> void:
 	]
 	for piece: Dictionary in pieces:
 		_spawn_terrain_piece(piece["pos"] as Vector3, piece["size"] as Vector3, piece["kind"] as String)
-	# Boulder clusters — three close-spaced small rocks that read as a
+
+	# Rock outcrops — bigger, multi-faceted natural rock formations
+	# (5-7 box chunks fused at angles) for organic stone silhouettes
+	# rather than monolithic boxes.
+	for outcrop_pos: Vector3 in [
+		Vector3(-25, 0, 60), Vector3(25, 0, -60),
+		Vector3(55, 0, 12), Vector3(-55, 0, -12),
+		Vector3(0, 0, 75), Vector3(0, 0, -90),
+	]:
+		_spawn_rock_outcrop(outcrop_pos, randf_range(4.0, 6.5))
+
+	# Ruined building complexes — multi-block collapsed industrial
+	# structures. Reads as "block of houses / factory wing", provides
+	# meaningful pathing blockage in the otherwise open mid-map.
+	for complex: Dictionary in [
+		# Mid-east complex — between contested mid and the east flank.
+		{"pos": Vector3(35, 0, 40), "rot": 0.3, "size": Vector2(11.0, 6.5)},
+		# Mid-west mirror.
+		{"pos": Vector3(-35, 0, -40), "rot": 0.3, "size": Vector2(11.0, 6.5)},
+		# Larger collapsed factory wing on the player approach.
+		{"pos": Vector3(45, 0, 65), "rot": -0.5, "size": Vector2(13.0, 7.0)},
+		# AI mirror.
+		{"pos": Vector3(-45, 0, -65), "rot": -0.5, "size": Vector2(13.0, 7.0)},
+		# Mid-map block near the apex scar — extra cover around the
+		# central battlefield.
+		{"pos": Vector3(-20, 0, -55), "rot": 1.1, "size": Vector2(9.0, 6.0)},
+		{"pos": Vector3(20, 0, 55), "rot": 1.1, "size": Vector2(9.0, 6.0)},
+	]:
+		_spawn_ruin_complex(complex["pos"] as Vector3, complex["size"] as Vector2, complex["rot"] as float)
+
+	# Boulder clusters — close-spaced small rocks that read as a
 	# weathered formation rather than a single big shape.
 	var cluster_centers: Array[Vector3] = [
 		Vector3(85, 0, 25),
@@ -408,6 +995,266 @@ func _setup_terrain() -> void:
 	]
 	for c: Vector3 in cluster_centers:
 		_spawn_boulder_cluster(c)
+
+
+func _setup_terrain_ashplains() -> void:
+	# Ashplains Crossing — wide-open ash flats with sparse cover. Per the
+	# V2 spec: 2 ruin clusters as the only meaningful cover, mostly open
+	# ground that favours long-sightline ranged combat. The single
+	# elevated ridge that crosses the map is built in `_setup_elevation`
+	# (its dedicated walkable plateau) — terrain pieces here are just
+	# ground-level cover.
+	var pieces: Array[Dictionary] = [
+		# West ruin cluster — half-collapsed industrial plant. Multiple
+		# small ruin pieces grouped so units can thread between them but
+		# the whole thing reads as one strategic feature.
+		{"pos": Vector3(-25, 0, 18), "size": Vector3(4.5, 3.5, 3.5), "kind": "ruin"},
+		{"pos": Vector3(-32, 0, 12), "size": Vector3(3.0, 4.0, 3.0), "kind": "ruin"},
+		{"pos": Vector3(-21, 0, 9), "size": Vector3(3.5, 3.0, 4.0), "kind": "ruin"},
+		# East ruin cluster — mirror.
+		{"pos": Vector3(25, 0, -18), "size": Vector3(4.5, 3.5, 3.5), "kind": "ruin"},
+		{"pos": Vector3(32, 0, -12), "size": Vector3(3.0, 4.0, 3.0), "kind": "ruin"},
+		{"pos": Vector3(21, 0, -9), "size": Vector3(3.5, 3.0, 4.0), "kind": "ruin"},
+		# A handful of standalone rocks scattered across the open plain
+		# so the map isn't perfectly flat — but very sparse compared to
+		# Foundry Belt. Long sightlines stay open.
+		{"pos": Vector3(55, 0, 40), "size": Vector3(2.0, 1.6, 2.0), "kind": "rock"},
+		{"pos": Vector3(-55, 0, -40), "size": Vector3(2.0, 1.6, 2.0), "kind": "rock"},
+		{"pos": Vector3(70, 0, -55), "size": Vector3(2.4, 2.0, 2.4), "kind": "rock"},
+		{"pos": Vector3(-70, 0, 55), "size": Vector3(2.4, 2.0, 2.4), "kind": "rock"},
+		# Far-corner fillers so the very edges of the playable area don't
+		# read as a perfectly flat boundary.
+		{"pos": Vector3(115, 0, 100), "size": Vector3(3.0, 2.0, 3.0), "kind": "rock"},
+		{"pos": Vector3(-115, 0, 100), "size": Vector3(3.0, 2.0, 3.0), "kind": "rock"},
+		{"pos": Vector3(115, 0, -100), "size": Vector3(3.0, 2.0, 3.0), "kind": "rock"},
+		{"pos": Vector3(-115, 0, -100), "size": Vector3(3.0, 2.0, 3.0), "kind": "rock"},
+		# Scattered small scrap piles toward the back / sides of each
+		# team's territory. Smaller and sparser than the central ruin
+		# clusters so they read as "salvage to scout for" rather than
+		# bulk cover. Player-side (z > 0) and AI-side (z < 0) get
+		# mirrored sets at varying flank positions.
+		{"pos": Vector3(70, 0, 95), "size": Vector3(2.4, 0.8, 2.6), "kind": "scrap_pile"},
+		{"pos": Vector3(-65, 0, 105), "size": Vector3(2.2, 0.7, 2.4), "kind": "scrap_pile"},
+		{"pos": Vector3(95, 0, 70), "size": Vector3(2.6, 0.9, 2.4), "kind": "scrap_pile"},
+		{"pos": Vector3(-100, 0, 60), "size": Vector3(2.4, 0.8, 2.6), "kind": "scrap_pile"},
+		{"pos": Vector3(70, 0, -95), "size": Vector3(2.4, 0.8, 2.6), "kind": "scrap_pile"},
+		{"pos": Vector3(-65, 0, -105), "size": Vector3(2.2, 0.7, 2.4), "kind": "scrap_pile"},
+		{"pos": Vector3(95, 0, -70), "size": Vector3(2.6, 0.9, 2.4), "kind": "scrap_pile"},
+		{"pos": Vector3(-100, 0, -60), "size": Vector3(2.4, 0.8, 2.6), "kind": "scrap_pile"},
+	]
+	for piece: Dictionary in pieces:
+		_spawn_terrain_piece(piece["pos"] as Vector3, piece["size"] as Vector3, piece["kind"] as String)
+
+
+func _decorate_ruin_block(root: Node3D, piece_size: Vector3, center_offset: Vector3 = Vector3.ZERO, add_roof_details: bool = true) -> void:
+	## Adds building-character details (windows, antennae, half-collapsed
+	## corner) to a ruin block of `piece_size` centered at `center_offset`
+	## within `root`. Pass center_offset = Vector3.ZERO for the base block,
+	## or the upper-story's local position so windows sit on the smaller
+	## block on top.
+	var hx: float = piece_size.x * 0.5
+	var hy: float = piece_size.y * 0.5
+	var hz: float = piece_size.z * 0.5
+
+	var window_mat := StandardMaterial3D.new()
+	# Dark window panels, very faint emission so they pick up at night.
+	window_mat.albedo_color = Color(0.04, 0.05, 0.07, 1.0)
+	window_mat.emission_enabled = true
+	window_mat.emission = Color(0.10, 0.16, 0.22, 1.0)
+	window_mat.emission_energy_multiplier = 0.18
+	window_mat.roughness = 0.4
+
+	# Skip windows on really small ruin chunks — they read as rubble.
+	if piece_size.x >= 2.0 and piece_size.z >= 2.0 and piece_size.y >= 1.6:
+		# Row count scales with block height — taller blocks get more
+		# stacked window bands. Even small blocks get 2 rows now so the
+		# upper-story block doesn't read as featureless concrete.
+		var rows: int = 1
+		if piece_size.y >= 3.6:
+			rows = 3
+		elif piece_size.y >= 2.0:
+			rows = 2
+		# Window pitch leaves an inset above and below so windows never
+		# land on the top edge (which used to push them above the roof).
+		var window_w: float = 0.36
+		var window_h: float = 0.42
+		var v_inset: float = 0.35
+		var available_h: float = maxf(piece_size.y - v_inset * 2.0, window_h)
+		var row_pitch: float = available_h / float(rows + 1)
+		for face_dir: Vector3 in [Vector3.FORWARD, Vector3.BACK, Vector3.LEFT, Vector3.RIGHT]:
+			var face_w: float = piece_size.x if face_dir.z != 0 else piece_size.z
+			var cols: int = 1
+			if face_w >= 3.5:
+				cols = 3
+			elif face_w >= 2.4:
+				cols = 2
+			for row: int in rows:
+				# Local-y of this row, relative to the block center.
+				# Range stays in [-hy + v_inset, +hy - v_inset], so
+				# windows never poke above the roof or below the base.
+				var row_y: float = -hy + v_inset + row_pitch * float(row + 1)
+				for col: int in cols:
+					if randf() < 0.25:
+						continue  # ~25% missing for "collapsed" feel
+					var window_mesh := MeshInstance3D.new()
+					var window_box := BoxMesh.new()
+					window_box.size = Vector3(window_w, window_h, 0.05)
+					window_mesh.mesh = window_box
+					var col_offset: float = 0.0
+					if cols > 1:
+						col_offset = (float(col) - float(cols - 1) * 0.5) * (face_w / float(cols + 1))
+					var pos := Vector3(0, row_y, 0)
+					if absf(face_dir.z) > 0.5:
+						pos.x = col_offset
+						pos.z = face_dir.z * (hz + 0.03)
+					else:
+						pos.x = face_dir.x * (hx + 0.03)
+						pos.z = col_offset
+						window_mesh.rotation.y = PI * 0.5
+					window_mesh.position = pos + center_offset
+					window_mesh.set_surface_override_material(0, window_mat)
+					root.add_child(window_mesh)
+
+	# Antennae and corner-collapse are roof-level details — only
+	# added when this is the topmost block in the building. For a base
+	# block with an upper-story we skip them so antennae poke from the
+	# real roof, not from underneath the upper-story.
+	if not add_roof_details:
+		return
+
+	# 1-2 broken antennae on the roof — thin tall boxes leaning at random
+	# angles. Reads as comm gear that survived the collapse.
+	var antenna_count: int = randi_range(0, 2)
+	for i: int in antenna_count:
+		var ant := MeshInstance3D.new()
+		var ant_box := BoxMesh.new()
+		var ant_h: float = randf_range(0.6, 1.4)
+		ant_box.size = Vector3(0.06, ant_h, 0.06)
+		ant.mesh = ant_box
+		ant.position = center_offset + Vector3(
+			randf_range(-hx * 0.6, hx * 0.6),
+			hy + ant_h * 0.5,
+			randf_range(-hz * 0.6, hz * 0.6),
+		)
+		ant.rotation = Vector3(
+			randf_range(-0.4, 0.4),
+			0.0,
+			randf_range(-0.4, 0.4),
+		)
+		var ant_mat := StandardMaterial3D.new()
+		ant_mat.albedo_color = Color(0.12, 0.10, 0.09, 1.0)
+		ant_mat.roughness = 0.65
+		ant.set_surface_override_material(0, ant_mat)
+		root.add_child(ant)
+
+	# Half-collapsed corner — a smaller box knocked off one corner,
+	# rotated so it reads as a fallen wall section. Position is just
+	# outside the block's footprint so collision isn't expanded.
+	if randf() < 0.6:
+		var corner := MeshInstance3D.new()
+		var c_box := BoxMesh.new()
+		var c_size: Vector3 = Vector3(
+			piece_size.x * randf_range(0.25, 0.45),
+			piece_size.y * randf_range(0.4, 0.6),
+			piece_size.z * randf_range(0.25, 0.45),
+		)
+		c_box.size = c_size
+		corner.mesh = c_box
+		var sign_x: float = 1.0 if randf() < 0.5 else -1.0
+		var sign_z: float = 1.0 if randf() < 0.5 else -1.0
+		corner.position = Vector3(
+			sign_x * (hx + c_size.x * 0.3),
+			c_size.y * 0.5,
+			sign_z * (hz + c_size.z * 0.3),
+		)
+		corner.rotation = Vector3(
+			randf_range(-0.6, 0.6),
+			randf_range(0.0, TAU),
+			randf_range(-0.6, 0.6),
+		)
+		var corner_mat := StandardMaterial3D.new()
+		corner_mat.albedo_color = Color(0.30, 0.24, 0.20, 1.0).darkened(randf_range(0.0, 0.2))
+		corner_mat.albedo_texture = SharedTextures.get_metal_wear_texture()
+		corner_mat.uv1_offset = Vector3(randf(), randf(), 0.0)
+		corner_mat.uv1_scale = Vector3(1.6, 1.6, 1.0)
+		corner_mat.roughness = 0.95
+		corner.set_surface_override_material(0, corner_mat)
+		root.add_child(corner)
+
+
+func _spawn_rock_outcrop(center: Vector3, base_size: float) -> void:
+	# Multi-faceted rock formation. One large central chunk plus 4-6
+	# smaller chunks fused at random angles — produces a more organic,
+	# multi-corner silhouette than a single box.
+	_spawn_terrain_piece(center, Vector3(base_size, base_size * 0.7, base_size * 0.9), "rock")
+	# Surround with smaller satellite rocks at random angles + heights.
+	var sat_count: int = randi_range(4, 6)
+	for i: int in sat_count:
+		var ang: float = float(i) / float(sat_count) * TAU + randf_range(-0.4, 0.4)
+		var radius: float = base_size * randf_range(0.55, 0.95)
+		var sx: float = base_size * randf_range(0.32, 0.6)
+		var sy: float = base_size * randf_range(0.4, 0.85)
+		var sz: float = base_size * randf_range(0.32, 0.6)
+		_spawn_terrain_piece(
+			center + Vector3(cos(ang) * radius, 0.0, sin(ang) * radius),
+			Vector3(sx, sy, sz),
+			"rock",
+		)
+
+
+func _spawn_ruin_complex(center: Vector3, complex_size: Vector2, rot_y: float) -> void:
+	# Asymmetric ruined-building complex. Multiple square ruin blocks
+	# arranged in a row + offset perpendicular blocks, all rotated as
+	# a unit so the whole complex aligns to the requested angle. Reads
+	# as a collapsed industrial wing / block of buildings.
+	#
+	# Each block is its own _spawn_terrain_piece — separate StaticBody3D
+	# colliders so units can thread between blocks where there's a gap,
+	# but the overall silhouette is one big asymmetric structure.
+	var hx: float = complex_size.x * 0.5
+	var hz: float = complex_size.y * 0.5
+	var fwd: Vector3 = Vector3(cos(rot_y), 0.0, sin(rot_y))
+	var right: Vector3 = Vector3(-fwd.z, 0.0, fwd.x)
+
+	# Main row — 3 large blocks along the long axis.
+	var block_w: float = complex_size.x / 3.0
+	for i: int in 3:
+		var t: float = float(i) - 1.0  # -1, 0, +1
+		var pos: Vector3 = center + fwd * (t * block_w * 0.95)
+		# Slight per-block size jitter so the row isn't perfectly uniform.
+		var sx: float = block_w * randf_range(0.85, 1.0)
+		var sz: float = complex_size.y * randf_range(0.65, 0.9)
+		var sy: float = randf_range(2.6, 4.5)  # variable heights — collapsed look
+		# Rotate the size by the complex's rotation so the block aligns.
+		var rotated_size: Vector3 = _rotated_box_size(sx, sy, sz, rot_y)
+		_spawn_terrain_piece(pos, rotated_size, "ruin")
+
+	# Two perpendicular wings sticking out from the main row, offset
+	# asymmetrically so the complex doesn't read as a perfectly
+	# symmetric shape.
+	var wing_offset_main: float = block_w * randf_range(0.3, 0.8)
+	var wing_pos_a: Vector3 = center + fwd * wing_offset_main + right * (hz + 1.5)
+	var wing_size_a: Vector3 = _rotated_box_size(
+		block_w * 0.85, randf_range(2.4, 3.6), complex_size.y * 0.5, rot_y
+	)
+	_spawn_terrain_piece(wing_pos_a, wing_size_a, "ruin")
+
+	var wing_offset_other: float = -block_w * randf_range(0.4, 0.9)
+	var wing_pos_b: Vector3 = center + fwd * wing_offset_other - right * (hz + 1.2)
+	var wing_size_b: Vector3 = _rotated_box_size(
+		block_w * 0.7, randf_range(2.0, 3.2), complex_size.y * 0.4, rot_y
+	)
+	_spawn_terrain_piece(wing_pos_b, wing_size_b, "ruin")
+
+
+func _rotated_box_size(sx: float, sy: float, sz: float, rot_y: float) -> Vector3:
+	# Rotated AABB approximation — a box of (sx, sy, sz) rotated by
+	# `rot_y` projects to an AABB of (sx*|cos| + sz*|sin|, sy,
+	# sx*|sin| + sz*|cos|). For collision/visual we use the projection
+	# so the spawn-piece BoxMesh covers the rotated footprint cleanly.
+	var c: float = absf(cos(rot_y))
+	var s: float = absf(sin(rot_y))
+	return Vector3(sx * c + sz * s, sy, sx * s + sz * c)
 
 
 func _spawn_boulder_cluster(center: Vector3) -> void:
@@ -428,6 +1275,54 @@ func _spawn_boulder_cluster(center: Vector3) -> void:
 
 
 func _spawn_terrain_piece(pos: Vector3, piece_size: Vector3, kind: String) -> void:
+	# Use the diagonal half-extent for the piece's 2D AABB so any
+	# rotation of the piece stays inside the carved footprint.
+	var diag_half: float = sqrt(piece_size.x * piece_size.x + piece_size.z * piece_size.z) * 0.5
+	var p_min: Vector2 = Vector2(pos.x - diag_half, pos.z - diag_half)
+	var p_max: Vector2 = Vector2(pos.x + diag_half, pos.z + diag_half)
+
+	# Skip placement that overlaps any ramp's approach clearance — the
+	# ramp footprint plus a 4u outward margin. This guarantees ramps
+	# stay reachable regardless of which terrain layout the map uses
+	# and how dense the surrounding obstacles are.
+	for clearance: Rect2 in _pending_ramp_clearance:
+		if p_max.x < clearance.position.x:
+			continue
+		if p_min.x > clearance.position.x + clearance.size.x:
+			continue
+		if p_max.y < clearance.position.y:
+			continue
+		if p_min.y > clearance.position.y + clearance.size.y:
+			continue
+		return  # overlap → silently drop the piece
+
+	# Queue the piece's 2D footprint as a blocked region so the ground
+	# strip-decomposition navmesh carves a hole at this position. Without
+	# this, units' nav agents path THROUGH terrain (the navmesh covers
+	# the area as walkable) and only RVO avoidance steers them — which
+	# fails inside dense terrain like ruin complexes, leaving units
+	# wedged against walls.
+	#
+	# The footprint is inflated by NAV_INFLATION beyond the visual extent.
+	# This is the navmesh-only buffer — collision and the RVO obstacle
+	# still match the visual size. Without inflation, a ruin complex's
+	# tightly-packed blocks leave 0.5-1.5u walkable slivers between them
+	# in the navmesh; the path planner happily routes heavy units through
+	# those slivers, but the units' avoidance radius (~2.5u for heavies)
+	# can't fit and they wedge against the geometry — the "invisible wall
+	# only small units can pass" symptom. Inflation closes those slivers
+	# so the planner only emits paths through gaps that are actually
+	# wide enough for the largest unit to traverse.
+	const NAV_INFLATION: float = 1.5
+	var inf_min: Vector2 = p_min - Vector2(NAV_INFLATION, NAV_INFLATION)
+	var inf_max: Vector2 = p_max + Vector2(NAV_INFLATION, NAV_INFLATION)
+	_pending_blocked_footprints.append(PackedVector2Array([
+		inf_min,
+		Vector2(inf_max.x, inf_min.y),
+		inf_max,
+		Vector2(inf_min.x, inf_max.y),
+	]))
+
 	var root := StaticBody3D.new()
 	root.collision_layer = 4
 	root.collision_mask = 0
@@ -467,6 +1362,23 @@ func _spawn_terrain_piece(pos: Vector3, piece_size: Vector3, kind: String) -> vo
 	mesh_inst.mesh = box_mesh
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = base_color
+	# Ruins use the panel-wall texture (horizontal/vertical joint lines)
+	# so they read as masonry, clearly distinct from the organic noise of
+	# rock surfaces. uv scale is tied to world size so the panel pitch
+	# stays roughly constant across blocks of different sizes.
+	if kind == "ruin":
+		mat.albedo_texture = SharedTextures.get_wall_panel_texture()
+		mat.uv1_offset = Vector3(randf(), randf(), 0.0)
+		# ~1 panel per ~1.2u of wall height. Texture has 4 horizontal
+		# panels per cycle, so scale.y = piece_size.y / 4.8 gives ~1u
+		# per panel.
+		mat.uv1_scale = Vector3(maxf(piece_size.x / 4.8, 0.6), maxf(piece_size.y / 4.8, 0.6), 1.0)
+	else:
+		# Rocks / scrap: organic-noise wear texture, wider scale so the
+		# pattern reads as weathered stone rather than fabricated panels.
+		mat.albedo_texture = SharedTextures.get_metal_wear_texture()
+		mat.uv1_offset = Vector3(randf(), randf(), 0.0)
+		mat.uv1_scale = Vector3(2.2, 2.2, 1.0)
 	mat.roughness = randf_range(0.85, 0.98)
 	mesh_inst.material_override = mat
 	root.add_child(mesh_inst)
@@ -504,9 +1416,55 @@ func _spawn_terrain_piece(pos: Vector3, piece_size: Vector3, kind: String) -> vo
 				chunk_mat.albedo_color = base_color.lerp(Color(0.6, 0.32, 0.14, 1.0), 0.4)
 			else:
 				chunk_mat.albedo_color = base_color.darkened(randf_range(0.0, 0.3))
+			chunk_mat.albedo_texture = SharedTextures.get_metal_wear_texture()
+			chunk_mat.uv1_offset = Vector3(randf(), randf(), 0.0)
+			chunk_mat.uv1_scale = Vector3(2.0, 2.0, 1.0)
 			chunk_mat.roughness = mat.roughness
 			chunk.material_override = chunk_mat
 			root.add_child(chunk)
+	elif kind == "ruin":
+		# Upper-story building block — clean axis-aligned smaller block
+		# resting on top of the base. Reads as a second floor of the same
+		# structure, not as collapsed debris. Same wall texture as the
+		# base so the building reads coherently. Gets its own grid of
+		# windows. Only added when the base is tall enough to support a
+		# distinct upper level — short ruins stay single-block.
+		var upper_offset: Vector3 = Vector3.ZERO
+		var upper_size: Vector3 = Vector3.ZERO
+		var has_upper: bool = piece_size.y >= 2.6
+		if has_upper:
+			var upper := MeshInstance3D.new()
+			var upper_box := BoxMesh.new()
+			var u_w: float = piece_size.x * randf_range(0.55, 0.75)
+			var u_d: float = piece_size.z * randf_range(0.55, 0.75)
+			var u_h: float = randf_range(1.4, 2.4)
+			upper_size = Vector3(u_w, u_h, u_d)
+			upper_box.size = upper_size
+			upper.mesh = upper_box
+			upper_offset = Vector3(
+				randf_range(-piece_size.x * 0.12, piece_size.x * 0.12),
+				piece_size.y * 0.5 + u_h * 0.5,
+				randf_range(-piece_size.z * 0.12, piece_size.z * 0.12),
+			)
+			upper.position = upper_offset
+			# Subtle Y-only rotation — keeps the upper story upright so it
+			# reads as an inhabited level rather than tumbled debris.
+			upper.rotation.y = randf_range(-0.15, 0.15)
+			var upper_mat := StandardMaterial3D.new()
+			upper_mat.albedo_color = base_color.darkened(randf_range(0.05, 0.15))
+			upper_mat.albedo_texture = SharedTextures.get_wall_panel_texture()
+			upper_mat.uv1_offset = Vector3(randf(), randf(), 0.0)
+			upper_mat.uv1_scale = Vector3(maxf(u_w / 4.8, 0.6), maxf(u_h / 4.8, 0.6), 1.0)
+			upper_mat.roughness = mat.roughness
+			upper.material_override = upper_mat
+			root.add_child(upper)
+		# Decorate the base block with windows only — no antennae /
+		# corner-collapse, those go on the topmost block. If there's no
+		# upper-story (short ruin), the base IS the topmost and gets the
+		# full treatment.
+		_decorate_ruin_block(root, piece_size, Vector3.ZERO, not has_upper)
+		if has_upper:
+			_decorate_ruin_block(root, upper_size, upper_offset, true)
 	else:
 		# Single debris chunk on top — random size + rotation, slightly
 		# darker shade. Adds vertical silhouette variation and breaks the
@@ -528,79 +1486,846 @@ func _spawn_terrain_piece(pos: Vector3, piece_size: Vector3, kind: String) -> vo
 		)
 		var chunk_mat := StandardMaterial3D.new()
 		chunk_mat.albedo_color = base_color.darkened(randf_range(0.05, 0.18))
+		chunk_mat.albedo_texture = SharedTextures.get_metal_wear_texture()
+		chunk_mat.uv1_offset = Vector3(randf(), randf(), 0.0)
+		chunk_mat.uv1_scale = Vector3(2.0, 2.0, 1.0)
 		chunk_mat.roughness = mat.roughness
 		chunk.material_override = chunk_mat
 		root.add_child(chunk)
 
 	# RVO obstacle so units steer around instead of grinding into the side.
-	# Radius is the larger horizontal half-extent + a small margin.
+	# Radius covers the FULL diagonal half-extent (sqrt(x²+z²)/2) plus a
+	# 1.2u margin — the previous max(x,z)/2 left the corners uncovered, so
+	# units routing diagonally past a long rectangle would catch on the
+	# corner and the stuck-rescue ladder would have to dig them out.
+	# Reuse `diag_half` computed at the top of the function for the
+	# blocked-footprint queue.
 	var obstacle := NavigationObstacle3D.new()
-	obstacle.radius = maxf(piece_size.x, piece_size.z) * 0.5 + 0.6
+	obstacle.radius = diag_half + 1.2
 	obstacle.height = piece_size.y
 	obstacle.avoidance_enabled = true
 	root.add_child(obstacle)
 
 
 func _setup_elevation() -> void:
-	# Foundry Belt elevation pass — the spec calls for a high-ground zone
-	# (V2 §"Map 1") and the map currently reads as a flat sheet. Three
-	# walkable rises at strategic positions: a central plateau between the
-	# mid deposits (the "high-ground zone"), one platform overlooking the
-	# back-door chokepoint, and one north of mid that gives the player a
-	# defensible push position on their side of the map.
-	#
-	# Heights are picked so units can step on/off via `agent_max_climb`
-	# (set to 0.7) — no rotated ramp geometry needed. Each piece is on
-	# layer 1 (walkable surface) so the navmesh bake parses it as nav-
-	# walkable rather than carving it as an obstacle.
-	#
-	# Avoid x∈[-3, 3], z∈[-3, 8] so player HQ + starting unit cluster
-	# stay clear; same on the AI side at z=-120.
-	var pieces: Array[Dictionary] = [
-		# Northern plateau (player-side mid).
-		{"pos": Vector3(0.0, 0.3, 25.0), "size": Vector3(18.0, 0.6, 12.0)},
-		# Southern plateau (AI-side mirror) — reduces the previous
-		# north-only asymmetry.
-		{"pos": Vector3(0.0, 0.3, -75.0), "size": Vector3(16.0, 0.6, 10.0)},
-		# East ridge near the back-door chokepoint.
-		{"pos": Vector3(70.0, 0.3, 0.0), "size": Vector3(8.0, 0.6, 14.0)},
-		# West ridge mirror near the new west back-door.
-		{"pos": Vector3(-70.0, 0.3, 0.0), "size": Vector3(8.0, 0.6, 14.0)},
+	if _is_ashplains():
+		_setup_elevation_ashplains()
+		return
+	_setup_elevation_foundry_belt()
+
+
+func _setup_elevation_foundry_belt() -> void:
+	# Bigger plateaus, wider ramps. Ramps cover the full width of the
+	# side they sit on — the top edge of the ramp is the same edge as
+	# the plateau's top, so they read as one continuous walkable surface
+	# rather than a separate piece sticking out. The plateau is also
+	# octagonal (corners cut) so the silhouette feels less rectilinear.
+	var plateaus: Array[Dictionary] = [
+		# Central plateau — the contested high ground. Larger footprint
+		# so a Bulwark squad can comfortably perch on it. Ramps N + S.
+		{"center": Vector3(0.0, 0.0, 25.0), "top": Vector2(28.0, 18.0),
+		 "height": 1.5, "ramps": ["N", "S"]},
+		# Southern (AI-side) plateau.
+		{"center": Vector3(0.0, 0.0, -75.0), "top": Vector2(24.0, 14.0),
+		 "height": 1.5, "ramps": ["S"]},
+		# East ridge — wider+longer, ramp on east side toward back-door.
+		{"center": Vector3(72.0, 0.0, 0.0), "top": Vector2(12.0, 22.0),
+		 "height": 1.5, "ramps": ["E"]},
+		# West ridge mirror.
+		{"center": Vector3(-72.0, 0.0, 0.0), "top": Vector2(12.0, 22.0),
+		 "height": 1.5, "ramps": ["W"]},
 	]
-	for piece: Dictionary in pieces:
-		_spawn_elevation_piece(piece["pos"] as Vector3, piece["size"] as Vector3)
+	for p: Dictionary in plateaus:
+		_spawn_walkable_plateau(
+			p["center"] as Vector3,
+			p["top"] as Vector2,
+			p["height"] as float,
+			p["ramps"] as Array,
+		)
 
 
-func _spawn_elevation_piece(pos: Vector3, piece_size: Vector3) -> void:
-	# Visual rise that physically blocks pathing — same collision treatment
-	# as terrain pieces (layer 4). Until the navmesh bake gets sorted out
-	# we can't make the top walkable, so for now these read as low-rise
-	# obstacles units route around. The high-ground combat bonus still
-	# applies to anyone who *does* end up at a higher Y (e.g. firing from
-	# a building roof later).
+func _setup_elevation_ashplains() -> void:
+	# Main ridge dominates the central plain — much wider than before so
+	# multiple squads can comfortably hold it. Three ramps (N + S + E)
+	# spread access points across both teams' approach lanes.
+	var plateaus: Array[Dictionary] = [
+		{"center": Vector3(0.0, 0.0, -8.0), "top": Vector2(90.0, 14.0),
+		 "height": 2.0, "ramps": ["N", "S", "E"]},
+		{"center": Vector3(0.0, 0.0, 38.0), "top": Vector2(28.0, 10.0),
+		 "height": 1.4, "ramps": ["N"]},
+	]
+	for p: Dictionary in plateaus:
+		_spawn_walkable_plateau(
+			p["center"] as Vector3,
+			p["top"] as Vector2,
+			p["height"] as float,
+			p["ramps"] as Array,
+		)
+
+
+func _spawn_walkable_plateau(center: Vector3, top_size: Vector2, height: float, ramp_sides: Array) -> void:
+	# Plateau body + ramp wedges. Ramps are EMBEDDED — their top edge
+	# spans the full width of the plateau side they're on, sharing the
+	# plateau's top corner positions. Visually the ramp reads as a
+	# natural extension of the plateau's surface, not a separate piece
+	# stuck on. Plateau silhouette is octagonal (corners cut) so it
+	# doesn't read as a perfect rectangle.
+	var hx: float = top_size.x * 0.5
+	var hz: float = top_size.y * 0.5
+
+	# Queue the plateau-body footprint as a blocked region so the
+	# ground triangulation cuts a hole here. Ramp footprints are queued
+	# inside `_spawn_plateau_ramp` after the per-side coords are known.
+	_pending_blocked_footprints.append(PackedVector2Array([
+		Vector2(center.x - hx, center.z - hz),
+		Vector2(center.x + hx, center.z - hz),
+		Vector2(center.x + hx, center.z + hz),
+		Vector2(center.x - hx, center.z + hz),
+	]))
+
 	var root := StaticBody3D.new()
 	root.collision_layer = 4
 	root.collision_mask = 0
-	root.position = pos
+	root.position = center
 	root.add_to_group("elevation")
 	add_child(root)
 
-	var shape := CollisionShape3D.new()
-	var box := BoxShape3D.new()
-	box.size = piece_size
-	shape.shape = box
-	root.add_child(shape)
+	# Two materials — same wear texture, two albedo shades. The top
+	# face uses the lighter tone (so it stands out against the ground);
+	# the sides and ramps use a noticeably darker variant so the
+	# vertical surfaces read as "rock face in shadow" against the lit
+	# top. Same texture on both keeps the surface character coherent.
+	#
+	# CULL_DISABLED — render both sides of every face so winding
+	# orientation never causes invisibility. Plateau geometry is small
+	# (≈64 triangles per plateau) so the 2× draw cost is trivial.
+	var mat_top := StandardMaterial3D.new()
+	mat_top.albedo_color = Color(0.18, 0.16, 0.13, 1.0)
+	mat_top.albedo_texture = SharedTextures.get_metal_wear_texture()
+	mat_top.uv1_scale = Vector3(3.5, 3.5, 1.0)
+	mat_top.roughness = 0.95
+	mat_top.cull_mode = BaseMaterial3D.CULL_DISABLED
+
+	var mat_side := StandardMaterial3D.new()
+	mat_side.albedo_color = Color(0.09, 0.08, 0.07, 1.0)
+	mat_side.albedo_texture = SharedTextures.get_metal_wear_texture()
+	mat_side.uv1_scale = Vector3(2.4, 2.4, 1.0)
+	mat_side.roughness = 0.95
+	mat_side.cull_mode = BaseMaterial3D.CULL_DISABLED
+
+	# --- Plateau body collision (single Box for the whole prism) ---
+	var box_col := CollisionShape3D.new()
+	var box_shape := BoxShape3D.new()
+	box_shape.size = Vector3(top_size.x, height, top_size.y)
+	box_col.shape = box_shape
+	box_col.position.y = height * 0.5
+	root.add_child(box_col)
+
+	# --- Plateau body visual: octagonal prism (cut corners) ---
+	# The 8 top corners trace an octagon by chamfering the rectangle's
+	# 4 corners by `corner_cut`. This breaks the perfectly-rectilinear
+	# silhouette without changing the collision footprint (collision
+	# stays the simpler Box, which is fine — the chamfer is small).
+	var corner_cut: float = minf(top_size.x, top_size.y) * 0.18
+	var oct_top: PackedVector3Array = _octagon_corners(top_size, corner_cut, height)
+	var oct_bot: PackedVector3Array = _octagon_corners(top_size, corner_cut, 0.0)
+
+	var body_mesh := _build_octagonal_prism_mesh(oct_top, oct_bot, mat_top, mat_side)
+	root.add_child(body_mesh)
+
+	# --- Ramps ---
+	# Ramp width is fixed at RAMP_WIDTH — wide enough for a Crawler
+	# (3.6u body + nav_agent radius 2.5u → needs ~5u clear) plus a bit
+	# of buffer for two units to pass / squad spread. The ramp is
+	# centered on each side, leaving the rest of that side as plateau
+	# wall, so high ground is still gated by a specific access lane
+	# rather than the whole edge being a slope.
+	const RAMP_WIDTH: float = 7.0
+	# Ramp run scales with plateau height — gentler slope on taller
+	# plateaus so collision climbing stays well under floor_max_angle
+	# (45°). At height 1.5 / run 6.5 the slope is ~13°; at height
+	# 2.0 / run 9.0 it's ~12.5°.
+	var run: float = maxf(height * 4.5, 6.5)
+
+	# --- Top nav polygons (CCW perimeter w/ ramp inserts → fan from center) ---
+	# The plateau-top perimeter walks the octagon corners CCW. For each
+	# side that has a ramp, we insert the ramp's two top-edge vertices
+	# inline so the fan triangle covering that segment shares an edge
+	# with the ramp's top — meaning the path planner sees them as one
+	# connected region instead of two disjoint islands.
+	var top_perimeter: PackedVector3Array = _plateau_top_perimeter_with_ramps(
+		top_size, corner_cut, height, ramp_sides, RAMP_WIDTH
+	)
+	var top_y: float = center.y + height
+	var top_center: Vector3 = Vector3(center.x, top_y, center.z)
+	# Plateau-top fan triangles. Winding is (top_center, b, a) — i.e.
+	# the perimeter walk is REVERSED — so the fan tri's edge between
+	# consecutive perimeter points goes (b → a). The ramp slope tri
+	# emits its top edge as (tA → tB) with the opposite direction, so
+	# the two share an edge with reversed indices and Godot's nav-mesh
+	# edge merger correctly identifies them as adjacent. The previous
+	# winding (top_center, a, b) put the fan tris and slope tris in
+	# the SAME direction, which produced the "more than 2 edges
+	# occupy same space" warnings and broke ramp connectivity.
+	for i: int in top_perimeter.size():
+		var a: Vector3 = top_perimeter[i] + Vector3(center.x, 0.0, center.z)
+		var b: Vector3 = top_perimeter[(i + 1) % top_perimeter.size()] + Vector3(center.x, 0.0, center.z)
+		_pending_nav_polys.append(PackedVector3Array([top_center, b, a]))
+
+	for side_var: Variant in ramp_sides:
+		var side: String = side_var as String
+		_spawn_plateau_ramp(center, top_size, height, side, run, RAMP_WIDTH, mat_side)
+
+	# No NavigationObstacle3D on plateaus — earlier we attached one
+	# sized to the diagonal half-extent (~17u for the central plateau)
+	# and the resulting RVO push field intercepted units approaching
+	# the ramp from far away, knocking them off the climb lane. The
+	# Box collision already physically blocks units at ground level,
+	# and the unit stuck-rescue ladder handles the rare case where a
+	# pathfinding query routes through the plateau wall.
+
+
+func _plateau_top_perimeter_with_ramps(top_size: Vector2, cut: float, height: float, ramp_sides: Array, ramp_width: float) -> PackedVector3Array:
+	## Walks the octagonal perimeter CCW. For each side that has a ramp,
+	## inserts the ramp's two top-edge endpoints inline so the fan
+	## triangle covering that segment shares an exact edge with the
+	## ramp's top — the path planner then sees them as one connected
+	## navigation surface. Without these insertions the plateau top fan
+	## and the ramp slope polys are separate islands and units stop at
+	## the seam.
+	var hx: float = top_size.x * 0.5
+	var hz: float = top_size.y * 0.5
+	var hw: float = ramp_width * 0.5
+	var has_n: bool = ramp_sides.has("N")
+	var has_s: bool = ramp_sides.has("S")
+	var has_e: bool = ramp_sides.has("E")
+	var has_w: bool = ramp_sides.has("W")
+	var verts := PackedVector3Array()
+	# Octagon walk CCW starting at SE chamfer top. Each octagon edge is
+	# chased; ramps embed in the four cardinal-side edges.
+	# 0: SE chamfer top
+	verts.append(Vector3(+hx, height, -hz + cut))
+	# 1: SE chamfer side (start of S edge)
+	verts.append(Vector3(+hx - cut, height, -hz))
+	if has_s:
+		verts.append(Vector3(+hw, height, -hz))
+		verts.append(Vector3(-hw, height, -hz))
+	# 2: SW chamfer side (end of S edge)
+	verts.append(Vector3(-hx + cut, height, -hz))
+	# 3: SW chamfer top (start of W edge)
+	verts.append(Vector3(-hx, height, -hz + cut))
+	if has_w:
+		verts.append(Vector3(-hx, height, -hw))
+		verts.append(Vector3(-hx, height, +hw))
+	# 4: NW chamfer bottom (end of W edge)
+	verts.append(Vector3(-hx, height, +hz - cut))
+	# 5: NW chamfer side (start of N edge)
+	verts.append(Vector3(-hx + cut, height, +hz))
+	if has_n:
+		verts.append(Vector3(-hw, height, +hz))
+		verts.append(Vector3(+hw, height, +hz))
+	# 6: NE chamfer side (end of N edge)
+	verts.append(Vector3(+hx - cut, height, +hz))
+	# 7: NE chamfer bottom (start of E edge)
+	verts.append(Vector3(+hx, height, +hz - cut))
+	if has_e:
+		verts.append(Vector3(+hx, height, +hw))
+		verts.append(Vector3(+hx, height, -hw))
+	# Wraps back to vertex 0 implicitly.
+	return verts
+
+
+func _octagon_corners(size: Vector2, cut: float, y: float) -> PackedVector3Array:
+	## Returns 8 vertices forming an octagon (rectangle with chamfered
+	## corners), going CCW starting from the +x / -z chamfer. Local
+	## coordinates centered on the origin.
+	var hx: float = size.x * 0.5
+	var hz: float = size.y * 0.5
+	return PackedVector3Array([
+		Vector3(+hx, y, -hz + cut),
+		Vector3(+hx - cut, y, -hz),
+		Vector3(-hx + cut, y, -hz),
+		Vector3(-hx, y, -hz + cut),
+		Vector3(-hx, y, +hz - cut),
+		Vector3(-hx + cut, y, +hz),
+		Vector3(+hx - cut, y, +hz),
+		Vector3(+hx, y, +hz - cut),
+	])
+
+
+func _build_octagonal_prism_mesh(oct_top: PackedVector3Array, oct_bot: PackedVector3Array, mat_top: StandardMaterial3D, mat_side: StandardMaterial3D) -> MeshInstance3D:
+	## Builds an 8-sided prism mesh from an octagon top + bottom. Two
+	## surfaces — top face uses `mat_top`, the 8 wall quads use
+	## `mat_side`. Splitting them lets the top read as the "lit upper
+	## face" and the walls as a darker, shadowed-rock variant.
+	var top_verts := PackedVector3Array()
+	var top_norms := PackedVector3Array()
+	var top_uvs := PackedVector2Array()
+	var side_verts := PackedVector3Array()
+	var side_norms := PackedVector3Array()
+	var side_uvs := PackedVector2Array()
+
+	# Top face — fan from local origin outward. The octagon vertex list
+	# walks the perimeter CW (looking from above), so we emit triangles
+	# as (center, c, b) instead of (center, b, c) to flip the winding
+	# back to CCW with normal pointing UP.
+	var top_y: float = oct_top[0].y
+	var top_center := Vector3(0, top_y, 0)
+	for i: int in oct_top.size():
+		var a: Vector3 = top_center
+		var b: Vector3 = oct_top[i]
+		var c: Vector3 = oct_top[(i + 1) % oct_top.size()]
+		var n: Vector3 = Vector3(0, 1, 0)
+		for v: Vector3 in [a, c, b]:
+			top_verts.append(v)
+			top_norms.append(n)
+		var w: int = oct_top.size()
+		var ang_b: float = TAU * float(i) / float(w)
+		var ang_c: float = TAU * float(i + 1) / float(w)
+		top_uvs.append(Vector2(0.5, 0.5))
+		top_uvs.append(Vector2(0.5 + cos(ang_c) * 0.5, 0.5 + sin(ang_c) * 0.5))
+		top_uvs.append(Vector2(0.5 + cos(ang_b) * 0.5, 0.5 + sin(ang_b) * 0.5))
+
+	# Wall quads — winding reversed so normals point outward.
+	for i: int in oct_top.size():
+		var t_a: Vector3 = oct_top[i]
+		var t_b: Vector3 = oct_top[(i + 1) % oct_top.size()]
+		var b_a: Vector3 = oct_bot[i]
+		var b_b: Vector3 = oct_bot[(i + 1) % oct_bot.size()]
+		var seg_len: float = (t_a - t_b).length()
+		var height: float = t_a.y - b_a.y
+		var uv_aspect: Vector2 = Vector2(seg_len * 0.4, height * 0.4)
+		# Two triangles per wall: (b_a, b_b, t_b) and (b_a, t_b, t_a).
+		var n: Vector3 = (b_b - b_a).cross(t_b - b_a).normalized()
+		for v: Vector3 in [b_a, b_b, t_b, b_a, t_b, t_a]:
+			side_verts.append(v)
+			side_norms.append(n)
+		side_uvs.append(Vector2(0, 0))
+		side_uvs.append(Vector2(uv_aspect.x, 0))
+		side_uvs.append(Vector2(uv_aspect.x, uv_aspect.y))
+		side_uvs.append(Vector2(0, 0))
+		side_uvs.append(Vector2(uv_aspect.x, uv_aspect.y))
+		side_uvs.append(Vector2(0, uv_aspect.y))
+
+	var arr_mesh := ArrayMesh.new()
+	# Surface 0 = top
+	var top_arrays := []
+	top_arrays.resize(Mesh.ARRAY_MAX)
+	top_arrays[Mesh.ARRAY_VERTEX] = top_verts
+	top_arrays[Mesh.ARRAY_NORMAL] = top_norms
+	top_arrays[Mesh.ARRAY_TEX_UV] = top_uvs
+	arr_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, top_arrays)
+	# Surface 1 = sides
+	var side_arrays := []
+	side_arrays.resize(Mesh.ARRAY_MAX)
+	side_arrays[Mesh.ARRAY_VERTEX] = side_verts
+	side_arrays[Mesh.ARRAY_NORMAL] = side_norms
+	side_arrays[Mesh.ARRAY_TEX_UV] = side_uvs
+	arr_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, side_arrays)
 
 	var mesh_inst := MeshInstance3D.new()
-	var box_mesh := BoxMesh.new()
-	box_mesh.size = piece_size
-	mesh_inst.mesh = box_mesh
-	var mat := StandardMaterial3D.new()
-	# Slightly lighter than the ground albedo so the rise reads visually.
-	mat.albedo_color = Color(0.22, 0.21, 0.19, 1.0)
-	mat.roughness = 0.92
-	mesh_inst.material_override = mat
+	mesh_inst.mesh = arr_mesh
+	mesh_inst.set_surface_override_material(0, mat_top)
+	mesh_inst.set_surface_override_material(1, mat_side)
+	return mesh_inst
+
+
+func _spawn_plateau_ramp(plateau_center: Vector3, top_size: Vector2, height: float, side: String, run: float, width: float, share_mat: StandardMaterial3D) -> void:
+	# Wedge ramp embedded into the plateau side. Ramp's top edge spans
+	# the full width of the plateau side (sharing top-corner positions
+	# with the plateau body), so the ramp surface reads as one continuous
+	# walkable surface with the plateau top.
+	var hx: float = top_size.x * 0.5
+	var hz: float = top_size.y * 0.5
+
+	# Ramp top edge sits flush against the plateau wall and is centered
+	# along the side at a fixed `width`. The plateau wall continues to
+	# either side of the ramp — units can only climb up via the central
+	# slot, not anywhere along the edge.
+	var hw: float = width * 0.5
+	var tA: Vector3
+	var tB: Vector3
+	var bA: Vector3
+	var bB: Vector3
+	match side:
+		"N":  # ramp on +z side, centered on x
+			tA = Vector3(-hw, height, hz)
+			tB = Vector3(+hw, height, hz)
+			bA = Vector3(-hw, 0.0, hz + run)
+			bB = Vector3(+hw, 0.0, hz + run)
+		"S":  # ramp on -z side, centered on x
+			tA = Vector3(+hw, height, -hz)
+			tB = Vector3(-hw, height, -hz)
+			bA = Vector3(+hw, 0.0, -hz - run)
+			bB = Vector3(-hw, 0.0, -hz - run)
+		"E":  # ramp on +x side, centered on z
+			tA = Vector3(hx, height, +hw)
+			tB = Vector3(hx, height, -hw)
+			bA = Vector3(hx + run, 0.0, +hw)
+			bB = Vector3(hx + run, 0.0, -hw)
+		_:    # "W" — ramp on -x side, centered on z
+			tA = Vector3(-hx, height, -hw)
+			tB = Vector3(-hx, height, +hw)
+			bA = Vector3(-hx - run, 0.0, -hw)
+			bB = Vector3(-hx - run, 0.0, +hw)
+	var uA: Vector3 = Vector3(tA.x, 0.0, tA.z)
+	var uB: Vector3 = Vector3(tB.x, 0.0, tB.z)
+
+	# Queue the ramp footprint as a blocked region so the ground
+	# triangulation cuts a hole at exactly the ramp's foot. The ramp's
+	# bottom-edge endpoints (bA, bB) become ground polygon vertices, so
+	# the resulting ground triangles share an edge with the ramp's
+	# bottom — ramp ↔ ground are connected for path planning.
+	# Footprint vertices are CCW in world space and slightly inset on
+	# the plateau-side edge so the polygon doesn't intersect the
+	# plateau body footprint (which would break clip_polygons).
+	var w_uA: Vector2 = Vector2(plateau_center.x + uA.x, plateau_center.z + uA.z)
+	var w_uB: Vector2 = Vector2(plateau_center.x + uB.x, plateau_center.z + uB.z)
+	var w_bA: Vector2 = Vector2(plateau_center.x + bA.x, plateau_center.z + bA.z)
+	var w_bB: Vector2 = Vector2(plateau_center.x + bB.x, plateau_center.z + bB.z)
+	# Order so the polygon winds CCW. tA→tB matches one direction along
+	# the plateau side; bA→bB extends outward. The CCW ordering depends
+	# on which side the ramp is on — easiest is to use a known-good fan.
+	_pending_blocked_footprints.append(PackedVector2Array([w_uA, w_bA, w_bB, w_uB]))
+
+	# Mark ramp-bottom endpoints as ground vertices so the
+	# triangulation puts a polygon edge there even if the clip
+	# operation is clipped slightly differently.
+	_pending_ground_vertex_marks.append(w_bA)
+	_pending_ground_vertex_marks.append(w_bB)
+
+	# Approach-clearance rect — the ramp footprint plus an extra
+	# OUTWARD margin so terrain spawn keeps the ramp's bottom
+	# approach lane free. Without this, a rock or ruin block can
+	# sit right where the ramp meets the ground and the ramp
+	# becomes effectively unreachable.
+	const RAMP_APPROACH_MARGIN: float = 4.0
+	var ramp_min_x: float = minf(w_uA.x, minf(w_bA.x, minf(w_bB.x, w_uB.x))) - RAMP_APPROACH_MARGIN
+	var ramp_max_x: float = maxf(w_uA.x, maxf(w_bA.x, maxf(w_bB.x, w_uB.x))) + RAMP_APPROACH_MARGIN
+	var ramp_min_z: float = minf(w_uA.y, minf(w_bA.y, minf(w_bB.y, w_uB.y))) - RAMP_APPROACH_MARGIN
+	var ramp_max_z: float = maxf(w_uA.y, maxf(w_bA.y, maxf(w_bB.y, w_uB.y))) + RAMP_APPROACH_MARGIN
+	_pending_ramp_clearance.append(Rect2(
+		Vector2(ramp_min_x, ramp_min_z),
+		Vector2(ramp_max_x - ramp_min_x, ramp_max_z - ramp_min_z),
+	))
+
+	var root := StaticBody3D.new()
+	root.collision_layer = 4
+	root.collision_mask = 0
+	root.position = plateau_center
+	root.add_to_group("elevation")
+	add_child(root)
+
+	# Mesh — sloped top + two side triangles + underside. UVs on every
+	# face so the wear texture renders correctly (without UVs the
+	# sampler returned (0,0) which produced flat black slabs).
+	var verts := PackedVector3Array()
+	var norms := PackedVector3Array()
+	var uvs := PackedVector2Array()
+
+	var push_tri := func(a: Vector3, b: Vector3, c: Vector3, uv_a: Vector2, uv_b: Vector2, uv_c: Vector2) -> void:
+		var n: Vector3 = (b - a).cross(c - a).normalized()
+		verts.append(a); norms.append(n); uvs.append(uv_a)
+		verts.append(b); norms.append(n); uvs.append(uv_b)
+		verts.append(c); norms.append(n); uvs.append(uv_c)
+
+	# Sloped top — UV: spans the slope length × the ramp width, scaled
+	# so the wear pattern matches the body's cell size. Argument order
+	# below is winding-corrected so the slope's normal points UP/OUT,
+	# not into the wedge body. Same correction on the side caps and
+	# underside.
+	var slope_len: float = sqrt(run * run + height * height)
+	var uv_w: float = width * 0.4
+	var uv_l: float = slope_len * 0.4
+	push_tri.call(tA, bB, tB, Vector2(0, 0), Vector2(uv_w, uv_l), Vector2(uv_w, 0))
+	push_tri.call(tA, bA, bB, Vector2(0, 0), Vector2(0, uv_l), Vector2(uv_w, uv_l))
+	# Two vertical side triangles capping the wedge ends.
+	var uv_s_l: float = run * 0.4
+	var uv_s_h: float = height * 0.4
+	push_tri.call(tA, uA, bA, Vector2(0, uv_s_h), Vector2(0, 0), Vector2(uv_s_l, 0))
+	push_tri.call(tB, bB, uB, Vector2(0, uv_s_h), Vector2(uv_s_l, 0), Vector2(0, 0))
+	# Underside (downward face).
+	push_tri.call(uA, bB, bA, Vector2(0, 0), Vector2(uv_s_l, uv_w), Vector2(uv_s_l, 0))
+	push_tri.call(uA, uB, bB, Vector2(0, 0), Vector2(0, uv_w), Vector2(uv_s_l, uv_w))
+
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = norms
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	var arr_mesh := ArrayMesh.new()
+	arr_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	var mesh_inst := MeshInstance3D.new()
+	mesh_inst.mesh = arr_mesh
+	mesh_inst.material_override = share_mat
 	root.add_child(mesh_inst)
+
+	# Collision — convex hull from all 6 unique vertices.
+	var col := CollisionShape3D.new()
+	var hull := ConvexPolygonShape3D.new()
+	hull.points = PackedVector3Array([tA, tB, bA, bB, uA, uB])
+	col.shape = hull
+	root.add_child(col)
+
+	# Navmesh — sloped walking surface as 2 tris in world space. Vertices
+	# tA/tB sit exactly on the plateau top edge so the path planner sees
+	# this slope as connected to the plateau top fan.
+	var to_world := func(v: Vector3) -> Vector3: return v + plateau_center
+	_pending_nav_polys.append(PackedVector3Array([to_world.call(tA), to_world.call(tB), to_world.call(bB)]))
+	_pending_nav_polys.append(PackedVector3Array([to_world.call(tA), to_world.call(bB), to_world.call(bA)]))
+
+	# Backstop NavigationLink3D — connects the slope's TOP-EDGE midpoint
+	# to its BOTTOM-EDGE midpoint. Both endpoints sit ON valid navmesh
+	# polygons: the top edge is shared with the plateau-top fan, the
+	# bottom edge is shared with the ground rect just past the ramp.
+	# (The previous version had the top endpoint at plateau-center, which
+	# is mid-air for a ground unit on the wrong side of the plateau wall.
+	# This version anchors both endpoints at the ramp itself, so a unit
+	# instructed to walk to the link endpoint physically reaches it via
+	# normal walking + slope collision-climb.)
+	#
+	# The link is needed because Godot's edge merger sporadically fails
+	# to connect the slope poly to the ground rect even with dedup —
+	# manifests as "It's not expect to not find the most reachable
+	# polygons" warnings. With an explicit link the path planner has a
+	# guaranteed traversable route from ground to plateau top.
+	var slope_bottom_world: Vector3 = ((bA + bB) * 0.5) + plateau_center
+	var slope_top_world: Vector3 = ((tA + tB) * 0.5) + plateau_center
+	var link := NavigationLink3D.new()
+	link.start_position = slope_top_world
+	link.end_position = slope_bottom_world
+	link.bidirectional = true
+	link.enabled = true
+	add_child(link)
+
+
+## Cached procedural alpha mask for ground patches. Generated once at first
+## use and shared across every patch material so the same blob silhouette
+## tints differently per patch instead of repeating identical squares.
+static var _patch_alpha_tex: Texture2D = null
+
+
+func _setup_ground_patches() -> void:
+	# Two layers stacked:
+	#   1. Large biome zones (40-70u) that tint the ground a different
+	#      base hue with soft, irregular edges — slag-soot fields, sand
+	#      drifts, dried-mud zones. These give the map distinct regions
+	#      with gradual transitions instead of one uniform tone.
+	#   2. Small detail patches (3-12u) scattered throughout — soot blots,
+	#      sand smears, occasional reflective oil spills.
+	#
+	# Every patch reuses a single procedural alpha-mask texture: an
+	# irregular blob with a soft radial fade to alpha 0 at the edges. This
+	# replaces the previous mono-color rectangular planes (which read as
+	# obvious squares against the noise ground) with rounded organic
+	# shapes that blend into whatever's underneath them.
+
+	# Biome zones — placed off the corners + a couple in mid-flank gaps so
+	# they don't crowd the deposits or the contested center. Mirrored
+	# across z=0 so neither team gets a different look. Foundry Belt
+	# uses an industrial palette (soot / sand / dried mud); Ashplains
+	# leans into pale-ash drift fields with a darker volcanic scar to
+	# break up the otherwise uniform plains.
+	var biomes: Array[Dictionary]
+	if _is_ashplains():
+		biomes = [
+			# Pale-ash drift zones either side of the central ridge —
+			# wash out a wide swath of the open ground so it reads as
+			# "ash plains", not "grey field".
+			{"pos": Vector3(0.0, 0.025, 60.0), "size": 90.0, "tint": Color(0.42, 0.36, 0.27, 0.45), "rough": 1.0},
+			{"pos": Vector3(0.0, 0.025, -60.0), "size": 90.0, "tint": Color(0.42, 0.36, 0.27, 0.45), "rough": 1.0},
+			# Volcanic scar that crosses the central deposit area —
+			# darker than the rest, marks where the heaviest fighting
+			# tends to happen.
+			{"pos": Vector3(0.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.10, 0.08, 0.07, 0.55), "rough": 1.0},
+			# Far-flank dust patches.
+			{"pos": Vector3(105.0, 0.025, 0.0), "size": 45.0, "tint": Color(0.36, 0.30, 0.20, 0.4), "rough": 1.0},
+			{"pos": Vector3(-105.0, 0.025, 0.0), "size": 45.0, "tint": Color(0.36, 0.30, 0.20, 0.4), "rough": 1.0},
+		]
+	else:
+		biomes = [
+			# Soot scar across the contested mid (ash-grey).
+			{"pos": Vector3(0.0, 0.025, 0.0), "size": 70.0, "tint": Color(0.09, 0.09, 0.10, 0.55), "rough": 1.0},
+			# Sand drift on the east flank (warm ochre).
+			{"pos": Vector3(95.0, 0.025, 35.0), "size": 55.0, "tint": Color(0.32, 0.26, 0.18, 0.50), "rough": 0.95},
+			# Sand drift on the west flank (mirror).
+			{"pos": Vector3(-95.0, 0.025, -35.0), "size": 55.0, "tint": Color(0.30, 0.24, 0.17, 0.50), "rough": 0.95},
+			# Dried-mud zones near the back-doors (slate-tan).
+			{"pos": Vector3(70.0, 0.025, -75.0), "size": 50.0, "tint": Color(0.21, 0.17, 0.13, 0.55), "rough": 0.95},
+			{"pos": Vector3(-70.0, 0.025, 75.0), "size": 50.0, "tint": Color(0.21, 0.17, 0.13, 0.55), "rough": 0.95},
+		]
+	for b: Dictionary in biomes:
+		_spawn_soft_patch(
+			b["pos"] as Vector3,
+			b["size"] as float,
+			b["tint"] as Color,
+			b["rough"] as float,
+			false,
+		)
+
+	# Small detail patches — keep the count modest so the per-patch
+	# transparency cost stays bounded. ~30 with soft edges reads denser
+	# than 60 with hard edges did.
+	const DETAIL_COUNT: int = 32
+	const MAP_HALF: float = 135.0
+	for i: int in DETAIL_COUNT:
+		var pos := Vector3(
+			randf_range(-MAP_HALF, MAP_HALF),
+			0.03,
+			randf_range(-MAP_HALF, MAP_HALF),
+		)
+		# Skip the HQ pads.
+		if absf(pos.x) < 12.0 and absf(pos.z) > 95.0:
+			continue
+		var roll: float = randf()
+		if roll < 0.55:
+			# Soot blot.
+			_spawn_soft_patch(pos, randf_range(5.0, 10.0), Color(0.05, 0.05, 0.05, randf_range(0.55, 0.8)), 1.0, false)
+		elif roll < 0.92:
+			# Sand smear.
+			_spawn_soft_patch(pos, randf_range(4.5, 8.5), Color(0.34, 0.27, 0.18, randf_range(0.45, 0.7)), 0.95, false)
+		else:
+			# Oil spill — gets its own multi-blob spawn so the silhouette
+			# reads as an irregular puddle, not a single-disc patch.
+			_spawn_oil_spill(pos)
+
+
+func _spawn_soft_patch(pos: Vector3, base_size: float, tint: Color, roughness: float, oil: bool) -> void:
+	# Soft-edged organic patch built from a triangle-fan ArrayMesh with
+	# vertex-color alpha (1 at center → 0 at perimeter). The fade is
+	# entirely driven by per-vertex interpolation, so we don't depend on
+	# transparency-texture sampling working correctly across drivers
+	# (which was the bug producing solid black rectangles in earlier
+	# attempts that used a procedural alpha texture).
+	var patch := MeshInstance3D.new()
+	patch.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var x_scale: float = randf_range(0.85, 1.25)
+	var z_scale: float = randf_range(0.85, 1.25)
+	patch.mesh = _build_soft_blob_mesh(base_size * 0.5, x_scale, z_scale)
+	patch.position = pos
+	patch.rotation.y = randf_range(0.0, TAU)
+
+	var mat := StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = tint
+	# Vertex color carries the alpha falloff; multiplied with albedo_color
+	# this gives `tint` at the center fading smoothly to fully transparent
+	# at the blob edge.
+	mat.vertex_color_use_as_albedo = true
+	mat.roughness = roughness
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED if oil else BaseMaterial3D.SHADING_MODE_PER_PIXEL
+	if oil:
+		# Kept for backwards-compat (the recommended path is now
+		# `_spawn_oil_spill`). Subtle emission to fake the wet glint.
+		mat.emission_enabled = true
+		mat.emission = Color(0.18, 0.12, 0.22, 1.0)
+		mat.emission_energy_multiplier = 0.35
+
+	patch.material_override = mat
+	add_child(patch)
+
+
+func _build_soft_blob_mesh(base_radius: float, x_scale: float, z_scale: float) -> ArrayMesh:
+	# Triangle-fan disc with `BLOB_VERTS` perimeter vertices. Each perimeter
+	# vertex gets a small radial noise offset so the silhouette is
+	# irregular (slightly off-circle). Center vertex has alpha = 1.0,
+	# perimeter vertices have alpha = 0.0 — the rasteriser interpolates
+	# between them, producing the soft fade.
+	const BLOB_VERTS: int = 24
+	var verts := PackedVector3Array()
+	var colors := PackedColorArray()
+	var uvs := PackedVector2Array()
+	# Center vertex, full alpha, UV at (0.5, 0.5).
+	verts.append(Vector3.ZERO)
+	colors.append(Color(1, 1, 1, 1))
+	uvs.append(Vector2(0.5, 0.5))
+	for i: int in BLOB_VERTS:
+		var ang: float = float(i) / float(BLOB_VERTS) * TAU
+		var radius_jitter: float = randf_range(0.85, 1.18)
+		var rx: float = cos(ang) * base_radius * x_scale * radius_jitter
+		var rz: float = sin(ang) * base_radius * z_scale * radius_jitter
+		verts.append(Vector3(rx, 0.0, rz))
+		colors.append(Color(1, 1, 1, 0))
+		# UV maps perimeter to a unit circle in [0,1] space — gives any
+		# texture sampled on the blob a natural radial layout (centered
+		# detail, perimeter is the texture's edge).
+		uvs.append(Vector2(0.5 + cos(ang) * 0.5, 0.5 + sin(ang) * 0.5))
+	# Indices — fan connecting center (0) to each perimeter pair.
+	var indices := PackedInt32Array()
+	for i: int in BLOB_VERTS:
+		var a: int = 1 + i
+		var b: int = 1 + ((i + 1) % BLOB_VERTS)
+		indices.append(0)
+		indices.append(b)
+		indices.append(a)
+
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_COLOR] = colors
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_INDEX] = indices
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
+
+
+func _spawn_oil_spill(center: Vector3) -> void:
+	# An oil spill is rendered as 2-4 overlapping elongated blobs at
+	# slightly offset positions and rotations. Each blob is irregular
+	# (random aspect ratio 0.55-1.8) so the combined silhouette reads as
+	# a real puddle that's seeped into uneven ground rather than a single
+	# round disc.
+	#
+	# We deliberately don't use `metallic` because StandardMaterial3D's
+	# transparent-metallic path can't sample reflections during the
+	# alpha-blend pass and the test_arena environment is too dark for
+	# real reflections anyway. Instead the wet/glossy read comes from
+	# very low roughness (catches direct-light specular) plus a subtle
+	# violet-tinged emission that gives the puddle the "iridescent oil
+	# sheen" look in any lighting.
+	var blob_count: int = randi_range(2, 4)
+	var oil_tex: Texture2D = _get_oil_sheen_tex()
+	for i: int in blob_count:
+		var blob := MeshInstance3D.new()
+		blob.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var base_size: float = randf_range(2.6, 4.5)
+		# Aggressive aspect ratio jitter so each blob is an oblong, not a
+		# circle — adjacent oblongs at different rotations form an
+		# irregular outline.
+		var aspect: float = randf_range(0.55, 1.8)
+		# Same vertex-alpha blob mesh the soft patches use, so the oil
+		# silhouette fades to transparent at the edges and the texture
+		# shows through cleanly without depending on transparency-mode
+		# texture alpha sampling.
+		blob.mesh = _build_soft_blob_mesh(base_size * 0.5, aspect, 1.0 / aspect)
+		# Small per-blob offset so they overlap rather than stack at
+		# identical positions. y stays at 0.04 so all blobs sit at the
+		# same ground level and don't z-fight against each other.
+		var offset := Vector3(randf_range(-1.2, 1.2), 0.04, randf_range(-1.2, 1.2))
+		blob.position = center + offset
+		blob.rotation.y = randf_range(0.0, TAU)
+
+		var mat := StandardMaterial3D.new()
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.vertex_color_use_as_albedo = true
+		# Slightly varied dark base — pure-black blobs read as holes;
+		# adding a touch of violet keeps them looking like fluid. Vertex
+		# color provides the alpha falloff; tint multiplies the iridescent
+		# texture to bias it toward the dark-fluid end of the gradient.
+		var base: Color = Color(
+			randf_range(0.04, 0.07),
+			randf_range(0.03, 0.05),
+			randf_range(0.05, 0.09),
+			1.0,
+		)
+		mat.albedo_color = base
+		mat.albedo_texture = oil_tex
+		mat.roughness = 0.18
+		mat.metallic = 0.0
+		# Iridescent sheen — emission energy is low but the cool tint
+		# breaks the monotonous dark and reads as the "rainbow" you get
+		# off a real oil puddle.
+		mat.emission_enabled = true
+		mat.emission = Color(0.22, 0.14, 0.30, 1.0)
+		mat.emission_energy_multiplier = 0.4
+
+		blob.material_override = mat
+		add_child(blob)
+
+
+## Procedural texture used for oil-spill blobs. RGB carries faint iridescent
+## streaks (cool blues / violets) over a dark base; alpha is the same kind
+## of soft radial blob mask the other patches use, but with stronger noise
+## perturbation so the silhouette is more obviously irregular.
+static var _oil_sheen_tex: Texture2D = null
+
+
+func _get_oil_sheen_tex() -> Texture2D:
+	if _oil_sheen_tex:
+		return _oil_sheen_tex
+	const TEX_SIZE: int = 256
+	var img := Image.create(TEX_SIZE, TEX_SIZE, false, Image.FORMAT_RGBA8)
+	var shape_noise := FastNoiseLite.new()
+	shape_noise.seed = 41
+	shape_noise.frequency = 0.025
+	shape_noise.fractal_octaves = 4
+	var sheen_noise := FastNoiseLite.new()
+	sheen_noise.seed = 73
+	sheen_noise.frequency = 0.04
+	sheen_noise.fractal_octaves = 3
+	var center: Vector2 = Vector2(TEX_SIZE * 0.5, TEX_SIZE * 0.5)
+	var max_r: float = TEX_SIZE * 0.5
+	for y: int in TEX_SIZE:
+		for x: int in TEX_SIZE:
+			var dx: float = float(x) - center.x
+			var dy: float = float(y) - center.y
+			# Strong noise perturbation on the radius so the blob outline
+			# is noticeably non-circular.
+			var d: float = sqrt(dx * dx + dy * dy) / max_r
+			d += shape_noise.get_noise_2d(float(x), float(y)) * 0.32
+			var t: float = clampf((d - 0.3) / 0.65, 0.0, 1.0)
+			var alpha: float = 1.0 - (t * t * (3.0 - 2.0 * t))
+
+			# Iridescent streaks. Sheen noise drives a hue offset
+			# between cold blue (low) and warm amber (high) over the
+			# base dark color. Streaks are thin so most of the puddle
+			# still reads as dark fluid.
+			var s: float = sheen_noise.get_noise_2d(float(x), float(y)) * 0.5 + 0.5
+			var base := Color(0.06, 0.045, 0.07)
+			var streak: Color
+			if s < 0.45:
+				streak = Color(0.10, 0.10, 0.22)  # cool blue
+			elif s > 0.7:
+				streak = Color(0.20, 0.14, 0.05)  # warm amber
+			else:
+				streak = base
+			var rgb: Color = base.lerp(streak, clampf(absf(s - 0.5) * 2.0, 0.0, 1.0))
+			img.set_pixel(x, y, Color(rgb.r, rgb.g, rgb.b, alpha))
+	img.generate_mipmaps()
+	_oil_sheen_tex = ImageTexture.create_from_image(img)
+	return _oil_sheen_tex
+
+
+func _get_patch_alpha_tex() -> Texture2D:
+	## Lazily build a white-RGB / radial-noise-alpha image and cache it.
+	## The alpha channel is a soft radial falloff perturbed by low-
+	## frequency noise so the patch silhouette is irregular and the
+	## edges fade gracefully into the ground beneath. Generated once per
+	## process; shared across every patch material.
+	##
+	## Uses FORMAT_RGBA8 (not LA8) — StandardMaterial3D's albedo path
+	## expects RGBA, and LA8 was producing opaque dark rectangles on
+	## some hardware because the alpha channel wasn't sampled correctly.
+	if _patch_alpha_tex:
+		return _patch_alpha_tex
+	const TEX_SIZE: int = 256
+	var img := Image.create(TEX_SIZE, TEX_SIZE, false, Image.FORMAT_RGBA8)
+	var noise := FastNoiseLite.new()
+	noise.seed = 17
+	noise.frequency = 0.02
+	noise.fractal_octaves = 3
+	var center: Vector2 = Vector2(TEX_SIZE * 0.5, TEX_SIZE * 0.5)
+	var max_r: float = TEX_SIZE * 0.5
+	for y: int in TEX_SIZE:
+		for x: int in TEX_SIZE:
+			var dx: float = float(x) - center.x
+			var dy: float = float(y) - center.y
+			var d: float = sqrt(dx * dx + dy * dy) / max_r
+			# Perturb the radius with noise so the silhouette isn't a
+			# perfect circle.
+			d += noise.get_noise_2d(float(x), float(y)) * 0.22
+			# Smooth fade: opaque inside ~0.35 of the radius, fully
+			# transparent past 0.95.
+			var t: float = clampf((d - 0.35) / 0.6, 0.0, 1.0)
+			var alpha: float = 1.0 - (t * t * (3.0 - 2.0 * t))
+			img.set_pixel(x, y, Color(1.0, 1.0, 1.0, alpha))
+	# Mipmaps so the texture samples cleanly when patches are seen at
+	# steep angles or far distances.
+	img.generate_mipmaps()
+	var tex := ImageTexture.create_from_image(img)
+	_patch_alpha_tex = tex
+	return _patch_alpha_tex
 
 
 func _setup_skyline_features() -> void:
@@ -612,23 +2337,45 @@ func _setup_skyline_features() -> void:
 	# Positions are off the central battle lanes (deposits / chokepoints
 	# are still clear) and skewed toward the edges so they fill empty
 	# corners rather than block routing.
-	var pieces: Array[Dictionary] = [
-		# Pair of refinery stacks flanking the apex wreck.
-		{"pos": Vector3(20.0, 0.0, -45.0), "kind": "stack", "height": 8.5},
-		{"pos": Vector3(-22.0, 0.0, -45.0), "kind": "stack", "height": 7.5},
-		# Broken tower north-east of the player base.
-		{"pos": Vector3(80.0, 0.0, 90.0), "kind": "tower", "height": 6.5},
-		# Mirror near the AI base.
-		{"pos": Vector3(-80.0, 0.0, -90.0), "kind": "tower", "height": 6.0},
-		# Chimney cluster at the deep east edge.
-		{"pos": Vector3(125.0, 0.0, 30.0), "kind": "chimneys", "height": 7.0},
-		{"pos": Vector3(125.0, 0.0, -30.0), "kind": "chimneys", "height": 7.5},
-		# Smaller pylons along the long flanks (visual bookends).
-		{"pos": Vector3(105.0, 0.0, 75.0), "kind": "pylon", "height": 5.5},
-		{"pos": Vector3(-105.0, 0.0, 75.0), "kind": "pylon", "height": 5.0},
-		{"pos": Vector3(105.0, 0.0, -75.0), "kind": "pylon", "height": 5.5},
-		{"pos": Vector3(-105.0, 0.0, -75.0), "kind": "pylon", "height": 5.0},
-	]
+	var pieces: Array[Dictionary]
+	if _is_ashplains():
+		# Ashplains is meant to FEEL open and exposed. Skyline features
+		# are pushed to the very edges — distant silhouettes that frame
+		# the map without breaking up the open central plain.
+		pieces = [
+			# Far-corner pylons (just visual bookends, way out at the
+			# camera bound).
+			{"pos": Vector3(125.0, 0.0, 110.0), "kind": "pylon", "height": 6.5},
+			{"pos": Vector3(-125.0, 0.0, 110.0), "kind": "pylon", "height": 6.5},
+			{"pos": Vector3(125.0, 0.0, -110.0), "kind": "pylon", "height": 6.5},
+			{"pos": Vector3(-125.0, 0.0, -110.0), "kind": "pylon", "height": 6.5},
+			# A pair of broken towers on the deep east + west edges so
+			# the long sightline isn't completely empty.
+			{"pos": Vector3(135.0, 0.0, 0.0), "kind": "tower", "height": 7.0},
+			{"pos": Vector3(-135.0, 0.0, 0.0), "kind": "tower", "height": 7.0},
+			# A single chimney cluster in the back-far-corner (only one;
+			# Ashplains intentionally has very little "stuff" to look at).
+			{"pos": Vector3(0.0, 0.0, 130.0), "kind": "chimneys", "height": 8.5},
+			{"pos": Vector3(0.0, 0.0, -130.0), "kind": "chimneys", "height": 8.5},
+		]
+	else:
+		pieces = [
+			# Pair of refinery stacks flanking the apex wreck.
+			{"pos": Vector3(20.0, 0.0, -45.0), "kind": "stack", "height": 8.5},
+			{"pos": Vector3(-22.0, 0.0, -45.0), "kind": "stack", "height": 7.5},
+			# Broken tower north-east of the player base.
+			{"pos": Vector3(80.0, 0.0, 90.0), "kind": "tower", "height": 6.5},
+			# Mirror near the AI base.
+			{"pos": Vector3(-80.0, 0.0, -90.0), "kind": "tower", "height": 6.0},
+			# Chimney cluster at the deep east edge.
+			{"pos": Vector3(125.0, 0.0, 30.0), "kind": "chimneys", "height": 7.0},
+			{"pos": Vector3(125.0, 0.0, -30.0), "kind": "chimneys", "height": 7.5},
+			# Smaller pylons along the long flanks (visual bookends).
+			{"pos": Vector3(105.0, 0.0, 75.0), "kind": "pylon", "height": 5.5},
+			{"pos": Vector3(-105.0, 0.0, 75.0), "kind": "pylon", "height": 5.0},
+			{"pos": Vector3(105.0, 0.0, -75.0), "kind": "pylon", "height": 5.5},
+			{"pos": Vector3(-105.0, 0.0, -75.0), "kind": "pylon", "height": 5.0},
+		]
 	for piece: Dictionary in pieces:
 		_spawn_skyline_feature(
 			piece["pos"] as Vector3,
@@ -697,6 +2444,9 @@ func _build_skyline_stack(root: Node3D, color: Color, height: float) -> void:
 	base.position.y = height * 0.09
 	var base_mat := StandardMaterial3D.new()
 	base_mat.albedo_color = color.darkened(0.15)
+	base_mat.albedo_texture = SharedTextures.get_metal_wear_texture()
+	base_mat.uv1_offset = Vector3(randf(), randf(), 0.0)
+	base_mat.uv1_scale = Vector3(1.8, 1.8, 1.0)
 	base_mat.roughness = 0.95
 	base.material_override = base_mat
 	root.add_child(base)
@@ -709,6 +2459,9 @@ func _build_skyline_stack(root: Node3D, color: Color, height: float) -> void:
 	column.position.y = height * 0.18 + column_cyl.height * 0.5
 	var col_mat := StandardMaterial3D.new()
 	col_mat.albedo_color = color
+	col_mat.albedo_texture = SharedTextures.get_metal_wear_texture()
+	col_mat.uv1_offset = Vector3(randf(), randf(), 0.0)
+	col_mat.uv1_scale = Vector3(1.5, 3.0, 1.0)
 	col_mat.roughness = 0.92
 	column.material_override = col_mat
 	root.add_child(column)
@@ -739,6 +2492,9 @@ func _build_skyline_tower(root: Node3D, color: Color, height: float) -> void:
 	trunk.position.y = height * 0.3
 	var trunk_mat := StandardMaterial3D.new()
 	trunk_mat.albedo_color = color
+	trunk_mat.albedo_texture = SharedTextures.get_metal_wear_texture()
+	trunk_mat.uv1_offset = Vector3(randf(), randf(), 0.0)
+	trunk_mat.uv1_scale = Vector3(1.8, 2.2, 1.0)
 	trunk_mat.roughness = 0.95
 	trunk.material_override = trunk_mat
 	root.add_child(trunk)
@@ -750,6 +2506,9 @@ func _build_skyline_tower(root: Node3D, color: Color, height: float) -> void:
 	upper.rotation.z = deg_to_rad(8.0)
 	var upper_mat := StandardMaterial3D.new()
 	upper_mat.albedo_color = color.darkened(0.1)
+	upper_mat.albedo_texture = SharedTextures.get_metal_wear_texture()
+	upper_mat.uv1_offset = Vector3(randf(), randf(), 0.0)
+	upper_mat.uv1_scale = Vector3(1.6, 1.8, 1.0)
 	upper_mat.roughness = 0.95
 	upper.material_override = upper_mat
 	root.add_child(upper)
@@ -784,6 +2543,9 @@ func _build_skyline_chimneys(root: Node3D, color: Color, height: float) -> void:
 		ch.position = positions[i] + Vector3(0.0, heights[i] * 0.5, 0.0)
 		var ch_mat := StandardMaterial3D.new()
 		ch_mat.albedo_color = color.darkened(randf_range(0.0, 0.2))
+		ch_mat.albedo_texture = SharedTextures.get_metal_wear_texture()
+		ch_mat.uv1_offset = Vector3(randf(), randf(), 0.0)
+		ch_mat.uv1_scale = Vector3(1.2, 2.5, 1.0)
 		ch_mat.roughness = 0.95
 		ch.material_override = ch_mat
 		root.add_child(ch)
@@ -800,6 +2562,9 @@ func _build_skyline_pylon(root: Node3D, color: Color, height: float) -> void:
 	post.position.y = height * 0.5
 	var post_mat := StandardMaterial3D.new()
 	post_mat.albedo_color = color
+	post_mat.albedo_texture = SharedTextures.get_metal_wear_texture()
+	post_mat.uv1_offset = Vector3(randf(), randf(), 0.0)
+	post_mat.uv1_scale = Vector3(1.0, 3.0, 1.0)
 	post_mat.roughness = 0.95
 	post.material_override = post_mat
 	root.add_child(post)
@@ -827,11 +2592,6 @@ func _build_skyline_pylon(root: Node3D, color: Color, height: float) -> void:
 
 
 func _setup_neutral_patrols() -> void:
-	# Foundry Belt 1v1 patrol layout (per SCOPE_VERTICAL_SLICE_V2.md §"Map 1"):
-	# - 1 Light patrol on each safe-side deposit (a Rook stand-in until we
-	#   have a proper neutral roster).
-	# - 1 Medium patrol on each contested mid-deposit (a Hound).
-	#
 	# Patrols don't move on their own — they're stationary and rely on the
 	# combat component's auto-engage to defend their deposit. Neutrals share
 	# owner_id = 2, which makes both player and AI see them as enemies (and
@@ -840,13 +2600,29 @@ func _setup_neutral_patrols() -> void:
 	var hound_stats: UnitStatResource = load("res://resources/units/anvil_hound.tres") as UnitStatResource
 	var bulwark_stats: UnitStatResource = load("res://resources/units/anvil_bulwark.tres") as UnitStatResource
 
-	# Patrol unit, position offset from the deposit center so harvesters
-	# don't spawn directly inside the patrol's collision.
-	# Patrols sit one unit-radius off each deposit so harvesters don't
-	# immediately overlap the guard's collision capsule. Layout differs
-	# per mode because the deposit positions do.
 	var patrols: Array[Dictionary]
-	if _is_2v2():
+	if _is_ashplains():
+		# Ashplains layout (V2 §"Map 2"). 1 Light per safe deposit + 1
+		# Heavy on the central deposit (THE objective). Flank deposits
+		# in 2v2 get a Medium each.
+		if _is_2v2():
+			patrols = [
+				{"stats": rook_stats, "pos": Vector3(-30 + 4, 0, 70)},
+				{"stats": rook_stats, "pos": Vector3(30 - 4, 0, 70)},
+				{"stats": rook_stats, "pos": Vector3(-30 + 4, 0, -70)},
+				{"stats": rook_stats, "pos": Vector3(30 - 4, 0, -70)},
+				{"stats": bulwark_stats, "pos": Vector3(4, 0, 4)},   # Central — THE objective
+				{"stats": hound_stats, "pos": Vector3(70 + 4, 0, 0)},   # East flank
+				{"stats": hound_stats, "pos": Vector3(-70 - 4, 0, 0)},  # West flank
+			]
+		else:
+			patrols = [
+				{"stats": rook_stats, "pos": Vector3(4, 0, 80)},     # Player safe
+				{"stats": rook_stats, "pos": Vector3(-4, 0, -80)},   # AI safe
+				{"stats": bulwark_stats, "pos": Vector3(4, 0, 4)},   # Central — THE objective
+			]
+	elif _is_2v2():
+		# Foundry Belt 2v2 layout.
 		patrols = [
 			# Each corner safe deposit gets a Light patrol — fast to clear
 			# but enough that a wandering Crawler can't waltz straight in.
@@ -861,6 +2637,10 @@ func _setup_neutral_patrols() -> void:
 			{"stats": bulwark_stats, "pos": Vector3(4, 0, -45)},
 		]
 	else:
+		# Foundry Belt 1v1 layout (V2 §"Map 1"):
+		# - 1 Light patrol on each safe-side deposit
+		# - 1 Medium patrol on each contested mid-deposit
+		# - 1 Heavy patrol on each back-door + the Apex scar
 		patrols = [
 			{"stats": rook_stats, "pos": Vector3(28 + 4, 0, 80)},     # Player safe
 			{"stats": rook_stats, "pos": Vector3(-28 - 4, 0, -80)},   # AI safe
@@ -907,6 +2687,10 @@ func _setup_buildable_buildings() -> void:
 			"res://resources/buildings/basic_generator.tres",
 			"res://resources/buildings/basic_armory.tres",
 			"res://resources/buildings/gun_emplacement.tres",
+			# V3 §"Pillar 3" — Aerodrome (produces aircraft) + SAM Site
+			# (anti-air defense). Both available to either faction.
+			"res://resources/buildings/aerodrome.tres",
+			"res://resources/buildings/sam_site.tres",
 		]
 		for path: String in stat_paths:
 			var stat: BuildingStatResource = load(path) as BuildingStatResource

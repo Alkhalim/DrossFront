@@ -67,6 +67,20 @@ extends Resource
 ## (v2 spec §1.3) — produced at the HQ but mechanically distinct from a mech.
 @export var is_crawler: bool = false
 
+@export_group("Aircraft")
+## V3 §"Pillar 3" — when true the unit spawns as an aircraft (extends
+## Aircraft scene, uses simple flight movement instead of NavigationAgent3D
+## ground pathing). Aircraft fly at fixed altitude and ignore ground
+## obstacles, but can only be hit by AAir weapons.
+@export var is_aircraft: bool = false
+## Flight altitude in world units. Aircraft maintain this Y above the
+## ground. Heavy gunships sit higher than swarm drones so the same
+## airspace doesn't crowd visually.
+@export var flight_altitude: float = 6.0
+## Max flight speed (units / second). Independent of `speed_tier` since
+## aircraft don't share the ground-unit speed tiers.
+@export var flight_speed: float = 14.0
+
 @export_group("Branch Upgrades")
 ## If this is a base unit, the two branch variant stats.
 @export var branch_a_stats: UnitStatResource

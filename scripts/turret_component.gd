@@ -11,16 +11,20 @@ const SEARCH_INTERVAL: float = 0.5
 const TURRET_TURN_SPEED: float = 5.0
 
 ## Backwards-compatible defaults so external code can still read these.
+## Damage values were 3x'd (was 15) — turrets read as a real defensive
+## investment now instead of chip-damage emitters.
 const TURRET_RANGE: float = 20.0
-const TURRET_DAMAGE: int = 15
+const TURRET_DAMAGE: int = 45
 const FIRE_INTERVAL: float = 0.8
 
 ## Profile presets. Keep keys stable — HUD code references them by name.
+## Damage values are 3x the original tuning so static defenses can actually
+## threaten an attacking squad rather than tickle it.
 const PROFILES: Dictionary = {
-	&"balanced":   { "damage": 15, "fire": 0.8,  "range": 20.0, "role": &"Universal", "name": "Balanced" },
-	&"anti_light": { "damage": 8,  "fire": 0.4,  "range": 18.0, "role": &"AP",        "name": "Anti-Light" },
-	&"anti_heavy": { "damage": 45, "fire": 2.0,  "range": 22.0, "role": &"AP",        "name": "Anti-Heavy" },
-	&"anti_air":   { "damage": 6,  "fire": 0.25, "range": 24.0, "role": &"AA",        "name": "Anti-Air" },
+	&"balanced":   { "damage": 45,  "fire": 0.8,  "range": 20.0, "role": &"Universal", "name": "Balanced" },
+	&"anti_light": { "damage": 24,  "fire": 0.4,  "range": 18.0, "role": &"AP",        "name": "Anti-Light" },
+	&"anti_heavy": { "damage": 135, "fire": 2.0,  "range": 22.0, "role": &"AP",        "name": "Anti-Heavy" },
+	&"anti_air":   { "damage": 18,  "fire": 0.25, "range": 24.0, "role": &"AA",        "name": "Anti-Air" },
 }
 
 var profile: StringName = &"balanced"
@@ -132,6 +136,11 @@ func _find_nearest_enemy() -> Node3D:
 	var nearest: Node3D = null
 	var nearest_dist: float = INF
 	var registry: PlayerRegistry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
+	# AAir profile turrets (SAM Sites etc.) only target aircraft and
+	# never engage ground units. Ground turrets ignore aircraft for now
+	# — the AAir tag exclusivity in CombatTables already gives them 0
+	# damage vs air armor, so engaging would just waste shots.
+	var is_aa: bool = get_role() == &"AA" or get_role() == &"AAir" or profile == &"anti_air"
 
 	var units: Array[Node] = get_tree().get_nodes_in_group("units")
 	for node: Node in units:
@@ -144,6 +153,11 @@ func _find_nearest_enemy() -> Node3D:
 		if not hostile:
 			continue
 		if "alive_count" in node and node.get("alive_count") <= 0:
+			continue
+		var target_is_air: bool = node.is_in_group("aircraft")
+		if is_aa and not target_is_air:
+			continue
+		if not is_aa and target_is_air:
 			continue
 		var d: float = my_pos.distance_to(node.global_position)
 		if d <= range_v and d < nearest_dist:

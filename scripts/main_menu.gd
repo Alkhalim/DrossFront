@@ -13,6 +13,8 @@ const COLOR_PANEL_BG := Color(0.08, 0.09, 0.10, 0.92)
 var _root_vbox: VBoxContainer = null
 var _main_buttons: VBoxContainer = null
 var _mode_panel: VBoxContainer = null
+var _map_panel: VBoxContainer = null
+var _faction_panel: VBoxContainer = null
 var _difficulty_panel: VBoxContainer = null
 var _settings_panel: VBoxContainer = null
 
@@ -98,6 +100,8 @@ func _build_layout() -> void:
 
 	_build_main_buttons()
 	_build_mode_panel()
+	_build_map_panel()
+	_build_faction_panel()
 	_build_difficulty_panel()
 	_build_settings_panel()
 
@@ -152,8 +156,78 @@ func _build_mode_panel() -> void:
 	var back := Button.new()
 	back.text = "Back"
 	back.custom_minimum_size = Vector2(160, 36)
-	back.pressed.connect(_show_main)
+	back.pressed.connect(_show_map)
 	_mode_panel.add_child(back)
+
+
+func _build_map_panel() -> void:
+	_map_panel = VBoxContainer.new()
+	_map_panel.add_theme_constant_override("separation", 10)
+	_map_panel.alignment = BoxContainer.ALIGNMENT_CENTER
+	_map_panel.visible = false
+	_root_vbox.add_child(_map_panel)
+
+	var heading := Label.new()
+	heading.text = "Choose Map"
+	heading.add_theme_font_size_override("font_size", 22)
+	heading.add_theme_color_override("font_color", COLOR_SUBTITLE)
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_map_panel.add_child(heading)
+
+	for entry: Dictionary in [
+		{ "label": "Foundry Belt",
+		  "value": MatchSettingsClass.MapId.FOUNDRY_BELT,
+		  "blurb": "Cluttered industrial map — multiple chokepoints, dense salvage, Apex wreck objective" },
+		{ "label": "Ashplains Crossing",
+		  "value": MatchSettingsClass.MapId.ASHPLAINS_CROSSING,
+		  "blurb": "Open ash flats with one elevated ridge — sparse salvage, long sightlines, ranged combat" },
+	]:
+		var btn := Button.new()
+		btn.text = "%s — %s" % [entry["label"], entry["blurb"]]
+		btn.custom_minimum_size = Vector2(560, 44)
+		btn.pressed.connect(_on_map_chosen.bind(entry["value"]))
+		_map_panel.add_child(btn)
+
+	var back := Button.new()
+	back.text = "Back"
+	back.custom_minimum_size = Vector2(160, 36)
+	back.pressed.connect(_show_main)
+	_map_panel.add_child(back)
+
+
+func _build_faction_panel() -> void:
+	_faction_panel = VBoxContainer.new()
+	_faction_panel.add_theme_constant_override("separation", 10)
+	_faction_panel.alignment = BoxContainer.ALIGNMENT_CENTER
+	_faction_panel.visible = false
+	_root_vbox.add_child(_faction_panel)
+
+	var heading := Label.new()
+	heading.text = "Choose Faction"
+	heading.add_theme_font_size_override("font_size", 22)
+	heading.add_theme_color_override("font_color", COLOR_SUBTITLE)
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_faction_panel.add_child(heading)
+
+	for entry: Dictionary in [
+		{ "label": "Anvil Directive",
+		  "value": MatchSettingsClass.FactionId.ANVIL,
+		  "blurb": "Heavy industrial. Slow, armored, inevitable. Fortification mechanic." },
+		{ "label": "Sable Concord",
+		  "value": MatchSettingsClass.FactionId.SABLE,
+		  "blurb": "Information warfare. Fast, fragile, deceptive. Neural Mesh mechanic. (V3 — partial roster)" },
+	]:
+		var btn := Button.new()
+		btn.text = "%s — %s" % [entry["label"], entry["blurb"]]
+		btn.custom_minimum_size = Vector2(620, 44)
+		btn.pressed.connect(_on_faction_chosen.bind(entry["value"]))
+		_faction_panel.add_child(btn)
+
+	var back := Button.new()
+	back.text = "Back"
+	back.custom_minimum_size = Vector2(160, 36)
+	back.pressed.connect(_show_mode)
+	_faction_panel.add_child(back)
 
 
 func _build_difficulty_panel() -> void:
@@ -184,7 +258,7 @@ func _build_difficulty_panel() -> void:
 	var back := Button.new()
 	back.text = "Back"
 	back.custom_minimum_size = Vector2(160, 36)
-	back.pressed.connect(_show_main)
+	back.pressed.connect(_show_faction)
 	_difficulty_panel.add_child(back)
 
 
@@ -229,6 +303,8 @@ func _build_settings_panel() -> void:
 func _show_main() -> void:
 	_main_buttons.visible = true
 	_mode_panel.visible = false
+	_map_panel.visible = false
+	_faction_panel.visible = false
 	_difficulty_panel.visible = false
 	_settings_panel.visible = false
 
@@ -236,6 +312,26 @@ func _show_main() -> void:
 func _show_mode() -> void:
 	_main_buttons.visible = false
 	_mode_panel.visible = true
+	_map_panel.visible = false
+	_faction_panel.visible = false
+	_difficulty_panel.visible = false
+	_settings_panel.visible = false
+
+
+func _show_map() -> void:
+	_main_buttons.visible = false
+	_mode_panel.visible = false
+	_map_panel.visible = true
+	_faction_panel.visible = false
+	_difficulty_panel.visible = false
+	_settings_panel.visible = false
+
+
+func _show_faction() -> void:
+	_main_buttons.visible = false
+	_mode_panel.visible = false
+	_map_panel.visible = false
+	_faction_panel.visible = true
 	_difficulty_panel.visible = false
 	_settings_panel.visible = false
 
@@ -243,6 +339,8 @@ func _show_mode() -> void:
 func _show_difficulty() -> void:
 	_main_buttons.visible = false
 	_mode_panel.visible = false
+	_map_panel.visible = false
+	_faction_panel.visible = false
 	_difficulty_panel.visible = true
 	_settings_panel.visible = false
 
@@ -250,6 +348,8 @@ func _show_difficulty() -> void:
 func _show_settings() -> void:
 	_main_buttons.visible = false
 	_mode_panel.visible = false
+	_map_panel.visible = false
+	_faction_panel.visible = false
 	_difficulty_panel.visible = false
 	_settings_panel.visible = true
 
@@ -258,6 +358,14 @@ func _show_settings() -> void:
 
 func _on_play_pressed() -> void:
 	MatchSettings.tutorial_mode = false
+	# New flow per user request: Map → Mode (player count) → Difficulty.
+	# Map is the most defining choice (different feel / strategy), so
+	# pick it first; mode and difficulty refine the chosen map.
+	_show_map()
+
+
+func _on_map_chosen(map_id: int) -> void:
+	MatchSettings.map_id = map_id as MatchSettingsClass.MapId
 	_show_mode()
 
 
@@ -265,14 +373,32 @@ func _on_mode_chosen(mode: int) -> void:
 	# Cast int → Mode enum explicitly. Strict typing rejects the implicit
 	# conversion even when the value is in-range.
 	MatchSettings.mode = mode as MatchSettingsClass.Mode
+	_show_faction()
+
+
+func _on_faction_chosen(faction_id: int) -> void:
+	MatchSettings.player_faction = faction_id as MatchSettingsClass.FactionId
+	# Enemy AI defaults to the OPPOSITE faction so picking Sable triggers
+	# an asymmetric Anvil-vs-Sable match (which is the V3 §"Pillar 1"
+	# validation case). 2v2 ally faction — for now mirrors the player's
+	# pick; mixed-faction allies arrive after Sable's roster is solid.
+	if faction_id == MatchSettingsClass.FactionId.ANVIL:
+		MatchSettings.enemy_faction = MatchSettingsClass.FactionId.SABLE
+	else:
+		MatchSettings.enemy_faction = MatchSettingsClass.FactionId.ANVIL
 	_show_difficulty()
 
 
 func _on_tutorial_pressed() -> void:
 	MatchSettings.tutorial_mode = true
-	# Tutorial always runs on Easy + 1v1 so new players aren't crushed while reading.
+	# Tutorial always runs on Easy + 1v1 + Foundry Belt + Anvil vs Anvil
+	# — Anvil is the more battle-tested faction and the cluttered map
+	# is friendlier to new players than Ashplains' open sightlines.
 	MatchSettings.difficulty = MatchSettingsClass.Difficulty.EASY
 	MatchSettings.mode = MatchSettingsClass.Mode.ONE_V_ONE
+	MatchSettings.map_id = MatchSettingsClass.MapId.FOUNDRY_BELT
+	MatchSettings.player_faction = MatchSettingsClass.FactionId.ANVIL
+	MatchSettings.enemy_faction = MatchSettingsClass.FactionId.ANVIL
 	_start_match()
 
 
