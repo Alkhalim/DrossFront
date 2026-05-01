@@ -28,14 +28,15 @@ func _ready() -> void:
 				randf_range(-spread, spread)
 			)
 			get_tree().current_scene.add_child.call_deferred(wreck)
-		# Apex-class wreck — bigger, much more salvage, blocks the
-		# Crawler. Per V2 §"Map 1" this is the heavy-guarded mid-late
-		# game objective on Foundry Belt.
+		# Apex-class wreck — a real landmark. Heavy-guarded mid-late game
+		# objective on Foundry Belt (V2 §"Map 1"). Big enough to read as
+		# a discrete monument from full-zoom, with a tall spire so the
+		# silhouette punctures the surrounding rubble field.
 		if cluster.get("apex", false):
 			var apex := Wreck.new()
-			apex.salvage_value = salvage_per_wreck * 6  # 480 vs 80 — a real prize
+			apex.salvage_value = salvage_per_wreck * 12  # 960 — actually worth fighting over
 			apex.salvage_remaining = apex.salvage_value
-			apex.wreck_size = Vector3(3.6, 1.0, 3.6)    # noticeably bigger than light/medium wrecks
+			apex.wreck_size = Vector3(9.0, 3.0, 7.0)
 			apex.position = center
 			get_tree().current_scene.add_child.call_deferred(apex)
 

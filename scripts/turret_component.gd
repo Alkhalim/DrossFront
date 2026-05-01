@@ -24,7 +24,7 @@ const PROFILES: Dictionary = {
 	&"balanced":   { "damage": 45,  "fire": 0.8,  "range": 20.0, "role": &"Universal", "name": "Balanced" },
 	&"anti_light": { "damage": 24,  "fire": 0.4,  "range": 18.0, "role": &"AP",        "name": "Anti-Light" },
 	&"anti_heavy": { "damage": 135, "fire": 2.0,  "range": 22.0, "role": &"AP",        "name": "Anti-Heavy" },
-	&"anti_air":   { "damage": 18,  "fire": 0.25, "range": 24.0, "role": &"AA",        "name": "Anti-Air" },
+	&"anti_air":   { "damage": 36,  "fire": 0.25, "range": 24.0, "role": &"AAir",      "name": "Anti-Air" },
 }
 
 var profile: StringName = &"balanced"

@@ -489,11 +489,41 @@ func _offset_for(key: String, fallback: Vector3) -> Vector3:
 	return fallback
 
 
+func _ai_prerequisites_met(bstats: BuildingStatResource) -> bool:
+	## True if every prerequisite building_id on `bstats` has at least one
+	## fully-constructed instance owned by THIS AI player. Buildings still
+	## under construction don't count — the player rule is the same, so
+	## both sides chain through basic → advanced.
+	if bstats.prerequisites.is_empty():
+		return true
+	var have: Dictionary = {}
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		if "owner_id" in node and (node.get("owner_id") as int) != owner_id:
+			continue
+		if not node.get("is_constructed"):
+			continue
+		var stat: BuildingStatResource = node.get("stats") as BuildingStatResource
+		if stat:
+			have[stat.building_id] = true
+	for req: StringName in bstats.prerequisites:
+		if not have.has(req):
+			return false
+	return true
+
+
 func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 	if _buildings_placed.has(key):
 		return
 	var bstats: BuildingStatResource = load(stats_path) as BuildingStatResource
 	if not bstats:
+		return
+	# Tech-tree gate: skip if any prerequisite isn't yet constructed.
+	# Same rule the player follows, so the AI naturally chains through
+	# basic_foundry → advanced_foundry → aerodrome instead of teleporting
+	# straight to the late-tier structure.
+	if not _ai_prerequisites_met(bstats):
 		return
 	# AI must afford the building, just like the player. _ai_resource_manager
 	# handles the spending inside builder.place_building.

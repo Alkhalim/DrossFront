@@ -32,3 +32,14 @@ extends Resource
 
 ## Placeholder visual color.
 @export var placeholder_color: Color = Color(0.3, 0.3, 0.3)
+
+## Tech tier — basic structures (foundry, generator, salvage yard,
+## armory, turret) are available from the start. Advanced structures
+## (advanced foundry, aerodrome, SAM site) are locked until a
+## prerequisite is built. The build menu uses this for tab routing.
+@export var is_advanced: bool = false
+
+## Building IDs that must be CONSTRUCTED before this one can be built.
+## Empty array = always available. Multiple entries are AND-ed (all
+## must be present). The ID matches `building_id` on the prerequisite.
+@export var prerequisites: Array[StringName] = []

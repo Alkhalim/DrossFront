@@ -5,6 +5,16 @@ extends Control
 var _resource_manager: ResourceManager = null
 var _selection_manager: SelectionManager = null
 
+## Currently-selected tab on the build menu. Buildings are routed by
+## `BuildingStatResource.is_advanced`; the Advanced tab additionally
+## disables entries whose prerequisites the local player hasn't built.
+var _build_tab: String = "basic"
+
+## Hash of the last-rebuilt advanced-prereq state. When the player
+## completes a new building, this changes and the build menu rebuilds
+## itself so just-unlocked Advanced entries become enabled live.
+var _build_prereq_hash: int = -1
+
 ## Track what we're showing to avoid rebuilding buttons every frame.
 var _last_building_id: int = -1
 var _last_unit_ids: Array[int] = []
@@ -1660,6 +1670,17 @@ func _update_unit_panel(units: Array[Node3D]) -> void:
 			_clear_buttons()
 			_rebuild_unit_command_buttons()
 
+	# When the build menu is showing, rebuild it whenever the local
+	# player's set of constructed buildings changes — so a freshly-
+	# completed Basic Foundry unlocks the Advanced Foundry button on
+	# the same frame the construction finishes, without needing a
+	# selection change to trigger the redraw.
+	if _showing_build_buttons:
+		var prereq_hash: int = _compute_built_ids_hash()
+		if prereq_hash != _build_prereq_hash:
+			_build_prereq_hash = prereq_hash
+			_rebuild_build_buttons()
+
 	# Update text every frame
 	_queue_label.text = ""
 	_hide_progress()
@@ -1712,17 +1733,68 @@ func _rebuild_build_buttons() -> void:
 	if not _selection_manager:
 		return
 
-	_action_label.text = "Build"
+	# Tabs (Basic / Advanced) rendered as a small row of toggle buttons
+	# above the build grid. Implemented inline as Buttons because we
+	# already manage the grid manually and TabContainer would require
+	# re-parenting the existing _button_grid.
+	var tab_row := HBoxContainer.new()
+	tab_row.add_theme_constant_override("separation", 6)
+	_button_grid.add_child(tab_row)
+	_action_buttons.append({ "button": tab_row, "kind": "build_tab_row" })
+	var tab_basic := Button.new()
+	tab_basic.text = "Basic"
+	tab_basic.custom_minimum_size = Vector2(72, 26)
+	tab_basic.toggle_mode = true
+	tab_basic.button_pressed = _build_tab == "basic"
+	tab_basic.pressed.connect(_on_build_tab_pressed.bind("basic"))
+	tab_row.add_child(tab_basic)
+	var tab_adv := Button.new()
+	tab_adv.text = "Advanced"
+	tab_adv.custom_minimum_size = Vector2(86, 26)
+	tab_adv.toggle_mode = true
+	tab_adv.button_pressed = _build_tab == "advanced"
+	tab_adv.pressed.connect(_on_build_tab_pressed.bind("advanced"))
+	tab_row.add_child(tab_adv)
+
+	_action_label.text = "Build — %s" % _build_tab.capitalize()
+	var built_ids: Dictionary = _local_player_built_ids()
 	var buildable: Array[BuildingStatResource] = _selection_manager.get_buildable_stats()
+	var visible_index: int = 0
 	for i: int in buildable.size():
 		var bstat: BuildingStatResource = buildable[i]
+		var is_advanced: bool = bstat.is_advanced
+		var tab_match: bool = (is_advanced and _build_tab == "advanced") or (not is_advanced and _build_tab == "basic")
+		if not tab_match:
+			continue
+		var prereqs_ok: bool = _prerequisites_met(bstat, built_ids)
 		var btn := Button.new()
 		btn.custom_minimum_size = Vector2(86, 42)
-		btn.text = "[%d] %s\n%dS" % [i + 1, bstat.building_name, bstat.cost_salvage]
-		btn.tooltip_text = _building_tooltip(bstat)
-		btn.pressed.connect(_on_build_button.bind(i))
+		var label: String = "[%d] %s\n%dS" % [visible_index + 1, bstat.building_name, bstat.cost_salvage]
+		if not prereqs_ok:
+			label = "[Locked] %s\n%dS" % [bstat.building_name, bstat.cost_salvage]
+		btn.text = label
+		btn.tooltip_text = _building_tooltip_with_prereq(bstat, prereqs_ok)
+		btn.disabled = not prereqs_ok
+		# Bind by stat reference, not visible index — visible_index only
+		# matches `buildable[i]` while filters are stable, and we don't
+		# want a hotkey collision to pick the wrong building.
+		btn.pressed.connect(_on_build_button_for_stat.bind(bstat))
 		_button_grid.add_child(btn)
-		_action_buttons.append({ "button": btn, "kind": "build", "stat": bstat })
+		_action_buttons.append({ "button": btn, "kind": "build", "stat": bstat, "locked": not prereqs_ok })
+		visible_index += 1
+
+
+func _on_build_tab_pressed(tab: String) -> void:
+	if _build_tab == tab:
+		return
+	_build_tab = tab
+	_rebuild_build_buttons()
+
+
+func _on_build_button_for_stat(bstat: BuildingStatResource) -> void:
+	if not _selection_manager or not bstat:
+		return
+	_selection_manager.start_build_placement(bstat)
 
 
 func _on_build_button(index: int) -> void:
@@ -1731,6 +1803,69 @@ func _on_build_button(index: int) -> void:
 	var buildable: Array[BuildingStatResource] = _selection_manager.get_buildable_stats()
 	if index < buildable.size():
 		_selection_manager.start_build_placement(buildable[index])
+
+
+func _compute_built_ids_hash() -> int:
+	## Cheap hash that changes whenever the local player's set of
+	## constructed-building IDs changes. Sums building_id hashes so a
+	## new building flips the value but the game-loop doesn't need to
+	## allocate a Dictionary every frame.
+	var h: int = 0
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		if "owner_id" in node and (node.get("owner_id") as int) != 0:
+			continue
+		if not node.get("is_constructed"):
+			continue
+		var bstat: BuildingStatResource = node.get("stats") as BuildingStatResource
+		if bstat:
+			h ^= hash(bstat.building_id)
+	return h
+
+
+func _local_player_built_ids() -> Dictionary:
+	## Returns a Dictionary mapping `building_id` -> true for every
+	## constructed building owned by the local player. Used by the
+	## advanced-tab tab to gate buildings behind prerequisites.
+	var ids: Dictionary = {}
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var owner_id: int = 0
+		if "owner_id" in node:
+			owner_id = node.get("owner_id") as int
+		if owner_id != 0:
+			continue
+		if not node.get("is_constructed"):
+			continue
+		var bstat: BuildingStatResource = node.get("stats") as BuildingStatResource
+		if bstat:
+			ids[bstat.building_id] = true
+	return ids
+
+
+func _prerequisites_met(bstat: BuildingStatResource, built_ids: Dictionary) -> bool:
+	if bstat.prerequisites.is_empty():
+		return true
+	for req: StringName in bstat.prerequisites:
+		if not built_ids.has(req):
+			return false
+	return true
+
+
+func _building_tooltip_with_prereq(bstat: BuildingStatResource, prereqs_ok: bool) -> String:
+	var base: String = _building_tooltip(bstat)
+	if prereqs_ok or bstat.prerequisites.is_empty():
+		return base
+	var names: PackedStringArray = PackedStringArray()
+	for req: StringName in bstat.prerequisites:
+		names.append(_pretty_id(req))
+	return "%s\n\nRequires: %s" % [base, ", ".join(names)]
+
+
+func _pretty_id(id: StringName) -> String:
+	return str(id).replace("_", " ").capitalize()
 
 
 func _clear_buttons() -> void:
@@ -1759,6 +1894,13 @@ func _update_button_affordability() -> void:
 		elif kind == "build":
 			var bstat: BuildingStatResource = entry["stat"] as BuildingStatResource
 			affordable = _resource_manager.can_afford_salvage(bstat.cost_salvage)
+			# Prereq-locked entries should stay disabled regardless of
+			# whether the player has the salvage to pay for them.
+			if entry.get("locked", false):
+				affordable = false
+		elif kind == "build_tab_row":
+			# Tab row container — never tinted as un-affordable.
+			continue
 		btn.disabled = not affordable
 		# Default theme already paints a red border on disabled buttons; we additionally
 		# dim the font so the player's eye is drawn to the affordable options.

@@ -24,7 +24,7 @@ const POPULATION_MAX: int = 250
 ## 0 = local human; AI managers set their own player_id via PlayerRegistry.
 var owner_id: int = 0
 
-var salvage: int = 200
+var salvage: int = 300
 var fuel: int = 0
 var fuel_cap: int = FUEL_CAP_BASE
 var power_production: int = 0

@@ -58,7 +58,8 @@ var _WRECK_CLASS_APEX: Dictionary = {
 	"max_extent": 1000000.0,
 	"base":   Color(0.22, 0.14, 0.08, 1.0),
 	"accent": Color(0.85, 0.55, 0.20, 1.0),
-	"chunks": 6,
+	"chunks": 14,
+	"apex": true,
 }
 
 
@@ -125,6 +126,93 @@ func _build_wreck_visuals() -> void:
 			color = color.darkened(0.4)
 		chunk.set_surface_override_material(0, _make_wreck_material(color))
 		add_child(chunk)
+
+	# Apex carcass — extra landmark elements so the wreck reads as a
+	# real downed capital mech, not just a slightly-bigger debris pile.
+	# A jutting spire (broken antenna mast / spine), a smoldering core
+	# with warm emissive light, and a scorch ring on the ground.
+	if spec.get("apex", false):
+		_build_apex_landmark(base_color, accent_color, max_extent)
+
+
+func _build_apex_landmark(base_color: Color, accent_color: Color, max_extent: float) -> void:
+	# Bent spire — tall vertical shard angled off-vertical so it reads
+	# as a snapped antenna or broken spinal column rather than a flag.
+	var spire := MeshInstance3D.new()
+	var spire_box := BoxMesh.new()
+	var spire_h: float = wreck_size.y * 3.2 + max_extent * 0.4
+	spire_box.size = Vector3(0.65, spire_h, 0.55)
+	spire.mesh = spire_box
+	spire.position = Vector3(
+		randf_range(-max_extent * 0.10, max_extent * 0.10),
+		wreck_size.y * 0.5 + spire_h * 0.5,
+		randf_range(-max_extent * 0.10, max_extent * 0.10),
+	)
+	spire.rotation = Vector3(
+		randf_range(-0.18, 0.18),
+		randf_range(0.0, TAU),
+		randf_range(0.20, 0.42) * (1.0 if randf() < 0.5 else -1.0),
+	)
+	spire.set_surface_override_material(0, _make_wreck_material(base_color.darkened(0.15)))
+	add_child(spire)
+
+	# Cap on top — a torn corner chunk hanging off the spire so it
+	# silhouettes as a broken structure, not a clean rod.
+	var cap := MeshInstance3D.new()
+	var cap_box := BoxMesh.new()
+	cap_box.size = Vector3(1.4, 0.6, 1.0)
+	cap.mesh = cap_box
+	cap.position = Vector3(0, spire_h * 0.5 - 0.1, 0)
+	cap.rotation = Vector3(randf_range(-0.4, 0.4), randf_range(0.0, TAU), randf_range(-0.4, 0.4))
+	cap.set_surface_override_material(0, _make_wreck_material(accent_color))
+	spire.add_child(cap)
+
+	# Smoldering core — emissive cube partially buried in the hull.
+	# A faint warm light point gives the wreck a "still hot" read at
+	# distance, separating it from background rocks.
+	var ember := MeshInstance3D.new()
+	var ember_box := BoxMesh.new()
+	ember_box.size = Vector3(1.2, 0.6, 1.2)
+	ember.mesh = ember_box
+	ember.position = Vector3(
+		randf_range(-max_extent * 0.18, max_extent * 0.18),
+		wreck_size.y * 0.55,
+		randf_range(-max_extent * 0.18, max_extent * 0.18),
+	)
+	var ember_mat := StandardMaterial3D.new()
+	ember_mat.albedo_color = Color(0.05, 0.03, 0.02, 1.0)
+	ember_mat.emission_enabled = true
+	ember_mat.emission = Color(1.0, 0.45, 0.12, 1.0)
+	ember_mat.emission_energy_multiplier = 1.4
+	ember_mat.roughness = 0.85
+	ember.set_surface_override_material(0, ember_mat)
+	add_child(ember)
+
+	var glow := OmniLight3D.new()
+	glow.light_color = Color(1.0, 0.55, 0.20, 1.0)
+	glow.light_energy = 1.8
+	glow.omni_range = max_extent * 1.6
+	glow.position = Vector3(ember.position.x, wreck_size.y * 0.9, ember.position.z)
+	add_child(glow)
+
+	# Scorch ring — flat disc-like dark mark on the ground out past
+	# the wreck footprint, drawing the eye toward this spot from the
+	# minimap and from any forward camera angle.
+	var ring := MeshInstance3D.new()
+	var ring_mesh := QuadMesh.new()
+	var ring_extent: float = max_extent * 1.6
+	ring_mesh.size = Vector2(ring_extent * 2.0, ring_extent * 2.0)
+	ring.mesh = ring_mesh
+	ring.rotation.x = -PI * 0.5
+	ring.position.y = 0.02
+	var ring_mat := StandardMaterial3D.new()
+	ring_mat.albedo_color = Color(0.06, 0.04, 0.03, 0.88)
+	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ring_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	ring_mat.no_depth_test = false
+	ring_mat.roughness = 1.0
+	ring.set_surface_override_material(0, ring_mat)
+	add_child(ring)
 
 
 func _make_wreck_material(c: Color) -> StandardMaterial3D:
