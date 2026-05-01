@@ -2146,32 +2146,46 @@ func _apply_sable_building_silhouette() -> void:
 	var hull_color: Color = _faction_tint_building_chassis(stats.placeholder_color).darkened(0.05)
 	var seam_color: Color = Color(0.78, 0.35, 1.0, 1.0)
 
+	# Some buildings have prominent rooftop hardware that needs a clear
+	# top (aerodrome's landing pad, SAM's launcher rack). For those we
+	# replace the hull with a single full-height base block and skip
+	# the mid-setback / top-spine that would otherwise stick up through
+	# the rooftop feature.
+	var keep_top_clear: bool = (
+		stats.building_id == &"aerodrome"
+		or stats.building_id == &"sam_site"
+	)
+
 	# Stepped main hull — base box (full footprint, ~70% height),
 	# narrower middle setback (~80% width, +25% height), then a thin
 	# spine block. Reads as a tiered corpo tower instead of a brick.
 	var base_block := MeshInstance3D.new()
 	var base_box := BoxMesh.new()
-	base_box.size = Vector3(fs.x, fs.y * 0.62, fs.z)
+	var base_h: float = fs.y if keep_top_clear else fs.y * 0.62
+	base_box.size = Vector3(fs.x, base_h, fs.z)
 	base_block.mesh = base_box
-	base_block.position.y = fs.y * 0.31
+	base_block.position.y = base_h * 0.5
 	base_block.set_surface_override_material(0, _make_sable_hull_mat(hull_color))
 	_visual_root.add_child(base_block)
 
-	var mid_block := MeshInstance3D.new()
-	var mid_box := BoxMesh.new()
-	mid_box.size = Vector3(fs.x * 0.78, fs.y * 0.30, fs.z * 0.78)
-	mid_block.mesh = mid_box
-	mid_block.position.y = fs.y * 0.62 + fs.y * 0.15
-	mid_block.set_surface_override_material(0, _make_sable_hull_mat(hull_color.darkened(0.08)))
-	_visual_root.add_child(mid_block)
+	# Skip the setback + spine entirely for buildings whose roof must
+	# stay clear (aerodrome landing pad, SAM launcher rack).
+	if not keep_top_clear:
+		var mid_block := MeshInstance3D.new()
+		var mid_box := BoxMesh.new()
+		mid_box.size = Vector3(fs.x * 0.78, fs.y * 0.30, fs.z * 0.78)
+		mid_block.mesh = mid_box
+		mid_block.position.y = fs.y * 0.62 + fs.y * 0.15
+		mid_block.set_surface_override_material(0, _make_sable_hull_mat(hull_color.darkened(0.08)))
+		_visual_root.add_child(mid_block)
 
-	var top_spine := MeshInstance3D.new()
-	var top_box := BoxMesh.new()
-	top_box.size = Vector3(fs.x * 0.32, fs.y * 0.18, fs.z * 0.42)
-	top_spine.mesh = top_box
-	top_spine.position.y = fs.y * 0.92 + fs.y * 0.09
-	top_spine.set_surface_override_material(0, _make_sable_hull_mat(hull_color.darkened(0.15)))
-	_visual_root.add_child(top_spine)
+		var top_spine := MeshInstance3D.new()
+		var top_box := BoxMesh.new()
+		top_box.size = Vector3(fs.x * 0.32, fs.y * 0.18, fs.z * 0.42)
+		top_spine.mesh = top_box
+		top_spine.position.y = fs.y * 0.92 + fs.y * 0.09
+		top_spine.set_surface_override_material(0, _make_sable_hull_mat(hull_color.darkened(0.15)))
+		_visual_root.add_child(top_spine)
 
 	# Forward chevron prow — slim slabs angled at the front face,
 	# echoing the Sable mech silhouette so units and structures
@@ -2217,14 +2231,17 @@ func _apply_sable_building_silhouette() -> void:
 	# Cantilevered upper eave — a thin overhanging slab at the top of
 	# the base block. Stronger architectural read than just a setback,
 	# and casts a shadow line that distinguishes Sable's silhouette
-	# from any Anvil rooftop in any lighting.
-	var eave := MeshInstance3D.new()
-	var eave_box := BoxMesh.new()
-	eave_box.size = Vector3(fs.x * 1.08, 0.08, fs.z * 1.08)
-	eave.mesh = eave_box
-	eave.position.y = fs.y * 0.62
-	eave.set_surface_override_material(0, _make_sable_hull_mat(hull_color.darkened(0.20)))
-	_visual_root.add_child(eave)
+	# from any Anvil rooftop in any lighting. Skipped for the clear-
+	# top buildings so it doesn't slice through their landing pad /
+	# launcher rack at mid-height.
+	if not keep_top_clear:
+		var eave := MeshInstance3D.new()
+		var eave_box := BoxMesh.new()
+		eave_box.size = Vector3(fs.x * 1.08, 0.08, fs.z * 1.08)
+		eave.mesh = eave_box
+		eave.position.y = fs.y * 0.62
+		eave.set_surface_override_material(0, _make_sable_hull_mat(hull_color.darkened(0.20)))
+		_visual_root.add_child(eave)
 
 	# Cyan emissive seams along the edge where each setback meets — a
 	# horizontal line at base/mid joint and another at mid/spine joint.
@@ -2234,10 +2251,20 @@ func _apply_sable_building_silhouette() -> void:
 	seam_mat.emission = seam_color
 	seam_mat.emission_energy_multiplier = 2.0
 	seam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	for ring_data: Dictionary in [
-		{ "y": fs.y * 0.62, "w": fs.x, "d": fs.z, "thick": 0.045 },
-		{ "y": fs.y * 0.92, "w": fs.x * 0.78, "d": fs.z * 0.78, "thick": 0.035 },
-	]:
+	# Seam rings live on the setback joints. With no setbacks (clear-
+	# top buildings) we render a single cornice ring at the top of the
+	# full-height base block instead of the two-ring pattern.
+	var ring_specs: Array[Dictionary]
+	if keep_top_clear:
+		ring_specs = [
+			{ "y": fs.y * 0.97, "w": fs.x, "d": fs.z, "thick": 0.045 },
+		]
+	else:
+		ring_specs = [
+			{ "y": fs.y * 0.62, "w": fs.x, "d": fs.z, "thick": 0.045 },
+			{ "y": fs.y * 0.92, "w": fs.x * 0.78, "d": fs.z * 0.78, "thick": 0.035 },
+		]
+	for ring_data: Dictionary in ring_specs:
 		var ring_y: float = ring_data["y"] as float
 		var ring_w: float = (ring_data["w"] as float) + 0.05
 		var ring_d: float = (ring_data["d"] as float) + 0.05
