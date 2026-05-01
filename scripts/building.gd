@@ -142,7 +142,19 @@ func _ready() -> void:
 	_process_phase = int(get_instance_id() & 1)
 	if stats:
 		current_hp = stats.hp
-		rally_point = global_position + Vector3(0, 0, stats.footprint_size.z + 2.0)
+		# Default rally point sits one large-unit-width "in front" of the
+		# building — i.e. toward the map centre. For the player HQ at
+		# +Z corner that's south; for an AI HQ at -Z corner it's north.
+		# 5u = roughly one Bulwark squad wide, so spawned units don't
+		# immediately overlap the footprint.
+		var to_center: Vector3 = Vector3.ZERO - global_position
+		to_center.y = 0.0
+		if to_center.length_squared() > 0.0001:
+			to_center = to_center.normalized()
+		else:
+			to_center = Vector3(0.0, 0.0, -1.0)
+		var rally_dist: float = stats.footprint_size.z * 0.5 + 5.0
+		rally_point = global_position + to_center * rally_dist
 		_ensure_visual_root()
 		_apply_placeholder_shape()
 		_add_nav_obstacle()

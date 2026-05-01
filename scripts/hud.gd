@@ -463,8 +463,19 @@ func _apply_theme() -> void:
 	btn_hover.border_color = Color(0.7, 0.85, 0.95, 1.0)
 
 	var btn_pressed := btn_normal.duplicate() as StyleBoxFlat
-	btn_pressed.bg_color = Color(0.12, 0.14, 0.16, 1.0)
-	btn_pressed.border_color = Color(0.95, 0.78, 0.32, 1.0)
+	# Pressed state — visibly inset: darker fill, brighter accent
+	# border, top edge nudged DOWN by adjusting content margins so the
+	# button label "drops" 1px when clicked. The expand_margin_top shift
+	# gives the panel an inset shadow so the button reads as physically
+	# pushed into the panel rather than just a colour swap.
+	btn_pressed.bg_color = Color(0.08, 0.10, 0.12, 1.0)
+	btn_pressed.border_color = Color(1.0, 0.82, 0.35, 1.0)
+	btn_pressed.set_border_width_all(2)
+	btn_pressed.content_margin_top = 5
+	btn_pressed.content_margin_bottom = 3
+	btn_pressed.shadow_color = Color(0, 0, 0, 0.5)
+	btn_pressed.shadow_size = 2
+	btn_pressed.shadow_offset = Vector2(0, 1)
 
 	var btn_disabled := btn_normal.duplicate() as StyleBoxFlat
 	btn_disabled.bg_color = Color(0.10, 0.10, 0.10, 0.95)

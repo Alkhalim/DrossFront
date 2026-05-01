@@ -28,24 +28,56 @@ const _OUTLINE: Color = Color(0.06, 0.07, 0.08, 1.0)
 const _RIVET: Color = Color(0.18, 0.20, 0.22, 1.0)
 
 var _textures: Dictionary = {}
+var _textures_pressed: Dictionary = {}
 var _current: int = -1
+var _is_pressed: bool = false
 
 
 func _ready() -> void:
-	_textures[Kind.DEFAULT] = _make_arrow(_BODY_BASE, _HIGHLIGHT_BASE, Kind.DEFAULT)
+	_textures[Kind.DEFAULT] = _make_arrow(_BODY_BASE, _HIGHLIGHT_BASE, Kind.DEFAULT, false)
 	_textures[Kind.ATTACK] = _make_arrow(
-		Color(0.55, 0.18, 0.18, 1.0), Color(0.95, 0.45, 0.40, 1.0), Kind.ATTACK
+		Color(0.55, 0.18, 0.18, 1.0), Color(0.95, 0.45, 0.40, 1.0), Kind.ATTACK, false
 	)
 	_textures[Kind.REPAIR] = _make_arrow(
-		Color(0.20, 0.45, 0.25, 1.0), Color(0.50, 0.92, 0.55, 1.0), Kind.REPAIR
+		Color(0.20, 0.45, 0.25, 1.0), Color(0.50, 0.92, 0.55, 1.0), Kind.REPAIR, false
 	)
 	_textures[Kind.BUILD] = _make_arrow(
-		Color(0.18, 0.40, 0.50, 1.0), Color(0.55, 0.90, 1.00, 1.0), Kind.BUILD
+		Color(0.18, 0.40, 0.50, 1.0), Color(0.55, 0.90, 1.00, 1.0), Kind.BUILD, false
 	)
 	_textures[Kind.MOVE] = _make_arrow(
-		Color(0.55, 0.42, 0.12, 1.0), Color(1.00, 0.85, 0.32, 1.0), Kind.MOVE
+		Color(0.55, 0.42, 0.12, 1.0), Color(1.00, 0.85, 0.32, 1.0), Kind.MOVE, false
+	)
+	# Pressed variants — same shape and tint but darkened and pixel-
+	# shifted 2px down-right, simulating the cursor being physically
+	# pushed when the player clicks. Generated once at startup so the
+	# swap on mouse-down is just a texture pointer change.
+	_textures_pressed[Kind.DEFAULT] = _make_arrow(_BODY_BASE.darkened(0.25), _HIGHLIGHT_BASE.darkened(0.2), Kind.DEFAULT, true)
+	_textures_pressed[Kind.ATTACK] = _make_arrow(
+		Color(0.40, 0.10, 0.10, 1.0), Color(0.75, 0.30, 0.25, 1.0), Kind.ATTACK, true
+	)
+	_textures_pressed[Kind.REPAIR] = _make_arrow(
+		Color(0.12, 0.32, 0.18, 1.0), Color(0.35, 0.70, 0.40, 1.0), Kind.REPAIR, true
+	)
+	_textures_pressed[Kind.BUILD] = _make_arrow(
+		Color(0.10, 0.28, 0.36, 1.0), Color(0.40, 0.70, 0.80, 1.0), Kind.BUILD, true
+	)
+	_textures_pressed[Kind.MOVE] = _make_arrow(
+		Color(0.40, 0.30, 0.08, 1.0), Color(0.78, 0.65, 0.22, 1.0), Kind.MOVE, true
 	)
 	set_kind(Kind.DEFAULT)
+
+
+func _input(event: InputEvent) -> void:
+	## Cursor "physical click" feel — swap to the darker / shifted
+	## pressed variant on mouse-down, restore on release. Both buttons
+	## (left and right) trigger the swap so right-clicking commands
+	## also get the press feedback.
+	if event is InputEventMouseButton:
+		var mb: InputEventMouseButton = event as InputEventMouseButton
+		if mb.button_index == MOUSE_BUTTON_LEFT or mb.button_index == MOUSE_BUTTON_RIGHT:
+			if mb.pressed != _is_pressed:
+				_is_pressed = mb.pressed
+				_apply_current()
 
 
 ## Used by main menu / boot scenes to install the default gunmetal
@@ -71,26 +103,36 @@ func set_kind(kind: int) -> void:
 	if _current == kind:
 		return
 	_current = kind
-	var tex: ImageTexture = _textures.get(kind) as ImageTexture
+	_apply_current()
+
+
+func _apply_current() -> void:
+	var bank: Dictionary = _textures_pressed if _is_pressed else _textures
+	var tex: ImageTexture = bank.get(_current) as ImageTexture
 	if not tex:
 		return
-	# All variants anchor at the arrow tip (top-left). The accent
-	# glyph hangs off the arrow's lower-right shoulder so the click
-	# point doesn't drift between cursor kinds.
+	# Anchor stays at the arrow tip — pressed variant pixel-shifts the
+	# silhouette but the click point should remain at the same screen
+	# location, so the hotspot doesn't move.
 	Input.set_custom_mouse_cursor(tex, Input.CURSOR_ARROW, Vector2(2, 2))
 
 
 ## --- Procedural cursor generators ----------------------------------------
 
-func _make_arrow(body: Color, highlight: Color, kind: int) -> ImageTexture:
-	return _build_arrow_static(body, highlight, kind)
+func _make_arrow(body: Color, highlight: Color, kind: int, pressed: bool = false) -> ImageTexture:
+	return _build_arrow_static(body, highlight, kind, pressed)
 
 
-static func _build_arrow_static(body: Color, highlight: Color, kind: int) -> ImageTexture:
+static func _build_arrow_static(body: Color, highlight: Color, kind: int, pressed: bool = false) -> ImageTexture:
 	## Draws the shared arrow silhouette tinted with `body` and inner
 	## highlight `highlight`, then overlays the per-kind glyph at the
 	## arrow's lower-right shoulder.
 	var img := Image.create(_SIZE, _SIZE, false, Image.FORMAT_RGBA8)
+	# Pressed variants pixel-shift the arrow 2 down + 1 right so the
+	# cursor visually "sinks" into the click point, simulating the
+	# physical motion of a button press without animating.
+	var shift_x: int = 1 if pressed else 0
+	var shift_y: int = 2 if pressed else 0
 	# Slightly-rounded chunky arrow — built row-by-row. The shape is
 	# the same as a standard pointer but the corners taper smoothly
 	# instead of going to single-pixel points.
@@ -99,8 +141,9 @@ static func _build_arrow_static(body: Color, highlight: Color, kind: int) -> Ima
 		if width <= 0:
 			continue
 		for x: int in width + 2:
-			var px: int = 2 + x
-			if px >= _SIZE:
+			var px: int = 2 + x + shift_x
+			var py: int = y + shift_y
+			if px >= _SIZE or py >= _SIZE:
 				continue
 			# Outline at the silhouette boundary.
 			var on_outline: bool = (x == 0 or x == width + 1 or y == 0 or y == _SIZE - 1)
@@ -112,18 +155,22 @@ static func _build_arrow_static(body: Color, highlight: Color, kind: int) -> Ima
 			if y > 19 and x > maxi(width - (y - 19) * 2, 1):
 				continue
 			if on_outline:
-				img.set_pixel(px, y, _OUTLINE)
+				img.set_pixel(px, py, _OUTLINE)
 			elif x <= 1:
 				# Inner highlight — runs along the leading (left) edge.
-				img.set_pixel(px, y, highlight)
+				img.set_pixel(px, py, highlight)
 			else:
 				# Body fill, slightly darker toward the trailing edge.
 				var t: float = float(x) / float(maxi(width, 1))
-				img.set_pixel(px, y, body.lerp(_OUTLINE, t * 0.35))
-	# Dark rivet near the arrow's base for industrial flavor.
+				img.set_pixel(px, py, body.lerp(_OUTLINE, t * 0.35))
+	# Dark rivet near the arrow's base for industrial flavor — also
+	# pixel-shifted with the rest of the body when pressed.
 	for dx: int in 2:
 		for dy: int in 2:
-			img.set_pixel(5 + dx, 16 + dy, _RIVET)
+			var rx: int = 5 + dx + shift_x
+			var ry: int = 16 + dy + shift_y
+			if rx < _SIZE and ry < _SIZE:
+				img.set_pixel(rx, ry, _RIVET)
 	# Per-kind accent glyph attached to the lower-right shoulder. The
 	# arrow ends around y=22, so glyph sits in y=14..22 range.
 	match kind:

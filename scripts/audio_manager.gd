@@ -40,6 +40,30 @@ var _sfx_defeat: Array[AudioStream] = []
 var _sfx_error: Array[AudioStream] = []
 ## UI confirm — replaces the procedural beep on select / command issue.
 var _sfx_confirm: Array[AudioStream] = []
+
+## --- Voicelines -----------------------------------------------------------
+## Per-faction commander VO. Nested as (faction_id, category) → bank.
+## faction_id: 0 = Anvil, 1 = Sable. Category strings:
+##   "select", "move", "attack", "attacked", "build"
+## Voicelines route through a SINGLE dedicated player so commands
+## issued during an active line are ignored rather than stacking up
+## five overlapping voices.
+var _voicelines: Dictionary = {}
+## Two voiceline channels — `_vl_player` for routine commands
+## (select/move/attack/build) which step on each other if spammed,
+## and `_vl_attacked` for the rare "we're under fire" stinger which
+## has its own player so a fast string of move commands doesn't
+## block the alert.
+var _vl_player: AudioStreamPlayer = null
+var _vl_attacked: AudioStreamPlayer = null
+## Dedicated audio bus for voicelines so we can apply the radio /
+## bandpass effect once and route every commander line through it.
+var _vl_bus_idx: int = -1
+const VL_BUS_NAME: String = "Voiceline"
+## Hard cooldown for the "attacked" voiceline — fires at most once
+## every COOLDOWN_ATTACKED_SEC seconds regardless of source.
+const COOLDOWN_ATTACKED_SEC: float = 30.0
+var _attacked_next_at_msec: int = 0
 ## When set to a non-INF position, the next batch of `_play_tone` /
 ## `_play_thump` / etc. internal calls route to a 3D player at that
 ## position instead of the 2D pool. Public "play X at" methods stash
@@ -142,6 +166,86 @@ func _load_sfx_banks() -> void:
 		"res://assets/audio/Confirm UI Sfx Low.mp3",
 		"res://assets/audio/Confirm UI Sfx Low (1).mp3",
 	])
+	_load_voicelines()
+
+
+func _load_voicelines() -> void:
+	## Anvil + Sable voiceline banks. Folder layout under
+	## res://assets/audio/Voicelines/<Faction>/<Faction> <Category> N.mp3.
+	## Each (faction, category) holds 4-6 variants; play_voice picks
+	## one at random so commanders don't repeat the same line back-to-back.
+	for faction_pair: Array in [[0, "Anvil"], [1, "Sable"]]:
+		var fid: int = faction_pair[0] as int
+		var fname: String = faction_pair[1] as String
+		_voicelines[fid] = {}
+		var f: Dictionary = _voicelines[fid] as Dictionary
+		f["select"] = _load_voiceline_bank(fname, "Select", 6)
+		f["move"] = _load_voiceline_bank(fname, "Move", 4)
+		f["attack"] = _load_voiceline_bank(fname, "Attack", 4)
+		f["attacked"] = _load_voiceline_bank(fname, "Attacked", 4)
+		f["build"] = _load_voiceline_bank(fname, "Build", 4)
+	# Set up a dedicated voiceline bus with a radio-style filter chain
+	# so every commander line shares the in-world handheld-radio
+	# feel. Done once at startup; players route to it.
+	_setup_voiceline_bus()
+	# Two players — routine commands and the dedicated "attacked"
+	# stinger. Both go through the radio bus.
+	_vl_player = AudioStreamPlayer.new()
+	_vl_player.bus = VL_BUS_NAME if _vl_bus_idx >= 0 else "Master"
+	add_child(_vl_player)
+	_vl_attacked = AudioStreamPlayer.new()
+	_vl_attacked.bus = VL_BUS_NAME if _vl_bus_idx >= 0 else "Master"
+	add_child(_vl_attacked)
+
+
+func _setup_voiceline_bus() -> void:
+	## Adds a "Voiceline" audio bus (if missing) and stacks effects on
+	## it: bandpass to cut sub and air frequencies (handheld-radio
+	## bandwidth), gentle distortion to add tube crunch, and a touch of
+	## reverb for the sense of being heard from inside a vehicle. Bus
+	## volume is pulled down so commander VO sits under the gameplay
+	## SFX rather than overpowering it.
+	if AudioServer.get_bus_index(VL_BUS_NAME) >= 0:
+		_vl_bus_idx = AudioServer.get_bus_index(VL_BUS_NAME)
+		return
+	var idx: int = AudioServer.bus_count
+	AudioServer.add_bus(idx)
+	AudioServer.set_bus_name(idx, VL_BUS_NAME)
+	AudioServer.set_bus_send(idx, "Master")
+	# Bandpass — cuts low rumble + high air, mimicking 300-3000Hz
+	# radio bandwidth.
+	var bp := AudioEffectBandPassFilter.new()
+	bp.cutoff_hz = 1400.0
+	bp.resonance = 0.6
+	AudioServer.add_bus_effect(idx, bp)
+	# Distortion — slight overdrive for tube / lo-fi grit.
+	var dist := AudioEffectDistortion.new()
+	dist.mode = AudioEffectDistortion.MODE_OVERDRIVE
+	dist.drive = 0.25
+	dist.post_gain = -3.0
+	AudioServer.add_bus_effect(idx, dist)
+	# Subtle reverb — small-room interior so the voice doesn't sound
+	# completely dry against the outdoor SFX.
+	var rev := AudioEffectReverb.new()
+	rev.room_size = 0.25
+	rev.damping = 0.85
+	rev.wet = 0.18
+	rev.dry = 0.85
+	AudioServer.add_bus_effect(idx, rev)
+	# Pull bus volume down so VO sits under combat SFX. Voicelines
+	# were too loud relative to the rest of the mix.
+	AudioServer.set_bus_volume_db(idx, -8.0)
+	_vl_bus_idx = idx
+
+
+func _load_voiceline_bank(faction: String, category: String, max_idx: int) -> Array[AudioStream]:
+	var bank: Array[AudioStream] = []
+	for i: int in range(1, max_idx + 1):
+		var path: String = "res://assets/audio/Voicelines/%s/%s %s %d.mp3" % [faction, faction, category, i]
+		var stream: AudioStream = load(path) as AudioStream
+		if stream:
+			bank.append(stream)
+	return bank
 
 
 func _load_bank(paths: Array) -> Array[AudioStream]:
@@ -521,6 +625,92 @@ func play_unit_destroyed(at: Vector3 = Vector3.INF, heavy: bool = false) -> void
 	if randf() < 0.6:
 		_play_filtered_noise(randf_range(0.1, 0.18), randf_range(1400.0, 2200.0), -10.0)
 	_spatial_pos = Vector3.INF
+
+## --- Voiceline API --------------------------------------------------------
+
+func play_voice_select() -> void:
+	_play_voiceline("select")
+
+
+func play_voice_move() -> void:
+	_play_voiceline("move")
+
+
+func play_voice_attack() -> void:
+	_play_voiceline("attack")
+
+
+func play_voice_attacked() -> void:
+	## Goes through the dedicated `_vl_attacked` player (separate from
+	## the routine-command channel) so a player rapid-firing move
+	## orders doesn't block the under-attack alert. Hard 30-second
+	## cooldown so sustained battles don't loop the line.
+	if not _vl_attacked:
+		return
+	if _vl_attacked.playing:
+		return
+	var now_msec: int = Time.get_ticks_msec()
+	if now_msec < _attacked_next_at_msec:
+		return
+	var fid: int = _player_faction_id()
+	if not _voicelines.has(fid):
+		return
+	var bank: Array = _voicelines[fid].get("attacked", []) as Array
+	if bank.is_empty():
+		return
+	var stream: AudioStream = bank[randi() % bank.size()] as AudioStream
+	if not stream:
+		return
+	_vl_attacked.stream = stream
+	# Bus already pulls volume down; small per-call pitch jitter for
+	# variety across the four variants.
+	_vl_attacked.volume_db = 0.0
+	_vl_attacked.pitch_scale = 1.0
+	_vl_attacked.play()
+	_attacked_next_at_msec = now_msec + int(COOLDOWN_ATTACKED_SEC * 1000.0)
+
+
+func play_voice_build() -> void:
+	_play_voiceline("build")
+
+
+func _play_voiceline(category: String) -> void:
+	## Plays one variant from the local player's faction. Single channel
+	## means a new command issued while a line is playing is ignored.
+	if not _vl_player:
+		return
+	if _vl_player.playing:
+		return
+	var fid: int = _player_faction_id()
+	if not _voicelines.has(fid):
+		return
+	var bank: Array = _voicelines[fid].get(category, []) as Array
+	if bank.is_empty():
+		return
+	var stream: AudioStream = bank[randi() % bank.size()] as AudioStream
+	if not stream:
+		return
+	_vl_player.stream = stream
+	# Bus-level volume already attenuates voicelines (-8 dB) plus the
+	# bandpass + distortion shape them. Per-player level stays neutral
+	# so all voicelines play at consistent loudness through the radio
+	# treatment.
+	_vl_player.volume_db = 0.0
+	# Pre-recorded human VO — leave pitch alone so the delivery
+	# sounds natural. Variety comes from the random bank pick.
+	_vl_player.pitch_scale = 1.0
+	_vl_player.play()
+
+
+func _player_faction_id() -> int:
+	# Local player's chosen faction. Anvil (0) is the default fallback
+	# when MatchSettings isn't loaded — keeps the test arena working
+	# from the editor.
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if not settings or not "player_faction" in settings:
+		return 0
+	return settings.get("player_faction") as int
+
 
 func play_capture_complete(at: Vector3 = Vector3.INF) -> void:
 	_spatial_pos = at

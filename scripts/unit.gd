@@ -2222,6 +2222,15 @@ func take_damage(amount: int, attacker: Node3D = null) -> void:
 	if alive_count <= 0:
 		return
 
+	# Player-only "we're under attack" alert. Channel-keyed by squad
+	# instance id so the AlertManager's per-channel cooldown gates
+	# the voiceline — a single squad taking sustained fire only
+	# fires the alert once every ~8 seconds, not on every bullet.
+	if owner_id == 0:
+		var alert: Node = get_tree().current_scene.get_node_or_null("AlertManager") if get_tree() else null
+		if alert and alert.has_method("emit_alert"):
+			alert.emit_alert("Squad under fire", 1, global_position, "unit_attack:%d" % get_instance_id(), 8.0)
+
 	var hp_before: int = get_total_hp()
 
 	# Damage carries across members so alive_count tracks the HP fraction:

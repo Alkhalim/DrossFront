@@ -523,7 +523,9 @@ func _finish_box_select(event: InputEventMouseButton) -> void:
 		or _selected_crawlers.size() > prev_crawler_count
 	)
 	if added_anything and _audio:
-		_audio.play_select()
+		# Unit selections speak instead of chiming — voiceline only.
+		if _audio.has_method("play_voice_select"):
+			_audio.play_voice_select()
 
 	# If nothing movable was selected, check for a building in the box
 	if _selected_units.is_empty() and _selected_crawlers.is_empty():
@@ -556,8 +558,8 @@ func _command_move(screen_pos: Vector2, queue: bool = false) -> void:
 	# the engineer to finish what it's doing and then walk to the waypoint.
 	if not queue:
 		_cancel_builder_tasks()
-	if _audio:
-		_audio.play_command()
+	if _audio and _audio.has_method("play_voice_move"):
+		_audio.play_voice_move()
 
 	var ground_pos := _raycast_ground(screen_pos)
 	if ground_pos == Vector3.INF:
@@ -593,8 +595,10 @@ func _command_assist_build(building: Building) -> void:
 		var builder: Node = unit.get_builder()
 		if builder and builder.has_method("start_building"):
 			builder.start_building(building)
-	if _audio:
-		_audio.play_command()
+	# Engineer commanded to assist construction — unit action, so the
+	# voiceline replaces the chime.
+	if _audio and _audio.has_method("play_voice_build"):
+		_audio.play_voice_build()
 
 
 func _command_attack(target: Node3D) -> void:
@@ -602,8 +606,8 @@ func _command_attack(target: Node3D) -> void:
 	if _selected_units.is_empty():
 		return
 	_cancel_builder_tasks()
-	if _audio:
-		_audio.play_command()
+	if _audio and _audio.has_method("play_voice_attack"):
+		_audio.play_voice_attack()
 	for unit: Node3D in _selected_units:
 		var combat: Node = unit.get_combat()
 		if combat and combat.has_method("set_target"):
@@ -618,8 +622,8 @@ func _command_attack_move(screen_pos: Vector2) -> void:
 	if _selected_units.is_empty():
 		return
 	_cancel_builder_tasks()
-	if _audio:
-		_audio.play_command()
+	if _audio and _audio.has_method("play_voice_attack"):
+		_audio.play_voice_attack()
 	var ground_pos := _raycast_ground(screen_pos)
 	if ground_pos == Vector3.INF:
 		return
@@ -655,8 +659,8 @@ func command_hold_position_on_selection() -> void:
 	if _selected_units.is_empty():
 		return
 	_cancel_builder_tasks()
-	if _audio:
-		_audio.play_command()
+	if _audio and _audio.has_method("play_voice_move"):
+		_audio.play_voice_move()
 	for unit: Node3D in _selected_units:
 		if unit.has_method("command_hold_position"):
 			unit.command_hold_position()
@@ -667,8 +671,8 @@ func _command_patrol(screen_pos: Vector2) -> void:
 	if _selected_units.is_empty():
 		return
 	_cancel_builder_tasks()
-	if _audio:
-		_audio.play_command()
+	if _audio and _audio.has_method("play_voice_move"):
+		_audio.play_voice_move()
 	var ground_pos := _raycast_ground(screen_pos)
 	if ground_pos == Vector3.INF:
 		return
@@ -751,7 +755,9 @@ func _select_all_of_type(unit_name: String) -> void:
 			_add_to_selection(unit, false)
 			added = true
 	if added and _audio:
-		_audio.play_select()
+		# Unit selections speak instead of chiming — voiceline only.
+		if _audio.has_method("play_voice_select"):
+			_audio.play_voice_select()
 
 
 func _select_all_buildings_of_type(building_id: StringName) -> void:
@@ -808,7 +814,9 @@ func _assign_control_group(index: int) -> void:
 	for unit: Node3D in _selected_units:
 		_control_groups[index].append(unit.get_instance_id())
 	if _audio:
-		_audio.play_select()
+		# Unit selections speak instead of chiming — voiceline only.
+		if _audio.has_method("play_voice_select"):
+			_audio.play_voice_select()
 
 
 ## Last-recalled control group + timestamp so a second press of the same key
@@ -833,7 +841,9 @@ func _recall_control_group(index: int) -> void:
 				_add_to_selection(unit, false)
 				added = true
 	if added and _audio:
-		_audio.play_select()
+		# Unit selections speak instead of chiming — voiceline only.
+		if _audio.has_method("play_voice_select"):
+			_audio.play_voice_select()
 
 	# Double-press detection: same group within the window pans the camera
 	# to where those units are right now.
@@ -882,7 +892,9 @@ func _add_to_selection(unit: Node3D, play_audio: bool = true) -> void:
 	_selected_units.append(unit)
 	unit.select()
 	if play_audio and _audio:
-		_audio.play_select()
+		# Unit selections speak instead of chiming — voiceline only.
+		if _audio.has_method("play_voice_select"):
+			_audio.play_voice_select()
 
 
 func _remove_from_selection(unit: Node3D) -> void:
@@ -1088,7 +1100,9 @@ func _select_building(building: Building) -> void:
 	_selected_buildings.clear()
 	_selected_buildings.append(building)
 	if _audio:
-		_audio.play_select()
+		# Unit selections speak instead of chiming — voiceline only.
+		if _audio.has_method("play_voice_select"):
+			_audio.play_voice_select()
 
 	# Show rally point only for production buildings
 	if building.stats and not building.get_producible_units().is_empty():
@@ -1223,7 +1237,9 @@ func _add_crawler_to_selection(crawler: SalvageCrawler, play_audio: bool = true)
 	_selected_crawlers.append(crawler)
 	crawler.select()
 	if play_audio and _audio:
-		_audio.play_select()
+		# Unit selections speak instead of chiming — voiceline only.
+		if _audio.has_method("play_voice_select"):
+			_audio.play_voice_select()
 
 
 func _remove_crawler_from_selection(crawler: SalvageCrawler) -> void:
@@ -1392,6 +1408,10 @@ func start_build_placement(bstat: BuildingStatResource) -> void:
 
 	_build_mode = true
 	_build_stats = bstat
+
+	# Building placement is a UI / building action — per spec, buildings
+	# get sounds but no voicelines. Chime falls through via the existing
+	# `play_command` callers; no voiceline here.
 
 	# Spawn a real Building scene as the ghost so the preview shows the actual
 	# silhouette (smokestacks, turrets, antenna farms, etc.), not just a box.

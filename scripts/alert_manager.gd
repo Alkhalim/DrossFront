@@ -26,6 +26,15 @@ func emit_alert(message: String, severity: int = Severity.INFO, world_pos: Vecto
 			return
 		_channel_next_at[channel] = now + cooldown
 	alert_emitted.emit(message, severity, world_pos)
+	# Commander voiceline for combat alerts. Building damage / unit
+	# damage / unit destruction all surface as warning-or-critical
+	# alerts on dedicated channels — the channel cooldown above
+	# already rate-limits the trigger so we don't get a wall of
+	# voicelines when the base is under sustained fire.
+	if severity >= Severity.WARNING and (channel.begins_with("building_attack") or channel.begins_with("unit_attack")):
+		var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager") if get_tree() else null
+		if audio and audio.has_method("play_voice_attacked"):
+			audio.play_voice_attacked()
 
 
 func _now() -> float:
