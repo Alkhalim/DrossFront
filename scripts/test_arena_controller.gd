@@ -2114,7 +2114,8 @@ func _spawn_plateau_ramp(plateau_center: Vector3, top_size: Vector2, height: flo
 	# plateau's vertical wall instead of routing up the slope.
 	var slope_col := CollisionShape3D.new()
 	var slope_box := BoxShape3D.new()
-	var slope_len: float = sqrt(run * run + height * height)
+	# `slope_len` already declared earlier in this function for the
+	# UV calculation — reuse the existing local instead of redeclaring.
 	slope_box.size = Vector3(width, 0.4, slope_len)
 	slope_col.shape = slope_box
 	# Center the box at the slope's midpoint and rotate around the X
