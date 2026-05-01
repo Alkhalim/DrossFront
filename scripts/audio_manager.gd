@@ -241,9 +241,10 @@ func _setup_voiceline_bus() -> void:
 		chorus.set_voice_rate_hz(0, 0.7)
 		chorus.set_voice_level_db(0, -6.0)
 	AudioServer.add_bus_effect(idx, chorus)
-	# Pull bus volume down so VO sits under combat SFX. Voicelines
-	# were too loud relative to the rest of the mix.
-	AudioServer.set_bus_volume_db(idx, -8.0)
+	# Bus level — pulled back from the previous -8 dB so voicelines
+	# are clearly audible. The crunchy bandpass + lofi distortion
+	# already keep them mixed-feeling against the dry combat SFX.
+	AudioServer.set_bus_volume_db(idx, -2.0)
 	_vl_bus_idx = idx
 
 
@@ -671,12 +672,95 @@ func play_voice_attacked() -> void:
 	if not stream:
 		return
 	_vl_attacked.stream = stream
-	# Bus already pulls volume down; small per-call pitch jitter for
-	# variety across the four variants.
 	_vl_attacked.volume_db = 0.0
 	_vl_attacked.pitch_scale = 1.0
+	# Same radio crackle treatment as the routine voicelines — the
+	# attacked stinger should still feel like it's coming through
+	# the squad radio.
+	_play_radio_crackle("on")
 	_vl_attacked.play()
+	if not _vl_attacked.finished.is_connected(_on_voiceline_finished):
+		_vl_attacked.finished.connect(_on_voiceline_finished, CONNECT_ONE_SHOT)
 	_attacked_next_at_msec = now_msec + int(COOLDOWN_ATTACKED_SEC * 1000.0)
+
+
+## --- Radio crackle generator -----------------------------------------------
+
+## Pool of dedicated players for the crackle bursts so they don't
+## stomp the main voiceline channel and can overlap briefly at the
+## tuning-in / tuning-out boundary.
+var _crackle_players: Array[AudioStreamPlayer] = []
+const _CRACKLE_POOL_SIZE: int = 4
+
+
+func _play_radio_crackle(kind: String) -> void:
+	## Generates a short procedural noise burst that gets shaped by the
+	## same Voiceline bus (bandpass + lofi distortion + chorus), so it
+	## comes out sounding like a real radio click + static spit. `kind`
+	## controls envelope shape:
+	##   "on"  — quick rising click + 50ms static tail
+	##   "off" — short snap as the carrier drops
+	## Both run through the radio bus so the output character matches
+	## the VO they bracket.
+	if _vl_bus_idx < 0:
+		return
+	# Lazy-init the crackle player pool.
+	if _crackle_players.is_empty():
+		for i: int in _CRACKLE_POOL_SIZE:
+			var p := AudioStreamPlayer.new()
+			p.bus = VL_BUS_NAME
+			add_child(p)
+			_crackle_players.append(p)
+	var player: AudioStreamPlayer = null
+	for cp: AudioStreamPlayer in _crackle_players:
+		if not cp.playing:
+			player = cp
+			break
+	if not player:
+		return
+	var stream: AudioStreamWAV = _generate_radio_crackle(kind)
+	player.stream = stream
+	# Bus already gets the bandpass+distortion. Crackle volume slightly
+	# louder than voiceline neutral so the click reads clearly.
+	player.volume_db = randf_range(-2.0, 1.0)
+	# Pitch-jitter so back-to-back voicelines don't have identical clicks.
+	player.pitch_scale = randf_range(0.85, 1.15)
+	player.play()
+
+
+func _generate_radio_crackle(kind: String) -> AudioStreamWAV:
+	## Brief filtered-noise burst with a sharp click at the front and
+	## a fast envelope. `kind == "on"` ramps in over 5ms then decays
+	## over 80ms, giving the "carrier click + static" sound. `kind ==
+	## "off"` is shorter (40ms total) and snappier.
+	var dur: float = 0.085 if kind == "on" else 0.045
+	var samples: int = int(SAMPLE_RATE * dur)
+	var data := PackedByteArray()
+	data.resize(samples * 2)
+	# IIR low-pass setup so the static doesn't sound like pure white
+	# noise — radio static has rolled-off highs.
+	var dt: float = 1.0 / float(SAMPLE_RATE)
+	var rc: float = 1.0 / (TAU * 4500.0)
+	var alpha: float = dt / (rc + dt)
+	var prev_lp: float = 0.0
+	var attack_samples: int = int(SAMPLE_RATE * 0.005)
+	for i: int in samples:
+		var u: float = float(i) / float(maxi(samples, 1))
+		# Front click — first 2-3 samples are full amplitude raw noise
+		# for the sharp transient that sells the carrier handover.
+		var raw: float = randf_range(-1.0, 1.0)
+		prev_lp = prev_lp + alpha * (raw - prev_lp)
+		var v: float = prev_lp
+		# Envelope: fast attack into exponential decay.
+		var attack: float = clampf(float(i) / float(maxi(attack_samples, 1)), 0.0, 1.0)
+		var decay_u: float = clampf((u - 0.05) / 0.95, 0.0, 1.0)
+		var decay: float = exp(-decay_u * 5.0)
+		v *= attack * decay
+		# Boost — bandpass on the bus drops a lot of energy, so we
+		# pre-boost here to keep the click loud post-filtering.
+		v = clampf(v * 2.5, -1.0, 1.0)
+		_write_sample(data, i, v)
+	return _make_stream(data)
 
 
 func play_voice_build() -> void:
@@ -700,15 +784,22 @@ func _play_voiceline(category: String) -> void:
 	if not stream:
 		return
 	_vl_player.stream = stream
-	# Bus-level volume already attenuates voicelines (-8 dB) plus the
-	# bandpass + distortion shape them. Per-player level stays neutral
-	# so all voicelines play at consistent loudness through the radio
-	# treatment.
 	_vl_player.volume_db = 0.0
-	# Pre-recorded human VO — leave pitch alone so the delivery
-	# sounds natural. Variety comes from the random bank pick.
 	_vl_player.pitch_scale = 1.0
+	# Radio "tuning in" crackle right before the line starts — a quick
+	# noise burst on the same bus, so it gets the same band-pass / lofi
+	# treatment as the VO. Sells the squad-radio handover feel.
+	_play_radio_crackle("on")
 	_vl_player.play()
+	# "Tuning out" crackle when the line finishes. Connect once per
+	# play; CONNECT_ONE_SHOT auto-disconnects after firing so we don't
+	# stack handlers.
+	if not _vl_player.finished.is_connected(_on_voiceline_finished):
+		_vl_player.finished.connect(_on_voiceline_finished, CONNECT_ONE_SHOT)
+
+
+func _on_voiceline_finished() -> void:
+	_play_radio_crackle("off")
 
 
 func _player_faction_id() -> int:

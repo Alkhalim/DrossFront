@@ -1099,10 +1099,12 @@ func _select_building(building: Building) -> void:
 	# subsequent queue calls don't fan out to a stale double-click set.
 	_selected_buildings.clear()
 	_selected_buildings.append(building)
+	# Buildings get the UI chime instead of a voiceline (per spec —
+	# voicelines are unit-only). The replace_all that swapped chimes
+	# for voicelines on every play_select call was too broad and
+	# accidentally caught this site too.
 	if _audio:
-		# Unit selections speak instead of chiming — voiceline only.
-		if _audio.has_method("play_voice_select"):
-			_audio.play_voice_select()
+		_audio.play_select()
 
 	# Show rally point only for production buildings
 	if building.stats and not building.get_producible_units().is_empty():
