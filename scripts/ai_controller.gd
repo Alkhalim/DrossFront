@@ -507,7 +507,8 @@ func _ai_prerequisites_met(bstats: BuildingStatResource) -> bool:
 		var stat: BuildingStatResource = node.get("stats") as BuildingStatResource
 		if stat:
 			have[stat.building_id] = true
-	for req: StringName in bstats.prerequisites:
+	for req_v: Variant in bstats.prerequisites:
+		var req: StringName = StringName(req_v)
 		if not have.has(req):
 			return false
 	return true

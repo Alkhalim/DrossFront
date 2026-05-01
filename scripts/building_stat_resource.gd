@@ -41,5 +41,8 @@ extends Resource
 
 ## Building IDs that must be CONSTRUCTED before this one can be built.
 ## Empty array = always available. Multiple entries are AND-ed (all
-## must be present). The ID matches `building_id` on the prerequisite.
-@export var prerequisites: Array[StringName] = []
+## must be present). Stored as plain `Array` of StringName values
+## because some Godot 4.x versions have parser issues with
+## `Array[StringName]` exports. Loaded values are read as StringName
+## by callers.
+@export var prerequisites: Array = []

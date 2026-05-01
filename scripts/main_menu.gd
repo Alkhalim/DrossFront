@@ -133,20 +133,30 @@ func _build_layout() -> void:
 	_root_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	center.add_child(_root_vbox)
 
-	# Title block.
+	# Title block — letter-spaced "DROSSFRONT" with a heavy iron-plate
+	# weight, brass-accented glow, and a pair of bracketing rules so it
+	# reads like a stamped insignia rather than a system label.
 	var title := Label.new()
-	title.text = "DROSSFRONT"
-	title.add_theme_font_size_override("font_size", 64)
+	title.text = "D R O S S F R O N T"
+	title.add_theme_font_size_override("font_size", 88)
 	title.add_theme_color_override("font_color", COLOR_TITLE)
+	title.add_theme_color_override("font_outline_color", Color(0.10, 0.07, 0.04, 1.0))
+	title.add_theme_constant_override("outline_size", 8)
+	title.add_theme_color_override("font_shadow_color", Color(0.95, 0.55, 0.20, 0.45))
+	title.add_theme_constant_override("shadow_offset_x", 0)
+	title.add_theme_constant_override("shadow_offset_y", 0)
+	title.add_theme_constant_override("shadow_outline_size", 14)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_root_vbox.add_child(title)
 
-	var subtitle := Label.new()
-	subtitle.text = "Salvage what you can. Burn the rest."
-	subtitle.add_theme_font_size_override("font_size", 18)
-	subtitle.add_theme_color_override("font_color", COLOR_HINT)
-	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_root_vbox.add_child(subtitle)
+	# Pair of thin horizontal rules above and below the title — the
+	# "stamped onto a chassis plate" feel. Drawn as ColorRects so we
+	# don't need a font with built-in decorations.
+	var rule_below := ColorRect.new()
+	rule_below.custom_minimum_size = Vector2(420, 2)
+	rule_below.color = Color(0.95, 0.65, 0.28, 0.85)
+	rule_below.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_root_vbox.add_child(rule_below)
 
 	var spacer := Control.new()
 	spacer.custom_minimum_size = Vector2(0, 28)

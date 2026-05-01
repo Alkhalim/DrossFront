@@ -1848,7 +1848,8 @@ func _local_player_built_ids() -> Dictionary:
 func _prerequisites_met(bstat: BuildingStatResource, built_ids: Dictionary) -> bool:
 	if bstat.prerequisites.is_empty():
 		return true
-	for req: StringName in bstat.prerequisites:
+	for req_v: Variant in bstat.prerequisites:
+		var req: StringName = StringName(req_v)
 		if not built_ids.has(req):
 			return false
 	return true
@@ -1859,8 +1860,8 @@ func _building_tooltip_with_prereq(bstat: BuildingStatResource, prereqs_ok: bool
 	if prereqs_ok or bstat.prerequisites.is_empty():
 		return base
 	var names: PackedStringArray = PackedStringArray()
-	for req: StringName in bstat.prerequisites:
-		names.append(_pretty_id(req))
+	for req_v: Variant in bstat.prerequisites:
+		names.append(_pretty_id(StringName(req_v)))
 	return "%s\n\nRequires: %s" % [base, ", ".join(names)]
 
 
