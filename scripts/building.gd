@@ -1098,70 +1098,125 @@ func _detail_salvage_yard() -> void:
 
 func _detail_aerodrome() -> void:
 	## Aerodrome — landing pad with hangar entrance + control tower.
-	## V3 §"Pillar 3" production building for aircraft.
+	## V3 §"Pillar 3" production building for aircraft. Roof reads as
+	## a corrugated metal deck (Wellblech ribs) instead of a flat
+	## white slab; landing strip is diagonal so it gets the longest
+	## possible run across the rooftop. Team color is restricted to
+	## small accent points (corner caps + a slim rear band) instead
+	## of a full-footprint slab.
 	var fs: Vector3 = stats.footprint_size
-	# Team collar around the base.
-	_team_collar(fs.x * 0.92, 0.1, fs.z * 0.92, Vector3(0, fs.y + 0.05, 0))
+	var sable: bool = _resolve_faction_id() == 1
+	var team_color: Color = _resolve_team_color()
 
-	# Landing pad — large flat slab on top with hatched stripe markings.
-	var pad := MeshInstance3D.new()
-	var pad_box := BoxMesh.new()
-	pad_box.size = Vector3(fs.x * 0.85, 0.1, fs.z * 0.55)
-	pad.mesh = pad_box
-	pad.position = Vector3(0, fs.y + 0.06, fs.z * 0.05)
-	var pad_mat := _detail_dark_metal_mat(Color(0.18, 0.19, 0.22))
-	pad.set_surface_override_material(0, pad_mat)
-	_attach_visual(pad)
+	# Corrugated metal roof deck — base flat plate plus a row of slim
+	# ribs running across the long axis, evenly spaced. Reads as
+	# Wellblech instead of a featureless white roof.
+	var roof_color: Color = Color(0.30, 0.32, 0.36, 1.0)
+	if sable:
+		roof_color = Color(0.18, 0.16, 0.22, 1.0)
+	var roof := MeshInstance3D.new()
+	var roof_box := BoxMesh.new()
+	roof_box.size = Vector3(fs.x * 0.96, 0.10, fs.z * 0.96)
+	roof.mesh = roof_box
+	roof.position = Vector3(0, fs.y + 0.05, 0)
+	roof.set_surface_override_material(0, _detail_dark_metal_mat(roof_color))
+	_attach_visual(roof)
+	# Wellblech ribs — slim raised strips parallel to the X axis,
+	# repeating every ~0.55u along Z. Strong horizontal striping
+	# breaks up the roof and reads as corrugated steel from the
+	# top-down RTS camera.
+	var rib_color: Color = roof_color.darkened(0.20)
+	var rib_count: int = maxi(int(fs.z / 0.55), 6)
+	for r_i: int in rib_count:
+		var rib := MeshInstance3D.new()
+		var rb := BoxMesh.new()
+		rb.size = Vector3(fs.x * 0.94, 0.08, 0.16)
+		rib.mesh = rb
+		var t: float = (float(r_i) + 0.5) / float(rib_count)
+		var rz: float = -fs.z * 0.47 + t * (fs.z * 0.94)
+		rib.position = Vector3(0, fs.y + 0.14, rz)
+		rib.set_surface_override_material(0, _detail_dark_metal_mat(rib_color))
+		_attach_visual(rib)
 
-	# Hatched landing stripes — alternating warning yellow strips.
-	for i: int in 4:
-		var stripe := MeshInstance3D.new()
-		var stripe_box := BoxMesh.new()
-		stripe_box.size = Vector3(fs.x * 0.7, 0.02, 0.18)
-		stripe.mesh = stripe_box
-		var z_offset: float = (float(i) - 1.5) * 0.55
-		stripe.position = Vector3(0, fs.y + 0.12, fs.z * 0.05 + z_offset)
-		var stripe_mat := StandardMaterial3D.new()
-		stripe_mat.albedo_color = Color(0.85, 0.65, 0.18, 1.0)
-		stripe_mat.emission_enabled = true
-		stripe_mat.emission = Color(0.95, 0.65, 0.15, 1.0)
-		stripe_mat.emission_energy_multiplier = 0.4
-		stripe.set_surface_override_material(0, stripe_mat)
-		_attach_visual(stripe)
+	# Diagonal landing strip — runs corner-to-corner so the deck
+	# gets the longest possible runway. Built as a thin oriented box
+	# rotated 45° around Y, with bright dashes painted along its
+	# length and approach chevrons at the entry end.
+	var strip_diag_len: float = sqrt(fs.x * fs.x + fs.z * fs.z) * 0.78
+	var strip_width: float = 1.6
+	var strip := MeshInstance3D.new()
+	var strip_box := BoxMesh.new()
+	strip_box.size = Vector3(strip_width, 0.06, strip_diag_len)
+	strip.mesh = strip_box
+	strip.position = Vector3(0, fs.y + 0.20, 0)
+	strip.rotation.y = deg_to_rad(45.0 if sable else -45.0)
+	strip.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.12, 0.13, 0.16, 1.0)))
+	_attach_visual(strip)
+	# Centerline dashes on the strip — short slabs spaced out so the
+	# strip reads as a proper runway.
+	var dash_color: Color = Color(0.95, 0.85, 0.30, 1.0)
+	var dash_mat := StandardMaterial3D.new()
+	dash_mat.albedo_color = dash_color
+	dash_mat.emission_enabled = true
+	dash_mat.emission = dash_color
+	dash_mat.emission_energy_multiplier = 0.55
+	dash_mat.roughness = 0.55
+	var dash_count: int = 5
+	for d_i: int in dash_count:
+		var dash := MeshInstance3D.new()
+		var db := BoxMesh.new()
+		db.size = Vector3(0.22, 0.03, strip_diag_len * 0.10)
+		dash.mesh = db
+		var dt: float = (float(d_i) + 0.5) / float(dash_count)
+		var local_z: float = -strip_diag_len * 0.5 + dt * strip_diag_len
+		# Position is in the rotated strip's local frame — apply the
+		# same 45° around Y.
+		var ang: float = deg_to_rad(45.0 if sable else -45.0)
+		dash.position = Vector3(sin(ang) * local_z, fs.y + 0.24, cos(ang) * local_z)
+		dash.rotation.y = ang
+		dash.set_surface_override_material(0, dash_mat)
+		_attach_visual(dash)
 
-	# Control tower — taller box at one corner.
-	var tower := MeshInstance3D.new()
-	var tower_box := BoxMesh.new()
-	tower_box.size = Vector3(fs.x * 0.32, fs.y * 1.4, fs.z * 0.32)
-	tower.mesh = tower_box
-	tower.position = Vector3(-fs.x * 0.3, fs.y * 0.7 + fs.y, -fs.z * 0.3)
-	tower.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.30, 0.30, 0.34)))
-	_attach_visual(tower)
+	# Team-color accent points — TWO small corner caps (front-left +
+	# rear-right or matching pair) plus a slim band along the rear
+	# edge. Replaces the previous full-footprint team slab that was
+	# painting the whole roof in player color.
+	var accent_mat := StandardMaterial3D.new()
+	accent_mat.albedo_color = team_color
+	accent_mat.emission_enabled = true
+	accent_mat.emission = team_color
+	accent_mat.emission_energy_multiplier = 1.2
+	accent_mat.roughness = 0.55
+	for cap_i: int in 2:
+		var cap_pt := MeshInstance3D.new()
+		var cap_box := BoxMesh.new()
+		cap_box.size = Vector3(0.55, 0.08, 0.55)
+		cap_pt.mesh = cap_box
+		var cx: float = fs.x * 0.42 if cap_i == 0 else -fs.x * 0.42
+		var cz: float = fs.z * 0.42 if cap_i == 0 else -fs.z * 0.42
+		cap_pt.position = Vector3(cx, fs.y + 0.20, cz)
+		cap_pt.set_surface_override_material(0, accent_mat)
+		_attach_visual(cap_pt)
+	# Slim rear team band — short strip at the back of the roof so
+	# ownership reads from the rear too.
+	var rear_band := MeshInstance3D.new()
+	var rear_box := BoxMesh.new()
+	rear_box.size = Vector3(fs.x * 0.45, 0.06, 0.18)
+	rear_band.mesh = rear_box
+	rear_band.position = Vector3(0, fs.y + 0.24, fs.z * 0.45)
+	rear_band.set_surface_override_material(0, accent_mat)
+	_attach_visual(rear_band)
 
-	# Tower observation cap — emissive band on the top of the tower.
-	var cap := MeshInstance3D.new()
-	var cap_box := BoxMesh.new()
-	cap_box.size = Vector3(fs.x * 0.4, 0.18, fs.z * 0.4)
-	cap.mesh = cap_box
-	cap.position = Vector3(-fs.x * 0.3, fs.y * 1.45 + fs.y, -fs.z * 0.3)
-	var cap_mat := StandardMaterial3D.new()
-	cap_mat.albedo_color = Color(0.65, 0.85, 0.95, 1.0)
-	cap_mat.emission_enabled = true
-	cap_mat.emission = Color(0.55, 0.85, 1.0, 1.0)
-	cap_mat.emission_energy_multiplier = 1.4
-	cap.set_surface_override_material(0, cap_mat)
-	_attach_visual(cap)
+	# Control tower — diverges per faction. Anvil ships a wide,
+	# squat brutalist concrete block with a slatted observation cap.
+	# Sable ships a slim glass spike with a single slim band.
+	if sable:
+		_build_aerodrome_tower_sable(fs)
+	else:
+		_build_aerodrome_tower_anvil(fs)
 
-	# Tower antenna spire.
-	var antenna := MeshInstance3D.new()
-	var antenna_box := BoxMesh.new()
-	antenna_box.size = Vector3(0.08, 1.2, 0.08)
-	antenna.mesh = antenna_box
-	antenna.position = Vector3(-fs.x * 0.3, fs.y * 1.6 + fs.y + 0.6, -fs.z * 0.3)
-	antenna.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.18, 0.20)))
-	_attach_visual(antenna)
-
-	# Hangar opening — large dark recess on the front face.
+	# Hangar opening — large dark recess on the front face. Same for
+	# both factions; the production gate is the unifying read.
 	var hangar := MeshInstance3D.new()
 	var hangar_box := BoxMesh.new()
 	hangar_box.size = Vector3(fs.x * 0.5, fs.y * 0.7, 0.1)
@@ -1174,6 +1229,106 @@ func _detail_aerodrome() -> void:
 	hangar_mat.emission_energy_multiplier = 0.35
 	hangar.set_surface_override_material(0, hangar_mat)
 	_attach_visual(hangar)
+
+
+func _build_aerodrome_tower_anvil(fs: Vector3) -> void:
+	## Wide, squat concrete brutalist tower at the rear-left corner
+	## with a slatted observation cap. Reads "industrial control
+	## bunker" — heavier and more grounded than the Sable variant.
+	var tower := MeshInstance3D.new()
+	var tower_box := BoxMesh.new()
+	tower_box.size = Vector3(fs.x * 0.36, fs.y * 1.15, fs.z * 0.36)
+	tower.mesh = tower_box
+	tower.position = Vector3(-fs.x * 0.30, fs.y + tower_box.size.y * 0.5, -fs.z * 0.30)
+	tower.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.32, 0.30, 0.27, 1.0)))
+	_attach_visual(tower)
+	# Slatted observation deck — a wider cap with horizontal louvre
+	# slits for that brutalist control-room read.
+	var cap_y: float = fs.y + tower_box.size.y + 0.18
+	var cap := MeshInstance3D.new()
+	var cap_box := BoxMesh.new()
+	cap_box.size = Vector3(fs.x * 0.46, 0.30, fs.z * 0.46)
+	cap.mesh = cap_box
+	cap.position = Vector3(-fs.x * 0.30, cap_y, -fs.z * 0.30)
+	cap.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.42, 0.36, 0.28, 1.0)))
+	_attach_visual(cap)
+	# Two louvre slits across the cap front — emissive amber so the
+	# control room reads as occupied.
+	var slit_mat := StandardMaterial3D.new()
+	slit_mat.albedo_color = Color(0.95, 0.55, 0.20, 1.0)
+	slit_mat.emission_enabled = true
+	slit_mat.emission = Color(0.95, 0.55, 0.20, 1.0)
+	slit_mat.emission_energy_multiplier = 0.95
+	for s_i: int in 2:
+		var slit := MeshInstance3D.new()
+		var sb := BoxMesh.new()
+		sb.size = Vector3(fs.x * 0.40, 0.06, 0.04)
+		slit.mesh = sb
+		slit.position = Vector3(-fs.x * 0.30, cap_y + (0.06 if s_i == 0 else -0.06), -fs.z * 0.30 - fs.z * 0.23)
+		slit.set_surface_override_material(0, slit_mat)
+		_attach_visual(slit)
+	# Stout antenna mast on the cap.
+	var antenna := MeshInstance3D.new()
+	var ant_box := BoxMesh.new()
+	ant_box.size = Vector3(0.10, 0.85, 0.10)
+	antenna.mesh = ant_box
+	antenna.position = Vector3(-fs.x * 0.30, cap_y + 0.30 + 0.42, -fs.z * 0.30)
+	antenna.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.16, 0.14, 1.0)))
+	_attach_visual(antenna)
+
+
+func _build_aerodrome_tower_sable(fs: Vector3) -> void:
+	## Slim glass spike at the rear-left corner with a single violet
+	## band near the top. Daintier silhouette than the Anvil control
+	## bunker — reads as a sleek corp observation tower.
+	var spike := MeshInstance3D.new()
+	var spike_box := BoxMesh.new()
+	spike_box.size = Vector3(fs.x * 0.20, fs.y * 1.55, fs.z * 0.20)
+	spike.mesh = spike_box
+	spike.position = Vector3(-fs.x * 0.30, fs.y + spike_box.size.y * 0.5, -fs.z * 0.30)
+	spike.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.10, 0.10, 0.14, 1.0)))
+	_attach_visual(spike)
+	# Single violet band — slim emissive ring near the top, much
+	# more restrained than the warm slatted cap on Anvil.
+	var band_y: float = fs.y + spike_box.size.y * 0.85
+	var band_mat := StandardMaterial3D.new()
+	const SABLE_VIOLET := Color(0.78, 0.35, 1.0, 1.0)
+	band_mat.albedo_color = SABLE_VIOLET
+	band_mat.emission_enabled = true
+	band_mat.emission = SABLE_VIOLET
+	band_mat.emission_energy_multiplier = 1.6
+	band_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	for face_i: int in 4:
+		var band := MeshInstance3D.new()
+		var bb := BoxMesh.new()
+		bb.size = Vector3(fs.x * 0.22 if face_i % 2 == 0 else 0.04, 0.06, fs.z * 0.22 if face_i % 2 == 1 else 0.04)
+		band.mesh = bb
+		var fx: float = -fs.x * 0.30
+		var fz: float = -fs.z * 0.30
+		match face_i:
+			0: fz += fs.z * 0.10
+			1: fx += fs.x * 0.10
+			2: fz -= fs.z * 0.10
+			3: fx -= fs.x * 0.10
+		band.position = Vector3(fx, band_y, fz)
+		band.set_surface_override_material(0, band_mat)
+		_attach_visual(band)
+	# Hair-thin antenna with a single violet tip — the spike is
+	# narrow enough that a chunky antenna would unbalance it.
+	var antenna := MeshInstance3D.new()
+	var ant_box := BoxMesh.new()
+	ant_box.size = Vector3(0.06, 0.65, 0.06)
+	antenna.mesh = ant_box
+	antenna.position = Vector3(-fs.x * 0.30, fs.y + spike_box.size.y + 0.32, -fs.z * 0.30)
+	antenna.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.16, 0.16, 0.20, 1.0)))
+	_attach_visual(antenna)
+	var tip := MeshInstance3D.new()
+	var tip_box := BoxMesh.new()
+	tip_box.size = Vector3(0.10, 0.06, 0.10)
+	tip.mesh = tip_box
+	tip.position = Vector3(-fs.x * 0.30, fs.y + spike_box.size.y + 0.65, -fs.z * 0.30)
+	tip.set_surface_override_material(0, band_mat)
+	_attach_visual(tip)
 
 
 func _detail_sam_site() -> void:
@@ -2264,26 +2419,60 @@ func _apply_sable_building_silhouette() -> void:
 			{ "y": fs.y * 0.62, "w": fs.x, "d": fs.z, "thick": 0.045 },
 			{ "y": fs.y * 0.92, "w": fs.x * 0.78, "d": fs.z * 0.78, "thick": 0.035 },
 		]
+	# Buildings whose roof should stay readable (aerodrome's landing
+	# strip, SAM's launcher rack) get a DOTTED ring rather than a
+	# continuous one — the unbroken cyan strip read as a violet
+	# slash framing the entire roof and competed with the type's own
+	# detail layer for the eye.
+	var dotted: bool = keep_top_clear
 	for ring_data: Dictionary in ring_specs:
 		var ring_y: float = ring_data["y"] as float
 		var ring_w: float = (ring_data["w"] as float) + 0.05
 		var ring_d: float = (ring_data["d"] as float) + 0.05
 		var thick: float = ring_data["thick"] as float
-		# Four edges of a flat ring — cheaper than a torus and plays
-		# nicer with the boxy aesthetic.
-		for edge_data: Dictionary in [
-			{ "size": Vector3(ring_w, thick, 0.05), "pos": Vector3(0.0, ring_y, ring_d * 0.5) },
-			{ "size": Vector3(ring_w, thick, 0.05), "pos": Vector3(0.0, ring_y, -ring_d * 0.5) },
-			{ "size": Vector3(0.05, thick, ring_d), "pos": Vector3(ring_w * 0.5, ring_y, 0.0) },
-			{ "size": Vector3(0.05, thick, ring_d), "pos": Vector3(-ring_w * 0.5, ring_y, 0.0) },
-		]:
-			var edge := MeshInstance3D.new()
-			var ebox := BoxMesh.new()
-			ebox.size = edge_data["size"] as Vector3
-			edge.mesh = ebox
-			edge.position = edge_data["pos"] as Vector3
-			edge.set_surface_override_material(0, seam_mat)
-			_visual_root.add_child(edge)
+		if dotted:
+			# Replace each edge with 4 short dashes of the same accent
+			# colour, evenly spaced. Keeps the Sable read at the edge
+			# without painting the whole rim.
+			var dash_count: int = 4
+			for axis_i: int in 4:
+				# axis_i 0,1 = front/back (vary X), 2,3 = sides (vary Z).
+				var along_x: bool = axis_i < 2
+				var span: float = ring_w if along_x else ring_d
+				var fixed: float = ring_d * 0.5 * (1.0 if axis_i == 0 else -1.0) if along_x else ring_w * 0.5 * (1.0 if axis_i == 2 else -1.0)
+				for d_i: int in dash_count:
+					var t: float = (float(d_i) + 0.5) / float(dash_count)
+					var along_pos: float = -span * 0.5 + t * span
+					var dash := MeshInstance3D.new()
+					var dbox := BoxMesh.new()
+					if along_x:
+						dbox.size = Vector3(ring_w * 0.10, thick, 0.05)
+					else:
+						dbox.size = Vector3(0.05, thick, ring_d * 0.10)
+					dash.mesh = dbox
+					var dpos: Vector3
+					if along_x:
+						dpos = Vector3(along_pos, ring_y, fixed)
+					else:
+						dpos = Vector3(fixed, ring_y, along_pos)
+					dash.position = dpos
+					dash.set_surface_override_material(0, seam_mat)
+					_visual_root.add_child(dash)
+		else:
+			# Continuous ring — four edges of a flat rectangle.
+			for edge_data: Dictionary in [
+				{ "size": Vector3(ring_w, thick, 0.05), "pos": Vector3(0.0, ring_y, ring_d * 0.5) },
+				{ "size": Vector3(ring_w, thick, 0.05), "pos": Vector3(0.0, ring_y, -ring_d * 0.5) },
+				{ "size": Vector3(0.05, thick, ring_d), "pos": Vector3(ring_w * 0.5, ring_y, 0.0) },
+				{ "size": Vector3(0.05, thick, ring_d), "pos": Vector3(-ring_w * 0.5, ring_y, 0.0) },
+			]:
+				var edge := MeshInstance3D.new()
+				var ebox := BoxMesh.new()
+				ebox.size = edge_data["size"] as Vector3
+				edge.mesh = ebox
+				edge.position = edge_data["pos"] as Vector3
+				edge.set_surface_override_material(0, seam_mat)
+				_visual_root.add_child(edge)
 
 	# Sensor spires — tall thin antennas off opposing corners of the
 	# top spine. Critical Sable silhouette element. Heights scale with
