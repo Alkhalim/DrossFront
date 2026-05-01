@@ -81,6 +81,12 @@ func _ready() -> void:
 	_build_gifting_panel()
 	_build_global_queue_panel()
 	_build_fps_counter()
+	_build_faction_watermark()
+	# Faster tooltip popups — Godot's default ~500ms is too slow for
+	# in-battle decisions where the player needs to verify costs /
+	# weapon roles in a couple of seconds. 0.18s feels responsive
+	# without firing on every transient hover.
+	_apply_tooltip_delay(0.18)
 
 	# Tutorial overlay — shown only when the player launched via the Tutorial
 	# button on the main menu. Dismisses with TAB or its own close button.
@@ -487,14 +493,24 @@ func _apply_theme() -> void:
 	theme_res.set_stylebox("panel", "PanelContainer", panel_sb)
 
 	# --- Buttons ---
+	# Faction button shape language: Anvil keeps right-angle corners
+	# all around (industrial, square-cut). Sable chamfers the top-
+	# right corner with a much larger radius — subtle but instantly
+	# tells you which faction's interface you're staring at.
 	var btn_normal := StyleBoxFlat.new()
 	btn_normal.bg_color = Color(0.16, 0.18, 0.20, 1.0)
 	btn_normal.border_color = Color(0.4, 0.42, 0.46, 1.0)
 	btn_normal.set_border_width_all(1)
-	btn_normal.corner_radius_top_left = 3
-	btn_normal.corner_radius_top_right = 3
-	btn_normal.corner_radius_bottom_left = 3
-	btn_normal.corner_radius_bottom_right = 3
+	if faction_id == 1:
+		btn_normal.corner_radius_top_left = 2
+		btn_normal.corner_radius_top_right = 12
+		btn_normal.corner_radius_bottom_right = 2
+		btn_normal.corner_radius_bottom_left = 2
+	else:
+		btn_normal.corner_radius_top_left = 3
+		btn_normal.corner_radius_top_right = 3
+		btn_normal.corner_radius_bottom_left = 3
+		btn_normal.corner_radius_bottom_right = 3
 	btn_normal.content_margin_left = 6
 	btn_normal.content_margin_right = 6
 	btn_normal.content_margin_top = 4
@@ -951,6 +967,40 @@ func _build_fps_counter() -> void:
 	_fps_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_fps_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_fps_label)
+
+
+func _build_faction_watermark() -> void:
+	## Soft 30%-alpha faction emblem in the lower-right corner of the
+	## bottom panel. Uses the same procedural FactionIcon as the main
+	## menu so the in-match HUD still reinforces the player's faction
+	## identity at a glance — Anvil iron-rivet plate or Sable matte-
+	## black diamond.
+	if not _bottom_panel:
+		return
+	var faction_id: int = 0
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if settings and "player_faction" in settings:
+		faction_id = settings.get("player_faction") as int
+	var icon_script: GDScript = load("res://scripts/faction_icon.gd") as GDScript
+	if not icon_script:
+		return
+	var watermark: Control = Control.new()
+	watermark.set_script(icon_script)
+	watermark.set("faction", faction_id)
+	watermark.modulate = Color(1.0, 1.0, 1.0, 0.30)
+	watermark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	watermark.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	watermark.custom_minimum_size = Vector2(56, 56)
+	watermark.size = Vector2(56, 56)
+	watermark.position = Vector2(-72, -64)
+	_bottom_panel.add_child(watermark)
+
+
+func _apply_tooltip_delay(seconds: float) -> void:
+	## Drops the global tooltip hover delay from Godot's default
+	## 0.5s to a tighter value so production / build / inspect
+	## tooltips fire faster during active play.
+	ProjectSettings.set_setting("gui/timers/tooltip_delay_sec", seconds)
 
 
 func _refresh_fps_counter(delta: float) -> void:
@@ -1993,9 +2043,11 @@ func _update_button_affordability() -> void:
 		# cost chips below.
 		btn.modulate = Color.WHITE if affordable else COLOR_AFFORD_BAD
 		var chips: Dictionary = entry.get("chips", {}) as Dictionary
-		_paint_cost_chip(chips.get("salvage", null) as Dictionary, lack_salvage)
-		_paint_cost_chip(chips.get("fuel", null) as Dictionary, lack_fuel)
-		_paint_cost_chip(chips.get("pop", null) as Dictionary, lack_pop)
+		# Defaults must stay as Dictionary, not null — `null as Dictionary`
+		# raises an invalid-cast error rather than silently producing {}.
+		_paint_cost_chip(chips.get("salvage", {}) as Dictionary, lack_salvage)
+		_paint_cost_chip(chips.get("fuel", {}) as Dictionary, lack_fuel)
+		_paint_cost_chip(chips.get("pop", {}) as Dictionary, lack_pop)
 
 
 func _paint_cost_chip(chip: Dictionary, lacking: bool) -> void:
