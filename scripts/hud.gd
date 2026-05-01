@@ -460,10 +460,21 @@ func _apply_theme() -> void:
 	# Default font sizing — slightly larger so labels pop on a busy battlefield.
 	theme_res.set_default_font_size(14)
 
+	# Faction-driven accent color used for panel borders and button
+	# hover/press highlights. Anvil ships warm brass, Sable swaps to
+	# violet so the HUD itself signals which faction the player picked
+	# the moment the match opens.
+	var faction_id: int = 0
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if settings and "player_faction" in settings:
+		faction_id = settings.get("player_faction") as int
+	var accent: Color = Color(1.0, 0.82, 0.35, 1.0) if faction_id == 0 else Color(0.78, 0.45, 1.0, 1.0)
+	var accent_dim: Color = accent.darkened(0.4)
+
 	# --- Panel ---
 	var panel_sb := StyleBoxFlat.new()
 	panel_sb.bg_color = Color(0.08, 0.09, 0.10, 0.88)
-	panel_sb.border_color = Color(0.32, 0.34, 0.38, 1.0)
+	panel_sb.border_color = accent_dim
 	panel_sb.set_border_width_all(1)
 	panel_sb.corner_radius_top_left = 4
 	panel_sb.corner_radius_top_right = 4
@@ -491,7 +502,7 @@ func _apply_theme() -> void:
 
 	var btn_hover := btn_normal.duplicate() as StyleBoxFlat
 	btn_hover.bg_color = Color(0.24, 0.28, 0.32, 1.0)
-	btn_hover.border_color = Color(0.7, 0.85, 0.95, 1.0)
+	btn_hover.border_color = accent.lightened(0.15)
 
 	var btn_pressed := btn_normal.duplicate() as StyleBoxFlat
 	# Pressed state — visibly inset: darker fill, brighter accent
@@ -500,7 +511,7 @@ func _apply_theme() -> void:
 	# gives the panel an inset shadow so the button reads as physically
 	# pushed into the panel rather than just a colour swap.
 	btn_pressed.bg_color = Color(0.08, 0.10, 0.12, 1.0)
-	btn_pressed.border_color = Color(1.0, 0.82, 0.35, 1.0)
+	btn_pressed.border_color = accent
 	btn_pressed.set_border_width_all(2)
 	btn_pressed.content_margin_top = 5
 	btn_pressed.content_margin_bottom = 3
@@ -1202,20 +1213,65 @@ func _rebuild_production_buttons(building: Building) -> void:
 		var hotkey: String = hotkeys[i] if i < hotkeys.size() else str(i + 1)
 
 		var btn := Button.new()
-		btn.custom_minimum_size = Vector2(86, 42)
-		var cost_text: String = "%dS" % unit_stat.cost_salvage
-		if unit_stat.cost_fuel > 0:
-			cost_text += "  %dF" % unit_stat.cost_fuel
-		btn.text = "[%s] %s\n%s" % [hotkey, unit_stat.unit_name, cost_text]
+		btn.custom_minimum_size = Vector2(96, 52)
+		btn.text = "[%s] %s" % [hotkey, unit_stat.unit_name]
 		btn.tooltip_text = _unit_tooltip(unit_stat)
 		btn.pressed.connect(_on_production_button.bind(i))
 		_button_grid.add_child(btn)
+		_attach_cost_widget(btn, unit_stat.cost_salvage, unit_stat.cost_fuel, unit_stat.population)
 		_action_buttons.append({ "button": btn, "kind": "produce", "stat": unit_stat })
 
 
 func _on_production_button(index: int) -> void:
 	if _selection_manager:
 		_selection_manager.queue_unit_at_building(index)
+
+
+## Color codes used by `_attach_cost_widget` for the salvage / fuel /
+## population swatches on production + build buttons. Each swatch +
+## number reads at a glance even when the eye is busy elsewhere.
+const RES_COLOR_SALVAGE: Color = Color(1.00, 0.78, 0.30, 1.0)  # warm gold
+const RES_COLOR_FUEL: Color = Color(0.30, 0.85, 1.00, 1.0)     # cyan
+const RES_COLOR_POP: Color = Color(0.78, 0.95, 0.55, 1.0)      # green-tan
+
+
+func _attach_cost_widget(btn: Button, salvage: int, fuel: int, pop: int) -> void:
+	## Anchors a small colored cost-readout strip at the bottom of a
+	## production / build button. Each resource gets its own swatch
+	## (small ColorRect) and Label so the player can decode salvage
+	## vs fuel vs pop at a glance instead of squinting at S/F/P.
+	var hbox := HBoxContainer.new()
+	hbox.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	hbox.add_theme_constant_override("separation", 6)
+	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hbox.offset_top = -16
+	hbox.offset_bottom = -3
+	btn.add_child(hbox)
+	if salvage > 0:
+		_add_cost_chip(hbox, salvage, RES_COLOR_SALVAGE)
+	if fuel > 0:
+		_add_cost_chip(hbox, fuel, RES_COLOR_FUEL)
+	if pop > 0:
+		_add_cost_chip(hbox, pop, RES_COLOR_POP)
+
+
+func _add_cost_chip(parent: Container, amount: int, color: Color) -> void:
+	var chip := HBoxContainer.new()
+	chip.add_theme_constant_override("separation", 3)
+	chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(chip)
+	var swatch := ColorRect.new()
+	swatch.custom_minimum_size = Vector2(8, 8)
+	swatch.color = color
+	swatch.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	chip.add_child(swatch)
+	var lbl := Label.new()
+	lbl.text = str(amount)
+	lbl.add_theme_color_override("font_color", color)
+	lbl.add_theme_font_size_override("font_size", 12)
+	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	chip.add_child(lbl)
 
 
 func _rebuild_turret_profile_buttons(building: Building) -> void:
@@ -1782,11 +1838,11 @@ func _rebuild_build_buttons() -> void:
 			continue
 		var prereqs_ok: bool = _prerequisites_met(bstat, built_ids)
 		var btn := Button.new()
-		btn.custom_minimum_size = Vector2(86, 42)
-		var label: String = "[%d] %s\n%dS" % [visible_index + 1, bstat.building_name, bstat.cost_salvage]
+		btn.custom_minimum_size = Vector2(96, 52)
+		var label_text: String = "[%d] %s" % [visible_index + 1, bstat.building_name]
 		if not prereqs_ok:
-			label = "[Locked] %s\n%dS" % [bstat.building_name, bstat.cost_salvage]
-		btn.text = label
+			label_text = "[Locked] %s" % bstat.building_name
+		btn.text = label_text
 		btn.tooltip_text = _building_tooltip_with_prereq(bstat, prereqs_ok)
 		btn.disabled = not prereqs_ok
 		# Bind by stat reference, not visible index — visible_index only
@@ -1794,6 +1850,7 @@ func _rebuild_build_buttons() -> void:
 		# want a hotkey collision to pick the wrong building.
 		btn.pressed.connect(_on_build_button_for_stat.bind(bstat))
 		_button_grid.add_child(btn)
+		_attach_cost_widget(btn, bstat.cost_salvage, 0, 0)
 		_action_buttons.append({ "button": btn, "kind": "build", "stat": bstat, "locked": not prereqs_ok })
 		visible_index += 1
 

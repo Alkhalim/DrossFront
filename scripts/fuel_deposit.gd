@@ -26,7 +26,9 @@ var _is_contested: bool = false
 var _fuel_accumulator: float = 0.0
 
 ## Visuals
-var _mesh: MeshInstance3D = null
+var _mesh: Node3D = null  # Container for the pumpjack rig + barrels + pad.
+var _pump_walker: Node3D = null  # Pivot for the pumpjack walking beam — animated.
+var _pump_anim_t: float = 0.0
 var _range_indicator: MeshInstance3D = null
 var _capture_bar_bg: MeshInstance3D = null
 var _capture_bar_fill: MeshInstance3D = null
@@ -47,7 +49,20 @@ func _ready() -> void:
 var _capture_throttle: float = 0.0
 const CAPTURE_INTERVAL: float = 0.1  # ~10 Hz; capture progress is multi-second
 
+func _detail_metal_dark() -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.16, 0.14, 0.12, 1.0)
+	m.metallic = 0.5
+	m.roughness = 0.55
+	return m
+
+
 func _process(delta: float) -> void:
+	# Pump-jack walking beam animation — slow rocking. Cheap (single
+	# rotation update per deposit per frame).
+	if _pump_walker:
+		_pump_anim_t += delta
+		_pump_walker.rotation.x = sin(_pump_anim_t * 1.6) * 0.18
 	# `_update_capture` iterates the whole units group every call —
 	# at 360 units × N deposits per frame that's the dominant deposit
 	# cost. Throttle to 10 Hz; capture progress is on the order of
@@ -61,7 +76,10 @@ func _process(delta: float) -> void:
 
 
 func _update_capture(delta: float) -> void:
-	# Count units of each owner inside the radius
+	# Count units of each owner inside the radius. Neutrals (owner_id 2)
+	# are skipped so wandering neutral patrols don't claim the deposit
+	# from the player by sitting in radius — neutrals contest combat
+	# but shouldn't be in the fuel-economy game.
 	var owner_counts: Dictionary = {}
 	var units: Array[Node] = get_tree().get_nodes_in_group("units")
 	for node: Node in units:
@@ -69,9 +87,11 @@ func _update_capture(delta: float) -> void:
 			continue
 		if not ("alive_count" in node) or node.get("alive_count") <= 0:
 			continue
+		var uid: int = node.get("owner_id")
+		if uid == 2:
+			continue
 		var dist: float = global_position.distance_to(node.global_position)
 		if dist <= capture_radius:
-			var uid: int = node.get("owner_id")
 			if owner_counts.has(uid):
 				owner_counts[uid] = (owner_counts[uid] as int) + 1
 			else:
@@ -170,21 +190,157 @@ func _generate_fuel(delta: float) -> void:
 ## --- Visuals ---
 
 func _create_visuals() -> void:
-	# Main deposit mesh — a hexagonal prism shape (using cylinder as placeholder)
-	_mesh = MeshInstance3D.new()
-	var cyl := CylinderMesh.new()
-	cyl.top_radius = 2.0
-	cyl.bottom_radius = 2.5
-	cyl.height = 1.5
-	cyl.radial_segments = 6
-	_mesh.mesh = cyl
-	_mesh.position.y = 0.75
-
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = NEUTRAL_COLOR
-	mat.roughness = 0.7
-	_mesh.set_surface_override_material(0, mat)
+	# Pump-jack rig + concrete pad + oil barrels around the base —
+	# clearly reads as "fuel is being extracted here" instead of a
+	# generic hex slab.
+	_mesh = Node3D.new()
+	_mesh.name = "DepositRig"
 	add_child(_mesh)
+
+	# Concrete pad — low wide cylinder at ground level so the rig
+	# silhouette has a foundation to read against.
+	var pad := MeshInstance3D.new()
+	var pad_cyl := CylinderMesh.new()
+	pad_cyl.top_radius = 3.0
+	pad_cyl.bottom_radius = 3.2
+	pad_cyl.height = 0.25
+	pad_cyl.radial_segments = 16
+	pad.mesh = pad_cyl
+	pad.position.y = 0.125
+	var pad_mat := StandardMaterial3D.new()
+	pad_mat.albedo_color = Color(0.32, 0.30, 0.27, 1.0)
+	pad_mat.roughness = 0.95
+	pad.set_surface_override_material(0, pad_mat)
+	_mesh.add_child(pad)
+
+	# Wellhead — short pipe stub in the center of the pad. The
+	# walking-beam pump nods over this.
+	var wellhead := MeshInstance3D.new()
+	var well_cyl := CylinderMesh.new()
+	well_cyl.top_radius = 0.18
+	well_cyl.bottom_radius = 0.22
+	well_cyl.height = 0.85
+	wellhead.mesh = well_cyl
+	wellhead.position = Vector3(0.0, 0.65, 0.0)
+	var well_mat := StandardMaterial3D.new()
+	well_mat.albedo_color = Color(0.18, 0.16, 0.14, 1.0)
+	well_mat.metallic = 0.5
+	well_mat.roughness = 0.55
+	wellhead.set_surface_override_material(0, well_mat)
+	_mesh.add_child(wellhead)
+
+	# Pump-jack derrick: an A-frame post that holds the walking beam.
+	var derrick_mat := StandardMaterial3D.new()
+	derrick_mat.albedo_color = Color(0.22, 0.19, 0.16, 1.0)
+	derrick_mat.metallic = 0.4
+	derrick_mat.roughness = 0.7
+	for leg_i: int in 2:
+		var leg := MeshInstance3D.new()
+		var lbox := BoxMesh.new()
+		lbox.size = Vector3(0.16, 2.6, 0.16)
+		leg.mesh = lbox
+		var sx: float = -0.55 if leg_i == 0 else 0.55
+		leg.position = Vector3(sx, 1.30, -0.85)
+		# Splay the legs outward at the bottom — A-frame.
+		leg.rotation.z = (-0.18 if leg_i == 0 else 0.18)
+		leg.set_surface_override_material(0, derrick_mat)
+		_mesh.add_child(leg)
+	# Cross-strut between the legs, mid-height.
+	var strut := MeshInstance3D.new()
+	var strut_box := BoxMesh.new()
+	strut_box.size = Vector3(1.4, 0.10, 0.10)
+	strut.mesh = strut_box
+	strut.position = Vector3(0.0, 1.6, -0.85)
+	strut.set_surface_override_material(0, derrick_mat)
+	_mesh.add_child(strut)
+
+	# Walking-beam pivot — child node animated by _process. Sits on
+	# top of the A-frame and rocks the beam + counterweight up/down.
+	_pump_walker = Node3D.new()
+	_pump_walker.position = Vector3(0.0, 2.55, -0.85)
+	_mesh.add_child(_pump_walker)
+	# Walking beam — long horizontal box pointing forward toward the
+	# wellhead. Rocks around the pivot to simulate the pump motion.
+	var beam := MeshInstance3D.new()
+	var beam_box := BoxMesh.new()
+	beam_box.size = Vector3(0.20, 0.20, 3.0)
+	beam.mesh = beam_box
+	beam.position = Vector3(0.0, 0.0, 0.6)
+	beam.set_surface_override_material(0, derrick_mat)
+	_pump_walker.add_child(beam)
+	# Horse-head — angled forward end of the walking beam, the iconic
+	# "nodding" tip of a pumpjack.
+	var head := MeshInstance3D.new()
+	var head_box := BoxMesh.new()
+	head_box.size = Vector3(0.30, 0.45, 0.55)
+	head.mesh = head_box
+	head.position = Vector3(0.0, -0.12, 1.95)
+	head.rotation.x = 0.35
+	head.set_surface_override_material(0, derrick_mat)
+	_pump_walker.add_child(head)
+	# Counterweight on the opposite side of the beam — square block
+	# behind the pivot.
+	var counter := MeshInstance3D.new()
+	var counter_box := BoxMesh.new()
+	counter_box.size = Vector3(0.55, 0.55, 0.55)
+	counter.mesh = counter_box
+	counter.position = Vector3(0.0, -0.04, -1.10)
+	counter.set_surface_override_material(0, derrick_mat)
+	_pump_walker.add_child(counter)
+
+	# Oil barrels — three around the pad edge, slight rotation jitter
+	# so they don't read as a perfect ring.
+	var barrel_mat := StandardMaterial3D.new()
+	barrel_mat.albedo_color = Color(0.62, 0.32, 0.18, 1.0)  # rust-orange
+	barrel_mat.albedo_texture = SharedTextures.get_metal_wear_texture()
+	barrel_mat.uv1_scale = Vector3(2.0, 2.0, 1.0)
+	barrel_mat.metallic = 0.3
+	barrel_mat.roughness = 0.65
+	var barrel_positions: Array[Vector2] = [
+		Vector2(2.1, 1.4),
+		Vector2(-2.0, 1.6),
+		Vector2(2.4, -0.4),
+		Vector2(-2.2, -0.6),
+	]
+	for bp: Vector2 in barrel_positions:
+		var barrel := MeshInstance3D.new()
+		var bcyl := CylinderMesh.new()
+		bcyl.top_radius = 0.32
+		bcyl.bottom_radius = 0.32
+		bcyl.height = 0.85
+		bcyl.radial_segments = 16
+		barrel.mesh = bcyl
+		barrel.position = Vector3(bp.x, 0.42, bp.y)
+		barrel.rotation.y = randf_range(0.0, TAU)
+		barrel.set_surface_override_material(0, barrel_mat)
+		_mesh.add_child(barrel)
+		# Top rim — slim ring around the cap so the barrel reads
+		# proper, not a flat-shaded cylinder.
+		var rim := MeshInstance3D.new()
+		var rim_cyl := CylinderMesh.new()
+		rim_cyl.top_radius = 0.34
+		rim_cyl.bottom_radius = 0.34
+		rim_cyl.height = 0.05
+		rim_cyl.radial_segments = 16
+		rim.mesh = rim_cyl
+		rim.position = Vector3(bp.x, 0.86, bp.y)
+		rim.set_surface_override_material(0, _detail_metal_dark())
+		_mesh.add_child(rim)
+
+	# Spilled oil patch on the pad — small dark disc near the wellhead.
+	var spill := MeshInstance3D.new()
+	var spill_quad := QuadMesh.new()
+	spill_quad.size = Vector2(2.0, 1.4)
+	spill.mesh = spill_quad
+	spill.rotation.x = -PI * 0.5
+	spill.position = Vector3(0.6, 0.27, 0.4)
+	var spill_mat := StandardMaterial3D.new()
+	spill_mat.albedo_color = Color(0.05, 0.04, 0.06, 0.85)
+	spill_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	spill_mat.metallic = 0.85
+	spill_mat.roughness = 0.20
+	spill.set_surface_override_material(0, spill_mat)
+	_mesh.add_child(spill)
 
 	# Range circle (always visible, subtle)
 	_range_indicator = MeshInstance3D.new()

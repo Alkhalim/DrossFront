@@ -335,6 +335,127 @@ func _build_visuals() -> void:
 	underglow.position = Vector3(0.0, 0.05, 0.0)
 	add_child(underglow)
 
+	# Extra detail: side rivets + visible road wheels through the
+	# tread cutouts + oil-drum cargo strapped to the rear deck. Reads
+	# as a properly built mobile factory instead of a stack of boxes.
+	var rivet_mat := _make_metal(Color(0.42, 0.36, 0.20))
+	for side: int in 2:
+		var sx: float = -1.81 if side == 0 else 1.81
+		# Five road wheels per side, peeking out from under the tread.
+		for w_i: int in 5:
+			var wheel := MeshInstance3D.new()
+			var wcyl := CylinderMesh.new()
+			wcyl.top_radius = 0.30
+			wcyl.bottom_radius = 0.30
+			wcyl.height = 0.20
+			wcyl.radial_segments = 12
+			wheel.mesh = wcyl
+			wheel.rotation.z = PI * 0.5
+			wheel.position = Vector3(sx, 0.30, -2.05 + float(w_i) * 1.05)
+			wheel.set_surface_override_material(0, _make_metal(Color(0.10, 0.10, 0.10)))
+			add_child(wheel)
+		# Hull rivets — six small bumps along the side of the chassis.
+		for r_i: int in 6:
+			var rivet := MeshInstance3D.new()
+			var rsp := SphereMesh.new()
+			rsp.radius = 0.05
+			rsp.height = 0.10
+			rsp.radial_segments = 6
+			rsp.rings = 3
+			rivet.mesh = rsp
+			rivet.position = Vector3(sx * 0.92, 0.85, -2.10 + float(r_i) * 0.82)
+			rivet.set_surface_override_material(0, rivet_mat)
+			add_child(rivet)
+
+	# Two oil drums strapped to the rear deck — clearly read as
+	# salvaged fuel cargo and emphasise the "mobile factory" silhouette.
+	var drum_mat := _make_metal(Color(0.55, 0.30, 0.18))
+	for drum_i: int in 2:
+		var drum := MeshInstance3D.new()
+		var dc := CylinderMesh.new()
+		dc.top_radius = 0.30
+		dc.bottom_radius = 0.30
+		dc.height = 0.85
+		dc.radial_segments = 16
+		drum.mesh = dc
+		var dx: float = -0.55 if drum_i == 0 else 0.55
+		drum.position = Vector3(dx, 2.50, 1.95)
+		drum.set_surface_override_material(0, drum_mat)
+		add_child(drum)
+
+	# Faction-aware silhouette overlay — Anvil keeps the warm
+	# headlight + cyan reactor lamp baked above. Sable layers a
+	# slate-violet upper plate, swaps to a violet visor strip, and
+	# replaces the cyan beacon with a violet pulse-cap.
+	if _faction_id() == 1:
+		_apply_sable_crawler_overlay()
+
+
+## --- Faction lookup (unit-style) ---------------------------------------
+
+func _faction_id() -> int:
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if not settings:
+		return 0
+	if owner_id == 0:
+		return settings.get("player_faction") as int
+	return settings.get("enemy_faction") as int
+
+
+func _apply_sable_crawler_overlay() -> void:
+	const SABLE_VIOLET := Color(0.78, 0.35, 1.0, 1.0)
+	# Slate-violet upper hull plate sitting on top of the workshop —
+	# the new dominant top surface.
+	var plate := MeshInstance3D.new()
+	var plate_box := BoxMesh.new()
+	plate_box.size = Vector3(2.95, 0.10, 3.55)
+	plate.mesh = plate_box
+	plate.position = Vector3(0, 2.10, -0.4)
+	plate.set_surface_override_material(0, _make_metal(Color(0.12, 0.10, 0.16)))
+	add_child(plate)
+	# Violet visor across the front of the workshop — replaces the
+	# warm-amber headlight read with a horizontal sensor slit.
+	var visor_mat := StandardMaterial3D.new()
+	visor_mat.albedo_color = SABLE_VIOLET
+	visor_mat.emission_enabled = true
+	visor_mat.emission = SABLE_VIOLET
+	visor_mat.emission_energy_multiplier = 2.4
+	visor_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	var visor := MeshInstance3D.new()
+	var visor_box := BoxMesh.new()
+	visor_box.size = Vector3(2.6, 0.12, 0.08)
+	visor.mesh = visor_box
+	visor.position = Vector3(0, 1.75, -2.05)
+	visor.set_surface_override_material(0, visor_mat)
+	add_child(visor)
+	# Violet beacon on the workshop roof — single pulse-point matching
+	# the Sable mech chest glow.
+	var beacon := MeshInstance3D.new()
+	var beacon_sphere := SphereMesh.new()
+	beacon_sphere.radius = 0.20
+	beacon_sphere.height = 0.40
+	beacon.mesh = beacon_sphere
+	beacon.position = Vector3(0, 2.30, -0.4)
+	beacon.set_surface_override_material(0, visor_mat)
+	add_child(beacon)
+	var beacon_light := OmniLight3D.new()
+	beacon_light.light_color = SABLE_VIOLET
+	beacon_light.light_energy = 1.4
+	beacon_light.omni_range = 5.5
+	beacon_light.position = beacon.position
+	add_child(beacon_light)
+	# Side seam strips along the chassis sides, echoing Sable's
+	# emissive seam treatment on mechs and buildings.
+	for side: int in 2:
+		var sx: float = -1.85 if side == 0 else 1.85
+		var seam := MeshInstance3D.new()
+		var sb := BoxMesh.new()
+		sb.size = Vector3(0.06, 0.08, 4.2)
+		seam.mesh = sb
+		seam.position = Vector3(sx, 1.05, 0.0)
+		seam.set_surface_override_material(0, visor_mat)
+		add_child(seam)
+
 
 func _build_collision() -> void:
 	var col := CollisionShape3D.new()
