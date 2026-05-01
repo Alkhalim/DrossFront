@@ -444,7 +444,21 @@ func _setup_navigation() -> void:
 
 	var nav_mesh := NavigationMesh.new()
 	nav_mesh.cell_size = 0.5
-	nav_mesh.cell_height = 0.25
+	# cell_height drives Recast's vertical voxel resolution. 0.25 was
+	# leaving the slope foot at y≈0.25 (one voxel above ground level)
+	# instead of y=0, putting a 0.25u step between the ramp navmesh
+	# and the surrounding ground navmesh. agent_max_climb 0.5 should
+	# bridge that, but the resulting connection is fragile and the
+	# path planner sometimes refuses to commit to it. Tighter cell
+	# height keeps the slope foot exactly at y=0.
+	nav_mesh.cell_height = 0.1
+	# Don't filter "ledge spans" — Recast's default behaviour drops
+	# walkable polygons that sit next to a drop, which removes ramp
+	# slope navmesh near the foot (the foot is at the same Y as the
+	# surrounding ground, but Recast classifies it as a ledge anyway).
+	nav_mesh.filter_ledge_spans = false
+	nav_mesh.filter_low_hanging_obstacles = false
+	nav_mesh.filter_walkable_low_height_spans = false
 	# agent_radius shrinks the walkable area by this distance from
 	# every obstacle edge. With 2.5u and a 7u-wide ramp, the walkable
 	# strip on the slope was only 2u — too narrow for the path planner
