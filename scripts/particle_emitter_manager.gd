@@ -166,7 +166,12 @@ func _smoke_mesh() -> Mesh:
 	sphere.height = 0.32
 	sphere.radial_segments = 8
 	sphere.rings = 4
-	sphere.material = _additive_unshaded_mat(Color(0.85, 0.65, 0.45, 0.7))
+	# Smoke uses ALPHA-blend (mix), not additive: real smoke obscures
+	# the scene behind it. The previous additive blend made the dark
+	# grey emitted by missile trails / damaged buildings / smokestacks
+	# nearly invisible against the lit ground (additive of 0.3-grey
+	# barely tints anything bright).
+	sphere.material = _alpha_unshaded_mat(Color(0.85, 0.65, 0.45, 0.7))
 	return sphere
 
 
@@ -310,6 +315,21 @@ func _additive_unshaded_mat(c: Color) -> StandardMaterial3D:
 	m.vertex_color_use_as_albedo = true
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	# Disable depth write so overlapping particles don't z-fight.
+	m.disable_receive_shadows = true
+	return m
+
+
+func _alpha_unshaded_mat(c: Color) -> StandardMaterial3D:
+	## Same as _additive_unshaded_mat but with standard alpha-blend
+	## instead of additive — used for smoke, which should obscure
+	## what's behind it rather than brighten it.
+	var m := StandardMaterial3D.new()
+	m.albedo_color = c
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.blend_mode = BaseMaterial3D.BLEND_MODE_MIX
+	m.vertex_color_use_as_albedo = true
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	m.disable_receive_shadows = true
 	return m
 

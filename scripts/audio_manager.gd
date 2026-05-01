@@ -466,6 +466,37 @@ func play_defeat() -> void:
 		_emit(stream, randf_range(-2.0, 1.0), pitch)
 
 
+func play_victory() -> void:
+	## Match-end win stinger — synthesised major-triad fanfare + a
+	## low triumphant body thump. No bundled victory sample exists, so
+	## we generate it via the same _play_tone helpers used for the UI
+	## chirps. Three ascending notes (G4-B4-D5) carry the cadence;
+	## the thump under the third note adds weight.
+	# Cadence: G4 -> B4 -> D5 (a major third + minor third, classic
+	# triumphant arpeggio).
+	const G4: float = 392.0
+	const B4: float = 493.88
+	const D5: float = 587.33
+	const NOTE_DUR: float = 0.34
+	const STAGGER: float = 0.22
+	# First note immediately.
+	_play_tone(G4, NOTE_DUR, -3.0)
+	_play_tone(G4 * 2.0, NOTE_DUR, -8.0)  # octave overlay for shimmer
+	# Second + third deferred via tree-timer so the arpeggio reads.
+	var tree: SceneTree = get_tree()
+	if tree:
+		tree.create_timer(STAGGER).timeout.connect(func() -> void:
+			_play_tone(B4, NOTE_DUR, -3.0)
+			_play_tone(B4 * 2.0, NOTE_DUR, -8.0)
+		)
+		tree.create_timer(STAGGER * 2.0).timeout.connect(func() -> void:
+			_play_tone(D5, NOTE_DUR * 1.4, -2.0)
+			_play_tone(D5 * 2.0, NOTE_DUR * 1.4, -7.0)
+			# Body thump on the resolution note for weight.
+			_play_thump(120.0, 0.45, -6.0)
+		)
+
+
 func play_alert(severity: int = 0) -> void:
 	# Two-pulse warning chirp — higher and brighter for criticals so the
 	# player can read the urgency without looking at the HUD. Severity 0
