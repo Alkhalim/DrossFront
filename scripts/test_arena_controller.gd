@@ -84,6 +84,14 @@ func _ready() -> void:
 	pem.name = "ParticleEmitterManager"
 	add_child(pem)
 
+	# Industrial-themed cursor manager. Procedurally generates the
+	# default / attack / repair / build / move cursor textures and
+	# exposes `set_kind()` for SelectionManager to switch on hover.
+	var cursor_script: GDScript = preload("res://scripts/cursor_manager.gd")
+	var cursor_mgr: Node = cursor_script.new()
+	cursor_mgr.name = "CursorManager"
+	add_child(cursor_mgr)
+
 	_apply_map_visuals()
 	_setup_alerts()
 	_setup_player_registry()

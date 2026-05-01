@@ -83,14 +83,88 @@ func _process(_delta: float) -> void:
 
 
 func _update_hover() -> void:
-	if not _camera or _build_mode:
+	if not _camera:
 		_set_hover(null)
+		_update_cursor_kind(null)
+		return
+	if _build_mode:
+		_set_hover(null)
+		_update_cursor_kind_for_build_mode()
 		return
 	# Hover affects ground Units only (HP-bar reveal). Aircraft skip
 	# hover treatment for now — `as Unit` returns null for Aircraft so
 	# `_set_hover(null)` clears the previous hover cleanly.
-	var hovered: Unit = _raycast_unit(get_viewport().get_mouse_position()) as Unit
+	var screen_pos: Vector2 = get_viewport().get_mouse_position()
+	var raw_hover: Node3D = _raycast_unit(screen_pos)
+	var hovered: Unit = raw_hover as Unit
 	_set_hover(hovered)
+	_update_cursor_kind(raw_hover)
+
+
+func _update_cursor_kind(hovered: Node3D) -> void:
+	## Switch the system cursor based on what's under the pointer.
+	## Attack reticle when an enemy unit / aircraft is hovered;
+	## repair wrench when an engineer is selected and a damaged ally
+	## is hovered; default arrow otherwise.
+	var cursor_mgr: Node = _get_cursor_manager()
+	if not cursor_mgr:
+		return
+	# CursorManager.Kind enum values inlined since the class_name may
+	# not be globally registered when this script first parses. Order
+	# matches `enum Kind`: 0 DEFAULT 1 ATTACK 2 REPAIR 3 BUILD 4 MOVE.
+	if hovered and is_instance_valid(hovered):
+		var owner_id: int = hovered.get("owner_id") as int if "owner_id" in hovered else -1
+		if owner_id >= 0 and owner_id != 0:
+			# Hostile or neutral non-player unit — attack reticle.
+			var registry: PlayerRegistry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
+			if registry and registry.are_enemies(0, owner_id):
+				cursor_mgr.set_kind(1)  # ATTACK
+				return
+		# Allied or own unit. Repair cursor when an engineer is selected
+		# and the target is damaged.
+		if _has_engineer_selected() and _is_damaged(hovered):
+			cursor_mgr.set_kind(2)  # REPAIR
+			return
+	cursor_mgr.set_kind(0)  # DEFAULT
+
+
+func _update_cursor_kind_for_build_mode() -> void:
+	var cursor_mgr: Node = _get_cursor_manager()
+	if cursor_mgr:
+		cursor_mgr.set_kind(3)  # BUILD
+
+
+func _get_cursor_manager() -> Node:
+	var scene: Node = get_tree().current_scene if get_tree() else null
+	if not scene:
+		return null
+	return scene.get_node_or_null("CursorManager")
+
+
+func _has_engineer_selected() -> bool:
+	for u: Node3D in _selected_units:
+		if not is_instance_valid(u):
+			continue
+		if u is Unit:
+			var unit: Unit = u as Unit
+			if unit.stats and unit.stats.can_build:
+				return true
+	return false
+
+
+func _is_damaged(node: Node3D) -> bool:
+	if not is_instance_valid(node) or not "stats" in node:
+		return false
+	var stats_v: Variant = node.get("stats")
+	if not stats_v or not "hp_total" in stats_v:
+		return false
+	# Both Unit and Aircraft expose `get_total_hp()`; if missing assume
+	# fully healed.
+	if not node.has_method("get_total_hp"):
+		return false
+	var hp_total: int = stats_v.get("hp_total") as int
+	var hp_now: int = node.call("get_total_hp") as int
+	return hp_now < hp_total
 
 
 func _set_hover(unit: Unit) -> void:
