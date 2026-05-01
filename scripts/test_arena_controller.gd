@@ -1784,13 +1784,12 @@ func _spawn_walkable_plateau(center: Vector3, top_size: Vector2, height: float, 
 	root.add_child(body_mesh)
 
 	# --- Ramps ---
-	# Ramp width is fixed at RAMP_WIDTH — wide enough for a Crawler
-	# (3.6u body + nav_agent radius 2.5u → needs ~5u clear) plus a bit
-	# of buffer for two units to pass / squad spread. The ramp is
-	# centered on each side, leaving the rest of that side as plateau
-	# wall, so high ground is still gated by a specific access lane
-	# rather than the whole edge being a slope.
-	const RAMP_WIDTH: float = 7.0
+	# Ramp width — generous enough that the bake's 1.5u agent_radius
+	# carve doesn't pinch the walkable strip down to almost nothing.
+	# At 10u, the slope's walkable navmesh is 10 - 2*1.5 = 7u wide,
+	# which gives diagonal approaches enough room to enter the ramp
+	# without grinding the side wall.
+	const RAMP_WIDTH: float = 10.0
 	# Ramp run scales with plateau height — gentler slope on taller
 	# plateaus so collision climbing stays well under floor_max_angle
 	# (45°). At height 1.5 / run 6.5 the slope is ~13°; at height
