@@ -212,59 +212,38 @@ func _spawn_volcanic_fissure(pos: Vector3, fissure_size: Vector3, rot_y: float) 
 	col.position.y = 0.3
 	root.add_child(col)
 
-	# Recessed dark trench — a flattened box sunk just below the
-	# ground plane. Reads as a narrow ditch cut into the surface, not
-	# a slab perched on top of it. The emissive crack lives further
-	# down inside.
-	var seg_count: int = clampi(int(fissure_size.x / 4.5) + 1, 3, 6)
-	var seg_step: float = fissure_size.x / float(seg_count)
-	# Crack material reused across segments (one allocation per
-	# fissure rather than one per segment).
+	# Replaced the previous "stack of box segments" approach with a
+	# single irregular polygon mesh that reads as a real crack: a
+	# jagged dark perimeter on the ground (the hole's "mouth") with
+	# a thinner emissive polygon recessed inside (the magma below).
+	# The polygon's edge wobbles per-vertex so adjacent vertices
+	# never align on a clean rectangle, which was the giveaway that
+	# made the box-stack version look stamped.
 	var crust_mat := StandardMaterial3D.new()
-	crust_mat.albedo_color = Color(0.05, 0.04, 0.04, 1.0)
-	crust_mat.albedo_texture = SharedTextures.get_metal_wear_texture()
-	crust_mat.uv1_offset = Vector3(randf(), randf(), 0.0)
-	crust_mat.uv1_scale = Vector3(2.4, 1.0, 1.0)
-	crust_mat.roughness = 1.0
+	crust_mat.albedo_color = Color(0.04, 0.03, 0.03, 1.0)
+	crust_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	crust_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	var glow_mat := StandardMaterial3D.new()
 	glow_mat.albedo_color = Color(1.0, 0.4, 0.1, 1.0)
 	glow_mat.emission_enabled = true
-	glow_mat.emission = Color(1.0, 0.45, 0.12, 1.0)
-	glow_mat.emission_energy_multiplier = 2.5
+	glow_mat.emission = Color(1.0, 0.5, 0.15, 1.0)
+	glow_mat.emission_energy_multiplier = 2.8
 	glow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	for i: int in seg_count:
-		var t: float = float(i) - float(seg_count - 1) * 0.5  # centred
-		var seg_x: float = t * seg_step + randf_range(-seg_step * 0.15, seg_step * 0.15)
-		var seg_w: float = seg_step * randf_range(0.85, 1.05)
-		var seg_z_off: float = randf_range(-fissure_size.z * 0.35, fissure_size.z * 0.35)
-		# Each segment is wider than the next, kinked at small angles.
-		var width: float = fissure_size.z * randf_range(0.7, 1.3)
-		var seg_rot: float = randf_range(-0.2, 0.2)
-
-		# Trench wall — a wider, slightly-deeper dark patch around the
-		# glow, so the crack looks framed by a recessed shadow band.
-		var trench := MeshInstance3D.new()
-		var trench_box := BoxMesh.new()
-		trench_box.size = Vector3(seg_w * 1.1, 0.12, width)
-		trench.mesh = trench_box
-		trench.position = Vector3(seg_x, -0.04, seg_z_off)
-		trench.rotation.y = seg_rot
-		trench.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		trench.set_surface_override_material(0, crust_mat)
-		root.add_child(trench)
-
-		# Inner glow strip — narrower and recessed deeper into the
-		# trench so it reads as magma at the bottom of the fissure
-		# rather than a stripe pasted on the surface.
-		var glow := MeshInstance3D.new()
-		var glow_box := BoxMesh.new()
-		glow_box.size = Vector3(seg_w * randf_range(0.55, 0.8), 0.04, width * randf_range(0.25, 0.45))
-		glow.mesh = glow_box
-		glow.position = Vector3(seg_x + randf_range(-0.1, 0.1), -0.16, seg_z_off + randf_range(-0.05, 0.05))
-		glow.rotation.y = seg_rot + randf_range(-0.1, 0.1)
-		glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		glow.set_surface_override_material(0, glow_mat)
-		root.add_child(glow)
+	glow_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	# Outer mouth polygon — perimeter walks along the fissure length
+	# with width that bulges in the middle and tapers at the ends,
+	# plus a per-vertex jitter so the silhouette is jagged.
+	var mouth: MeshInstance3D = _build_fissure_polygon(
+		fissure_size.x, fissure_size.z, -0.04, 0.45, 12, crust_mat
+	)
+	root.add_child(mouth)
+	# Inner glow polygon — narrower (~50%) and recessed deeper so it
+	# reads as magma seen down through the crack mouth, not a stripe
+	# painted on the surface.
+	var inner: MeshInstance3D = _build_fissure_polygon(
+		fissure_size.x * 0.65, fissure_size.z * 0.5, -0.18, 0.55, 10, glow_mat
+	)
+	root.add_child(inner)
 
 	# Heat glow — soft warm omni light hovering just above the trench
 	# so the surrounding ash plain picks up the heat halo. Position is
@@ -282,6 +261,68 @@ func _spawn_volcanic_fissure(pos: Vector3, fissure_size: Vector3, rot_y: float) 
 	nav_obstacle.height = 1.0
 	nav_obstacle.avoidance_enabled = true
 	root.add_child(nav_obstacle)
+
+
+func _build_fissure_polygon(length: float, width: float, y: float, jitter: float, segments: int, mat: StandardMaterial3D) -> MeshInstance3D:
+	## Builds a flat horizontal mesh with an irregular jagged perimeter
+	## representing a single elongated crack in the ground. The polygon
+	## is shaped like a cigar (tapered ends, bulged middle), with each
+	## perimeter vertex jittered by `jitter` units so adjacent vertices
+	## never align on a clean rectangle. Triangulated as a fan from the
+	## centre. Returned as a MeshInstance3D positioned at y=`y`,
+	## y-rotation 0 (the caller's root node owns the heading rotation).
+	var verts := PackedVector3Array()
+	var norms := PackedVector3Array()
+	var uvs := PackedVector2Array()
+	# Build perimeter — `segments` per long side, top + bottom + 2 caps.
+	# We walk along the length axis collecting top-edge points (positive
+	# z offset) then bottom-edge points (negative z) so the polygon
+	# winds CCW from above.
+	var top_pts := PackedVector3Array()
+	var bot_pts := PackedVector3Array()
+	for i: int in segments + 1:
+		var u: float = float(i) / float(segments)
+		var x: float = lerp(-length * 0.5, length * 0.5, u)
+		# Width tapers at the ends, bulges in the middle — sin gives the
+		# right falloff curve.
+		var taper: float = sin(u * PI)
+		var z_extent: float = width * 0.5 * lerp(0.25, 1.0, taper)
+		# Per-vertex jitter so the edge is jagged, not smooth.
+		var jx: float = randf_range(-jitter, jitter) * 0.5
+		var jz_top: float = randf_range(-jitter, jitter)
+		var jz_bot: float = randf_range(-jitter, jitter)
+		top_pts.append(Vector3(x + jx, 0, +z_extent + jz_top))
+		bot_pts.append(Vector3(x + jx, 0, -z_extent + jz_bot))
+	# Triangulate as a fan from the polygon centre.
+	var centre: Vector3 = Vector3(0, 0, 0)
+	var perimeter: PackedVector3Array = PackedVector3Array()
+	for p: Vector3 in top_pts:
+		perimeter.append(p)
+	# bottom walks back the other direction so the perimeter is a
+	# closed loop CCW from above.
+	for i: int in bot_pts.size():
+		perimeter.append(bot_pts[bot_pts.size() - 1 - i])
+	for i: int in perimeter.size():
+		var a: Vector3 = perimeter[i]
+		var b: Vector3 = perimeter[(i + 1) % perimeter.size()]
+		# Triangle (centre, b, a) — note reversed b/a so the normal
+		# points UP (CCW from +Y).
+		verts.append(centre); norms.append(Vector3.UP); uvs.append(Vector2(0.5, 0.5))
+		verts.append(b); norms.append(Vector3.UP); uvs.append(Vector2(0.5 + b.x / length, 0.5 + b.z / width))
+		verts.append(a); norms.append(Vector3.UP); uvs.append(Vector2(0.5 + a.x / length, 0.5 + a.z / width))
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = norms
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	var arr_mesh := ArrayMesh.new()
+	arr_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	var inst := MeshInstance3D.new()
+	inst.mesh = arr_mesh
+	inst.position.y = y
+	inst.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	inst.set_surface_override_material(0, mat)
+	return inst
 
 
 func _apply_map_visuals() -> void:
@@ -972,9 +1013,11 @@ func _setup_fuel_deposits() -> void:
 		add_child(deposit)
 		deposit.global_position = pos
 
-	# 2v2 only — extra small back-/side-of-base satellite deposits.
-	# Foundry Belt only — Ashplains is intentionally lean on resources.
-	if _is_2v2() and not _is_ashplains():
+	# 2v2 — extra small back-/side-of-base satellite deposits.
+	# Previously gated to Foundry Belt only because Ashplains was meant
+	# to be lean; the new design wants more resources on the desert
+	# map too, so the small satellites apply to both maps now.
+	if _is_2v2():
 		for pos: Vector3 in _small_deposit_positions_2v2():
 			var small: Node3D = deposit_script.new()
 			# Lower yield + smaller capture radius than the main deposits —
@@ -1026,6 +1069,13 @@ func _deposit_positions_ashplains_1v1() -> Array[Vector3]:
 		Vector3(0, 0, 80),     # Player safe (north)
 		Vector3(0, 0, -80),    # AI safe (south)
 		Vector3(0, 0, 0),      # Central — the primary objective, Heavy patrol
+		# Additional flank deposits — give the player meaningful
+		# expansion targets beyond the safe + central. Mid-z so they
+		# sit between safe and central, encouraging scouting pushes.
+		Vector3(80, 0, 40),    # East flank, player side
+		Vector3(-80, 0, 40),   # West flank, player side
+		Vector3(80, 0, -40),   # East flank, AI side
+		Vector3(-80, 0, -40),  # West flank, AI side
 	]
 
 
@@ -1164,50 +1214,73 @@ func _setup_terrain_foundry_belt() -> void:
 
 
 func _setup_terrain_ashplains() -> void:
-	# Ashplains Crossing — wide-open ash flats with sparse cover. Per the
-	# V2 spec: 2 ruin clusters as the only meaningful cover, mostly open
-	# ground that favours long-sightline ranged combat. The single
-	# elevated ridge that crosses the map is built in `_setup_elevation`
-	# (its dedicated walkable plateau) — terrain pieces here are just
-	# ground-level cover.
+	# Ashplains Crossing — volcanic ash flats. The "industrial plant
+	# ruins" that previously sat at flank-mid have been replaced with
+	# rock outcrops because ruined buildings on a desert / volcanic
+	# map didn't make sense. Plus a much denser scattering of small
+	# scrap piles (resource opportunities) so the map isn't visually
+	# empty at standard zoom — the player should always have a few
+	# salvage targets within scouting range.
 	var pieces: Array[Dictionary] = [
-		# West ruin cluster — half-collapsed industrial plant. Multiple
-		# small ruin pieces grouped so units can thread between them but
-		# the whole thing reads as one strategic feature.
-		{"pos": Vector3(-25, 0, 18), "size": Vector3(4.5, 3.5, 3.5), "kind": "ruin"},
-		{"pos": Vector3(-32, 0, 12), "size": Vector3(3.0, 4.0, 3.0), "kind": "ruin"},
-		{"pos": Vector3(-21, 0, 9), "size": Vector3(3.5, 3.0, 4.0), "kind": "ruin"},
-		# East ruin cluster — mirror.
-		{"pos": Vector3(25, 0, -18), "size": Vector3(4.5, 3.5, 3.5), "kind": "ruin"},
-		{"pos": Vector3(32, 0, -12), "size": Vector3(3.0, 4.0, 3.0), "kind": "ruin"},
-		{"pos": Vector3(21, 0, -9), "size": Vector3(3.5, 3.0, 4.0), "kind": "ruin"},
-		# A handful of standalone rocks scattered across the open plain
-		# so the map isn't perfectly flat — but very sparse compared to
-		# Foundry Belt. Long sightlines stay open.
-		{"pos": Vector3(55, 0, 40), "size": Vector3(2.0, 1.6, 2.0), "kind": "rock"},
-		{"pos": Vector3(-55, 0, -40), "size": Vector3(2.0, 1.6, 2.0), "kind": "rock"},
-		{"pos": Vector3(70, 0, -55), "size": Vector3(2.4, 2.0, 2.4), "kind": "rock"},
-		{"pos": Vector3(-70, 0, 55), "size": Vector3(2.4, 2.0, 2.4), "kind": "rock"},
-		# Far-corner fillers so the very edges of the playable area don't
-		# read as a perfectly flat boundary.
+		# Standalone rock formations across the plain — replacing the
+		# previous ruin clusters at the same approximate locations so
+		# the strategic cover layout stays similar (something to push
+		# around on each flank).
+		{"pos": Vector3(55, 0, 40), "size": Vector3(2.4, 2.0, 2.4), "kind": "rock"},
+		{"pos": Vector3(-55, 0, -40), "size": Vector3(2.4, 2.0, 2.4), "kind": "rock"},
+		{"pos": Vector3(70, 0, -55), "size": Vector3(2.6, 2.2, 2.6), "kind": "rock"},
+		{"pos": Vector3(-70, 0, 55), "size": Vector3(2.6, 2.2, 2.6), "kind": "rock"},
+		# Corner / boundary rocks — the very edges of the playable area
+		# don't read as a perfectly flat boundary.
 		{"pos": Vector3(115, 0, 100), "size": Vector3(3.0, 2.0, 3.0), "kind": "rock"},
 		{"pos": Vector3(-115, 0, 100), "size": Vector3(3.0, 2.0, 3.0), "kind": "rock"},
 		{"pos": Vector3(115, 0, -100), "size": Vector3(3.0, 2.0, 3.0), "kind": "rock"},
 		{"pos": Vector3(-115, 0, -100), "size": Vector3(3.0, 2.0, 3.0), "kind": "rock"},
-		# Scattered small scrap piles toward the back / sides of each
-		# team's territory. Smaller and sparser than the central ruin
-		# clusters so they read as "salvage to scout for" rather than
-		# bulk cover. Player-side (z > 0) and AI-side (z < 0) get
-		# mirrored sets at varying flank positions.
-		{"pos": Vector3(70, 0, 95), "size": Vector3(2.4, 0.8, 2.6), "kind": "scrap_pile"},
-		{"pos": Vector3(-65, 0, 105), "size": Vector3(2.2, 0.7, 2.4), "kind": "scrap_pile"},
-		{"pos": Vector3(95, 0, 70), "size": Vector3(2.6, 0.9, 2.4), "kind": "scrap_pile"},
-		{"pos": Vector3(-100, 0, 60), "size": Vector3(2.4, 0.8, 2.6), "kind": "scrap_pile"},
-		{"pos": Vector3(70, 0, -95), "size": Vector3(2.4, 0.8, 2.6), "kind": "scrap_pile"},
-		{"pos": Vector3(-65, 0, -105), "size": Vector3(2.2, 0.7, 2.4), "kind": "scrap_pile"},
-		{"pos": Vector3(95, 0, -70), "size": Vector3(2.6, 0.9, 2.4), "kind": "scrap_pile"},
-		{"pos": Vector3(-100, 0, -60), "size": Vector3(2.4, 0.8, 2.6), "kind": "scrap_pile"},
+		# Mid-flank rock cluster anchors (was ruins). Three rocks each
+		# in a loose triangle so the silhouette reads as a small rocky
+		# outcropping rather than a single boulder.
+		{"pos": Vector3(-28, 0, 16), "size": Vector3(3.0, 2.5, 3.0), "kind": "rock"},
+		{"pos": Vector3(-34, 0, 10), "size": Vector3(2.6, 2.2, 2.6), "kind": "rock"},
+		{"pos": Vector3(-22, 0, 8), "size": Vector3(2.4, 2.0, 2.8), "kind": "rock"},
+		{"pos": Vector3(28, 0, -16), "size": Vector3(3.0, 2.5, 3.0), "kind": "rock"},
+		{"pos": Vector3(34, 0, -10), "size": Vector3(2.6, 2.2, 2.6), "kind": "rock"},
+		{"pos": Vector3(22, 0, -8), "size": Vector3(2.4, 2.0, 2.8), "kind": "rock"},
 	]
+	# Many scattered small scrap piles for resource scouting + visual
+	# density. Mirrored across both teams' territory plus mid-flank
+	# spread so the map has consistent salvage targets at any zoom.
+	# Each pile is small (~2u) so they don't act as cover, just
+	# economic incentive to push out.
+	var scrap_pile_positions: Array[Vector3] = [
+		# Player half (z > 0)
+		Vector3(40, 0, 50), Vector3(-40, 0, 50),
+		Vector3(15, 0, 60), Vector3(-15, 0, 60),
+		Vector3(60, 0, 35), Vector3(-60, 0, 35),
+		Vector3(45, 0, 75), Vector3(-45, 0, 75),
+		Vector3(80, 0, 60), Vector3(-80, 0, 60),
+		Vector3(20, 0, 90), Vector3(-20, 0, 90),
+		Vector3(95, 0, 90), Vector3(-95, 0, 90),
+		Vector3(110, 0, 50), Vector3(-110, 0, 50),
+		# AI half (z < 0) — mirrored
+		Vector3(40, 0, -50), Vector3(-40, 0, -50),
+		Vector3(15, 0, -60), Vector3(-15, 0, -60),
+		Vector3(60, 0, -35), Vector3(-60, 0, -35),
+		Vector3(45, 0, -75), Vector3(-45, 0, -75),
+		Vector3(80, 0, -60), Vector3(-80, 0, -60),
+		Vector3(20, 0, -90), Vector3(-20, 0, -90),
+		Vector3(95, 0, -90), Vector3(-95, 0, -90),
+		Vector3(110, 0, -50), Vector3(-110, 0, -50),
+		# Mid-flanks (z ≈ 0) — sparser so the central ridge area still
+		# reads as the contested high-stakes zone.
+		Vector3(90, 0, 18), Vector3(-90, 0, 18),
+		Vector3(90, 0, -18), Vector3(-90, 0, -18),
+	]
+	for sp: Vector3 in scrap_pile_positions:
+		# Per-pile size jitter so the scattering doesn't look stamped.
+		var sx: float = randf_range(1.6, 2.6)
+		var sz: float = randf_range(1.6, 2.6)
+		var sy: float = randf_range(0.5, 1.0)
+		pieces.append({"pos": sp, "size": Vector3(sx, sy, sz), "kind": "scrap_pile"})
 	for piece: Dictionary in pieces:
 		_spawn_terrain_piece(piece["pos"] as Vector3, piece["size"] as Vector3, piece["kind"] as String)
 

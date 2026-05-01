@@ -212,26 +212,35 @@ func _setup_voiceline_bus() -> void:
 	AudioServer.add_bus(idx)
 	AudioServer.set_bus_name(idx, VL_BUS_NAME)
 	AudioServer.set_bus_send(idx, "Master")
-	# Bandpass — cuts low rumble + high air, mimicking 300-3000Hz
-	# radio bandwidth.
+	# Bandpass — narrowed to roughly 400-2400Hz, simulating a field
+	# radio's restricted bandwidth. Higher resonance (1.4) gives the
+	# nasal mid-range honk characteristic of squad radios.
 	var bp := AudioEffectBandPassFilter.new()
-	bp.cutoff_hz = 1400.0
-	bp.resonance = 0.6
+	bp.cutoff_hz = 1100.0
+	bp.resonance = 1.4
 	AudioServer.add_bus_effect(idx, bp)
-	# Distortion — slight overdrive for tube / lo-fi grit.
+	# Heavy distortion — bitcrush mode gives the digital crunch /
+	# clipping edge of compressed radio audio. Drive bumped from the
+	# previous gentle overdrive so the VO actually sounds processed
+	# rather than just slightly filtered.
 	var dist := AudioEffectDistortion.new()
-	dist.mode = AudioEffectDistortion.MODE_OVERDRIVE
-	dist.drive = 0.25
-	dist.post_gain = -3.0
+	dist.mode = AudioEffectDistortion.MODE_LOFI
+	dist.drive = 0.55
+	dist.post_gain = -4.0
 	AudioServer.add_bus_effect(idx, dist)
-	# Subtle reverb — small-room interior so the voice doesn't sound
-	# completely dry against the outdoor SFX.
-	var rev := AudioEffectReverb.new()
-	rev.room_size = 0.25
-	rev.damping = 0.85
-	rev.wet = 0.18
-	rev.dry = 0.85
-	AudioServer.add_bus_effect(idx, rev)
+	# (Reverb removed — earlier "small room" tail muddied the line.
+	# Field radios don't have that kind of space; they're tight, dry,
+	# and crunchy.)
+	# Subtle chorus for radio-static modulation — fills the dryness
+	# without adding spatial reverb tail.
+	var chorus := AudioEffectChorus.new()
+	chorus.wet = 0.20
+	chorus.dry = 0.85
+	if chorus.voice_count > 0:
+		chorus.set_voice_depth_ms(0, 1.2)
+		chorus.set_voice_rate_hz(0, 0.7)
+		chorus.set_voice_level_db(0, -6.0)
+	AudioServer.add_bus_effect(idx, chorus)
 	# Pull bus volume down so VO sits under combat SFX. Voicelines
 	# were too loud relative to the rest of the mix.
 	AudioServer.set_bus_volume_db(idx, -8.0)
