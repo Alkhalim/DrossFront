@@ -45,6 +45,8 @@ const ALTITUDE_BOB_FREQ: float = 1.1
 var _bob_phase: float = 0.0
 var _altitude_anim_time: float = 0.0
 var _smoke_trail_timer: float = 0.0
+var _anvil_rotor: Node3D = null
+var _anvil_tail_rotor: Node3D = null
 
 ## Ground shadow blob — flat dark ellipse on the ground beneath the
 ## aircraft. Sells the "airborne" read at any camera angle (the directional
@@ -249,6 +251,13 @@ func _process(delta: float) -> void:
 		_shadow_blob.global_position = Vector3(global_position.x, 0.06, global_position.z)
 	if _select_ring and is_instance_valid(_select_ring):
 		_select_ring.global_position = Vector3(global_position.x, 0.08, global_position.z)
+
+	# Spin Anvil's main + tail rotors. Speed is constant — the
+	# rotor reads as "engine running" all the time.
+	if _anvil_rotor and is_instance_valid(_anvil_rotor):
+		_anvil_rotor.rotate_y(delta * 28.0)
+	if _anvil_tail_rotor and is_instance_valid(_anvil_tail_rotor):
+		_anvil_tail_rotor.rotate_z(delta * 42.0)
 
 	# Per-drone bob — gives swarm aircraft visual life. Each drone has
 	# its own phase (set when spawned) so they don't bob in unison.
@@ -808,15 +817,89 @@ func _build_hammerhead() -> void:
 	spine.set_surface_override_material(0, spine_mat)
 	add_child(spine)
 
-	# Slim antenna mast on the spine — tiny silhouette punctuation.
-	var ant := MeshInstance3D.new()
-	ant.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var ant_box := BoxMesh.new()
-	ant_box.size = Vector3(0.05, 0.45, 0.05)
-	ant.mesh = ant_box
-	ant.position = Vector3(0, 0.65, -0.40)
-	ant.set_surface_override_material(0, _aircraft_metal_mat(Color(0.12, 0.12, 0.12, 1.0)))
-	add_child(ant)
+	# Rotor mast — short pylon rising from the spine where the
+	# rotor hub mounts. Reads as an attack-chopper instead of a
+	# generic blocky gunship.
+	var rotor_pylon := MeshInstance3D.new()
+	rotor_pylon.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var rp_box := BoxMesh.new()
+	rp_box.size = Vector3(0.34, 0.55, 0.34)
+	rotor_pylon.mesh = rp_box
+	rotor_pylon.position = Vector3(0, 0.72, 0.20)
+	rotor_pylon.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.20)))
+	add_child(rotor_pylon)
+	# Rotor hub disc on top of the pylon.
+	var hub := MeshInstance3D.new()
+	hub.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var hub_cyl := CylinderMesh.new()
+	hub_cyl.top_radius = 0.18
+	hub_cyl.bottom_radius = 0.18
+	hub_cyl.height = 0.10
+	hub_cyl.radial_segments = 12
+	hub.mesh = hub_cyl
+	hub.position = Vector3(0, 1.05, 0.20)
+	hub.set_surface_override_material(0, _aircraft_metal_mat(Color(0.08, 0.08, 0.08, 1.0)))
+	add_child(hub)
+	# Three rotor blades — long thin slabs radiating from the hub.
+	# Built under a Node3D pivot so future _process spinning logic
+	# can rotate them in place without restructuring.
+	var rotor_pivot := Node3D.new()
+	rotor_pivot.name = "RotorPivot"
+	rotor_pivot.position = Vector3(0, 1.10, 0.20)
+	add_child(rotor_pivot)
+	for blade_i: int in 3:
+		var blade := MeshInstance3D.new()
+		blade.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var bb := BoxMesh.new()
+		bb.size = Vector3(2.6, 0.04, 0.18)
+		blade.mesh = bb
+		blade.rotation.y = float(blade_i) * (TAU / 3.0)
+		blade.set_surface_override_material(0, _aircraft_metal_mat(Color(0.10, 0.10, 0.12, 0.9)))
+		rotor_pivot.add_child(blade)
+	_anvil_rotor = rotor_pivot
+	# Tail boom — slim extension behind the hull supporting the
+	# tail rotor. Gives the gunship an unmistakable chopper read.
+	var tail_boom := MeshInstance3D.new()
+	tail_boom.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var tb_box := BoxMesh.new()
+	tb_box.size = Vector3(0.30, 0.30, 1.20)
+	tail_boom.mesh = tb_box
+	tail_boom.position = Vector3(0, 0.20, -2.30)
+	tail_boom.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.10)))
+	add_child(tail_boom)
+	# Tail rotor — small vertical disc at the end of the boom with
+	# 2 short blades. Same rotor-pivot trick.
+	var tail_pivot := Node3D.new()
+	tail_pivot.name = "TailRotorPivot"
+	tail_pivot.position = Vector3(0.20, 0.20, -2.95)
+	add_child(tail_pivot)
+	for tail_blade_i: int in 2:
+		var tblade := MeshInstance3D.new()
+		tblade.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var tbb := BoxMesh.new()
+		tbb.size = Vector3(0.04, 0.55, 0.10)
+		tblade.mesh = tbb
+		tblade.rotation.x = float(tail_blade_i) * (PI * 0.5)
+		tblade.set_surface_override_material(0, _aircraft_metal_mat(Color(0.10, 0.10, 0.12, 0.9)))
+		tail_pivot.add_child(tblade)
+	_anvil_tail_rotor = tail_pivot
+
+	# Riveted armor patches on the hull sides — small cube bumps in
+	# a row just below the spine, reinforcing the brutalist read.
+	var rivet_mat: StandardMaterial3D = _aircraft_metal_mat(Color(0.45, 0.40, 0.22, 1.0))
+	for rivet_side: int in 2:
+		var rsx: float = 0.95 if rivet_side == 0 else -0.95
+		for rivet_i: int in 5:
+			var rivet := MeshInstance3D.new()
+			rivet.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var rb := BoxMesh.new()
+			rb.size = Vector3(0.10, 0.10, 0.10)
+			rivet.mesh = rb
+			var rt: float = (float(rivet_i) + 0.5) / 5.0
+			var rz: float = -1.30 + rt * 2.6
+			rivet.position = Vector3(rsx, 0.12, rz)
+			rivet.set_surface_override_material(0, rivet_mat)
+			add_child(rivet)
 
 
 func _build_switchblade() -> void:
@@ -951,6 +1034,70 @@ func _build_switchblade() -> void:
 	spine_mat.emission_energy_multiplier = 1.8
 	spine.set_surface_override_material(0, spine_mat)
 	add_child(spine)
+
+	# Sable stealth-fighter polish — extra silhouette elements that
+	# read as B-2 / F-117 cousins, fitting the corp-stealth faction
+	# profile. Forward canard wings, a slim nose probe, twin
+	# outward-canted thrust vectoring nozzles at the back, and a
+	# sharper violet under-glow strip along the belly.
+	var canard_mat: StandardMaterial3D = _aircraft_metal_mat(body_color.darkened(0.15))
+	for canard_side: int in 2:
+		var csx: float = 1.0 if canard_side == 0 else -1.0
+		var canard := MeshInstance3D.new()
+		canard.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var canard_box := BoxMesh.new()
+		canard_box.size = Vector3(0.65, 0.04, 0.45)
+		canard.mesh = canard_box
+		canard.position = Vector3(csx * 0.55, 0.18, 1.20)
+		canard.rotation.y = csx * deg_to_rad(-22.0)
+		canard.set_surface_override_material(0, canard_mat)
+		add_child(canard)
+	# Nose probe — slim cylinder extending past the nose cone tip.
+	var probe := MeshInstance3D.new()
+	probe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var probe_cyl := CylinderMesh.new()
+	probe_cyl.top_radius = 0.04
+	probe_cyl.bottom_radius = 0.05
+	probe_cyl.height = 0.55
+	probe_cyl.radial_segments = 6
+	probe.mesh = probe_cyl
+	probe.rotation.x = PI * 0.5
+	probe.position = Vector3(0, -0.08, 2.70)
+	probe.set_surface_override_material(0, _aircraft_metal_mat(Color(0.18, 0.18, 0.20, 1.0)))
+	add_child(probe)
+	# Twin thrust vectoring nozzles at the rear, canted outward —
+	# replaces the single-block exhaust read with a clearly-paired
+	# "two engines" silhouette.
+	var nozzle_mat := StandardMaterial3D.new()
+	nozzle_mat.albedo_color = SABLE_NEON_PALE
+	nozzle_mat.emission_enabled = true
+	nozzle_mat.emission = SABLE_NEON_PALE
+	nozzle_mat.emission_energy_multiplier = 2.6
+	for nozzle_side: int in 2:
+		var nzsx: float = 1.0 if nozzle_side == 0 else -1.0
+		var nozzle := MeshInstance3D.new()
+		nozzle.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var nz_cyl := CylinderMesh.new()
+		nz_cyl.top_radius = 0.18
+		nz_cyl.bottom_radius = 0.18
+		nz_cyl.height = 0.30
+		nz_cyl.radial_segments = 8
+		nozzle.mesh = nz_cyl
+		nozzle.rotation.x = PI * 0.5
+		nozzle.rotation.y = nzsx * deg_to_rad(-12.0)
+		nozzle.position = Vector3(nzsx * 0.30, 0.04, -1.85)
+		nozzle.set_surface_override_material(0, nozzle_mat)
+		add_child(nozzle)
+	# Sharper violet under-glow strip along the belly so the
+	# silhouette has a "highlighted edge" read from below.
+	var belly := MeshInstance3D.new()
+	belly.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var belly_box := BoxMesh.new()
+	belly_box.size = Vector3(0.10, 0.04, 2.5)
+	belly.mesh = belly_box
+	belly.position = Vector3(0, -0.27, 0.1)
+	belly.set_surface_override_material(0, spine_mat)
+	add_child(belly)
 
 
 const SABLE_NEON_PALE := Color(0.78, 0.35, 1.0, 1.0)  # violet, paired with unit/building Sable accent
