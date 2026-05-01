@@ -77,10 +77,12 @@ func _process(delta: float) -> void:
 
 func _update_capture(delta: float) -> void:
 	# Count units of each owner inside the radius. Neutrals (owner_id 2)
-	# are skipped so wandering neutral patrols don't claim the deposit
-	# from the player by sitting in radius — neutrals contest combat
-	# but shouldn't be in the fuel-economy game.
+	# CAN block the capture — if a wandering neutral patrol is in
+	# radius it counts toward "contested" so progress halts — but
+	# they cannot claim the deposit themselves; neutral never goes
+	# below into the capture-progress branch.
 	var owner_counts: Dictionary = {}
+	var has_neutral: bool = false
 	var units: Array[Node] = get_tree().get_nodes_in_group("units")
 	for node: Node in units:
 		if not is_instance_valid(node):
@@ -88,14 +90,21 @@ func _update_capture(delta: float) -> void:
 		if not ("alive_count" in node) or node.get("alive_count") <= 0:
 			continue
 		var uid: int = node.get("owner_id")
-		if uid == 2:
-			continue
 		var dist: float = global_position.distance_to(node.global_position)
-		if dist <= capture_radius:
-			if owner_counts.has(uid):
-				owner_counts[uid] = (owner_counts[uid] as int) + 1
-			else:
-				owner_counts[uid] = 1
+		if dist > capture_radius:
+			continue
+		if uid == 2:
+			has_neutral = true
+			continue
+		if owner_counts.has(uid):
+			owner_counts[uid] = (owner_counts[uid] as int) + 1
+		else:
+			owner_counts[uid] = 1
+	# Any neutral inside the radius blocks progress — treat the
+	# deposit as contested while a neutral patrol is contesting it.
+	if has_neutral and not owner_counts.is_empty():
+		_is_contested = true
+		return
 
 	# Determine capture state
 	var capturers: Array = owner_counts.keys()

@@ -92,6 +92,13 @@ var _anchor_plating: Node3D = null
 # Visual elements that we can toggle for selection highlight.
 var _hull: MeshInstance3D = null
 var _team_stripe: MeshInstance3D = null
+
+## Track-plate scrolling — list of {node, segment_z_min, segment_length}
+## entries. Each frame we advance the plate's local Z by delta *
+## _move_speed when the crawler is moving, wrapping back to the front
+## of the segment when it falls off the rear.
+var _track_plates: Array[Dictionary] = []
+var _track_scroll_t: float = 0.0
 var _hp_bar: Node3D = null
 var _hp_bar_fill: MeshInstance3D = null
 var _hp_bar_bg: MeshInstance3D = null
@@ -156,6 +163,13 @@ func get_power_efficiency() -> float:
 
 ## --- Visuals ---
 
+## Vertical offset applied to every chassis-mounted element (hull,
+## workshop, stripes, lights, crane, etc.). Treads / road wheels /
+## sprockets stay at ground level so the chassis sits visibly above
+## the tread block instead of sharing the ground plane with it.
+const CHASSIS_LIFT: float = 0.20
+
+
 func _build_visuals() -> void:
 	var team_color: Color = _resolve_team_color()
 
@@ -164,7 +178,7 @@ func _build_visuals() -> void:
 	var hull_box := BoxMesh.new()
 	hull_box.size = Vector3(3.6, 1.0, 5.0)
 	_hull.mesh = hull_box
-	_hull.position.y = 0.55
+	_hull.position.y = 0.55 + CHASSIS_LIFT
 	var hull_mat := _make_metal(Color(0.32, 0.3, 0.27))
 	_hull.set_surface_override_material(0, hull_mat)
 	add_child(_hull)
@@ -175,14 +189,21 @@ func _build_visuals() -> void:
 	# side ("bogie" pairs) for a quicker, more agile silhouette read.
 	# Both layouts emit detailed plate strips on top of the tread so
 	# the side panel doesn't look like a mono-coloured block.
+	#
+	# Both factions sit slightly raised off the ground so the tread
+	# clearly protrudes below the hull instead of merging with it
+	# (handled below by lifting _hull). Sable additionally angles
+	# its two bogies — front bogie nose-up, rear bogie nose-down —
+	# which raises the chassis belly visibly higher.
 	var sable: bool = _faction_id() == 1
 	for side: int in 2:
 		var sx: float = -1.95 if side == 0 else 1.95
 		if sable:
-			# Two bogie sets per side, staggered front + rear so the
-			# silhouette reads as multi-bogie (smaller, more wheels).
-			_build_tread_segment(sx, -1.6, 1.85)  # front bogie
-			_build_tread_segment(sx, 1.6, 1.85)   # rear bogie
+			# Two bogie sets per side, staggered front + rear with
+			# opposite X-tilts so the bogies splay outward at the
+			# ends. Lifts the chassis belly noticeably.
+			_build_tread_segment(sx, -1.6, 1.85, -8.0)
+			_build_tread_segment(sx, 1.6, 1.85, 8.0)
 		else:
 			_build_tread_segment(sx, 0.0, 5.2)
 		# Drive sprocket up front (toothed wheel) — clearly the
@@ -217,7 +238,7 @@ func _build_visuals() -> void:
 	var ws_box := BoxMesh.new()
 	ws_box.size = Vector3(2.8, 1.0, 3.4)
 	workshop.mesh = ws_box
-	workshop.position = Vector3(0, 1.55, -0.4)
+	workshop.position = Vector3(0, 1.55 + CHASSIS_LIFT, -0.4)
 	workshop.set_surface_override_material(0, _make_metal(Color(0.28, 0.26, 0.22)))
 	add_child(workshop)
 
@@ -228,7 +249,7 @@ func _build_visuals() -> void:
 	var ws_stripe_box := BoxMesh.new()
 	ws_stripe_box.size = Vector3(2.85, 0.12, 3.45)
 	_team_stripe.mesh = ws_stripe_box
-	_team_stripe.position = Vector3(0.0, 1.0, -0.4)
+	_team_stripe.position = Vector3(0.0, 1.0 + CHASSIS_LIFT, -0.4)
 	var ws_stripe_mat := StandardMaterial3D.new()
 	ws_stripe_mat.albedo_color = team_color
 	ws_stripe_mat.emission_enabled = true
@@ -246,7 +267,7 @@ func _build_visuals() -> void:
 	nose_box.size = Vector3(2.6, 0.7, 1.0)
 	nose.mesh = nose_box
 	nose.rotation.x = deg_to_rad(-22.0)
-	nose.position = Vector3(0.0, 0.65, -2.1)
+	nose.position = Vector3(0.0, 0.65 + CHASSIS_LIFT, -2.1)
 	nose.set_surface_override_material(0, _make_metal(Color(0.22, 0.2, 0.18)))
 	add_child(nose)
 	# Headlight pair on the nose — emissive amber, brighter than v1
@@ -258,7 +279,7 @@ func _build_visuals() -> void:
 		hl_sphere.radius = 0.16
 		hl_sphere.height = 0.32
 		headlight.mesh = hl_sphere
-		headlight.position = Vector3(hx, 0.82, -2.60)
+		headlight.position = Vector3(hx, 0.82 + CHASSIS_LIFT, -2.60)
 		var hl_mat := StandardMaterial3D.new()
 		hl_mat.albedo_color = Color(1.0, 0.78, 0.42)
 		hl_mat.emission_enabled = true
@@ -285,7 +306,7 @@ func _build_visuals() -> void:
 			sb.size = Vector3(0.85, 0.04, 0.16)
 			slab.mesh = sb
 			var sx2: float = -0.45 if slab_side == 0 else 0.45
-			slab.position = Vector3(sx2, 0.92, z_offset)
+			slab.position = Vector3(sx2, 0.92 + CHASSIS_LIFT, z_offset)
 			slab.rotation.x = deg_to_rad(-22.0)
 			slab.rotation.y = deg_to_rad(28.0 if slab_side == 0 else -28.0)
 			slab.set_surface_override_material(0, chevron_mat)
@@ -299,7 +320,7 @@ func _build_visuals() -> void:
 		var ex_box := BoxMesh.new()
 		ex_box.size = Vector3(0.32, 0.55, 0.32)
 		exhaust.mesh = ex_box
-		exhaust.position = Vector3(ex_x, 1.4, 2.4)
+		exhaust.position = Vector3(ex_x, 1.4 + CHASSIS_LIFT, 2.4)
 		exhaust.set_surface_override_material(0, _make_metal(Color(0.16, 0.14, 0.12)))
 		add_child(exhaust)
 	# Red taillights on the rear face, mirror of the headlight pair.
@@ -315,7 +336,7 @@ func _build_visuals() -> void:
 		var tail_box := BoxMesh.new()
 		tail_box.size = Vector3(0.22, 0.10, 0.06)
 		tail.mesh = tail_box
-		tail.position = Vector3(tx, 0.95, 2.55)
+		tail.position = Vector3(tx, 0.95 + CHASSIS_LIFT, 2.55)
 		tail.set_surface_override_material(0, tail_mat)
 		add_child(tail)
 
@@ -324,7 +345,7 @@ func _build_visuals() -> void:
 	var cb := BoxMesh.new()
 	cb.size = Vector3(0.16, 1.4, 0.16)
 	crane.mesh = cb
-	crane.position = Vector3(0, 2.2, 1.5)
+	crane.position = Vector3(0, 2.2 + CHASSIS_LIFT, 1.5)
 	crane.set_surface_override_material(0, _make_metal(Color(0.22, 0.2, 0.16)))
 	add_child(crane)
 
@@ -332,7 +353,7 @@ func _build_visuals() -> void:
 	var ca := BoxMesh.new()
 	ca.size = Vector3(0.12, 0.12, 1.6)
 	crane_arm.mesh = ca
-	crane_arm.position = Vector3(0, 2.85, 1.0)
+	crane_arm.position = Vector3(0, 2.85 + CHASSIS_LIFT, 1.0)
 	crane_arm.set_surface_override_material(0, _make_metal(Color(0.22, 0.2, 0.16)))
 	add_child(crane_arm)
 
@@ -343,7 +364,7 @@ func _build_visuals() -> void:
 	var mast_box := BoxMesh.new()
 	mast_box.size = Vector3(0.05, 1.2, 0.05)
 	mast.mesh = mast_box
-	mast.position = Vector3(0.9, 2.7, -1.1)
+	mast.position = Vector3(0.9, 2.7 + CHASSIS_LIFT, -1.1)
 	mast.set_surface_override_material(0, _make_metal(Color(0.2, 0.18, 0.15)))
 	add_child(mast)
 	# Tiny emissive cap on top so the mast catches the eye.
@@ -352,7 +373,7 @@ func _build_visuals() -> void:
 	tip_sphere.radius = 0.05
 	tip_sphere.height = 0.1
 	mast_tip.mesh = tip_sphere
-	mast_tip.position = Vector3(0.9, 3.32, -1.1)
+	mast_tip.position = Vector3(0.9, 3.32 + CHASSIS_LIFT, -1.1)
 	var tip_mat := StandardMaterial3D.new()
 	tip_mat.albedo_color = Color(1.0, 0.55, 0.2)
 	tip_mat.emission_enabled = true
@@ -368,7 +389,7 @@ func _build_visuals() -> void:
 	lamp_sphere.radius = 0.18
 	lamp_sphere.height = 0.36
 	lamp.mesh = lamp_sphere
-	lamp.position = Vector3(0, 2.3, -0.4)
+	lamp.position = Vector3(0, 2.3 + CHASSIS_LIFT, -0.4)
 	var lamp_mat := StandardMaterial3D.new()
 	lamp_mat.albedo_color = Color(0.3, 0.85, 1.0)
 	lamp_mat.emission_enabled = true
@@ -388,7 +409,7 @@ func _build_visuals() -> void:
 	work_pool.light_energy = 1.2
 	work_pool.omni_range = 9.0
 	work_pool.omni_attenuation = 1.4
-	work_pool.position = Vector3(0.0, 1.4, -0.4)
+	work_pool.position = Vector3(0.0, 1.4 + CHASSIS_LIFT, -0.4)
 	add_child(work_pool)
 	lamp_light.omni_range = 6.0
 	lamp_light.position = lamp.position
@@ -435,7 +456,7 @@ func _build_visuals() -> void:
 			rsp.radial_segments = 6
 			rsp.rings = 3
 			rivet.mesh = rsp
-			rivet.position = Vector3(sx * 0.92, 0.85, -2.10 + float(r_i) * 0.82)
+			rivet.position = Vector3(sx * 0.92, 0.85 + CHASSIS_LIFT, -2.10 + float(r_i) * 0.82)
 			rivet.set_surface_override_material(0, rivet_mat)
 			add_child(rivet)
 
@@ -451,7 +472,7 @@ func _build_visuals() -> void:
 		dc.radial_segments = 16
 		drum.mesh = dc
 		var dx: float = -0.55 if drum_i == 0 else 0.55
-		drum.position = Vector3(dx, 2.50, 1.95)
+		drum.position = Vector3(dx, 2.50 + CHASSIS_LIFT, 1.95)
 		drum.set_surface_override_material(0, drum_mat)
 		add_child(drum)
 
@@ -463,41 +484,63 @@ func _build_visuals() -> void:
 		_apply_sable_crawler_overlay()
 
 
-func _build_tread_segment(sx: float, z_center: float, length: float) -> void:
+func _build_tread_segment(sx: float, z_center: float, length: float, tilt_x_deg: float = 0.0) -> void:
 	## A single visible tread segment: the dark slab + a row of small
 	## "track plate" ribs across its top + a thin upper-rail strip.
 	## Used twice per side for Sable (front/rear bogie pairs) and
-	## once per side for Anvil (single long tread).
+	## once per side for Anvil (single long tread). `tilt_x_deg`
+	## angles the bogie around X (Sable's bogies tilt at the ends
+	## so the chassis sits visibly higher off the ground).
+	## Plates are recorded in `_track_plates` so `_process` can
+	## scroll them along the segment when the crawler is moving.
+	# Segment Y is bumped up slightly so the tread block protrudes
+	# clearly below the chassis silhouette instead of sharing the
+	# ground plane with it. Tilted bogies get an additional lift to
+	# keep their lowest point above ground.
+	var seg_y: float = 0.45
+	if tilt_x_deg != 0.0:
+		seg_y = 0.55
+	var seg_root := Node3D.new()
+	seg_root.position = Vector3(sx, seg_y, z_center)
+	if tilt_x_deg != 0.0:
+		seg_root.rotation.x = deg_to_rad(tilt_x_deg)
+	add_child(seg_root)
+
 	var tread := MeshInstance3D.new()
 	var tb := BoxMesh.new()
 	tb.size = Vector3(0.50, 0.70, length)
 	tread.mesh = tb
-	tread.position = Vector3(sx, 0.40, z_center)
 	tread.set_surface_override_material(0, _make_metal(Color(0.18, 0.16, 0.14)))
-	add_child(tread)
+	seg_root.add_child(tread)
 	# Track plates — one slim raised rib every ~0.4u along the top.
 	# Reads as actual moving track segments rather than a slab.
+	# Plates live in segment-local space so the scroll wrap is a
+	# simple `+= delta` on the local Z.
 	var plate_count: int = maxi(int(length / 0.40), 4)
 	var plate_mat := _make_metal(Color(0.10, 0.10, 0.10))
 	for p_i: int in plate_count:
 		var t: float = (float(p_i) + 0.5) / float(plate_count)
-		var pz: float = z_center - length * 0.5 + t * length
+		var local_z: float = -length * 0.5 + t * length
 		var plate := MeshInstance3D.new()
 		var plate_box := BoxMesh.new()
 		plate_box.size = Vector3(0.56, 0.10, 0.18)
 		plate.mesh = plate_box
-		plate.position = Vector3(sx, 0.78, pz)
+		plate.position = Vector3(0.0, 0.38, local_z)
 		plate.set_surface_override_material(0, plate_mat)
-		add_child(plate)
+		seg_root.add_child(plate)
+		_track_plates.append({
+			"node": plate,
+			"length": length,
+		})
 	# Upper rail strip — thin strip running the length of the tread
 	# along its outer top edge. Adds an extra silhouette line.
 	var rail := MeshInstance3D.new()
 	var rail_box := BoxMesh.new()
 	rail_box.size = Vector3(0.10, 0.06, length * 0.96)
 	rail.mesh = rail_box
-	rail.position = Vector3(sx + (0.20 if sx > 0.0 else -0.20), 0.78, z_center)
+	rail.position = Vector3(0.20 if sx > 0.0 else -0.20, 0.38, 0.0)
 	rail.set_surface_override_material(0, _make_metal(Color(0.32, 0.28, 0.22)))
-	add_child(rail)
+	seg_root.add_child(rail)
 
 
 ## --- Faction lookup (unit-style) ---------------------------------------
@@ -519,7 +562,7 @@ func _apply_sable_crawler_overlay() -> void:
 	var plate_box := BoxMesh.new()
 	plate_box.size = Vector3(2.95, 0.10, 3.55)
 	plate.mesh = plate_box
-	plate.position = Vector3(0, 2.10, -0.4)
+	plate.position = Vector3(0, 2.10 + CHASSIS_LIFT, -0.4)
 	plate.set_surface_override_material(0, _make_metal(Color(0.12, 0.10, 0.16)))
 	add_child(plate)
 	# Violet visor across the front of the workshop — replaces the
@@ -534,7 +577,7 @@ func _apply_sable_crawler_overlay() -> void:
 	var visor_box := BoxMesh.new()
 	visor_box.size = Vector3(2.6, 0.12, 0.08)
 	visor.mesh = visor_box
-	visor.position = Vector3(0, 1.75, -2.05)
+	visor.position = Vector3(0, 1.75 + CHASSIS_LIFT, -2.05)
 	visor.set_surface_override_material(0, visor_mat)
 	add_child(visor)
 	# Violet beacon on the workshop roof — single pulse-point matching
@@ -544,7 +587,7 @@ func _apply_sable_crawler_overlay() -> void:
 	beacon_sphere.radius = 0.20
 	beacon_sphere.height = 0.40
 	beacon.mesh = beacon_sphere
-	beacon.position = Vector3(0, 2.30, -0.4)
+	beacon.position = Vector3(0, 2.30 + CHASSIS_LIFT, -0.4)
 	beacon.set_surface_override_material(0, visor_mat)
 	add_child(beacon)
 	var beacon_light := OmniLight3D.new()
@@ -561,7 +604,7 @@ func _apply_sable_crawler_overlay() -> void:
 		var sb := BoxMesh.new()
 		sb.size = Vector3(0.06, 0.08, 4.2)
 		seam.mesh = sb
-		seam.position = Vector3(sx, 1.05, 0.0)
+		seam.position = Vector3(sx, 1.05 + CHASSIS_LIFT, 0.0)
 		seam.set_surface_override_material(0, visor_mat)
 		add_child(seam)
 
@@ -652,6 +695,28 @@ func stop() -> void:
 	move_queue.clear()
 	velocity = Vector3.ZERO
 	has_move_order = false
+
+
+func _process(delta: float) -> void:
+	# Scroll the track plates along their segment when the crawler
+	# is moving. Each plate slides a constant distance per frame
+	# proportional to ground speed; once a plate falls off the rear
+	# end of its segment it wraps back to the front. Cheap (single
+	# float per plate) and reads as a continuously moving track.
+	var speed_xz: float = Vector2(velocity.x, velocity.z).length()
+	if speed_xz > 0.05 and not _track_plates.is_empty():
+		# Treads run faster than the chassis to look like the track
+		# is shedding material at the rear and feeding new at the
+		# front. Multiplier ~1.5 sells the read.
+		var scroll: float = speed_xz * delta * 1.5
+		for plate_data: Dictionary in _track_plates:
+			var node: Node3D = plate_data["node"] as Node3D
+			if not is_instance_valid(node):
+				continue
+			var seg_len: float = plate_data["length"] as float
+			node.position.z += scroll
+			if node.position.z > seg_len * 0.5:
+				node.position.z -= seg_len
 
 
 func _physics_process(delta: float) -> void:
