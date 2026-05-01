@@ -318,11 +318,16 @@ func _ready() -> void:
 		_move_speed = SPEED_MAP.get(stats.speed_tier, 8.0)
 		var shape: Dictionary = CLASS_SHAPES.get(stats.unit_class, CLASS_SHAPES[&"medium"])
 		_turn_speed = shape.get("turn_speed", 6.0) as float
-		# Scale avoidance radius with the squad footprint so big mechs don't
-		# clip through neighbours.
+		# Avoidance radius — covers the LEADER's collision capsule with
+		# a small buffer, NOT the whole squad formation. The leader is
+		# the only physics body; squad members are visual children
+		# orbiting around it. Sizing the avoidance radius to the squad
+		# spread caused RVO to push agents 3u from any wall, but the
+		# baked navmesh only carves 1.5u clearance — agents oscillated
+		# against ramp walls and tight building corridors instead of
+		# walking through. Tighter avoidance gets the agent through.
 		var torso_w: float = (shape["torso"] as Vector3).x
-		var formation_spacing: float = shape.get("formation_spacing", 1.5) as float
-		_nav_agent.radius = formation_spacing + torso_w * 0.5 + 0.2
+		_nav_agent.radius = torso_w * 0.5 + 0.4
 		_init_hp()
 		_build_squad_visuals()
 		_build_hp_bar()
