@@ -39,10 +39,25 @@ func _ready() -> void:
 	# "invisible wall" reports. Renders walkable cells as colored
 	# polygons; gaps in the overlay correspond directly to spots where
 	# the navmesh is broken. Will turn off again once the bug is fully
-	# squashed (z-fighting with the plateau visual is the only reason
-	# this isn't permanent).
+	# squashed.
 	const NAV_DEBUG_OVERLAY: bool = true
 	NavigationServer3D.set_debug_enabled(NAV_DEBUG_OVERLAY)
+	if NAV_DEBUG_OVERLAY:
+		# Force-set high-contrast colors via project settings so the
+		# overlay actually shows up — defaults can be very subtle and
+		# blend with the ash-tinted ground. Random face color highlights
+		# polygon boundaries (each cell gets a different tint, so a
+		# disconnected island stands out visually). Edge color in bright
+		# magenta makes polygon-perimeter seams pop.
+		var nav_settings: Array = [
+			["debug/shapes/navigation/enable_geometry_face_random_color", true],
+			["debug/shapes/navigation/enable_edge_lines", true],
+			["debug/shapes/navigation/edge_color", Color(1.0, 0.2, 0.9, 1.0)],
+			["debug/shapes/navigation/geometry_face_color", Color(0.2, 0.9, 0.4, 0.55)],
+		]
+		for kv: Array in nav_settings:
+			if ProjectSettings.has_setting(kv[0] as String):
+				ProjectSettings.set_setting(kv[0] as String, kv[1])
 
 	# Manual strip-decomposition navmesh has dense polygon adjacency
 	# (every blocker contributes both X and Z cuts, so 4-way corners
