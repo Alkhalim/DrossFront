@@ -431,7 +431,12 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 	var mats: Array[StandardMaterial3D] = []
 
 	# --- Legs (per-class skeleton) ---
-	var leg_info: Dictionary = _build_legs(member, shape, mats, leg_kind)
+	# Pass the faction-tinted base color into leg construction so the
+	# legs share the chassis palette (Sable matte-black instead of the
+	# Anvil grey-tan baked into shape["color"]).
+	var leg_shape: Dictionary = shape.duplicate()
+	leg_shape["color"] = base_color
+	var leg_info: Dictionary = _build_legs(member, leg_shape, mats, leg_kind)
 	var legs: Array = leg_info["legs"] as Array
 	var leg_phases: Array = leg_info["phases"] as Array
 
@@ -1024,12 +1029,13 @@ func _apply_sable_silhouette(
 	visor.set_surface_override_material(0, accent_mat)
 	torso_pivot.add_child(visor)
 
-	# Sensor spire — single tall thin antenna rising off the rear
-	# shoulder block. Critical silhouette element: the Sable Mesh.
+	# Sensor spire — short rear antenna rising off the shoulder
+	# block. Smaller than the early version so it doesn't tower over
+	# light mechs; reads as "comm whip", not "flagpole".
 	var spire := MeshInstance3D.new()
 	var spire_box := BoxMesh.new()
-	var spire_h: float = (torso_size.y + head_size.y) * 1.4
-	spire_box.size = Vector3(0.10, spire_h, 0.10)
+	var spire_h: float = (torso_size.y + head_size.y) * 0.55
+	spire_box.size = Vector3(0.06, spire_h, 0.06)
 	spire.mesh = spire_box
 	spire.position = Vector3(
 		torso_size.x * 0.32,
@@ -1040,13 +1046,12 @@ func _apply_sable_silhouette(
 	spire.set_surface_override_material(0, _make_metal_mat(base_color.darkened(0.25)))
 	torso_pivot.add_child(spire)
 
-	# Tip cap on the spire — small cyan emitter so the antenna
-	# silhouette has a punctuating glow point.
+	# Tip cap — small dot, not a baseball.
 	var tip := MeshInstance3D.new()
 	var tip_box := BoxMesh.new()
-	tip_box.size = Vector3(0.18, 0.12, 0.18)
+	tip_box.size = Vector3(0.10, 0.06, 0.10)
 	tip.mesh = tip_box
-	tip.position = Vector3(0.0, spire_h * 0.5 + 0.06, 0.0)
+	tip.position = Vector3(0.0, spire_h * 0.5 + 0.04, 0.0)
 	tip.set_surface_override_material(0, accent_mat)
 	spire.add_child(tip)
 
@@ -1084,15 +1089,18 @@ func _build_legs_biped(member: Node3D, shape: Dictionary, mats: Array[StandardMa
 
 
 func _build_legs_chicken(member: Node3D, shape: Dictionary, mats: Array[StandardMaterial3D]) -> Dictionary:
-	## Reverse-jointed legs: thigh pitches forward, shin angles back so the
-	## knee points forward and the foot lands roughly under the body.
+	## Proper digitigrade legs (raptor / chicken): the thigh pitches BACK
+	## from the hip so the knee sits BEHIND the body, the shin then pitches
+	## forward to plant the foot under or slightly ahead of the hip, and
+	## the talons spread forward. Reads as a fast strider, not a humanoid.
 	var leg_size: Vector3 = shape["leg"] as Vector3
 	var hip_y: float = shape["hip_y"] as float
 	var leg_x: float = shape["leg_x"] as float
 	var base_color: Color = shape["color"] as Color
-	# Sized so the bent leg's vertical projection reaches the ground:
-	# thigh tilts +0.55 (cos 0.85), shin tilts back so its world angle is -0.45 (cos 0.90).
-	# 2 segments × hip_y × 0.58 × 1.75 ≈ hip_y, with a tiny embed for visual contact.
+	# Segment lengths chosen so the bent geometry plants the foot near
+	# y=0 with minimal stretch. Thigh tilts -0.55 (cos 0.85), shin tilts
+	# back forward by +1.0 (cos 0.54). Vertical reach ≈ thigh*0.85 +
+	# shin*0.54 ≈ hip_y.
 	var thigh_len: float = hip_y * 0.58
 	var shin_len: float = hip_y * 0.58
 	var thigh_size := Vector3(leg_size.x, thigh_len, leg_size.z)
@@ -1106,9 +1114,12 @@ func _build_legs_chicken(member: Node3D, shape: Dictionary, mats: Array[Standard
 		pivot.position = Vector3(sx, hip_y, 0)
 		member.add_child(pivot)
 
-		# Thigh tilts forward (knee in front of hip).
+		# Thigh tilts BACKWARD from the hip — the knee is now behind the
+		# body, mirroring a real digitigrade animal. With unit-forward at
+		# +Z, "backward" is -Z, so the thigh's bottom rotates toward -Z
+		# via a NEGATIVE X-axis rotation.
 		var thigh_rot := Node3D.new()
-		thigh_rot.rotation.x = 0.55
+		thigh_rot.rotation.x = -0.55
 		pivot.add_child(thigh_rot)
 
 		var thigh_mesh := MeshInstance3D.new()
@@ -1121,14 +1132,16 @@ func _build_legs_chicken(member: Node3D, shape: Dictionary, mats: Array[Standard
 		thigh_rot.add_child(thigh_mesh)
 		mats.append(thigh_mat)
 
-		# Knee node sits at the bottom of the thigh.
+		# Knee node — at the bottom (and slightly back) end of the thigh.
 		var knee := Node3D.new()
 		knee.position.y = -thigh_len
 		thigh_rot.add_child(knee)
 
-		# Shin tilts back so the foot ends up roughly under the hip.
+		# Shin pitches FORWARD from the knee so the foot lands beneath
+		# or slightly ahead of the hip. Positive X-axis rotation with
+		# the local forward at +Z.
 		var shin_rot := Node3D.new()
-		shin_rot.rotation.x = -1.0
+		shin_rot.rotation.x = 1.0
 		knee.add_child(shin_rot)
 
 		var shin_mesh := MeshInstance3D.new()
@@ -1141,7 +1154,8 @@ func _build_legs_chicken(member: Node3D, shape: Dictionary, mats: Array[Standard
 		shin_rot.add_child(shin_mesh)
 		mats.append(shin_mat)
 
-		# Forward-extending foot — chicken style talons.
+		# Talon-style foot — extends forward of the ankle so the toes
+		# read as a raptor's spread claws when the leg is planted.
 		var foot := MeshInstance3D.new()
 		var foot_box := BoxMesh.new()
 		foot_box.size = Vector3(leg_size.x * 1.1, 0.08, leg_size.z * 2.4)
@@ -2686,12 +2700,33 @@ func _faction_tint_chassis(c: Color) -> Color:
 	# (heavies darker than lights) survives the re-tint.
 	if _faction_id() != 1:  # not Sable → no change
 		return c
-	# Sable base palette — desaturate, darken, push slightly toward blue.
+	# Sable per-class palette. The Anvil unit base colors all collapsed
+	# to a single near-black after the desaturate pass, making a Sable
+	# squad of Riggers look identical to a squad of Specters. Shift the
+	# tone per class so the squads can be told apart at a glance:
+	#   engineer = warm graphite (slight bronze undercoat)
+	#   light    = blued steel (cool, slightly brighter)
+	#   medium   = anthracite (the canonical "Sable" matte black)
+	#   heavy    = gunmetal (heavy and slightly green-tinted)
+	#   apex     = obsidian violet (darkest + violet wash)
+	var class_id: StringName = stats.unit_class if stats else &"medium"
+	var palette: Vector3
+	match class_id:
+		&"engineer": palette = Vector3(0.18, 0.16, 0.14)
+		&"light":    palette = Vector3(0.16, 0.20, 0.26)
+		&"heavy":    palette = Vector3(0.13, 0.16, 0.16)
+		&"apex":     palette = Vector3(0.13, 0.10, 0.16)
+		_:           palette = Vector3(0.14, 0.15, 0.18)
+	# Preserve a hint of the original brightness so per-class shape
+	# materials still differ slightly within a unit. Most of the colour
+	# contrast comes from the palette; only ~10% comes from the input.
 	var avg: float = (c.r + c.g + c.b) / 3.0
-	var darkened: float = avg * 0.45  # average chassis brightness ~0.10-0.18
+	var bias: float = clampf(avg * 0.20, 0.0, 0.06)
 	return Color(
-		darkened * 0.95,
-		darkened * 1.0,
-		darkened * 1.15,
+		clampf(palette.x + bias, 0.0, 1.0),
+		clampf(palette.y + bias, 0.0, 1.0),
+		clampf(palette.z + bias, 0.0, 1.0),
 		c.a,
 	)
+
+

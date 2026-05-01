@@ -1033,29 +1033,38 @@ func _swap_starter_units_to_player_faction() -> void:
 	## world position so the starter formation stays visually identical
 	## regardless of which faction the player picked.
 	var player_faction: int = _faction_id_for_player(0)
-	if player_faction == 0:
-		return  # Anvil = no swap needed; the .tscn already matches.
 	var units_node: Node = get_node_or_null("Units")
 	if not units_node:
 		return
-	var specs: Array[Dictionary] = []
-	for child: Node in units_node.get_children():
-		if not (child is Unit):
-			continue
-		var u: Unit = child as Unit
-		if not u.stats:
-			continue
-		var role: String = _role_for_unit_class(u.stats.unit_class)
-		if role.is_empty():
-			continue
-		specs.append({"pos": u.global_position, "role": role})
-		child.queue_free()
-	for spec: Dictionary in specs:
-		var role: String = spec["role"] as String
-		var new_stats: UnitStatResource = _unit_for_role(player_faction, role)
-		if not new_stats:
-			continue
-		_spawn_ai_unit(new_stats, spec["pos"] as Vector3, 0)
+	if player_faction != 0:
+		var specs: Array[Dictionary] = []
+		for child: Node in units_node.get_children():
+			if not (child is Unit):
+				continue
+			var u: Unit = child as Unit
+			if not u.stats:
+				continue
+			var role: String = _role_for_unit_class(u.stats.unit_class)
+			if role.is_empty():
+				continue
+			specs.append({"pos": u.global_position, "role": role})
+			child.queue_free()
+		for spec: Dictionary in specs:
+			var role: String = spec["role"] as String
+			var new_stats: UnitStatResource = _unit_for_role(player_faction, role)
+			if not new_stats:
+				continue
+			_spawn_ai_unit(new_stats, spec["pos"] as Vector3, 0)
+
+	# Bonus starter heavy — one Bulwark / Harbinger spawned just outside
+	# the player's HQ so the heavy mech silhouette can be eyeballed
+	# without grinding through advanced-foundry build times. Useful for
+	# faction-comparison playtests; harmless in regular play (it just
+	# means the player opens with a free heavy).
+	var heavy_stats: UnitStatResource = _unit_for_role(player_faction, "heavy")
+	if heavy_stats:
+		var heavy_pos := Vector3(0.0, 0.0, 92.0)  # slightly forward of HQ on the player side
+		_spawn_ai_unit(heavy_stats, heavy_pos, 0)
 
 
 func _setup_fuel_deposits() -> void:

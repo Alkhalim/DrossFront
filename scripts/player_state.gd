@@ -26,7 +26,7 @@ extends Resource
 ## Per-player accent — the small overlays / banners / minimap dots. Faction
 ## paint stays the same across same-faction players; this is the secondary
 ## tint that distinguishes them.
-@export var player_color: Color = Color(0.15, 0.45, 0.9, 1.0)
+@export var player_color: Color = Color(0.10, 0.32, 1.0, 1.0)
 
 ## True for the local human, false for AI. Networked humans are still false
 ## here — they're just AI from this client's perspective until netcode lands.

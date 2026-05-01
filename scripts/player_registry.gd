@@ -26,7 +26,7 @@ enum Relation { SELF, ALLY, ENEMY, NEUTRAL }
 const COLOR_ALLY: Color = Color(0.3, 0.85, 0.4, 1.0)        # green
 const COLOR_ENEMY: Color = Color(0.85, 0.2, 0.15, 1.0)      # red
 const COLOR_NEUTRAL: Color = Color(0.85, 0.7, 0.3, 1.0)     # amber
-const COLOR_SELF_FALLBACK: Color = Color(0.15, 0.45, 0.9, 1.0)  # blue
+const COLOR_SELF_FALLBACK: Color = Color(0.10, 0.32, 1.0, 1.0)  # saturated royal blue (away from Sable cyan)
 
 ## Whose perspective drives `get_relation` / `get_perspective_color`. For
 ## now this is the local human player; observer / split-screen modes can

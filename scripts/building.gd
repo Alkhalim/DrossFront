@@ -34,7 +34,7 @@ var resource_manager: Node = null
 @onready var _collision: CollisionShape3D = $CollisionShape3D as CollisionShape3D
 @onready var _spawn_marker: Marker3D = $SpawnPoint as Marker3D
 
-const PLAYER_COLOR := Color(0.15, 0.45, 0.9, 1.0)
+const PLAYER_COLOR := Color(0.10, 0.32, 1.0, 1.0)
 const ENEMY_COLOR := Color(0.85, 0.2, 0.15, 1.0)
 const NEUTRAL_COLOR := Color(0.85, 0.7, 0.3, 1.0)
 
@@ -415,26 +415,69 @@ func _detail_emissive_mat(c: Color, energy: float = 1.5) -> StandardMaterial3D:
 
 
 func _add_production_door(width: float, height: float) -> void:
-	## Recessed dark door on the camera-facing (+Z) side of the building, sized
-	## per the unit class trained inside. Larger units → bigger door.
+	## Recessed production gate on the camera-facing (+Z) side. Built as a
+	## real opening: a deep dark interior box set INTO the wall, surrounded
+	## by a raised frame (header beam + jamb posts) sticking forward from
+	## the wall, so the eye reads "open hangar mouth", not "black sticker
+	## on a brick".
 	if not stats:
 		return
 	var fs: Vector3 = stats.footprint_size
-	var door := MeshInstance3D.new()
-	var db := BoxMesh.new()
-	db.size = Vector3(width, height, 0.08)
-	door.mesh = db
-	door.position = Vector3(0, height * 0.5 + 0.05, fs.z * 0.5 + 0.04)
-	door.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.08, 0.08, 0.1)))
-	_attach_visual(door)
 
-	# Top door rail (lighter trim).
+	# Interior cavity — deep recessed dark box. Most of it sits inside the
+	# building wall; only a sliver pokes out to define the opening edge.
+	var cavity := MeshInstance3D.new()
+	var cbox := BoxMesh.new()
+	var cavity_depth: float = maxf(0.45, fs.z * 0.12)
+	cbox.size = Vector3(width, height, cavity_depth)
+	cavity.mesh = cbox
+	# Push the cavity centroid INTO the building so its outer face sits a
+	# touch proud of the wall while its back wall is well inside.
+	cavity.position = Vector3(0.0, height * 0.5 + 0.05, fs.z * 0.5 - cavity_depth * 0.35)
+	cavity.set_surface_override_material(0, _detail_emissive_mat(Color(0.18, 0.10, 0.05), 0.25))
+	_attach_visual(cavity)
+
+	# Header beam — heavy box across the top of the opening, sticks out
+	# from the wall so it casts a ledge shadow over the cavity.
+	var header := MeshInstance3D.new()
+	var hb := BoxMesh.new()
+	hb.size = Vector3(width + 0.30, 0.20, 0.30)
+	header.mesh = hb
+	header.position = Vector3(0.0, height + 0.15, fs.z * 0.5 + 0.12)
+	header.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.32, 0.28, 0.22)))
+	_attach_visual(header)
+
+	# Jamb posts — left and right vertical pillars framing the opening.
+	for side: int in 2:
+		var jx: float = -width * 0.5 - 0.07 if side == 0 else width * 0.5 + 0.07
+		var jamb := MeshInstance3D.new()
+		var jb := BoxMesh.new()
+		jb.size = Vector3(0.18, height + 0.10, 0.30)
+		jamb.mesh = jb
+		jamb.position = Vector3(jx, (height + 0.10) * 0.5 + 0.05, fs.z * 0.5 + 0.12)
+		jamb.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.28, 0.24, 0.20)))
+		_attach_visual(jamb)
+
+	# Cross-strut overhead lamp — single cylinder with a warm emissive
+	# disc, sits flush against the underside of the header so the cavity
+	# has a believable interior light.
+	var lamp := MeshInstance3D.new()
+	var lcyl := CylinderMesh.new()
+	lcyl.top_radius = 0.10
+	lcyl.bottom_radius = 0.10
+	lcyl.height = 0.05
+	lamp.mesh = lcyl
+	lamp.position = Vector3(0.0, height + 0.02, fs.z * 0.5 + 0.04)
+	lamp.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.75, 0.35), 1.4))
+	_attach_visual(lamp)
+
+	# Top door rail (lighter trim above the header).
 	var rail := MeshInstance3D.new()
 	var rb := BoxMesh.new()
-	rb.size = Vector3(width + 0.1, 0.06, 0.04)
+	rb.size = Vector3(width + 0.40, 0.06, 0.06)
 	rail.mesh = rb
-	rail.position = Vector3(0, height + 0.05, fs.z * 0.5 + 0.07)
-	rail.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.32, 0.3, 0.25)))
+	rail.position = Vector3(0, height + 0.30, fs.z * 0.5 + 0.16)
+	rail.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.42, 0.38, 0.30)))
 	_attach_visual(rail)
 
 
@@ -656,16 +699,30 @@ func _detail_foundry(advanced: bool) -> void:
 	stack.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.15, 0.13, 0.12)))
 	_attach_visual(stack)
 
-	# Glowing rim at the top of the stack — molten interior.
-	var glow := MeshInstance3D.new()
-	var glow_cyl := CylinderMesh.new()
-	glow_cyl.top_radius = stack_cyl.top_radius * 0.85
-	glow_cyl.bottom_radius = stack_cyl.top_radius * 0.85
-	glow_cyl.height = 0.08
-	glow.mesh = glow_cyl
-	glow.position = Vector3(stack.position.x, fs.y + stack_cyl.height + 0.04, stack.position.z)
-	glow.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.45, 0.1), 3.0))
-	_attach_visual(glow)
+	# Real 3D stack mouth — outer rim collar (slightly larger radius
+	# than the stack tube, with visible thickness) over a sunken
+	# molten core (smaller, hotter, sitting INSIDE the stack throat).
+	# Reads as a hollow chimney mouth instead of a glowing disc.
+	var rim := MeshInstance3D.new()
+	var rim_cyl := CylinderMesh.new()
+	rim_cyl.top_radius = stack_cyl.top_radius * 1.05
+	rim_cyl.bottom_radius = stack_cyl.top_radius * 1.05
+	rim_cyl.height = 0.18
+	rim.mesh = rim_cyl
+	rim.position = Vector3(stack.position.x, fs.y + stack_cyl.height + 0.09, stack.position.z)
+	rim.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.10, 0.08, 0.07)))
+	_attach_visual(rim)
+	# Sunken molten core — sits below the rim's top edge so the
+	# heat appears recessed.
+	var core := MeshInstance3D.new()
+	var core_cyl := CylinderMesh.new()
+	core_cyl.top_radius = stack_cyl.top_radius * 0.78
+	core_cyl.bottom_radius = stack_cyl.top_radius * 0.78
+	core_cyl.height = 0.10
+	core.mesh = core_cyl
+	core.position = Vector3(stack.position.x, fs.y + stack_cyl.height + 0.05, stack.position.z)
+	core.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.45, 0.10), 3.4))
+	_attach_visual(core)
 	# Hot-orange light at the stack tip — sells the molten interior.
 	var stack_light := OmniLight3D.new()
 	stack_light.light_color = Color(1.0, 0.5, 0.15)
@@ -680,14 +737,41 @@ func _detail_foundry(advanced: bool) -> void:
 	_attach_visual(stack_top)
 	_atmos_stack_tops.append(stack_top)
 
-	# Intake vent on the front face.
-	var vent := MeshInstance3D.new()
-	var vent_box := BoxMesh.new()
-	vent_box.size = Vector3(fs.x * 0.45, fs.y * 0.18, 0.08)
-	vent.mesh = vent_box
-	vent.position = Vector3(0, fs.y * 0.5, -fs.z * 0.5 - 0.03)
-	vent.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.12, 0.12, 0.12)))
-	_attach_visual(vent)
+	# Recessed intake vent on the front face — built as a sunken dark
+	# cavity with louvre bars stretched across it. Real depth + grille
+	# bars instead of a flat panel decal.
+	var vent_w: float = fs.x * 0.45
+	var vent_h: float = fs.y * 0.18
+	var vent_cavity := MeshInstance3D.new()
+	var vc_box := BoxMesh.new()
+	vc_box.size = Vector3(vent_w, vent_h, 0.30)
+	vent_cavity.mesh = vc_box
+	vent_cavity.position = Vector3(0, fs.y * 0.5, -fs.z * 0.5 + 0.04)
+	vent_cavity.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.06, 0.06, 0.07)))
+	_attach_visual(vent_cavity)
+	# Louvre bars — three slim horizontal slats across the cavity.
+	for bar_i: int in 3:
+		var bar := MeshInstance3D.new()
+		var bbox := BoxMesh.new()
+		bbox.size = Vector3(vent_w * 0.95, vent_h * 0.12, 0.08)
+		bar.mesh = bbox
+		var by: float = fs.y * 0.5 + (float(bar_i) - 1.0) * vent_h * 0.30
+		bar.position = Vector3(0, by, -fs.z * 0.5 - 0.07)
+		bar.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.20, 0.18, 0.16)))
+		_attach_visual(bar)
+	# Vent frame — thin rectangle around the opening, sticks proud of
+	# the wall so the louvres read as recessed.
+	for side_pair: Dictionary in [
+		{ "size": Vector3(vent_w + 0.20, 0.08, 0.10), "y": fs.y * 0.5 + vent_h * 0.5 + 0.04 },
+		{ "size": Vector3(vent_w + 0.20, 0.08, 0.10), "y": fs.y * 0.5 - vent_h * 0.5 - 0.04 },
+	]:
+		var fr := MeshInstance3D.new()
+		var frb := BoxMesh.new()
+		frb.size = side_pair["size"] as Vector3
+		fr.mesh = frb
+		fr.position = Vector3(0, side_pair["y"] as float, -fs.z * 0.5 - 0.07)
+		fr.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.32, 0.28, 0.22)))
+		_attach_visual(fr)
 
 	# For advanced foundry, add a second smaller stack and a roof detail.
 	if advanced:
@@ -765,19 +849,36 @@ func _detail_generator() -> void:
 	core.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.25, 0.25, 0.28)))
 	_attach_visual(core)
 
-	# Vertical cooling fins around the core (4 cardinal sides).
-	for i: int in 4:
-		var ang: float = float(i) * PI * 0.5
+	# Cooling tower — eight chunky radial fins ringing the core, deeper
+	# and thicker than the previous four-fin version. Real silhouette
+	# from any camera angle, not a thin cross-shape that disappears
+	# at oblique angles.
+	for i: int in 8:
+		var ang: float = float(i) * (PI * 0.25)
 		var fin := MeshInstance3D.new()
 		var fin_box := BoxMesh.new()
-		fin_box.size = Vector3(0.08, fs.y * 0.55, fs.x * 0.18)
+		fin_box.size = Vector3(0.18, fs.y * 0.55, fs.x * 0.22)
 		fin.mesh = fin_box
-		var dx: float = sin(ang) * (fs.x * 0.32 + 0.05)
-		var dz: float = cos(ang) * (fs.x * 0.32 + 0.05)
+		var dx: float = sin(ang) * (fs.x * 0.38)
+		var dz: float = cos(ang) * (fs.x * 0.38)
 		fin.position = Vector3(dx, fs.y + fin_box.size.y * 0.5, dz)
 		fin.rotation.y = -ang
 		fin.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.22, 0.22)))
 		_attach_visual(fin)
+	# Stacked radiator rings — three horizontal bands around the core
+	# add the slatted-cooling-tower read at every camera angle. These
+	# are thin discs sandwiched between the core and the fins.
+	for ring_i: int in 3:
+		var ring := MeshInstance3D.new()
+		var ring_cyl := CylinderMesh.new()
+		ring_cyl.top_radius = fs.x * 0.36
+		ring_cyl.bottom_radius = fs.x * 0.36
+		ring_cyl.height = 0.08
+		ring.mesh = ring_cyl
+		var ry: float = fs.y + (float(ring_i) + 0.5) * (core_cyl.height / 3.0)
+		ring.position = Vector3(0, ry, 0)
+		ring.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.18, 0.18)))
+		_attach_visual(ring)
 
 	# Glowing top cap — pulses via _process.
 	var cap := MeshInstance3D.new()
@@ -2094,6 +2195,11 @@ func _apply_sable_building_silhouette() -> void:
 	# Sensor spires — tall thin antennas off opposing corners of the
 	# top spine. Critical Sable silhouette element. Heights scale with
 	# building footprint so the HQ towers higher than a generator.
+	# Skip on HQ: the standard headquarters detail already adds a tall
+	# central command tower + radar dish, and the corner spires were
+	# clipping into it.
+	if stats.building_id == &"headquarters":
+		return
 	var spire_h: float = fs.y * 1.2 + maxf(fs.x, fs.z) * 0.22
 	for spire_idx: int in 2:
 		var spire := MeshInstance3D.new()
