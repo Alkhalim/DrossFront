@@ -242,6 +242,40 @@ func _build_visuals() -> void:
 	workshop.set_surface_override_material(0, _make_metal(Color(0.28, 0.26, 0.22)))
 	add_child(workshop)
 
+	# Corrugated Wellblech ribs across the workshop roof — strong
+	# horizontal striping read for the top of the chassis. Anvil
+	# uses thicker ribs (industrial sheet metal); Sable uses thin
+	# raised seams (corp clean panel).
+	var ws_top_y: float = workshop.position.y + ws_box.size.y * 0.5 + 0.04
+	var rib_count: int = 8
+	var rib_color: Color = Color(0.18, 0.16, 0.14, 1.0)
+	if _faction_id() == 1:
+		rib_color = Color(0.10, 0.10, 0.16, 1.0)
+		rib_count = 12
+	for r_i: int in rib_count:
+		var rib := MeshInstance3D.new()
+		var rb := BoxMesh.new()
+		var rib_h: float = 0.07 if _faction_id() == 1 else 0.10
+		rb.size = Vector3(2.6, rib_h, 0.16)
+		rib.mesh = rb
+		var t: float = (float(r_i) + 0.5) / float(rib_count)
+		var rz: float = -0.4 - 1.7 * 0.95 + t * (3.4 * 0.95)
+		rib.position = Vector3(0, ws_top_y + rib_h * 0.5, rz)
+		rib.set_surface_override_material(0, _make_metal(rib_color))
+		add_child(rib)
+
+	# Rear cargo deck — short flat platform extending PAST the
+	# workshop's rear face so the oil drums on top of it actually
+	# rest on something. Without this, the drums hover in midair at
+	# z=1.95 past the workshop's z=1.30 rear edge.
+	var deck := MeshInstance3D.new()
+	var deck_box := BoxMesh.new()
+	deck_box.size = Vector3(2.4, 0.18, 1.5)
+	deck.mesh = deck_box
+	deck.position = Vector3(0, ws_top_y + 0.09, 1.95)
+	deck.set_surface_override_material(0, _make_metal(Color(0.18, 0.16, 0.14)))
+	add_child(deck)
+
 	# Player-color identity strip on the bottom of the workshop (above the
 	# chassis). Keeps ownership readable from a top-down camera angle even
 	# though the chassis-level color band is replaced with an underglow.
@@ -382,18 +416,84 @@ func _build_visuals() -> void:
 	mast_tip.set_surface_override_material(0, tip_mat)
 	add_child(mast_tip)
 
-	# Reactor lamp atop the workshop — emissive cyan, marks the Crawler at
-	# a distance.
+	# Reactor lamp atop the workshop — sits inside a faction-shaped
+	# housing so it reads as a real piece of equipment rather than a
+	# floating glow orb.
+	var sable_now: bool = _faction_id() == 1
+	var housing_y: float = 2.3 + CHASSIS_LIFT
+	# Faction housing — Anvil gets a riveted square base + hooded
+	# cap (industrial floodlight); Sable gets a hex-prism cradle
+	# (corp lantern). The lamp itself sits inside.
+	if sable_now:
+		var hex := MeshInstance3D.new()
+		var hex_cyl := CylinderMesh.new()
+		hex_cyl.top_radius = 0.32
+		hex_cyl.bottom_radius = 0.30
+		hex_cyl.height = 0.34
+		hex_cyl.radial_segments = 6
+		hex.mesh = hex_cyl
+		hex.position = Vector3(0, housing_y, -0.4)
+		hex.set_surface_override_material(0, _make_metal(Color(0.10, 0.10, 0.14)))
+		add_child(hex)
+		# Slim cap on top of the hex — pinches the silhouette and
+		# breaks the cylinder profile at the top.
+		var hex_cap := MeshInstance3D.new()
+		var hcap_cyl := CylinderMesh.new()
+		hcap_cyl.top_radius = 0.18
+		hcap_cyl.bottom_radius = 0.30
+		hcap_cyl.height = 0.10
+		hcap_cyl.radial_segments = 6
+		hex_cap.mesh = hcap_cyl
+		hex_cap.position = Vector3(0, housing_y + 0.22, -0.4)
+		hex_cap.set_surface_override_material(0, _make_metal(Color(0.06, 0.06, 0.10)))
+		add_child(hex_cap)
+	else:
+		# Anvil — square steel base + hooded cap. Reads as a flood
+		# lamp bolted to the deck.
+		var base := MeshInstance3D.new()
+		var base_box := BoxMesh.new()
+		base_box.size = Vector3(0.46, 0.20, 0.46)
+		base.mesh = base_box
+		base.position = Vector3(0, housing_y - 0.12, -0.4)
+		base.set_surface_override_material(0, _make_metal(Color(0.20, 0.18, 0.16)))
+		add_child(base)
+		# Four small rivets at the base corners.
+		var rivet_mat: StandardMaterial3D = _make_metal(Color(0.42, 0.36, 0.22))
+		for rx_i: int in 2:
+			for rz_i: int in 2:
+				var rivet := MeshInstance3D.new()
+				var rsp := SphereMesh.new()
+				rsp.radius = 0.04
+				rsp.height = 0.08
+				rsp.radial_segments = 6
+				rsp.rings = 3
+				rivet.mesh = rsp
+				var rxp: float = -0.18 if rx_i == 0 else 0.18
+				var rzp: float = -0.4 - 0.18 if rz_i == 0 else -0.4 + 0.18
+				rivet.position = Vector3(rxp, housing_y - 0.06, rzp)
+				rivet.set_surface_override_material(0, rivet_mat)
+				add_child(rivet)
+		# Hooded cap above the lamp — angled tin shade.
+		var hood := MeshInstance3D.new()
+		var hood_box := BoxMesh.new()
+		hood_box.size = Vector3(0.50, 0.06, 0.50)
+		hood.mesh = hood_box
+		hood.position = Vector3(0, housing_y + 0.22, -0.4)
+		hood.rotation.x = deg_to_rad(-12.0)
+		hood.set_surface_override_material(0, _make_metal(Color(0.16, 0.14, 0.12)))
+		add_child(hood)
+
 	var lamp := MeshInstance3D.new()
 	var lamp_sphere := SphereMesh.new()
-	lamp_sphere.radius = 0.18
-	lamp_sphere.height = 0.36
+	lamp_sphere.radius = 0.16
+	lamp_sphere.height = 0.32
 	lamp.mesh = lamp_sphere
-	lamp.position = Vector3(0, 2.3 + CHASSIS_LIFT, -0.4)
+	lamp.position = Vector3(0, housing_y, -0.4)
+	var lamp_color: Color = Color(0.78, 0.35, 1.0) if sable_now else Color(0.3, 0.85, 1.0)
 	var lamp_mat := StandardMaterial3D.new()
-	lamp_mat.albedo_color = Color(0.3, 0.85, 1.0)
+	lamp_mat.albedo_color = lamp_color
 	lamp_mat.emission_enabled = true
-	lamp_mat.emission = Color(0.3, 0.85, 1.0)
+	lamp_mat.emission = lamp_color
 	lamp_mat.emission_energy_multiplier = 2.4
 	lamp.set_surface_override_material(0, lamp_mat)
 	add_child(lamp)
@@ -472,7 +572,9 @@ func _build_visuals() -> void:
 		dc.radial_segments = 16
 		drum.mesh = dc
 		var dx: float = -0.55 if drum_i == 0 else 0.55
-		drum.position = Vector3(dx, 2.50 + CHASSIS_LIFT, 1.95)
+		# Drum bottom must rest on the rear cargo deck (top at
+		# ~2.47). Drum height 0.85 -> centre Y = deck top + 0.425.
+		drum.position = Vector3(dx, 2.70 + CHASSIS_LIFT, 1.95)
 		drum.set_surface_override_material(0, drum_mat)
 		add_child(drum)
 
@@ -580,21 +682,14 @@ func _apply_sable_crawler_overlay() -> void:
 	visor.position = Vector3(0, 1.75 + CHASSIS_LIFT, -2.05)
 	visor.set_surface_override_material(0, visor_mat)
 	add_child(visor)
-	# Violet beacon on the workshop roof — single pulse-point matching
-	# the Sable mech chest glow.
-	var beacon := MeshInstance3D.new()
-	var beacon_sphere := SphereMesh.new()
-	beacon_sphere.radius = 0.20
-	beacon_sphere.height = 0.40
-	beacon.mesh = beacon_sphere
-	beacon.position = Vector3(0, 2.30 + CHASSIS_LIFT, -0.4)
-	beacon.set_surface_override_material(0, visor_mat)
-	add_child(beacon)
+	# Just a violet beacon LIGHT — the visible reactor sphere lives
+	# in _build_visuals' faction-aware housing block (added before
+	# the overlay), so the orb itself isn't doubled here.
 	var beacon_light := OmniLight3D.new()
 	beacon_light.light_color = SABLE_VIOLET
 	beacon_light.light_energy = 1.4
 	beacon_light.omni_range = 5.5
-	beacon_light.position = beacon.position
+	beacon_light.position = Vector3(0, 2.30 + CHASSIS_LIFT, -0.4)
 	add_child(beacon_light)
 	# Side seam strips along the chassis sides, echoing Sable's
 	# emissive seam treatment on mechs and buildings.

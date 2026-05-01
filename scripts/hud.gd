@@ -926,6 +926,11 @@ func _update_building_panel(building: Building) -> void:
 	elif building.get_queue_size() > 0:
 		_queue_label.text = ""
 		_show_progress(building.get_build_progress_percent(), Color(0.4, 0.85, 1.0, 0.95))
+		# Build-queue ETA tooltip — hover the bar to see "Currently:
+		# Hound — 14s" plus the queue tail. Implemented via the
+		# bar's tooltip_text rather than a custom popup so it picks
+		# up the same fast tooltip delay as everything else.
+		_progress_bar.tooltip_text = _build_queue_tooltip(building)
 	else:
 		_queue_label.text = ""
 		_hide_progress()
@@ -934,6 +939,33 @@ func _update_building_panel(building: Building) -> void:
 	# refund. Yards / armories don't have a build queue in the usual
 	# sense, so they fall through with an empty row (no icons rendered).
 	_refresh_queue_icons(building)
+
+
+func _build_queue_tooltip(building: Building) -> String:
+	## Composes a multi-line tooltip for the production progress bar:
+	## current unit + remaining seconds, then the queue tail. Returns
+	## empty when there's nothing in the queue.
+	if not building or building.get_queue_size() <= 0:
+		return ""
+	var queue: Array = building.get("_build_queue") as Array
+	if queue.is_empty():
+		return ""
+	var current: UnitStatResource = queue[0] as UnitStatResource
+	if not current:
+		return ""
+	var build_progress: float = building.get("_build_progress") as float
+	var remaining: float = maxf(current.build_time - build_progress, 0.0)
+	var lines: PackedStringArray = PackedStringArray()
+	lines.append("Currently: %s — %ds" % [current.unit_name, int(ceil(remaining))])
+	if queue.size() > 1:
+		var tail: PackedStringArray = PackedStringArray()
+		for i: int in range(1, queue.size()):
+			var u: UnitStatResource = queue[i] as UnitStatResource
+			if u:
+				tail.append(u.unit_name)
+		if not tail.is_empty():
+			lines.append("Queued: %s" % ", ".join(tail))
+	return "\n".join(lines)
 
 
 func _show_progress(pct: float, fill_color: Color) -> void:
@@ -952,6 +984,7 @@ func _show_progress(pct: float, fill_color: Color) -> void:
 func _hide_progress() -> void:
 	if _progress_bar:
 		_progress_bar.visible = false
+		_progress_bar.tooltip_text = ""
 
 
 ## --- FPS counter ---
