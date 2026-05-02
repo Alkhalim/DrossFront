@@ -92,6 +92,16 @@ func _ready() -> void:
 	mesh.name = "MeshSystem"
 	add_child(mesh)
 
+	# Fog of War — Age-of-Empires-style three-state grid (unexplored
+	# / explored / visible). Allied vision shares automatically.
+	# Per-unit + per-building visibility hooks read from this node
+	# every frame; the terrain darkening overlay reads the same
+	# grid via revision bumps.
+	var fow_script: GDScript = preload("res://scripts/fog_of_war.gd")
+	var fow: Node = fow_script.new()
+	fow.name = "FogOfWar"
+	add_child(fow)
+
 	# Industrial-themed cursor manager. Procedurally generates the
 	# default / attack / repair / build / move cursor textures and
 	# exposes `set_kind()` for SelectionManager to switch on hover.
