@@ -102,6 +102,18 @@ func _process(delta: float) -> void:
 				_pending_crashes.remove_at(i)
 			elif now_sec - (entry["last_ping"] as float) >= WARNING_PING_INTERVAL_SEC:
 				_ping_warning(entry["pos"] as Vector3)
+				# Re-emit the countdown so the player sees the time
+				# remaining shrinking instead of just a static "90s"
+				# alert that fired once at scheduling.
+				var remaining: int = int(maxf((entry["fires_at"] as float) - now_sec, 0.0))
+				var alerts: Node = get_tree().current_scene.get_node_or_null("AlertManager")
+				if alerts and alerts.has_method("emit_alert") and remaining > 0:
+					alerts.call(
+						"emit_alert",
+						"Satellite incoming — %ds to impact" % remaining,
+						0,
+						entry["pos"] as Vector3,
+					)
 				entry["last_ping"] = now_sec
 				_pending_crashes[i] = entry
 			i -= 1
