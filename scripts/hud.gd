@@ -277,11 +277,14 @@ func _build_tutorial_mission_banner() -> void:
 	# same left column. Tighter width than the dialogue (340 vs
 	# the dialogue's ~440) so the call-to-action reads as a
 	# focused HUD chip rather than a second narrative banner.
+	# Pushed offset_top down to 240 so the longest dialogue
+	# (Riven Yul's ~5-line "drop the targeting solution" speech)
+	# can fully expand without overlapping the objective panel.
 	_tutorial_banner_objective_panel = PanelContainer.new()
 	_tutorial_banner_objective_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
 	_tutorial_banner_objective_panel.offset_left = 18
 	_tutorial_banner_objective_panel.offset_right = 358
-	_tutorial_banner_objective_panel.offset_top = 152
+	_tutorial_banner_objective_panel.offset_top = 240
 	_tutorial_banner_objective_panel.process_mode = Node.PROCESS_MODE_ALWAYS
 	_tutorial_banner_objective_panel.modulate.a = 0.0
 	# Green-tinted stylebox so the panel reads as objective /
