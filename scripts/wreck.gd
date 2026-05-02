@@ -98,17 +98,26 @@ func _build_wreck_visuals() -> void:
 	# tidy cube on the ground. Random per instance.
 	rotation.y = randf_range(0.0, TAU)
 
-	# Main twisted-hull mass — a flattened box with a slight roll/pitch so
-	# corners poke up unevenly.
-	var hull := MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = wreck_size
-	hull.mesh = box
-	hull.position.y = wreck_size.y * 0.5
-	hull.rotation.x = randf_range(-0.18, 0.18)
-	hull.rotation.z = randf_range(-0.18, 0.18)
-	hull.set_surface_override_material(0, _make_wreck_material(base_color))
-	add_child(hull)
+	if is_satellite:
+		# Satellite piles previously inherited the wide flat hull box --
+		# the 2.6x0.7x2.6 plate read as an obviously-placed prop. Swap
+		# in a low scorched crater disc plus extra chunk density so the
+		# pile blends as a "thing landed and burned" patch on the
+		# ground instead of a slab.
+		_build_satellite_crater(base_color)
+		chunk_count = chunk_count + 6
+	else:
+		# Main twisted-hull mass — a flattened box with a slight roll/pitch so
+		# corners poke up unevenly.
+		var hull := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = wreck_size
+		hull.mesh = box
+		hull.position.y = wreck_size.y * 0.5
+		hull.rotation.x = randf_range(-0.18, 0.18)
+		hull.rotation.z = randf_range(-0.18, 0.18)
+		hull.set_surface_override_material(0, _make_wreck_material(base_color))
+		add_child(hull)
 
 	# Debris chunks — small boxes scattered around the main hull at random
 	# rotations. Some get the rust-accent material to break up the dark
@@ -265,6 +274,68 @@ func claim_microchips() -> int:
 	var out: int = microchip_remaining
 	microchip_remaining = 0
 	return out
+
+
+func _build_satellite_crater(base_color: Color) -> void:
+	## Replacement for the standard rectangular hull box on satellite
+	## piles. Stack two low scorched discs (one wider/darker for the
+	## scorch ring on the ground, one narrower for the actual debris
+	## mound) plus 4 mid-size deformed plates jutting at random angles.
+	## Reads as a small impact crater + crumpled hull plates instead
+	## of a crisp 2.6u rectangular slab.
+	var max_extent: float = maxf(wreck_size.x, wreck_size.z)
+	# Outer scorch disc -- wide, very flat, dark, blends into the
+	# ground texture as a soot ring around the impact.
+	var scorch := MeshInstance3D.new()
+	var scorch_cyl := CylinderMesh.new()
+	scorch_cyl.top_radius = max_extent * 0.85
+	scorch_cyl.bottom_radius = max_extent * 0.90
+	scorch_cyl.height = 0.06
+	scorch_cyl.radial_segments = 18
+	scorch.mesh = scorch_cyl
+	scorch.position.y = 0.03
+	var scorch_mat := StandardMaterial3D.new()
+	scorch_mat.albedo_color = base_color.darkened(0.55)
+	scorch_mat.roughness = 1.0
+	scorch.set_surface_override_material(0, scorch_mat)
+	add_child(scorch)
+	# Inner debris mound -- shorter cylinder, base material, irregular.
+	var mound := MeshInstance3D.new()
+	var mound_cyl := CylinderMesh.new()
+	mound_cyl.top_radius = max_extent * 0.40
+	mound_cyl.bottom_radius = max_extent * 0.55
+	mound_cyl.height = wreck_size.y * 0.70
+	mound_cyl.radial_segments = 12
+	mound.mesh = mound_cyl
+	mound.position.y = mound_cyl.height * 0.45
+	mound.rotation.y = randf_range(0.0, TAU)
+	mound.set_surface_override_material(0, _make_wreck_material(base_color))
+	add_child(mound)
+	# Crumpled hull plates jutting at angles -- broken hull skin.
+	for i: int in 4:
+		var plate := MeshInstance3D.new()
+		var plate_box := BoxMesh.new()
+		plate_box.size = Vector3(
+			randf_range(0.55, 0.95) * max_extent,
+			0.10,
+			randf_range(0.45, 0.80) * max_extent,
+		)
+		plate.mesh = plate_box
+		var ang: float = float(i) / 4.0 * TAU + randf_range(-0.4, 0.4)
+		var radius: float = max_extent * randf_range(0.15, 0.35)
+		plate.position = Vector3(
+			cos(ang) * radius,
+			randf_range(0.08, 0.18),
+			sin(ang) * radius,
+		)
+		plate.rotation = Vector3(
+			randf_range(-0.50, 0.50),
+			ang + randf_range(-0.3, 0.3),
+			randf_range(-0.50, 0.50),
+		)
+		var plate_color: Color = base_color.darkened(randf_range(0.0, 0.25))
+		plate.set_surface_override_material(0, _make_wreck_material(plate_color))
+		add_child(plate)
 
 
 func _build_satellite_landmark() -> void:
