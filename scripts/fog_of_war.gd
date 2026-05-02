@@ -500,5 +500,15 @@ func _stamp_visibility(world_pos: Vector3, radius: float, observer_elevated: boo
 				continue
 			var idx: int = _cell_index(cx, cz)
 			if skip_plateau_cells and _plateau_cells[idx] == 1:
+				# Ground observer near a plateau -- can't see what's
+				# on top, but absolutely *knows* the plateau exists.
+				# Promote the cell from UNEXPLORED to EXPLORED so the
+				# plateau geometry renders (dimmed) instead of leaving
+				# a solid-black hole where the ground is cut and the
+				# StaticBody3D stays hidden via t3d.visible = false.
+				# Aircraft / plateau-top observers still drive the
+				# full VISIBLE promotion below.
+				if _cells[idx] == CellState.UNEXPLORED:
+					_cells[idx] = CellState.EXPLORED
 				continue
 			_cells[idx] = CellState.VISIBLE
