@@ -1364,18 +1364,27 @@ func _detail_generator() -> void:
 
 func _detail_armory() -> void:
 	var fs: Vector3 = stats.footprint_size
-	# Vertical rib panels along each side wall — like ammunition lockers.
-	for side: int in 2:
-		var sx: float = -fs.x * 0.5 if side == 0 else fs.x * 0.5
-		for i: int in 3:
-			var rib := MeshInstance3D.new()
-			var rib_box := BoxMesh.new()
-			rib_box.size = Vector3(0.06, fs.y * 0.7, 0.18)
-			rib.mesh = rib_box
-			var rib_z: float = (float(i) - 1.0) * fs.z * 0.3
-			rib.position = Vector3(sx + (-0.04 if side == 0 else 0.04), fs.y * 0.5, rib_z)
-			rib.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.2, 0.18)))
-			_attach_visual(rib)
+	# Hex-aligned vertical rib panels -- one rib on each of the six
+	# hex faces of the new armory hull. Previously placed at fixed
+	# +/-X positions assuming a box hull, which clipped through the
+	# hex's corner vertices and read as misaligned. Hex flat-face
+	# centres sit at angles 0, 60, 120, 180, 240, 300 deg around
+	# the cylinder; placing each rib on the face midpoint keeps
+	# them flush with the wall.
+	var radius: float = fs.x * 0.5
+	for face_i: int in 6:
+		var ang: float = float(face_i) * (PI / 3.0)
+		var rib := MeshInstance3D.new()
+		var rib_box := BoxMesh.new()
+		rib_box.size = Vector3(0.10, fs.y * 0.70, 0.06)
+		rib.mesh = rib_box
+		# Push slightly outward from the face so the rib reads as
+		# proud of the wall instead of clipping through.
+		var face_radius: float = radius * 0.94
+		rib.position = Vector3(sin(ang) * face_radius, fs.y * 0.5, cos(ang) * face_radius)
+		rib.rotation.y = ang
+		rib.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.2, 0.18)))
+		_attach_visual(rib)
 
 	# Indicator strip across the front.
 	var strip := MeshInstance3D.new()
@@ -1422,18 +1431,21 @@ func _detail_advanced_armory() -> void:
 	## dish/scanner on top, and violet emissive accents (vs the basic
 	## armory's amber strip) so the player can pick it out at range.
 	var fs: Vector3 = stats.footprint_size
-	# Vertical rib panels along each side wall — same as basic armory.
-	for side: int in 2:
-		var sx: float = -fs.x * 0.5 if side == 0 else fs.x * 0.5
-		for i: int in 3:
-			var rib := MeshInstance3D.new()
-			var rib_box := BoxMesh.new()
-			rib_box.size = Vector3(0.06, fs.y * 0.7, 0.18)
-			rib.mesh = rib_box
-			var rib_z: float = (float(i) - 1.0) * fs.z * 0.3
-			rib.position = Vector3(sx + (-0.04 if side == 0 else 0.04), fs.y * 0.5, rib_z)
-			rib.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.20, 0.18, 0.20)))
-			_attach_visual(rib)
+	# Hex-aligned ribs -- one per hex face, matching the basic
+	# armory pattern but in a slightly cooler tone for the advanced
+	# tier read.
+	var radius: float = fs.x * 0.5
+	for face_i: int in 6:
+		var ang: float = float(face_i) * (PI / 3.0)
+		var rib := MeshInstance3D.new()
+		var rib_box := BoxMesh.new()
+		rib_box.size = Vector3(0.10, fs.y * 0.70, 0.06)
+		rib.mesh = rib_box
+		var face_radius: float = radius * 0.94
+		rib.position = Vector3(sin(ang) * face_radius, fs.y * 0.5, cos(ang) * face_radius)
+		rib.rotation.y = ang
+		rib.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.20, 0.18, 0.22)))
+		_attach_visual(rib)
 
 	# Raised research bay on the roof — a smaller setback box that
 	# reads as a second story / clean room. The skylight strips on
