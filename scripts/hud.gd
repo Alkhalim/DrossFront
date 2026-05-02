@@ -2072,6 +2072,7 @@ func _ensure_hq_tab_row() -> void:
 	_hq_tab_row = row
 	_hq_tab_train = Button.new()
 	_hq_tab_train.text = "Train"
+	_hq_tab_train.tooltip_text = "Train Engineers and Salvage Crawlers."
 	_hq_tab_train.custom_minimum_size = Vector2(72, 26)
 	_hq_tab_train.toggle_mode = true
 	_hq_tab_train.button_pressed = _hq_tab == "train"
@@ -2079,6 +2080,7 @@ func _ensure_hq_tab_row() -> void:
 	row.add_child(_hq_tab_train)
 	_hq_tab_defense = Button.new()
 	_hq_tab_defense.text = "Defense"
+	_hq_tab_defense.tooltip_text = "Anvil HQ defensive upgrades — HQ Plating (+25% HP) and HQ Battery (+50% MG damage / +4u range)."
 	_hq_tab_defense.custom_minimum_size = Vector2(86, 26)
 	_hq_tab_defense.toggle_mode = true
 	_hq_tab_defense.button_pressed = _hq_tab == "defense"
