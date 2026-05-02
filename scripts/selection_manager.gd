@@ -599,6 +599,17 @@ func _finish_box_select(event: InputEventMouseButton) -> void:
 
 
 func _command_move(screen_pos: Vector2, queue: bool = false) -> void:
+	var ground_pos := _raycast_ground(screen_pos)
+	if ground_pos == Vector3.INF:
+		return
+	command_move_to_world(ground_pos, queue)
+
+
+func command_move_to_world(ground_pos: Vector3, queue: bool = false) -> void:
+	## Issue a formation move to the current selection, anchored at the
+	## given world position. Used by the in-world right-click path
+	## (after raycasting screen->world) and by the minimap right-click
+	## handler (which already has world coords).
 	_prune_selection()
 	# Combined movables list — units and crawlers both honor command_move(target).
 	var movables: Array = []
@@ -616,10 +627,6 @@ func _command_move(screen_pos: Vector2, queue: bool = false) -> void:
 		_cancel_builder_tasks()
 	if _audio and _audio.has_method("play_voice_move"):
 		_audio.play_voice_move()
-
-	var ground_pos := _raycast_ground(screen_pos)
-	if ground_pos == Vector3.INF:
-		return
 
 	# Simple formation: offset entries in a grid around the target. Crawlers
 	# slot into the formation alongside units — the wider crawler footprint

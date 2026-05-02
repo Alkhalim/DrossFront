@@ -356,6 +356,8 @@ var _is_panning: bool = false
 
 func _gui_input(event: InputEvent) -> void:
 	# Click on minimap to move camera; drag to keep panning while LMB is held.
+	# Right-click issues a move command on the current selection to the
+	# clicked world position (mirrors the in-world right-click path).
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
@@ -365,6 +367,9 @@ func _gui_input(event: InputEvent) -> void:
 			else:
 				_is_panning = false
 			get_viewport().set_input_as_handled()
+		elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
+			_minimap_move_command(mb.position)
+			get_viewport().set_input_as_handled()
 	elif event is InputEventMouseMotion and _is_panning:
 		var motion: InputEventMouseMotion = event as InputEventMouseMotion
 		_click_minimap(motion.position)
@@ -372,15 +377,26 @@ func _gui_input(event: InputEvent) -> void:
 
 
 func _click_minimap(local_pos: Vector2) -> void:
-	var half_world: float = MAP_WORLD_SIZE / 2.0
-	var map_size: Vector2 = size
-	var world_x: float = (local_pos.x / map_size.x) * half_world * 2.0 - half_world
-	var world_z: float = (local_pos.y / map_size.y) * half_world * 2.0 - half_world
-
+	var world_pos: Vector3 = _local_to_world(local_pos)
 	var cam: Camera3D = get_viewport().get_camera_3d()
 	if not cam:
 		return
 	# Set both pivots — _target_pivot drives the smooth lerp in RTSCamera
 	# and _pivot snaps the current position so clicks/drags feel responsive.
-	cam.set("_target_pivot", Vector3(world_x, 0, world_z))
-	cam.set("_pivot", Vector3(world_x, 0, world_z))
+	cam.set("_target_pivot", world_pos)
+	cam.set("_pivot", world_pos)
+
+
+func _minimap_move_command(local_pos: Vector2) -> void:
+	var world_pos: Vector3 = _local_to_world(local_pos)
+	var sm: Node = get_tree().current_scene.get_node_or_null("SelectionManager") if get_tree() else null
+	if sm and sm.has_method("command_move_to_world"):
+		sm.call("command_move_to_world", world_pos, false)
+
+
+func _local_to_world(local_pos: Vector2) -> Vector3:
+	var half_world: float = MAP_WORLD_SIZE / 2.0
+	var map_size: Vector2 = size
+	var world_x: float = (local_pos.x / map_size.x) * half_world * 2.0 - half_world
+	var world_z: float = (local_pos.y / map_size.y) * half_world * 2.0 - half_world
+	return Vector3(world_x, 0.0, world_z)
