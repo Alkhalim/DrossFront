@@ -309,21 +309,40 @@ func _find_nearest_enemy() -> Node3D:
 	return nearest
 
 
+## Idle-scan state. Every few seconds the turret picks a fresh random
+## yaw offset around its captured idle rotation and slowly slews to
+## it, so a defended position visibly scans the horizon instead of
+## standing perfectly still until something walks into range.
+var _idle_scan_target_y: float = 0.0
+var _idle_scan_timer: float = 0.0
+var _idle_scan_initialized: bool = false
+const IDLE_SCAN_RANGE_RAD: float = 0.8     # ~46 degrees off-axis sweep
+const IDLE_SCAN_INTERVAL_MIN: float = 3.5
+const IDLE_SCAN_INTERVAL_MAX: float = 6.5
+
+
 func _relax_to_idle(delta: float) -> void:
-	## Lerps the pivot back to its captured idle (outward-facing)
-	## rotation when there's no target to track. Slower than the
-	## active aim slew so the relax reads as "stand down" rather
-	## than a snappy flick. Skips work when the pivot is already
-	## aligned within ~1 degree.
+	## Slow random horizon-scan around the captured idle rotation.
+	## Picks a new target yaw every IDLE_SCAN_INTERVAL_*; in between,
+	## eases the pivot toward that target with the relaxed turn rate.
+	## Reads as "the turret is paying attention" rather than staring
+	## at a fixed compass point.
 	if not _idle_rotation_captured:
 		return
 	var pivot: Node3D = _resolve_pivot()
 	if not pivot or not is_instance_valid(pivot):
 		return
-	var diff: float = absf(wrapf(pivot.rotation.y - _idle_pivot_rotation_y + PI, 0.0, TAU) - PI)
-	if diff < 0.02:
-		return
-	pivot.rotation.y = lerp_angle(pivot.rotation.y, _idle_pivot_rotation_y, clampf(TURRET_TURN_SPEED * 0.5 * delta, 0.0, 1.0))
+	# First call -- jitter the initial timer + seed a target so all
+	# turrets don't sweep in lockstep.
+	if not _idle_scan_initialized:
+		_idle_scan_initialized = true
+		_idle_scan_target_y = _idle_pivot_rotation_y
+		_idle_scan_timer = randf_range(0.5, IDLE_SCAN_INTERVAL_MAX)
+	_idle_scan_timer -= delta
+	if _idle_scan_timer <= 0.0:
+		_idle_scan_timer = randf_range(IDLE_SCAN_INTERVAL_MIN, IDLE_SCAN_INTERVAL_MAX)
+		_idle_scan_target_y = _idle_pivot_rotation_y + randf_range(-IDLE_SCAN_RANGE_RAD, IDLE_SCAN_RANGE_RAD)
+	pivot.rotation.y = lerp_angle(pivot.rotation.y, _idle_scan_target_y, clampf(TURRET_TURN_SPEED * 0.4 * delta, 0.0, 1.0))
 
 
 func _aim_at_target(delta: float) -> void:

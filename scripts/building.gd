@@ -2165,6 +2165,34 @@ func _detail_sam_site() -> void:
 	rack.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.23, 0.26)))
 	rack_pivot.add_child(rack)
 
+	# Chunky pod housing wrapping the missile cluster -- reads as a
+	# real "sealed rocket pod" instead of an open carriage of single
+	# missiles. The missiles still slot through the front face so
+	# the warhead tips remain visible.
+	var pod_housing := MeshInstance3D.new()
+	var pod_box := BoxMesh.new()
+	pod_box.size = Vector3(fs.x * 0.85, 0.46, fs.z * 0.95)
+	pod_housing.mesh = pod_box
+	pod_housing.position = Vector3(0, 0.30, fs.z * 0.10)
+	pod_housing.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.18, 0.20)))
+	rack_pivot.add_child(pod_housing)
+	# Pod side ribs -- two slim emissive strips along the housing's
+	# long edges so the pod silhouette pops at zoom.
+	for rib_side: int in 2:
+		var rsx: float = (-1.0 if rib_side == 0 else 1.0) * fs.x * 0.42
+		var rib := MeshInstance3D.new()
+		var rib_box_mesh := BoxMesh.new()
+		rib_box_mesh.size = Vector3(0.06, 0.06, fs.z * 0.85)
+		rib.mesh = rib_box_mesh
+		rib.position = Vector3(rsx, 0.46, fs.z * 0.10)
+		var rib_mat := StandardMaterial3D.new()
+		rib_mat.albedo_color = Color(0.85, 0.18, 0.15, 1.0)
+		rib_mat.emission_enabled = true
+		rib_mat.emission = Color(1.0, 0.25, 0.18, 1.0)
+		rib_mat.emission_energy_multiplier = 0.8
+		rib.set_surface_override_material(0, rib_mat)
+		rack_pivot.add_child(rib)
+
 	# Four missiles in the rack — slim white-tipped tubes.
 	for i: int in 4:
 		var missile := MeshInstance3D.new()
