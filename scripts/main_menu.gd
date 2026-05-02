@@ -789,6 +789,21 @@ func _show_faction_tech_tree(faction_id: int) -> void:
 	rows.add_theme_constant_override("separation", 6)
 	scroll.add_child(rows)
 
+	# Faction summary — civ-bonus-style overview of doctrine, role
+	# emphasis, and the headline mechanical differentiators. Reads
+	# above the build chain so the player gets the "why pick this
+	# faction" pitch before they scan the unit list.
+	var summary_lbl := Label.new()
+	summary_lbl.text = _faction_summary(faction_id)
+	summary_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	summary_lbl.custom_minimum_size = Vector2(560, 0)
+	summary_lbl.add_theme_font_size_override("font_size", 13)
+	summary_lbl.add_theme_color_override("font_color", Color(0.78, 0.85, 0.95, 1.0))
+	rows.add_child(summary_lbl)
+	var summary_spacer := Control.new()
+	summary_spacer.custom_minimum_size = Vector2(0, 8)
+	rows.add_child(summary_spacer)
+
 	# Build chain — each entry shows the building gate + the units
 	# unlocked at that gate. Reads top-down as the actual progression
 	# the player follows in match. Slots a roster doesn't fill (e.g.
@@ -842,6 +857,37 @@ func _show_faction_tech_tree(faction_id: int) -> void:
 	close_btn.custom_minimum_size = Vector2(160, 36)
 	close_btn.pressed.connect(canvas.queue_free)
 	vbox.add_child(close_btn)
+
+
+func _faction_summary(faction_id: int) -> String:
+	## AoE-style civ-bonus blurb. Lists the tangible mechanical
+	## differentiators a player would care about when picking a
+	## faction: doctrine emphasis, where the faction is stronger /
+	## weaker, and the unique structures or units it has access to.
+	## Keep these honest -- they should read like a "what am I
+	## actually getting" summary, not flavor copy.
+	if faction_id == 0:
+		return ("ANVIL DIRECTIVE — Industrial doctrine. Tougher static "
+			+ "defenses (specialised Gun Emplacement: +15% HP, +15% "
+			+ "damage, switchable Balanced / Anti-Light / Anti-Heavy "
+			+ "profiles vs the baseline ground turret). Standard "
+			+ "production tempo, mid-tier mobility. Heavy ground "
+			+ "lineup (Bulwark + Forgemaster) leans on sustain and "
+			+ "slow advance; air tier (Phalanx + Hammerhead) is "
+			+ "gunship-doctrine — punchy, expensive, slower. Best "
+			+ "when you want to anchor a position and grind forward.")
+	elif faction_id == 1:
+		return ("SABLE CONCORD — Shadow-ops doctrine. Standard ground "
+			+ "turret (no profile swap, ground only -- pair with a SAM "
+			+ "Site for air). Larger overall unit roster, including "
+			+ "the Courier Tank transport and the Pulsefont caster, "
+			+ "and faster / lighter aircraft (Switchblade + Fang "
+			+ "drone swarm). Unique structure: Black Pylon (Mesh "
+			+ "anchor + unlocks the Wraith stealth bomber). Best "
+			+ "when you want flexibility, vision, and an answer for "
+			+ "every threat type rather than a single hard-anchored "
+			+ "front.")
+	return ""
 
 
 func _build_tactical_background() -> Control:
