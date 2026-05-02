@@ -111,6 +111,7 @@ func _ready() -> void:
 	_build_pause_overlay()
 	_build_power_widget()
 	_build_alert_banner()
+	_build_chat_input()
 	# Gift-allies panel — hide in tutorial since the lone Sable
 	# strike force the mission spawns isn't a real player slot
 	# the human can transfer resources to. Rest of the modes
@@ -3315,6 +3316,96 @@ func clear_persistent_warning(key: String) -> void:
 		_refresh_warning_label()
 
 
+## Chat / cheat input. Hidden by default; Enter shows a small
+## input bar at the bottom of the screen, the player types, Enter
+## again submits to CheatManager and echoes the result through the
+## standard alert banner.
+var _chat_input: LineEdit = null
+var _chat_panel: PanelContainer = null
+
+
+func _build_chat_input() -> void:
+	_chat_panel = PanelContainer.new()
+	_chat_panel.name = "ChatPanel"
+	_chat_panel.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	_chat_panel.offset_top = -120.0
+	_chat_panel.offset_bottom = -90.0
+	_chat_panel.offset_left = 320.0
+	_chat_panel.offset_right = -320.0
+	_chat_panel.visible = false
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.08, 0.08, 0.10, 0.94)
+	style.border_color = Color(1.0, 0.78, 0.32, 0.85)
+	style.border_width_top = 1
+	style.border_width_bottom = 1
+	style.border_width_left = 1
+	style.border_width_right = 1
+	style.corner_radius_top_left = 4
+	style.corner_radius_top_right = 4
+	style.corner_radius_bottom_left = 4
+	style.corner_radius_bottom_right = 4
+	style.content_margin_left = 8
+	style.content_margin_right = 8
+	style.content_margin_top = 4
+	style.content_margin_bottom = 4
+	_chat_panel.add_theme_stylebox_override("panel", style)
+	_chat_input = LineEdit.new()
+	_chat_input.placeholder_text = "Type and press Enter..."
+	_chat_input.text_submitted.connect(_on_chat_submitted)
+	_chat_panel.add_child(_chat_input)
+	add_child(_chat_panel)
+
+
+func _open_chat_input() -> void:
+	if not _chat_panel or not _chat_input:
+		return
+	_chat_panel.visible = true
+	_chat_input.text = ""
+	_chat_input.grab_focus()
+
+
+func _close_chat_input() -> void:
+	if not _chat_panel or not _chat_input:
+		return
+	_chat_panel.visible = false
+	_chat_input.release_focus()
+
+
+func _on_chat_submitted(text: String) -> void:
+	_close_chat_input()
+	if text.strip_edges() == "":
+		return
+	var cheats: Node = get_tree().current_scene.get_node_or_null("CheatManager") if get_tree() else null
+	var msg: String = "Chat: %s" % text
+	if cheats and cheats.has_method("apply_code"):
+		var resp: String = cheats.call("apply_code", text)
+		if resp != "":
+			msg = resp
+	# Surface through the alert banner so the player gets visible
+	# feedback without a dedicated chat log scroll.
+	_on_alert(msg, 0, Vector3.ZERO)
+
+
+func _input(event: InputEvent) -> void:
+	# Enter (no modifiers) opens the chat input; Esc cancels it. Skip
+	# if any modifier is pressed so existing Ctrl/Shift+Enter combos
+	# stay free for future use.
+	if not (event is InputEventKey):
+		return
+	var key: InputEventKey = event as InputEventKey
+	if not key.pressed or key.echo:
+		return
+	if key.keycode == KEY_ENTER and not key.ctrl_pressed and not key.shift_pressed and not key.alt_pressed:
+		# If chat is already open with focus the LineEdit handles its
+		# own submit; only catch the OPEN press here.
+		if _chat_panel and not _chat_panel.visible:
+			_open_chat_input()
+			get_viewport().set_input_as_handled()
+	elif key.keycode == KEY_ESCAPE and _chat_panel and _chat_panel.visible:
+		_close_chat_input()
+		get_viewport().set_input_as_handled()
+
+
 func _refresh_warning_label() -> void:
 	if not _warning_label:
 		return
@@ -3601,6 +3692,10 @@ func _local_player_built_ids() -> Dictionary:
 
 func _prerequisites_met(bstat: BuildingStatResource, built_ids: Dictionary) -> bool:
 	if bstat.prerequisites.is_empty():
+		return true
+	# Cheat bypass — 'techcraze' opens every gate for the player.
+	var cheats: Node = get_tree().current_scene.get_node_or_null("CheatManager") if get_tree() else null
+	if cheats and "tech_craze" in cheats and (cheats.get("tech_craze") as bool):
 		return true
 	for req_v: Variant in bstat.prerequisites:
 		var req: StringName = StringName(req_v)

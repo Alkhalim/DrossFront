@@ -3225,7 +3225,17 @@ func _unit_unlock_prerequisite_met(u: UnitStatResource) -> bool:
 	var prereq: StringName = u.unlock_prerequisite
 	if prereq == &"":
 		return true
+	# Cheat bypass -- 'techcraze' opens every gate for the local player.
+	if owner_id == 0 and _cheats_tech_craze():
+		return true
 	return _local_player_has_built(prereq)
+
+
+func _cheats_tech_craze() -> bool:
+	var cheats: Node = get_tree().current_scene.get_node_or_null("CheatManager") if get_tree() else null
+	if cheats and "tech_craze" in cheats:
+		return cheats.get("tech_craze") as bool
+	return false
 
 
 func _apply_sable_building_silhouette() -> void:

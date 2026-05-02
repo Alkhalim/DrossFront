@@ -118,6 +118,14 @@ func _ready() -> void:
 	cursor_mgr.name = "CursorManager"
 	add_child(cursor_mgr)
 
+	# Cheat state -- bypassed unless the player types a code into the
+	# HUD chat input. Lives at the scene root so prereq checks +
+	# resource grants can find it via a simple get_node lookup.
+	var cheat_script: GDScript = preload("res://scripts/cheat_manager.gd")
+	var cheats: Node = cheat_script.new()
+	cheats.name = "CheatManager"
+	add_child(cheats)
+
 	_apply_map_visuals()
 	_setup_alerts()
 	_setup_player_registry()
