@@ -1,0 +1,36 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+[ext_resource type="Resource" path="res://resources/units/sable_courier_infiltrator.tres" id="3"]
+[ext_resource type="Resource" path="res://resources/units/sable_courier_sensor_carrier.tres" id="4"]
+
+[sub_resource type="Resource" id="weapon_courier_chaingun"]
+script = ExtResource("2")
+weapon_name = "Light Chaingun"
+role_tag = &"AP"
+damage_tier = &"low"
+range_tier = &"short"
+rof_tier = &"rapid"
+
+[resource]
+script = ExtResource("1")
+unit_name = "Courier Tank"
+unit_class = &"medium"
+hp_total = 1240
+hp_per_unit = 1240
+armor_class = &"medium"
+speed_tier = &"fast"
+sight_tier = &"long"
+squad_size = 1
+population = 10
+cost_salvage = 240
+cost_fuel = 25
+build_time = 20.0
+built_at = &"basic_foundry"
+primary_weapon = SubResource("weapon_courier_chaingun")
+special_description = "Sable transport medium. Light chaingun for self-defence; primary role is hauling allied infantry / engineers across the map. Branch A: Infiltrator (vehicle stealth). Branch B: Sensor Carrier (Mesh provider, sensor dome instead of cargo bay)."
+branch_a_name = "Infiltrator"
+branch_b_name = "Sensor Carrier"
+branch_a_stats = ExtResource("3")
+branch_b_stats = ExtResource("4")

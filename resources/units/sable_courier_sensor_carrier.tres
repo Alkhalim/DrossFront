@@ -1,0 +1,33 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_courier_sensor_chaingun"]
+script = ExtResource("2")
+weapon_name = "Light Chaingun"
+role_tag = &"AP"
+damage_tier = &"low"
+range_tier = &"short"
+rof_tier = &"rapid"
+base_accuracy = 0.84
+
+[resource]
+script = ExtResource("1")
+unit_name = "Courier (Sensor Carrier)"
+unit_class = &"medium"
+hp_total = 1320
+hp_per_unit = 1320
+armor_class = &"medium"
+speed_tier = &"fast"
+sight_tier = &"very_long"
+squad_size = 1
+population = 10
+cost_salvage = 320
+cost_fuel = 35
+build_time = 24.0
+built_at = &"basic_foundry"
+primary_weapon = SubResource("weapon_courier_sensor_chaingun")
+detection_radius = 150.0
+mesh_provider_radius = 24.0
+special_description = "Courier Sensor Carrier — drops the transport hardware for a roof-mounted dish antenna. Mobile mid-range Mesh provider (24u aura) + 150u stealth detection. Reads as the army's rolling sensor bus; protect it to keep the Mesh moving forward."

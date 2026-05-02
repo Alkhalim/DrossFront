@@ -1,0 +1,35 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_hunter_at"]
+script = ExtResource("2")
+weapon_name = "AT Micro-Missile Cluster"
+role_tag = &"AA"
+damage_tier = &"moderate"
+range_tier = &"medium"
+rof_tier = &"fast"
+base_accuracy = 0.90
+
+[resource]
+script = ExtResource("1")
+unit_name = "Fang (Hunter)"
+unit_class = &"aircraft"
+hp_total = 700
+hp_per_unit = 70
+armor_class = &"light_air"
+speed_tier = &"very_fast"
+sight_tier = &"medium"
+squad_size = 10
+population = 12
+cost_salvage = 320
+cost_fuel = 40
+build_time = 24.0
+built_at = &"aerodrome"
+primary_weapon = SubResource("weapon_hunter_at")
+squad_strength_bonus = 0.10
+is_aircraft = true
+flight_altitude = 5.5
+flight_speed = 18.0
+special_description = "Fang Hunter — micro-missiles retuned for anti-armour work (AA tag, moderate damage). Drops light micro-rockets that crack heavy armour. Pair with Switchblades or Specters; the Hunter alone won't beat dedicated AAir defenses."

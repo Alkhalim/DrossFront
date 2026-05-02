@@ -2373,6 +2373,7 @@ func get_producible_units() -> Array[UnitStatResource]:
 			sable_paths = [
 				"res://resources/units/sable_specter.tres",
 				"res://resources/units/sable_jackal.tres",
+				"res://resources/units/sable_courier_tank.tres",
 			]
 		&"advanced_foundry":
 			sable_paths = [

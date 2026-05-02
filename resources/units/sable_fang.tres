@@ -1,7 +1,9 @@
-[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+[ext_resource type="Resource" path="res://resources/units/sable_fang_hunter.tres" id="3"]
+[ext_resource type="Resource" path="res://resources/units/sable_fang_harasser.tres" id="4"]
 
 [sub_resource type="Resource" id="weapon_micro_missile"]
 script = ExtResource("2")
@@ -31,6 +33,8 @@ squad_strength_bonus = 0.10
 special_description = "Sable swarm of 10 light drones. Branch A: Hunter (AT micro-missiles). Branch B: Harasser (anti-worker, salvage disruption)."
 branch_a_name = "Hunter"
 branch_b_name = "Harasser"
+branch_a_stats = ExtResource("3")
+branch_b_stats = ExtResource("4")
 is_aircraft = true
 flight_altitude = 5.5
 flight_speed = 18.0

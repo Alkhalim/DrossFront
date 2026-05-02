@@ -1,7 +1,9 @@
-[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+[ext_resource type="Resource" path="res://resources/units/anvil_phalanx_shield.tres" id="3"]
+[ext_resource type="Resource" path="res://resources/units/anvil_phalanx_interceptor.tres" id="4"]
 
 [sub_resource type="Resource" id="weapon_drone_mg"]
 script = ExtResource("2")
@@ -28,9 +30,11 @@ build_time = 22.0
 built_at = &"aerodrome"
 primary_weapon = SubResource("weapon_drone_mg")
 squad_strength_bonus = 0.10
-special_description = "Squad of 8 light drones. Anvil's standard air patrol. Branch A: Shield (autocast directional barriers). Branch B: Interceptor (anti-air / anti-missile)."
+special_description = "Squad of 8 light drones. Anvil's standard air patrol. Branch A: Shield (more HP, slower, screening role). Branch B: Interceptor (anti-air / anti-missile)."
 branch_a_name = "Shield"
 branch_b_name = "Interceptor"
+branch_a_stats = ExtResource("3")
+branch_b_stats = ExtResource("4")
 is_aircraft = true
 flight_altitude = 5.5
 flight_speed = 16.0

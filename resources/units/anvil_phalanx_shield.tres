@@ -1,0 +1,35 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_shield_drone_mg"]
+script = ExtResource("2")
+weapon_name = "Drone Light MG"
+role_tag = &"AP"
+damage_tier = &"low"
+range_tier = &"short"
+rof_tier = &"rapid"
+base_accuracy = 0.84
+
+[resource]
+script = ExtResource("1")
+unit_name = "Phalanx (Shield)"
+unit_class = &"aircraft"
+hp_total = 920
+hp_per_unit = 115
+armor_class = &"light_air"
+speed_tier = &"moderate"
+sight_tier = &"long"
+squad_size = 8
+population = 12
+cost_salvage = 300
+cost_fuel = 30
+build_time = 22.0
+built_at = &"aerodrome"
+primary_weapon = SubResource("weapon_shield_drone_mg")
+squad_strength_bonus = 0.10
+is_aircraft = true
+flight_altitude = 5.5
+flight_speed = 14.0
+special_description = "Phalanx Shield — drones reinforced with directional barrier projectors. Higher per-drone HP at the cost of speed. Reads as the screening swarm — soak hits in front of higher-value gunships."

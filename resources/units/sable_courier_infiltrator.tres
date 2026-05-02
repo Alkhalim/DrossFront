@@ -1,0 +1,34 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_courier_chaingun"]
+script = ExtResource("2")
+weapon_name = "Light Chaingun"
+role_tag = &"AP"
+damage_tier = &"low"
+range_tier = &"short"
+rof_tier = &"rapid"
+base_accuracy = 0.84
+
+[resource]
+script = ExtResource("1")
+unit_name = "Courier (Infiltrator)"
+unit_class = &"medium"
+hp_total = 1280
+hp_per_unit = 1280
+armor_class = &"medium"
+speed_tier = &"fast"
+sight_tier = &"long"
+squad_size = 1
+population = 10
+cost_salvage = 280
+cost_fuel = 30
+build_time = 22.0
+built_at = &"basic_foundry"
+primary_weapon = SubResource("weapon_courier_chaingun")
+is_stealth_capable = true
+detection_radius = 80.0
+stealth_restore_time = 4.0
+special_description = "Courier Infiltrator — stealth-capable transport variant. Same chassis but vehicle-scale stealth shrouding lets it ferry up to a small squad through enemy territory undetected. Reads as the deep-strike delivery truck."
