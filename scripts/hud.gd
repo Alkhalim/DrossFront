@@ -1793,31 +1793,31 @@ func _rebuild_unit_command_buttons() -> void:
 	_button_grid.add_child(amove_btn)
 	_action_buttons.append({"button": amove_btn, "kind": "command", "key": "attack_move"})
 
-	# Active-ability button — added when EVERY unit in the current
-	# selection shares the same ability (so a mixed selection of
-	# Pulsefonts + Hounds doesn't show a button that only fires on
-	# half of them). The button label flips between the cast / cooldown
-	# states each frame via _refresh_ability_button. Tinted distinct
-	# from the standard command buttons (violet vs grey) so the
-	# player sees at a glance that this slot is a special action,
-	# not another move command.
-	var ability_units: Array[Node3D] = _selection_ability_units()
-	if not ability_units.is_empty():
-		var first: Node3D = ability_units[0]
-		var ability_stat: UnitStatResource = first.stats
+	# Active-ability buttons — one slot per distinct ability type
+	# in the current selection (capped to ABILITY_BUTTON_LIMIT so a
+	# mixed mass-select doesn't paper over the move-command row).
+	# Used to require every selected unit to share the same ability;
+	# a mixed Pulsefont + Forgemaster selection then showed nothing.
+	# The new behaviour mirrors classic RTS HUDs: each ability the
+	# selection contains gets its own slot, pressing it fires the
+	# ability on the subset of units that own it. Tinted violet to
+	# distinguish from the grey command buttons.
+	var ability_groups: Array[Dictionary] = _selection_ability_groups()
+	for group: Dictionary in ability_groups:
+		var ability_units: Array[Node3D] = group["units"] as Array[Node3D]
+		var ability_stat: UnitStatResource = group["stat"] as UnitStatResource
 		var ability_btn := Button.new()
 		ability_btn.custom_minimum_size = Vector2(150, 42)
-		ability_btn.tooltip_text = "%s\n%s\nCooldown %ds" % [
+		var unit_count_label: String = ""
+		if ability_units.size() > 1:
+			unit_count_label = "  ×%d" % ability_units.size()
+		ability_btn.tooltip_text = "%s%s\n%s\nCooldown %ds" % [
 			ability_stat.ability_name,
+			unit_count_label,
 			ability_stat.ability_description,
 			int(ability_stat.ability_cooldown),
 		]
 		_paint_ability_button_style(ability_btn)
-		# Autocast indicator — small "AUTO" badge anchored to the
-		# top-right of the button so the player reads at a glance
-		# that this ability fires on its own when the unit's in
-		# combat. Manual press still works (and fast-forwards
-		# cooldown rolls if available).
 		if ability_stat.ability_autocast:
 			_attach_autocast_badge(ability_btn)
 		ability_btn.pressed.connect(_on_ability_button.bind(ability_units))
@@ -1830,29 +1830,57 @@ func _rebuild_unit_command_buttons() -> void:
 		})
 
 
-func _selection_ability_units() -> Array[Node3D]:
-	## Returns the subset of the current selection that shares one
-	## active ability. Empty when no selected unit has an ability or
-	## when the selection mixes ability types.
-	var out: Array[Node3D] = []
+## Bottom-row capacity for ability slots. The command row already
+## fills three slots (Hold / Patrol / Attack-Move); leaving three
+## free below for ability buttons matches the "standard commands
+## top, special actions bottom" layout the user asked for. Selections
+## that mix more than three distinct abilities clip to the most
+## populous three.
+const ABILITY_BUTTON_LIMIT: int = 3
+
+
+func _selection_ability_groups() -> Array[Dictionary]:
+	## Buckets the current selection by ability_name and returns
+	## one entry per distinct ability:
+	##   { units: Array[Node3D], stat: UnitStatResource }
+	## Stats taken from the first unit in each bucket -- ability
+	## metadata (name, description, cooldown, autocast) is per-unit-
+	## class-shared so the first unit's stat block is representative.
+	## Buckets sorted descending by unit count, then clipped to
+	## ABILITY_BUTTON_LIMIT so the bottom row stays uncluttered.
+	var out: Array[Dictionary] = []
 	if not _selection_manager:
 		return out
 	var selected: Array[Node3D] = _selection_manager.get_selected_units() as Array[Node3D]
 	if selected.is_empty():
 		return out
-	var ability_id: String = ""
+	# Bucket by ability_name -> { units: [...], stat: ... }.
+	var buckets: Dictionary = {}
+	var bucket_order: Array[String] = []
 	for unit: Node3D in selected:
 		if not is_instance_valid(unit) or not "stats" in unit:
 			continue
 		var s: UnitStatResource = unit.get("stats") as UnitStatResource
 		if not s or s.ability_name == "":
 			continue
-		if ability_id == "":
-			ability_id = s.ability_name
-		elif ability_id != s.ability_name:
-			# Mixed ability types — no shared button.
-			return [] as Array[Node3D]
-		out.append(unit)
+		var key: String = s.ability_name
+		if not buckets.has(key):
+			buckets[key] = { "units": [] as Array[Node3D], "stat": s }
+			bucket_order.append(key)
+		var bucket: Dictionary = buckets[key]
+		(bucket["units"] as Array[Node3D]).append(unit)
+	# Stable rank: descending unit count, ties broken by first-seen.
+	bucket_order.sort_custom(func(a: String, b: String) -> bool:
+		var ca: int = (buckets[a]["units"] as Array).size()
+		var cb: int = (buckets[b]["units"] as Array).size()
+		return ca > cb
+	)
+	var emitted: int = 0
+	for key: String in bucket_order:
+		if emitted >= ABILITY_BUTTON_LIMIT:
+			break
+		out.append(buckets[key])
+		emitted += 1
 	return out
 
 
