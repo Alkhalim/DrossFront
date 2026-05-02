@@ -1137,8 +1137,46 @@ func _detail_foundry(advanced: bool) -> void:
 		fr.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.32, 0.28, 0.22)))
 		_attach_visual(fr)
 
-	# For advanced foundry, add a second smaller stack and a roof detail.
+	# Advanced foundry only: rear annex wing + roof-pipe bridge +
+	# secondary stack so the silhouette breaks out of the "basic
+	# foundry but bigger" read. Three changes layered:
+	#   1. Annex wing -- a smaller hull volume bolted to the back
+	#      face. Different X/Z proportions so it reads as a
+	#      separate shop, not a uniform extension.
+	#   2. Roof-pipe bridge -- thick conduit running between the
+	#      main stack and the secondary, evoking heavy-industrial
+	#      plumbing.
+	#   3. Secondary stack -- already present; kept and joined to
+	#      the bridge.
 	if advanced:
+		# Rear annex wing.
+		var wing := MeshInstance3D.new()
+		var wing_box := BoxMesh.new()
+		wing_box.size = Vector3(fs.x * 0.55, fs.y * 0.65, fs.z * 0.45)
+		wing.mesh = wing_box
+		wing.position = Vector3(0.0, wing_box.size.y * 0.5, fs.z * 0.5 + wing_box.size.z * 0.5 - 0.10)
+		wing.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.20, 0.22)))
+		_attach_visual(wing)
+		# Wing roof cap so the silhouette doesn't look like a flat
+		# slab leaning against the building.
+		var wing_cap := MeshInstance3D.new()
+		var wing_cap_box := BoxMesh.new()
+		wing_cap_box.size = Vector3(wing_box.size.x + 0.20, 0.10, wing_box.size.z + 0.20)
+		wing_cap.mesh = wing_cap_box
+		wing_cap.position = Vector3(0.0, wing_box.size.y + 0.05, fs.z * 0.5 + wing_box.size.z * 0.5 - 0.10)
+		wing_cap.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.16, 0.14, 0.14)))
+		_attach_visual(wing_cap)
+		# Lit doorway on the wing back so the annex reads as
+		# functional, not a decorative box.
+		_build_lit_doorway(
+			wing.position + Vector3(0.0, 0.0, wing_box.size.z * 0.5 + 0.02),
+			wing_box.size.x * 0.5,
+			wing_box.size.y * 0.55,
+			Color(0.95, 0.65, 0.20),
+		)
+
+		# Secondary stack on the wing (still feeds the smoke
+		# loop through _atmos_stack_tops).
 		var stack2 := MeshInstance3D.new()
 		var stack2_cyl := CylinderMesh.new()
 		stack2_cyl.top_radius = fs.x * 0.09
@@ -1152,6 +1190,34 @@ func _detail_foundry(advanced: bool) -> void:
 		stack2_top.position = Vector3(-fs.x * 0.3, fs.y + stack2_cyl.height + 0.08, fs.z * 0.1)
 		_attach_visual(stack2_top)
 		_atmos_stack_tops.append(stack2_top)
+
+		# Roof pipe bridge between the two stacks. Thick conduit
+		# slung between the stack tops and bracketed by smaller
+		# support piping. Straight box runs main->secondary at
+		# stack-mid height.
+		var pipe_a: Vector3 = Vector3(stack.position.x, fs.y + stack_cyl.height * 0.55, stack.position.z)
+		var pipe_b: Vector3 = Vector3(stack2.position.x, fs.y + stack2_cyl.height * 0.55, stack2.position.z)
+		var pipe_mid: Vector3 = (pipe_a + pipe_b) * 0.5
+		var pipe_dist: float = pipe_a.distance_to(pipe_b)
+		var bridge := MeshInstance3D.new()
+		var bridge_box := BoxMesh.new()
+		bridge_box.size = Vector3(pipe_dist, 0.12, 0.12)
+		bridge.mesh = bridge_box
+		bridge.position = pipe_mid
+		bridge.rotation.y = atan2(pipe_b.x - pipe_a.x, pipe_b.z - pipe_a.z) - PI * 0.5
+		bridge.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.30, 0.26, 0.18)))
+		_attach_visual(bridge)
+		# Brass support struts hanging from the bridge midpoint.
+		for s_i: int in 2:
+			var strut := MeshInstance3D.new()
+			var strut_box := BoxMesh.new()
+			strut_box.size = Vector3(0.05, 0.30, 0.05)
+			strut.mesh = strut_box
+			var t: float = 0.3 + float(s_i) * 0.4
+			var sp: Vector3 = pipe_a.lerp(pipe_b, t)
+			strut.position = Vector3(sp.x, sp.y - 0.15, sp.z)
+			strut.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.45, 0.36, 0.18)))
+			_attach_visual(strut)
 
 	# Ore intake hopper — angled wedge on the left side.
 	var hopper := MeshInstance3D.new()
