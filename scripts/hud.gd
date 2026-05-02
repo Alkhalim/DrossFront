@@ -1123,19 +1123,33 @@ func _update_building_panel(building: Building) -> void:
 		or building.stats.building_id == &"advanced_armory"
 	)
 	var armory_in_progress: bool = is_armory and rm and rm.is_in_progress()
+	# Buildings that produce units take priority over the turret-
+	# profile panel even when they carry a TurretComponent (the HQ
+	# now mounts a built-in defensive turret but its primary action
+	# is still training Engineers + Crawlers). Pure defenses (gun
+	# emplacement, SAM Site) have no producible_units list and fall
+	# through to the turret panel.
+	var has_production: bool = (
+		building.stats != null
+		and not (building.get_producible_units() if building.has_method("get_producible_units") else []).is_empty()
+	)
 	if bid != _last_building_id or armory_in_progress:
 		_last_building_id = bid
 		_last_unit_ids.clear()
 		_showing_build_buttons = false
 		if is_armory:
 			_rebuild_armory_buttons(building)
+		elif has_production:
+			_rebuild_production_buttons(building)
 		elif building.has_node("TurretComponent"):
 			_rebuild_turret_profile_buttons(building)
 		else:
 			_rebuild_production_buttons(building)
-	elif building.has_node("TurretComponent"):
+	elif building.has_node("TurretComponent") and not has_production:
 		# Re-tint each frame so the active profile stays highlighted even
-		# without a selection-change rebuild.
+		# without a selection-change rebuild. Skip when the panel is
+		# rendering production -- highlight ticking would walk an empty
+		# turret-profile button list.
 		_refresh_turret_profile_highlight(building)
 
 	# Under construction → show construction progress bar.
