@@ -2270,15 +2270,21 @@ func _build_unit_stat_sheet(unit: Node3D, _include_cost: bool = false) -> String
 	# and accuracy fall on the same row to keep all combat numbers
 	# in one scannable line.
 	var dps_ground: float = _compute_dps_vs(stats, &"medium")
-	var dps_air: float = _compute_dps_vs(stats, &"light_air")
 	var range_u: float = _max_weapon_range(stats)
 	var acc_pct: int = int(_effective_accuracy(unit) * 100.0)
+	# Air DPS only shows for units that can actually engage aircraft
+	# (have an AAir-tagged weapon). AP / Universal trickle damage at
+	# 0.1-0.4x mults isn't meaningful enough to call the unit anti-
+	# air, and showing the value for ground-only units misled the
+	# reader into thinking those units could threaten airframes.
 	var row_combat: Array = [
 		_stat_chip("DPS Gnd", "%.0f" % dps_ground, STAT_LABEL_COLOR_DAMAGE),
-		_stat_chip("DPS Air", "%.0f" % dps_air, STAT_LABEL_COLOR_DAMAGE),
-		_stat_chip("Range", "%.0fu" % range_u, STAT_LABEL_COLOR_RANGE),
-		_stat_chip("Acc", "%d%%" % acc_pct, STAT_LABEL_COLOR_RANGE),
 	]
+	if stats.can_target_air():
+		var dps_air: float = _compute_dps_vs(stats, &"light_air")
+		row_combat.append(_stat_chip("DPS Air", "%.0f" % dps_air, STAT_LABEL_COLOR_DAMAGE))
+	row_combat.append(_stat_chip("Range", "%.0fu" % range_u, STAT_LABEL_COLOR_RANGE))
+	row_combat.append(_stat_chip("Acc", "%d%%" % acc_pct, STAT_LABEL_COLOR_RANGE))
 
 	# Row 3 — mobility. Speed and sight read as star bars
 	# (bronze->silver->gold across 30 half-steps) so the relative
@@ -2322,14 +2328,19 @@ func _attack_bonus_chips(stats: UnitStatResource) -> Array:
 	## so the player can see why a unit's raw DPS reads low or high
 	## against a specific class. Empty array when the unit has no
 	## primary weapon (engineers etc).
+	##
+	## Air classes (LtAir / HvAir) are dropped for ground-only units
+	## so the row stops advertising trickle-damage multipliers vs
+	## targets the unit can't actually engage.
 	var out: Array = []
 	if not stats or not stats.primary_weapon:
 		return out
 	var role_tag: StringName = stats.primary_weapon.role_tag
-	# Subset of armor classes the player actually faces. AS / Universal
-	# get rolled into the same row -- the role tag IS the column header.
-	var classes: Array[StringName] = [&"light", &"medium", &"heavy", &"light_air", &"heavy_air", &"structure"]
-	var labels: Array[String] = ["Lt", "Md", "Hv", "LtAir", "HvAir", "Struct"]
+	var classes: Array[StringName] = [&"light", &"medium", &"heavy", &"structure"]
+	var labels: Array[String] = ["Lt", "Md", "Hv", "Struct"]
+	if stats.can_target_air():
+		classes = [&"light", &"medium", &"heavy", &"light_air", &"heavy_air", &"structure"]
+		labels = ["Lt", "Md", "Hv", "LtAir", "HvAir", "Struct"]
 	for i: int in classes.size():
 		var mult: float = CombatTables.get_role_modifier(role_tag, classes[i])
 		out.append(_stat_chip("vs " + labels[i], "%.1fx" % mult, STAT_LABEL_COLOR_DAMAGE))
@@ -3794,10 +3805,13 @@ func _unit_tooltip(stat: UnitStatResource) -> String:
 	lines.append("Cost  %dS / %dF   Build %.1fs" % [
 		stat.cost_salvage, stat.cost_fuel, stat.build_time
 	])
-	lines.append("DPS  %.0f vs Ground / %.0f vs Air" % [
-		_compute_dps_vs(stat, &"medium"),
-		_compute_dps_vs(stat, &"light_air"),
-	])
+	if stat.can_target_air():
+		lines.append("DPS  %.0f vs Ground / %.0f vs Air" % [
+			_compute_dps_vs(stat, &"medium"),
+			_compute_dps_vs(stat, &"light_air"),
+		])
+	else:
+		lines.append("DPS  %.0f vs Ground" % _compute_dps_vs(stat, &"medium"))
 	if stat.primary_weapon:
 		var pw: WeaponResource = stat.primary_weapon
 		lines.append("Primary: %s — %s, %d dmg, %.0fu, %.2fs cd, Acc %d%%" % [

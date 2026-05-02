@@ -305,6 +305,13 @@ func _find_nearest_enemy(max_range: float) -> Node3D:
 	var nearest: Node3D = null
 	var nearest_dist: float = INF
 
+	# Ground-only units (no AAir-tagged weapon) skip aircraft in
+	# auto-acquire. AP / Universal trickle damage at 0.1-0.4x is
+	# misleading -- the unit shouldn't be reading as anti-air-capable
+	# from the targeting behaviour. Player can still manually
+	# right-click an aircraft to forced-target it.
+	var ground_only: bool = not stats.can_target_air()
+
 	# Check enemy units
 	var all_units: Array[Node] = get_tree().get_nodes_in_group("units")
 	for node: Node in all_units:
@@ -315,6 +322,8 @@ func _find_nearest_enemy(max_range: float) -> Node3D:
 			continue
 		var node_alive: int = node.get("alive_count")
 		if node_alive <= 0:
+			continue
+		if ground_only and node.is_in_group("aircraft"):
 			continue
 		# V3 stealth — auto-target ignores stealth-capable units that
 		# aren't currently revealed. The player can still manually
