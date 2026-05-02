@@ -156,9 +156,16 @@ var _tutorial_progress: Dictionary = {}  # task_id → completed bool
 var _tutorial_banner_panel: PanelContainer = null
 var _tutorial_banner_dialogue: Label = null
 var _tutorial_banner_objective: Label = null
+var _tutorial_banner_objective_panel: PanelContainer = null
 var _tutorial_banner_progress: Label = null
 var _tutorial_banner_last_index: int = -2  # never matches a real stage
 var _tutorial_banner_dialogue_tween: Tween = null
+var _tutorial_banner_objective_tween: Tween = null
+## Pause between dialogue finishing and the objective panel
+## fading in. Tuned so the player gets a beat to read the line
+## before the call-to-action lands.
+const TUTORIAL_OBJECTIVE_DELAY_SEC: float = 2.0
+const TUTORIAL_OBJECTIVE_FADE_SEC: float = 0.45
 
 
 func _build_tutorial_overlay() -> void:
@@ -223,11 +230,16 @@ func _build_tutorial_overlay() -> void:
 
 
 func _build_tutorial_mission_banner() -> void:
-	## Centred-top banner panel that shows the current
-	## TutorialMission stage's dialogue + objective. Lives above
-	## the existing topbar but stays out of the way of the
-	## minimap. Updates every HUD tick via
-	## _refresh_tutorial_mission_banner.
+	## Two stacked panels at the top of the screen:
+	##   - Dialogue panel  — story line, left-aligned so the
+	##     letter-by-letter typewriter doesn't cause the text to
+	##     re-centre on every character (causing the perceived
+	##     wobble / nausea the player called out).
+	##   - Objective panel — the actionable task. Hidden while
+	##     dialogue is still typing + 2s afterwards, then fades
+	##     in. Visually distinct (green border, slightly smaller
+	##     panel) so it reads as a HUD banner rather than another
+	##     story line.
 	_tutorial_banner_panel = PanelContainer.new()
 	_tutorial_banner_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	_tutorial_banner_panel.offset_left = 220
@@ -242,22 +254,48 @@ func _build_tutorial_mission_banner() -> void:
 	_tutorial_banner_progress.text = ""
 	_tutorial_banner_progress.add_theme_font_size_override("font_size", 12)
 	_tutorial_banner_progress.add_theme_color_override("font_color", Color(0.78, 0.85, 0.95, 0.85))
-	_tutorial_banner_progress.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_tutorial_banner_progress.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	inner.add_child(_tutorial_banner_progress)
 	_tutorial_banner_dialogue = Label.new()
 	_tutorial_banner_dialogue.text = ""
 	_tutorial_banner_dialogue.add_theme_font_size_override("font_size", 16)
 	_tutorial_banner_dialogue.add_theme_color_override("font_color", Color(0.95, 0.92, 0.78, 1.0))
 	_tutorial_banner_dialogue.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_tutorial_banner_dialogue.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# LEFT-anchored so each typed letter pushes the line outward
+	# from the left edge instead of resampling the centre point
+	# every frame (which made the text appear to slide).
+	_tutorial_banner_dialogue.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	inner.add_child(_tutorial_banner_dialogue)
+
+	# Objective — its own PanelContainer so the visual frame is
+	# distinct, anchored just below the dialogue panel.
+	_tutorial_banner_objective_panel = PanelContainer.new()
+	_tutorial_banner_objective_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	_tutorial_banner_objective_panel.offset_left = 220
+	_tutorial_banner_objective_panel.offset_right = -260
+	_tutorial_banner_objective_panel.offset_top = 124
+	_tutorial_banner_objective_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	_tutorial_banner_objective_panel.modulate.a = 0.0
+	# Green-tinted stylebox so the panel reads as objective /
+	# call-to-action rather than another dialogue line.
+	var obj_style := StyleBoxFlat.new()
+	obj_style.bg_color = Color(0.05, 0.16, 0.10, 0.92)
+	obj_style.border_color = Color(0.45, 0.95, 0.55, 0.8)
+	obj_style.set_border_width_all(2)
+	obj_style.set_corner_radius_all(4)
+	obj_style.content_margin_left = 10
+	obj_style.content_margin_right = 10
+	obj_style.content_margin_top = 6
+	obj_style.content_margin_bottom = 6
+	_tutorial_banner_objective_panel.add_theme_stylebox_override("panel", obj_style)
+	add_child(_tutorial_banner_objective_panel)
 	_tutorial_banner_objective = Label.new()
 	_tutorial_banner_objective.text = ""
-	_tutorial_banner_objective.add_theme_font_size_override("font_size", 14)
-	_tutorial_banner_objective.add_theme_color_override("font_color", Color(0.55, 0.95, 0.55, 1.0))
+	_tutorial_banner_objective.add_theme_font_size_override("font_size", 15)
+	_tutorial_banner_objective.add_theme_color_override("font_color", Color(0.78, 1.0, 0.82, 1.0))
 	_tutorial_banner_objective.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_tutorial_banner_objective.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	inner.add_child(_tutorial_banner_objective)
+	_tutorial_banner_objective.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_tutorial_banner_objective_panel.add_child(_tutorial_banner_objective)
 
 
 func _refresh_tutorial_mission_banner() -> void:
@@ -281,7 +319,7 @@ func _refresh_tutorial_mission_banner() -> void:
 	var dialogue: String = mission.call("current_stage_dialogue") as String
 	var objective: String = mission.call("current_stage_objective") as String
 	var total: int = mission.call("total_stages") as int
-	_tutorial_banner_objective.text = "Objective: %s" % objective
+	_tutorial_banner_objective.text = objective
 	_tutorial_banner_progress.text = "Stage %d / %d" % [idx + 1, total]
 	# Typewriter dialogue — drop the full text in but clamp
 	# visible_characters to 0 and tween it up to the full length
@@ -295,14 +333,31 @@ func _refresh_tutorial_mission_banner() -> void:
 	if _tutorial_banner_dialogue_tween and _tutorial_banner_dialogue_tween.is_valid():
 		_tutorial_banner_dialogue_tween.kill()
 	var char_count: int = dialogue.length()
+	var dialogue_dur: float = 0.0
 	if char_count > 0:
-		var dur: float = clampf(float(char_count) / 32.0, 0.6, 4.0)
+		dialogue_dur = clampf(float(char_count) / 32.0, 0.6, 4.0)
 		_tutorial_banner_dialogue_tween = create_tween()
 		_tutorial_banner_dialogue_tween.tween_property(
 			_tutorial_banner_dialogue,
 			"visible_characters",
 			char_count,
-			dur,
+			dialogue_dur,
+		)
+	# Objective panel — start hidden, fade in after the dialogue
+	# finishes typing + a 2s breathing pause. Kill any previous
+	# objective tween so back-to-back stage flips don't stack
+	# fade chains on the same panel.
+	if _tutorial_banner_objective_tween and _tutorial_banner_objective_tween.is_valid():
+		_tutorial_banner_objective_tween.kill()
+	if _tutorial_banner_objective_panel:
+		_tutorial_banner_objective_panel.modulate.a = 0.0
+		_tutorial_banner_objective_tween = create_tween()
+		_tutorial_banner_objective_tween.tween_interval(dialogue_dur + TUTORIAL_OBJECTIVE_DELAY_SEC)
+		_tutorial_banner_objective_tween.tween_property(
+			_tutorial_banner_objective_panel,
+			"modulate:a",
+			1.0,
+			TUTORIAL_OBJECTIVE_FADE_SEC,
 		)
 
 

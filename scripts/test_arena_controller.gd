@@ -864,12 +864,17 @@ func _setup_player() -> void:
 	# counter starts at the correct value rather than 0.
 	_account_starter_unit_population()
 
-	# Snap the camera so the match opens looking at the player's base
-	# instead of wherever the .tscn happened to leave the camera node.
-	# Reuses RTSCamera's pivot fields (same way the H hotkey does).
+	# Snap the camera so the match opens looking at the player's
+	# base — or, in tutorial mode, the player's lone Rook squad at
+	# world origin (the HQ at (0, 95) is still neutral and the
+	# squad is what the player actually starts the mission with).
 	var cam: Camera3D = get_viewport().get_camera_3d() if get_viewport() else null
-	if cam and hq:
-		var focus: Vector3 = Vector3(hq.global_position.x, 0.0, hq.global_position.z)
+	if cam:
+		var focus: Vector3 = Vector3.ZERO
+		if in_tutorial:
+			focus = Vector3(0.0, 0.0, 0.0)
+		elif hq:
+			focus = Vector3(hq.global_position.x, 0.0, hq.global_position.z)
 		cam.set("_pivot", focus)
 		cam.set("_target_pivot", focus)
 
