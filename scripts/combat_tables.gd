@@ -84,9 +84,29 @@ const ROLE_VS_ARMOR: Dictionary = {
 		&"light_air": 1.2, &"heavy_air": 1.0,
 	},
 	&"Universal": {
-		&"unarmored": 0.8, &"light": 0.8, &"medium": 0.8,
+		# Bumped medium to 1.0 so every Universal-tagged weapon has at
+		# least one role-vs-armor multiplier of 1x, satisfying the
+		# "each unit's raw damage should match at least one target
+		# class" rule that keeps the panel's DPS readout from
+		# overstating a weapon that does <1x against everything.
+		# Universal stays the generalist (decent vs anything, strong
+		# vs nothing); medium = canonical mech armor reads as the
+		# weapon's "tuned for" class.
+		&"unarmored": 0.8, &"light": 0.8, &"medium": 1.0,
 		&"heavy": 0.8, &"structure": 0.8,
 		&"light_air": 0.4, &"heavy_air": 0.3,
+	},
+	&"AS": {
+		# Anti-structure -- the dedicated building cracker (Wraith
+		# bombs, Hammerhead Bomber payload, Rook Sapper charges,
+		# Bulwark Siegebreaker). Hits structures hard; underperforms
+		# against mobile units so AS comps need a partner role to
+		# trade against ground / air. Without this row AS weapons
+		# fell through to Universal and capped at 1.0 vs medium,
+		# which made anti-structure builds soft against buildings.
+		&"unarmored": 0.6, &"light": 0.6, &"medium": 0.6,
+		&"heavy": 0.7, &"structure": 1.5,
+		&"light_air": 0.2, &"heavy_air": 0.2,
 	},
 }
 
