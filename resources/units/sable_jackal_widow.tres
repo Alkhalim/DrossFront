@@ -1,0 +1,41 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_widow_needles"]
+script = ExtResource("2")
+weapon_name = "Coilgun Needles"
+role_tag = &"AP"
+damage_tier = &"moderate"
+range_tier = &"long"
+rof_tier = &"fast"
+base_accuracy = 0.92
+
+[sub_resource type="Resource" id="weapon_widow_jump"]
+script = ExtResource("2")
+weapon_name = "Jump-Pack Mini Rockets"
+role_tag = &"Universal"
+damage_tier = &"low"
+range_tier = &"short"
+rof_tier = &"slow"
+
+[resource]
+script = ExtResource("1")
+unit_name = "Jackal (Widow)"
+unit_class = &"medium"
+hp_total = 1380
+hp_per_unit = 460
+armor_class = &"medium"
+speed_tier = &"fast"
+sight_tier = &"long"
+squad_size = 3
+population = 12
+cost_salvage = 340
+cost_fuel = 22
+build_time = 23.5
+built_at = &"basic_foundry"
+primary_weapon = SubResource("weapon_widow_needles")
+secondary_weapon = SubResource("weapon_widow_jump")
+squad_strength_bonus = 0.12
+special_description = "Jackal Widow branch — long-range coilgun needles + jump pack stays but on a longer cooldown. Picks targets at extreme range, then jumps to reposition. Lower HP, longer reach."

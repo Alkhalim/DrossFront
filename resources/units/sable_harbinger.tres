@@ -1,7 +1,9 @@
-[gd_resource type="Resource" script_class="UnitStatResource" load_steps=4 format=3]
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+[ext_resource type="Resource" path="res://resources/units/sable_harbinger_swarm_marshal.tres" id="3"]
+[ext_resource type="Resource" path="res://resources/units/sable_harbinger_overseer.tres" id="4"]
 
 [sub_resource type="Resource" id="weapon_harbinger_railgun"]
 script = ExtResource("2")
@@ -41,3 +43,5 @@ mesh_provider_radius = 30.0
 special_description = "Sable heavy drone carrier (V3 §Pillar 1). Spinal railgun + drone bay releases + Mesh aura provider. Requires Black Pylon to build. Branch A: Swarm Marshal (more drones). Branch B: Overseer (extends Mesh aura further)."
 branch_a_name = "Swarm Marshal"
 branch_b_name = "Overseer"
+branch_a_stats = ExtResource("3")
+branch_b_stats = ExtResource("4")
