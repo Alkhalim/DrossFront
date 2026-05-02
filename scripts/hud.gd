@@ -112,6 +112,7 @@ func _ready() -> void:
 	_build_power_widget()
 	_build_alert_banner()
 	_build_chat_input()
+	_build_minimap_quick_select()
 	# Gift-allies panel — hide in tutorial since the lone Sable
 	# strike force the mission spawns isn't a real player slot
 	# the human can transfer resources to. Rest of the modes
@@ -3322,6 +3323,57 @@ func clear_persistent_warning(key: String) -> void:
 ## standard alert banner.
 var _chat_input: LineEdit = null
 var _chat_panel: PanelContainer = null
+
+
+## Two small quick-select buttons floating just above the minimap.
+## Mech glyph -> select all military (combat units, no engineers /
+## crawlers); engineer glyph -> jump to + select an idle engineer
+## (no current build / move / attack target).
+var _qs_military_btn: Button = null
+var _qs_engineer_btn: Button = null
+
+
+func _build_minimap_quick_select() -> void:
+	var row := HBoxContainer.new()
+	row.name = "MinimapQuickSelect"
+	row.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	# Minimap occupies the bottom 244x244 corner; sit the buttons in
+	# the 36px strip just above it, right-aligned.
+	row.offset_top = -284.0
+	row.offset_bottom = -250.0
+	row.offset_left = -244.0
+	row.offset_right = -8.0
+	row.alignment = BoxContainer.ALIGNMENT_END
+	row.add_theme_constant_override("separation", 6)
+	add_child(row)
+
+	_qs_military_btn = Button.new()
+	_qs_military_btn.text = "Mil"
+	_qs_military_btn.custom_minimum_size = Vector2(48, 30)
+	_qs_military_btn.tooltip_text = "Select all your military units (skip engineers / crawlers)."
+	_qs_military_btn.pressed.connect(_on_quick_select_military)
+	row.add_child(_qs_military_btn)
+
+	_qs_engineer_btn = Button.new()
+	_qs_engineer_btn.text = "Eng"
+	_qs_engineer_btn.custom_minimum_size = Vector2(48, 30)
+	_qs_engineer_btn.tooltip_text = "Jump to and select an idle engineer (no current build target)."
+	_qs_engineer_btn.pressed.connect(_on_quick_select_idle_engineer)
+	row.add_child(_qs_engineer_btn)
+
+
+func _on_quick_select_military() -> void:
+	if not _selection_manager:
+		return
+	if _selection_manager.has_method("select_all_player_military"):
+		_selection_manager.call("select_all_player_military")
+
+
+func _on_quick_select_idle_engineer() -> void:
+	if not _selection_manager:
+		return
+	if _selection_manager.has_method("select_idle_engineer"):
+		_selection_manager.call("select_idle_engineer")
 
 
 func _build_chat_input() -> void:

@@ -3051,18 +3051,15 @@ func _update_progress_bar() -> void:
 	_progress_mat.albedo_color = Color(r, g, 0.1, 0.9)
 	_progress_mat.emission = Color(r, g, 0.1, 1.0)
 
-	# Update label -- "PCT% • N workers • ~Xs" so the player can see
-	# both the build progress and how many engineers to add for it
-	# to finish faster.
+	# Update label -- "PCT% • ~Xs" so the player sees a live ETA
+	# without the noisy worker count (engineers are visibly clustered
+	# on the foundation already; a number on top read as duplicate).
 	if _progress_label:
-		var workers: int = _builders_last_tick.size()
 		var line: String = "%d%%" % int(pct * 100.0)
-		if workers > 0:
-			line += "  •  %d worker%s" % [workers, "" if workers == 1 else "s"]
-			if _build_rate_per_sec > 0.0001:
-				var remaining: float = (stats.build_time - _construction_progress) / _build_rate_per_sec
-				if remaining > 0.5:
-					line += "  •  ~%ds" % int(ceilf(remaining))
+		if _build_rate_per_sec > 0.0001:
+			var remaining: float = (stats.build_time - _construction_progress) / _build_rate_per_sec
+			if remaining > 0.5:
+				line += "  •  ~%ds" % int(ceilf(remaining))
 		_progress_label.text = line
 
 

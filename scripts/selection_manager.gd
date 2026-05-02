@@ -350,6 +350,80 @@ func _input(event: InputEvent) -> void:
 			_handle_build_hotkey(key)
 
 
+func select_all_player_military() -> void:
+	## Replaces the current selection with every player-owned combat
+	## unit. Combat = stays out of the engineer (can_build) and crawler
+	## groups -- those are gatherers, not military. Triggered by the
+	## minimap-overlay quick-select Mil button.
+	_clear_selection()
+	_deselect_building()
+	var any_selected: bool = false
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node):
+			continue
+		var u: Node3D = node as Node3D
+		if not u:
+			continue
+		if (u.get("owner_id") as int) != 0:
+			continue
+		if "alive_count" in u and (u.get("alive_count") as int) <= 0:
+			continue
+		if u.is_in_group("crawlers"):
+			continue
+		var stats: UnitStatResource = (u.get("stats") as UnitStatResource) if "stats" in u else null
+		if stats and stats.can_build:
+			continue
+		_selected_units.append(u)
+		if u.has_method("set_selected"):
+			u.set_selected(true)
+		any_selected = true
+	if any_selected and _audio:
+		_audio.play_select()
+
+
+func select_idle_engineer() -> void:
+	## Jumps the camera to and selects the first engineer with no
+	## active build / move / attack target. Engineer = unit with a
+	## builder component (stats.can_build == true). Idle check =
+	## builder._target_building null AND unit.move_target == INF.
+	## Falls through silently if no idle engineer exists.
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node):
+			continue
+		var u: Node3D = node as Node3D
+		if not u:
+			continue
+		if (u.get("owner_id") as int) != 0:
+			continue
+		if "alive_count" in u and (u.get("alive_count") as int) <= 0:
+			continue
+		var stats: UnitStatResource = (u.get("stats") as UnitStatResource) if "stats" in u else null
+		if not (stats and stats.can_build):
+			continue
+		var builder: Node = null
+		if u.has_method("get_builder"):
+			builder = u.call("get_builder") as Node
+		if builder and ("_target_building" in builder) and builder.get("_target_building") != null:
+			continue
+		var move_target: Variant = u.get("move_target") if "move_target" in u else null
+		if move_target is Vector3 and (move_target as Vector3) != Vector3.INF:
+			continue
+		# Found an idle engineer -- swap the selection in.
+		_clear_selection()
+		_deselect_building()
+		_selected_units.append(u)
+		if u.has_method("set_selected"):
+			u.set_selected(true)
+		# Centre camera on the chosen engineer.
+		var cam: Camera3D = get_viewport().get_camera_3d()
+		if cam:
+			cam.set("_target_pivot", u.global_position)
+			cam.set("_pivot", u.global_position)
+		if _audio:
+			_audio.play_select()
+		return
+
+
 func _delete_selected_owned_entities() -> bool:
 	## Self-destructs every player-owned entity in the current selection.
 	## Units / Crawlers / buildings / foundations all route through their
