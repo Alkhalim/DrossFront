@@ -231,10 +231,12 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 			_is_dragging = false
 
 	elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-		# Ctrl-held → queue this command after whatever the unit is already
-		# doing instead of replacing it. Only the plain move path supports
-		# queueing for now (attack / assist / rally still replace).
-		var queue: bool = event.ctrl_pressed
+		# Ctrl OR Shift held → queue this command after whatever the unit
+		# is already doing instead of replacing it. Shift is the standard
+		# RTS modifier; Ctrl is preserved as an alternate. Only the plain
+		# move path supports queueing for now (attack / assist / rally
+		# still replace).
+		var queue: bool = event.ctrl_pressed or event.shift_pressed
 		if _selected_building and _selected_building.stats and not _selected_building.get_producible_units().is_empty() and _selection_movables_count() == 0:
 			_set_rally_point(event.position)
 		elif _attack_move_mode:
