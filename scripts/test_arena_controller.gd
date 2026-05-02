@@ -101,6 +101,14 @@ func _ready() -> void:
 	var fow: Node = fow_script.new()
 	fow.name = "FogOfWar"
 	add_child(fow)
+	# Visible darkening layer that sits just above the ground and
+	# tints itself per-cell from the FOW grid. Reads the grid via
+	# revision bumps so the multi-mesh colour buffer is only re-
+	# uploaded when fog actually moves.
+	var fow_overlay_script: GDScript = preload("res://scripts/fog_overlay.gd")
+	var fow_overlay: Node = fow_overlay_script.new()
+	fow_overlay.name = "FogOverlay"
+	add_child(fow_overlay)
 
 	# Industrial-themed cursor manager. Procedurally generates the
 	# default / attack / repair / build / move cursor textures and
