@@ -78,6 +78,15 @@ var _progress_bar: MeshInstance3D = null
 var _progress_mat: StandardMaterial3D = null
 var _progress_label: Label3D = null
 var _bar_width: float = 0.0
+## Per-frame construction stats so the progress label can show
+## current worker count and an estimated remaining time. The dicts
+## are flipped in _process so a builder still counts even if it
+## advanced earlier in the frame than the rotation tick.
+var _builders_this_tick: Dictionary = {}
+var _builders_last_tick: Dictionary = {}
+var _build_amount_this_tick: float = 0.0
+var _build_rate_per_sec: float = 0.0
+var _last_build_tick_time_msec: int = 0
 
 ## Holds all visual children (mesh, team ring, type-specific details). The
 ## construction-rise animation lifts this single node from below ground to its
@@ -2793,7 +2802,7 @@ func begin_construction() -> void:
 		_visual_root.position.y = -stats.footprint_size.y * 0.95
 
 
-func advance_construction(amount: float) -> void:
+func advance_construction(amount: float, builder: Node = null) -> void:
 	if is_constructed:
 		return
 	# Construction halts while any unit is standing inside the footprint, so
@@ -2806,6 +2815,9 @@ func advance_construction(amount: float) -> void:
 	# as a real structure. Pre-start foundations are placement intent only.
 	construction_started = true
 	_construction_progress += amount
+	_build_amount_this_tick += amount
+	if builder:
+		_builders_this_tick[builder.get_instance_id()] = true
 	_update_progress_bar()
 	_update_construction_rise()
 	if _construction_progress >= stats.build_time:
@@ -3004,9 +3016,19 @@ func _update_progress_bar() -> void:
 	_progress_mat.albedo_color = Color(r, g, 0.1, 0.9)
 	_progress_mat.emission = Color(r, g, 0.1, 1.0)
 
-	# Update label
+	# Update label -- "PCT% • N workers • ~Xs" so the player can see
+	# both the build progress and how many engineers to add for it
+	# to finish faster.
 	if _progress_label:
-		_progress_label.text = "%d%%" % int(pct * 100.0)
+		var workers: int = _builders_last_tick.size()
+		var line: String = "%d%%" % int(pct * 100.0)
+		if workers > 0:
+			line += "  •  %d worker%s" % [workers, "" if workers == 1 else "s"]
+			if _build_rate_per_sec > 0.0001:
+				var remaining: float = (stats.build_time - _construction_progress) / _build_rate_per_sec
+				if remaining > 0.5:
+					line += "  •  ~%ds" % int(ceilf(remaining))
+		_progress_label.text = line
 
 
 func _remove_progress_bar() -> void:
@@ -3770,6 +3792,23 @@ func _scrappy_neutral_building_tint(c: Color) -> Color:
 
 
 func _process(delta: float) -> void:
+	# Construction-progress sampling runs every frame regardless of
+	# the cosmetic stagger so the worker count + ETA refresh feels
+	# instant when the player adds / removes engineers. Sample window
+	# is roughly 0.25s -- cheap, and keeps the displayed rate stable
+	# instead of jittering with single-frame contributor lists.
+	if not is_constructed:
+		var now_msec: int = Time.get_ticks_msec()
+		if now_msec - _last_build_tick_time_msec >= 250:
+			var window_sec: float = float(now_msec - _last_build_tick_time_msec) * 0.001
+			if window_sec > 0.001:
+				_build_rate_per_sec = _build_amount_this_tick / window_sec
+			_builders_last_tick = _builders_this_tick
+			_builders_this_tick = {}
+			_build_amount_this_tick = 0.0
+			_last_build_tick_time_msec = now_msec
+			_update_progress_bar()
+
 	# Half-frame stagger for the cosmetic / damage-VFX work. Buildings
 	# don't need 60 Hz redraws — smoke timers, ember flicker, foundry
 	# glow loops all read fine at 30 Hz. Phase is set at _enter_tree

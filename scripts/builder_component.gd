@@ -116,7 +116,7 @@ func _physics_process(delta: float) -> void:
 
 	# In range — stop moving and build
 	_unit.stop()
-	_target_building.advance_construction(build_rate * delta)
+	_target_building.advance_construction(build_rate * delta, _unit)
 	# Only animate when the foundation is actually progressing (it can be
 	# blocked by units standing inside the footprint).
 	_set_build_anim(not _target_building.is_constructed and _target_building._is_foundation_clear())
