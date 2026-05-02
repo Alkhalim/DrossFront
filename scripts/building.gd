@@ -2065,19 +2065,45 @@ func _apply_placeholder_shape() -> void:
 	if not stats:
 		return
 
-	# Most buildings use a rectangular hull; the basic generator uses a
-	# squat cylinder so its silhouette doesn't read as "another box".
+	# Per-role base shape so the building silhouette reads at a
+	# glance even before the type-specific roof / detail layer
+	# kicks in:
+	#   power generator -> short cylinder (already)
+	#   tech (armory + advanced armory) -> hex prism (8-sided)
+	#   defense turrets -> short cylindrical pad
+	#   everything else (production / economy / HQ / pylon) -> box
 	var fs: Vector3 = stats.footprint_size
-	if stats.building_id == &"basic_generator":
-		var cyl := CylinderMesh.new()
-		cyl.top_radius = fs.x * 0.5
-		cyl.bottom_radius = fs.x * 0.55
-		cyl.height = fs.y
-		_mesh.mesh = cyl
-	else:
-		var box := BoxMesh.new()
-		box.size = fs
-		_mesh.mesh = box
+	match stats.building_id:
+		&"basic_generator":
+			var cyl := CylinderMesh.new()
+			cyl.top_radius = fs.x * 0.5
+			cyl.bottom_radius = fs.x * 0.55
+			cyl.height = fs.y
+			_mesh.mesh = cyl
+		&"basic_armory", &"advanced_armory":
+			# Hex prism via a CylinderMesh with 6 radial segments --
+			# avoids hand-building a SurfaceTool mesh while still
+			# reading as a faceted research bunker.
+			var hex := CylinderMesh.new()
+			hex.radial_segments = 6
+			hex.top_radius = fs.x * 0.5
+			hex.bottom_radius = fs.x * 0.5
+			hex.height = fs.y
+			_mesh.mesh = hex
+		&"gun_emplacement", &"gun_emplacement_basic", &"sam_site":
+			# Cylindrical pad so the turret cap reads as
+			# "fortified mount" rather than another box. Slight
+			# bottom flare so the silhouette tapers visibly.
+			var pad := CylinderMesh.new()
+			pad.radial_segments = 16
+			pad.top_radius = fs.x * 0.5
+			pad.bottom_radius = fs.x * 0.55
+			pad.height = fs.y
+			_mesh.mesh = pad
+		_:
+			var box := BoxMesh.new()
+			box.size = fs
+			_mesh.mesh = box
 	_mesh.position.y = fs.y / 2.0
 
 	var mat := StandardMaterial3D.new()
