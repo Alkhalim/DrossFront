@@ -643,6 +643,30 @@ func _team_collar(width: float, height: float, depth: float, pos: Vector3) -> vo
 	_attach_visual(collar)
 
 
+func _team_collar_ring(radius: float, height: float, pos: Vector3) -> void:
+	## Cylindrical variant of `_team_collar` for cylindrical detail
+	## towers (smokestacks, spires). A box collar around a round stack
+	## reads as a misaligned colour patch; the cylindrical band wraps
+	## the stack edge correctly.
+	var team_color: Color = _resolve_team_color()
+	var collar := MeshInstance3D.new()
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = radius
+	cyl.bottom_radius = radius
+	cyl.height = height
+	cyl.radial_segments = 20
+	collar.mesh = cyl
+	collar.position = pos
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = team_color
+	mat.emission_enabled = true
+	mat.emission = team_color
+	mat.emission_energy_multiplier = 1.2
+	mat.roughness = 0.6
+	collar.set_surface_override_material(0, mat)
+	_attach_visual(collar)
+
+
 func _detail_hq_defense_turret() -> void:
 	## Four MG nests at the HQ roof corners -- reads as a
 	## position-secured-by-soldiers, not a turret fortification.
@@ -1037,8 +1061,6 @@ func _detail_headquarters() -> void:
 
 func _detail_foundry(advanced: bool) -> void:
 	var fs: Vector3 = stats.footprint_size
-	# Team collar at the base of the main smokestack.
-	_team_collar(fs.x * 0.32, 0.1, fs.z * 0.32, Vector3(fs.x * 0.28, fs.y + 0.05, fs.z * 0.18))
 	# Off-center smokestack.
 	var stack := MeshInstance3D.new()
 	var stack_cyl := CylinderMesh.new()
@@ -1047,6 +1069,10 @@ func _detail_foundry(advanced: bool) -> void:
 	stack_cyl.height = fs.y * (1.1 if advanced else 0.9)
 	stack.mesh = stack_cyl
 	stack.position = Vector3(fs.x * 0.28, fs.y + stack_cyl.height * 0.5, fs.z * 0.18)
+	# Cylindrical team collar wrapping the stack base. A box collar
+	# poked outside the stack's circular silhouette and read as a
+	# misaligned colour patch instead of a band on the smokestack.
+	_team_collar_ring(stack_cyl.bottom_radius * 1.10, 0.10, Vector3(stack.position.x, fs.y + 0.05, stack.position.z))
 	stack.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.15, 0.13, 0.12)))
 	_attach_visual(stack)
 
@@ -2411,14 +2437,22 @@ func _apply_team_ring() -> void:
 	# angle. Replaces the old inverted-shell trick which only rendered on one
 	# face from the RTS camera angle.
 	_team_ring = MeshInstance3D.new()
-	# Match the hull shape — cylinder body gets a cylindrical band so it
-	# wraps without weird edge clipping.
+	# Match the hull shape — cylinder body gets a cylindrical band, hex
+	# armory gets a 6-segment cylindrical band so it wraps the hex faces
+	# instead of poking past their corners as a rectangular box would.
 	if stats.building_id == &"basic_generator" or stats.building_id == &"advanced_generator":
 		var ring_cyl := CylinderMesh.new()
 		ring_cyl.top_radius = stats.footprint_size.x * 0.5 + 0.06
 		ring_cyl.bottom_radius = stats.footprint_size.x * 0.55 + 0.06
 		ring_cyl.height = stats.footprint_size.y * 0.14
 		_team_ring.mesh = ring_cyl
+	elif stats.building_id == &"basic_armory" or stats.building_id == &"advanced_armory":
+		var ring_hex := CylinderMesh.new()
+		ring_hex.radial_segments = 6
+		ring_hex.top_radius = stats.footprint_size.x * 0.5 + 0.06
+		ring_hex.bottom_radius = stats.footprint_size.x * 0.5 + 0.06
+		ring_hex.height = stats.footprint_size.y * 0.14
+		_team_ring.mesh = ring_hex
 	else:
 		var stripe := BoxMesh.new()
 		stripe.size = Vector3(
