@@ -2072,7 +2072,6 @@ func _ensure_hq_tab_row() -> void:
 	_hq_tab_row = row
 	_hq_tab_train = Button.new()
 	_hq_tab_train.text = "Train"
-	_hq_tab_train.tooltip_text = "Train Engineers and Salvage Crawlers."
 	_hq_tab_train.custom_minimum_size = Vector2(72, 26)
 	_hq_tab_train.toggle_mode = true
 	_hq_tab_train.button_pressed = _hq_tab == "train"
@@ -2080,7 +2079,6 @@ func _ensure_hq_tab_row() -> void:
 	row.add_child(_hq_tab_train)
 	_hq_tab_defense = Button.new()
 	_hq_tab_defense.text = "Defense"
-	_hq_tab_defense.tooltip_text = "Anvil HQ defensive upgrades — HQ Plating (+25% HP) and HQ Battery (+50% MG damage / +4u range)."
 	_hq_tab_defense.custom_minimum_size = Vector2(86, 26)
 	_hq_tab_defense.toggle_mode = true
 	_hq_tab_defense.button_pressed = _hq_tab == "defense"
@@ -3333,7 +3331,6 @@ func _ensure_build_tab_row() -> void:
 	_build_tab_row = row
 	_build_tab_basic = Button.new()
 	_build_tab_basic.text = "Basic"
-	_build_tab_basic.tooltip_text = "Basic tier — buildings available from match start (Foundry, Yard, Generator, Gun Emplacement)."
 	_build_tab_basic.custom_minimum_size = Vector2(72, 26)
 	_build_tab_basic.toggle_mode = true
 	_build_tab_basic.button_pressed = _build_tab == "basic"
@@ -3341,7 +3338,6 @@ func _ensure_build_tab_row() -> void:
 	row.add_child(_build_tab_basic)
 	_build_tab_advanced = Button.new()
 	_build_tab_advanced.text = "Advanced"
-	_build_tab_advanced.tooltip_text = "Advanced tier — gated behind a basic foundry (Adv Foundry, Aerodrome, Armory, SAM, Adv Generator, Black Pylon)."
 	_build_tab_advanced.custom_minimum_size = Vector2(86, 26)
 	_build_tab_advanced.toggle_mode = true
 	_build_tab_advanced.button_pressed = _build_tab == "advanced"
@@ -3967,7 +3963,7 @@ func _building_description(id: StringName) -> String:
 		&"advanced_armory":
 			return "Unlocks the gated unit slots at Advanced Foundry and Aerodrome, and hosts their branch upgrades."
 		&"salvage_yard":
-			return "Stationary harvester. Pulls salvage from wrecks inside its work radius. Hungry on power -- budget ahead before stacking yards."
+			return "Stationary harvester. Pulls salvage from wrecks inside its work radius."
 		&"gun_emplacement":
 			return "Anvil mode-switchable emplacement: Balanced / Anti-Light / Anti-Heavy. Ground only. +15% HP / damage vs the baseline turret."
 		&"gun_emplacement_basic":
