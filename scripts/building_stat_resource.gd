@@ -46,3 +46,12 @@ extends Resource
 ## `Array[StringName]` exports. Loaded values are read as StringName
 ## by callers.
 @export var prerequisites: Array = []
+
+## V3 §"Pillar 2 — Neural Mesh" — when > 0 this building emits a
+## Mesh aura. Black Pylon ~35u radius is the largest Mesh provider
+## and the strategic anchor.
+@export var mesh_provider_radius: float = 0.0
+
+## Faction lock. 0 = available to all, 1 = Anvil only, 2 = Sable
+## only. Used by HUD's build menu to filter the buildable list.
+@export var faction_lock: int = 0

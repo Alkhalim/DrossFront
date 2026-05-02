@@ -341,6 +341,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		if key.pressed and not key.echo and key.keycode == KEY_ESCAPE:
 			_toggle_pause()
 			get_viewport().set_input_as_handled()
+		elif key.pressed and not key.echo and key.keycode == KEY_M:
+			# V3 QoL — M toggles the bright Mesh-coverage overlay.
+			# Each provider's ground ring is bumped to a brighter
+			# emission level so the player can read the entire Sable
+			# Mesh footprint at a glance.
+			_toggle_mesh_overlay()
+			get_viewport().set_input_as_handled()
 		elif key.keycode == KEY_TAB:
 			# TAB on first press: dismiss the tutorial overlay if it's
 			# up. Otherwise, hold-Tab shows the hotkey palette overlay
@@ -1153,6 +1160,38 @@ func _build_selection_roster() -> void:
 	_bottom_panel.add_child(_roster_strip)
 
 
+var _mesh_overlay_on: bool = false
+
+
+func _toggle_mesh_overlay() -> void:
+	## V3 §Pillar 2 — flip every MeshAuraRing's emission energy so
+	## the rings either pulse subtly (default, off) or punch out
+	## brightly (overlay, on). No new geometry is created; we just
+	## bump the emission multiplier on the existing per-provider
+	## rings + the central column glow.
+	_mesh_overlay_on = not _mesh_overlay_on
+	var bright: float = 2.4 if _mesh_overlay_on else 0.85
+	# Walk every MeshAuraRing in the scene.
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		_apply_mesh_overlay_to(node, bright)
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		_apply_mesh_overlay_to(node, bright)
+
+
+func _apply_mesh_overlay_to(node: Node, energy: float) -> void:
+	if not is_instance_valid(node):
+		return
+	var ring: Node = node.get_node_or_null("MeshAuraRing")
+	if not ring or not (ring is MeshInstance3D):
+		return
+	var mat: StandardMaterial3D = (ring as MeshInstance3D).get_surface_override_material(0) as StandardMaterial3D
+	if mat:
+		mat.emission_energy_multiplier = energy
+		var c: Color = mat.albedo_color
+		c.a = 0.85 if _mesh_overlay_on else 0.50
+		mat.albedo_color = c
+
+
 func _refresh_hotkey_palette() -> void:
 	## Repopulates the palette with hotkeys relevant to the current
 	## selection: camera + global shortcuts, plus production /
@@ -1165,6 +1204,7 @@ func _refresh_hotkey_palette() -> void:
 	lines.append("[color=#9fd0ff]Global[/color]")
 	lines.append("  Esc — pause / settings")
 	lines.append("  Tab — show this overlay")
+	lines.append("  M — toggle Mesh coverage overlay (Sable)")
 	lines.append("  WASD / arrow keys — pan camera")
 	lines.append("  QE / mouse wheel — zoom")
 	lines.append("  Ctrl + 1-9 — assign control group")

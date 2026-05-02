@@ -365,6 +365,10 @@ func _ready() -> void:
 		if stats.is_stealth_capable:
 			stealth_revealed = false
 			_apply_stealth_visual(true)
+		# V3 Pillar 2 — Mesh provider aura ring on the ground around
+		# any unit whose stat sheet declares it a Mesh source.
+		if stats.mesh_provider_radius > 0.0:
+			_add_mesh_aura_ring(stats.mesh_provider_radius)
 
 
 func _init_hp() -> void:
@@ -2785,6 +2789,30 @@ func get_muzzle_positions() -> Array[Vector3]:
 
 
 ## --- Faction-aware visual identity (V3 §"Pillar 1") ----------------------
+
+## --- V3 Mesh aura visual --------------------------------------------------
+
+func _add_mesh_aura_ring(radius: float) -> void:
+	var ring := MeshInstance3D.new()
+	ring.name = "MeshAuraRing"
+	var torus := TorusMesh.new()
+	torus.inner_radius = radius - 0.18
+	torus.outer_radius = radius
+	torus.rings = 36
+	torus.ring_segments = 4
+	ring.mesh = torus
+	ring.position.y = 0.05
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.78, 0.45, 1.0, 0.50)
+	mat.emission_enabled = true
+	mat.emission = Color(0.78, 0.45, 1.0, 1.0)
+	mat.emission_energy_multiplier = 0.85
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	ring.set_surface_override_material(0, mat)
+	add_child(ring)
+
 
 ## --- V3 Stealth -----------------------------------------------------------
 

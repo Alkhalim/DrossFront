@@ -84,6 +84,14 @@ func _ready() -> void:
 	pem.name = "ParticleEmitterManager"
 	add_child(pem)
 
+	# V3 Pillar 2 — Neural Mesh provider tracker. Maintains a snapshot
+	# of every Sable Mesh provider (Black Pylon + Overseer Harbinger
+	# etc.) so combat can read the per-position Mesh strength cheaply.
+	var mesh_script: GDScript = preload("res://scripts/mesh_system.gd")
+	var mesh: Node = mesh_script.new()
+	mesh.name = "MeshSystem"
+	add_child(mesh)
+
 	# Industrial-themed cursor manager. Procedurally generates the
 	# default / attack / repair / build / move cursor textures and
 	# exposes `set_kind()` for SelectionManager to switch on hover.
@@ -3132,9 +3140,18 @@ func _setup_buildable_buildings() -> void:
 			# (anti-air defense). Both available to either faction.
 			"res://resources/buildings/aerodrome.tres",
 			"res://resources/buildings/sam_site.tres",
+			# V3 §"Pillar 2" — Sable's Mesh anchor structure. Filtered
+			# below by faction_lock so Anvil players don't see it.
+			"res://resources/buildings/black_pylon.tres",
 		]
+		var player_faction: int = _faction_id_for_player(0)
 		for path: String in stat_paths:
 			var stat: BuildingStatResource = load(path) as BuildingStatResource
-			if stat:
-				buildable_buildings.append(stat)
+			if not stat:
+				continue
+			# faction_lock 0 = universal, 1 = Anvil only, 2 = Sable only.
+			# Player faction id 0 = Anvil, 1 = Sable. Map: lock = (faction_id + 1).
+			if stat.faction_lock != 0 and stat.faction_lock != (player_faction + 1):
+				continue
+			buildable_buildings.append(stat)
 	selection_mgr.set_buildable_buildings(buildable_buildings)

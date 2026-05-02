@@ -361,7 +361,18 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	if not weapon or not _current_target:
 		return
 
-	var rof: float = CombatTables.get_rof(weapon.rof_tier)
+	# Mesh strength bonus — V3 §Pillar 2. Sable units inside friendly
+	# Mesh provider auras get faster reload (rof shrinks) AND higher
+	# accuracy. Looked up via the scene-level MeshSystem singleton.
+	var mesh_strength: int = 0
+	var mesh_sys: Node = get_tree().current_scene.get_node_or_null("MeshSystem") if get_tree() else null
+	if mesh_sys and mesh_sys.has_method("strength_for"):
+		mesh_strength = mesh_sys.call("strength_for", _unit.global_position, _unit.get("owner_id") as int) as int
+	var reload_factor: float = 1.0
+	if mesh_sys and mesh_sys.has_method("reload_factor"):
+		reload_factor = mesh_sys.call("reload_factor", mesh_strength) as float
+
+	var rof: float = CombatTables.get_rof(weapon.rof_tier) * reload_factor
 	if is_primary:
 		# Burst pattern for very high RoF: BURST_SHOTS quick shots, then a
 		# longer pause that keeps the average DPS the same.
@@ -390,6 +401,9 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	if stats.squad_strength_bonus > 0.0:
 		var strength_ratio: float = _unit.get_squad_strength_ratio()
 		accuracy += stats.squad_strength_bonus * strength_ratio
+	# Mesh accuracy bonus — additive on top of squad-strength.
+	if mesh_sys and mesh_sys.has_method("accuracy_bonus"):
+		accuracy += mesh_sys.call("accuracy_bonus", mesh_strength) as float
 
 	# Role vs armor modifier
 	var target_armor: StringName = _get_target_armor()

@@ -95,6 +95,14 @@ extends Resource
 ## aircraft don't share the ground-unit speed tiers.
 @export var flight_speed: float = 14.0
 
+@export_group("Mesh")
+## V3 §"Pillar 2 — Neural Mesh" — when > 0, this unit emits a Mesh
+## aura of this radius. Sable units inside 1+ provider auras gain
+## stacked accuracy / reload bonuses (capped at 3 providers = 100%
+## strength). Examples per spec: Glitch Specter ~18u, Courier Sensor
+## Carrier ~24u, Harbinger Overseer ~30u, Pulsefont ~24u.
+@export var mesh_provider_radius: float = 0.0
+
 @export_group("Branch Upgrades")
 ## If this is a base unit, the two branch variant stats.
 @export var branch_a_stats: UnitStatResource

@@ -243,6 +243,11 @@ func _add_building_details() -> void:
 		&"gun_emplacement": _detail_gun_emplacement()
 		&"aerodrome": _detail_aerodrome()
 		&"sam_site": _detail_sam_site()
+		&"black_pylon": _detail_black_pylon()
+	# Mesh-provider aura ring (V3 §Pillar 2). Drawn after the type
+	# detail layer so the ring sits on top of the ground markings.
+	if stats.mesh_provider_radius > 0.0:
+		_add_mesh_aura_ring(stats.mesh_provider_radius)
 
 
 func _detail_universal_extras() -> void:
@@ -2727,6 +2732,83 @@ func _make_sable_hull_mat(c: Color) -> StandardMaterial3D:
 	m.metallic = 0.5
 	m.roughness = 0.5
 	return m
+
+
+func _detail_black_pylon() -> void:
+	## V3 §Pillar 2 — Sable's Mesh anchor structure. Tall thin
+	## obelisk + a stack of antenna rings + a violet pulse-point at
+	## the top. Visually unmistakable as "the Mesh node here".
+	var fs: Vector3 = stats.footprint_size
+	# Central column rising the full height.
+	var column := MeshInstance3D.new()
+	var col_box := BoxMesh.new()
+	col_box.size = Vector3(fs.x * 0.65, fs.y * 0.95, fs.z * 0.65)
+	column.mesh = col_box
+	column.position.y = fs.y * 0.475
+	column.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.10, 0.08, 0.16)))
+	_attach_visual(column)
+	# Antenna ring stack — three torus-like rings at intervals up
+	# the column, each slightly larger than the column's width.
+	const SABLE_VIOLET := Color(0.78, 0.35, 1.0, 1.0)
+	var ring_mat := StandardMaterial3D.new()
+	ring_mat.albedo_color = SABLE_VIOLET
+	ring_mat.emission_enabled = true
+	ring_mat.emission = SABLE_VIOLET
+	ring_mat.emission_energy_multiplier = 1.2
+	ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	for r_i: int in 3:
+		var ring := MeshInstance3D.new()
+		var torus := TorusMesh.new()
+		torus.inner_radius = fs.x * 0.40
+		torus.outer_radius = fs.x * 0.50
+		torus.rings = 16
+		torus.ring_segments = 6
+		ring.mesh = torus
+		ring.position.y = fs.y * (0.30 + float(r_i) * 0.22)
+		ring.set_surface_override_material(0, ring_mat)
+		_attach_visual(ring)
+	# Violet pulse-point at the top.
+	var pulse := MeshInstance3D.new()
+	var pulse_sphere := SphereMesh.new()
+	pulse_sphere.radius = 0.22
+	pulse_sphere.height = 0.44
+	pulse.mesh = pulse_sphere
+	pulse.position.y = fs.y + 0.20
+	pulse.set_surface_override_material(0, ring_mat)
+	_attach_visual(pulse)
+	# Glow point so the pylon casts violet onto the surrounding
+	# ground — matches the Mesh aura colour.
+	var glow := OmniLight3D.new()
+	glow.light_color = SABLE_VIOLET
+	glow.light_energy = 1.6
+	glow.omni_range = 6.0
+	glow.position.y = fs.y * 0.6
+	_attach_visual(glow)
+
+
+func _add_mesh_aura_ring(radius: float) -> void:
+	## Flat ground ring marking this building's Mesh aura coverage.
+	## Always visible to the controlling player; opponents see it
+	## only when they have line of sight on the structure.
+	var ring := MeshInstance3D.new()
+	ring.name = "MeshAuraRing"
+	var torus := TorusMesh.new()
+	torus.inner_radius = radius - 0.20
+	torus.outer_radius = radius
+	torus.rings = 48
+	torus.ring_segments = 4
+	ring.mesh = torus
+	ring.position.y = 0.05
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.78, 0.45, 1.0, 0.55)
+	mat.emission_enabled = true
+	mat.emission = Color(0.78, 0.45, 1.0, 1.0)
+	mat.emission_energy_multiplier = 0.9
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	ring.set_surface_override_material(0, mat)
+	add_child(ring)
 
 
 func _resolve_faction_id() -> int:

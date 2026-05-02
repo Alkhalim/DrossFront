@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+building_name = "Black Pylon"
+building_id = &"black_pylon"
+hp = 1100
+cost_salvage = 320
+build_time = 38.0
+power_consumption = 0
+power_production = 25
+footprint_size = Vector3(3.2, 6.0, 3.2)
+placeholder_color = Color(0.10, 0.08, 0.16, 1)
+is_advanced = true
+prerequisites = [&"basic_armory"]
+mesh_provider_radius = 35.0
+faction_lock = 2
