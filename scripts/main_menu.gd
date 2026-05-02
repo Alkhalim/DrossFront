@@ -990,15 +990,24 @@ func _build_tech_tree_card(n: Dictionary, roster: Dictionary) -> PanelContainer:
 			var unit_stat: UnitStatResource = load(path) as UnitStatResource
 			if not unit_stat:
 				continue
-			var u_lbl := Label.new()
-			u_lbl.text = "• %s  (%dS%s)" % [
+			# Use a Label-shaped tooltip-aware container. Plain Label
+			# in Godot doesn't surface mouse_filter properly for
+			# tooltip dispatch, so wrap in a Button styled flat to
+			# get hover behaviour without the click affordance.
+			var u_btn := Button.new()
+			u_btn.text = "• %s  (%dS%s)" % [
 				unit_stat.unit_name,
 				unit_stat.cost_salvage,
 				"" if unit_stat.cost_fuel == 0 else " / %dF" % unit_stat.cost_fuel,
 			]
-			u_lbl.add_theme_font_size_override("font_size", 12)
-			u_lbl.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85, 1.0))
-			col.add_child(u_lbl)
+			u_btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			u_btn.flat = true
+			u_btn.focus_mode = Control.FOCUS_NONE
+			u_btn.add_theme_font_size_override("font_size", 12)
+			u_btn.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85, 1.0))
+			u_btn.add_theme_color_override("font_hover_color", Color(1.0, 0.95, 0.78, 1.0))
+			u_btn.tooltip_text = _tech_tree_unit_tooltip(unit_stat)
+			col.add_child(u_btn)
 
 	return panel
 
@@ -1038,6 +1047,45 @@ class _TechTreeArrowOverlay extends Control:
 			var head_a: Vector2 = to_pt + Vector2(-head_size, -head_size * 0.6)
 			var head_b: Vector2 = to_pt + Vector2(-head_size, head_size * 0.6)
 			draw_polygon(PackedVector2Array([to_pt, head_a, head_b]), PackedColorArray([arrow_color]))
+
+
+func _tech_tree_unit_tooltip(stat: UnitStatResource) -> String:
+	## Compact info readout for hovering a unit chip in the tech-tree
+	## modal. Plain text only -- Godot's tooltip_text rendering doesn't
+	## interpret BBCode, so star bars / colored chips would show as
+	## literal tags. Keeps the lines short so the tooltip popup
+	## doesn't grow off-screen on small panels.
+	if not stat:
+		return ""
+	var lines: PackedStringArray = PackedStringArray()
+	lines.append("%s — %s" % [stat.unit_name, str(stat.unit_class).capitalize()])
+	lines.append("HP %d   Squad %d   Pop %d" % [stat.hp_total, stat.squad_size, stat.population])
+	lines.append("Cost  %dS / %dF   Build %.1fs" % [stat.cost_salvage, stat.cost_fuel, stat.build_time])
+	lines.append("Armor %s   Speed %.0f u/s   Sight %.0fu" % [
+		str(stat.armor_class).capitalize(),
+		stat.resolved_speed(),
+		stat.resolved_sight_radius(),
+	])
+	if stat.primary_weapon:
+		var pw: WeaponResource = stat.primary_weapon
+		lines.append("Primary: %s — %s, %d dmg, %.0fu, %.2fs cd" % [
+			pw.weapon_name if pw.weapon_name else "Cannon",
+			str(pw.role_tag),
+			pw.resolved_damage(),
+			pw.resolved_range(),
+			pw.resolved_rof_seconds(),
+		])
+	if stat.secondary_weapon:
+		var sw: WeaponResource = stat.secondary_weapon
+		lines.append("Secondary: %s — %s, %d dmg" % [
+			sw.weapon_name if sw.weapon_name else "Backup",
+			str(sw.role_tag),
+			sw.resolved_damage(),
+		])
+	if stat.special_description != "":
+		lines.append("")
+		lines.append(stat.special_description)
+	return "\n".join(lines)
 
 
 func _faction_summary(faction_id: int) -> String:
