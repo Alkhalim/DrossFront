@@ -436,7 +436,12 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 		_secondary_cooldown = rof
 
 	var base_damage: int = CombatTables.get_damage(weapon.damage_tier)
-	var shots: int = _unit.get("alive_count")
+	# Salvo support — a salvo_count of N fires N projectiles per
+	# squad member per fire tick. Each projectile deals base_damage
+	# independently; weapons with high salvo (Hammerhead missiles)
+	# pre-pay this by carrying a smaller per-projectile damage tier.
+	var salvo_count: int = maxi(int(weapon.salvo_count), 1)
+	var shots: int = (_unit.get("alive_count") as int) * salvo_count
 
 	# Squad strength accuracy bonus
 	var stats: UnitStatResource = _unit.get("stats") as UnitStatResource
@@ -554,8 +559,11 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 
 		if proj_script:
 			var fire_pos: Vector3 = _unit.global_position
-			if i < muzzle_positions.size():
-				fire_pos = muzzle_positions[i]
+			# Modulo so salvo shots (i past the muzzle count) cycle
+			# back through the available muzzles instead of all
+			# spawning from the unit's centre.
+			if not muzzle_positions.is_empty():
+				fire_pos = muzzle_positions[i % muzzle_positions.size()]
 
 			if is_shotgun:
 				var to_target: Vector3 = aim_pos - fire_pos

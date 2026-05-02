@@ -2775,7 +2775,12 @@ func _weapon_dps(weapon: WeaponResource) -> float:
 	var rof: float = CombatTables.get_rof(weapon.rof_tier)
 	if rof <= 0.0:
 		return 0.0
-	return dmg / rof
+	# Salvo weapons fire salvo_count projectiles per cooldown,
+	# each dealing the weapon's damage independently. The displayed
+	# DPS has to mirror that multiplier or the Hammerhead's
+	# six-tube missile pod under-reads at 1/6 of its real output.
+	var salvo: int = maxi(int(weapon.salvo_count), 1)
+	return (dmg * float(salvo)) / rof
 
 
 func _unit_tooltip(stat: UnitStatResource) -> String:

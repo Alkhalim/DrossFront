@@ -15,11 +15,12 @@ rof_tier = &"slow"
 
 [sub_resource type="Resource" id="weapon_underwing_missiles"]
 script = ExtResource("2")
-weapon_name = "Underwing Missile Pods"
+weapon_name = "Underwing Missile Pods (6-tube)"
 role_tag = &"AA"
-damage_tier = &"high"
+damage_tier = &"low"
 range_tier = &"long"
 rof_tier = &"slow"
+salvo_count = 6
 
 [resource]
 script = ExtResource("1")

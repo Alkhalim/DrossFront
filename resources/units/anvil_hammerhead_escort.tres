@@ -5,12 +5,13 @@
 
 [sub_resource type="Resource" id="weapon_escort_aa"]
 script = ExtResource("2")
-weapon_name = "Tracking AA Missiles"
+weapon_name = "Tracking AA Missiles (6-tube)"
 role_tag = &"AAir"
-damage_tier = &"high"
+damage_tier = &"low"
 range_tier = &"long"
 rof_tier = &"moderate"
 base_accuracy = 0.92
+salvo_count = 6
 
 [sub_resource type="Resource" id="weapon_escort_chin_cannon"]
 script = ExtResource("2")

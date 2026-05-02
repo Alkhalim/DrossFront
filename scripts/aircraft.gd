@@ -661,14 +661,55 @@ func _build_hammerhead() -> void:
 	var team: Color = _team_color()
 	var body_color := Color(0.32, 0.30, 0.27, 1.0)
 
-	# Wide hull (smaller than v1 — was 2.6x0.7x4.5).
-	var hull := MeshInstance3D.new()
-	hull.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var hull_box := BoxMesh.new()
-	hull_box.size = Vector3(2.0, 0.55, 3.4)
-	hull.mesh = hull_box
-	hull.set_surface_override_material(0, _aircraft_metal_mat(body_color))
-	add_child(hull)
+	# Hull broken into three stacked / nested segments instead of a
+	# single 2.0×0.55×3.4 brick — the original silhouette read as
+	# one big block from any zoom. Front segment is narrowest +
+	# tallest (cockpit pod), mid segment carries the spine and is
+	# the widest, rear segment tapers down to the boom. Two
+	# chamfer plates on the top edges tie the segments together
+	# and break the boxy silhouette.
+	var hull_front := MeshInstance3D.new()
+	hull_front.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var hull_front_box := BoxMesh.new()
+	hull_front_box.size = Vector3(1.55, 0.55, 1.10)
+	hull_front.mesh = hull_front_box
+	hull_front.position = Vector3(0, 0.02, 1.05)
+	hull_front.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.04)))
+	add_child(hull_front)
+
+	var hull_mid := MeshInstance3D.new()
+	hull_mid.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var hull_mid_box := BoxMesh.new()
+	hull_mid_box.size = Vector3(2.0, 0.55, 1.30)
+	hull_mid.mesh = hull_mid_box
+	hull_mid.position = Vector3(0, 0.0, 0.0)
+	hull_mid.set_surface_override_material(0, _aircraft_metal_mat(body_color))
+	add_child(hull_mid)
+
+	var hull_rear := MeshInstance3D.new()
+	hull_rear.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var hull_rear_box := BoxMesh.new()
+	hull_rear_box.size = Vector3(1.65, 0.45, 1.10)
+	hull_rear.mesh = hull_rear_box
+	hull_rear.position = Vector3(0, -0.02, -1.10)
+	hull_rear.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.06)))
+	add_child(hull_rear)
+
+	# Two chamfer plates joining the segments — slim slabs tilted
+	# inward on the top edges so the silhouette steps down from
+	# mid to front and from mid to rear instead of a hard ledge.
+	for chamfer_z: int in 2:
+		var chamfer := MeshInstance3D.new()
+		chamfer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var ch_box := BoxMesh.new()
+		ch_box.size = Vector3(1.7, 0.05, 0.55)
+		chamfer.mesh = ch_box
+		var cz: float = 0.55 if chamfer_z == 0 else -0.55
+		var crot: float = -0.30 if chamfer_z == 0 else 0.30
+		chamfer.position = Vector3(0, 0.27, cz)
+		chamfer.rotation.x = crot
+		chamfer.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.10)))
+		add_child(chamfer)
 
 	# Tapered nose — angled slab in front.
 	var nose := MeshInstance3D.new()
@@ -700,17 +741,43 @@ func _build_hammerhead() -> void:
 	canopy.set_surface_override_material(0, canopy_mat)
 	add_child(canopy)
 
-	# Twin engine nacelles flanking the body.
+	# Twin engine nacelles flanking the body. Each nacelle is now
+	# split into a forward intake block + an aft thrust block, with
+	# a slim cooling-fin band wrapping the join — same overall
+	# silhouette, much less monolithic at zoom.
 	for side: int in 2:
 		var sx: float = 1.0 if side == 0 else -1.0
-		var nacelle := MeshInstance3D.new()
-		nacelle.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		var nacelle_box := BoxMesh.new()
-		nacelle_box.size = Vector3(0.50, 0.55, 2.0)
-		nacelle.mesh = nacelle_box
-		nacelle.position = Vector3(sx * 1.30, 0.0, -0.30)
-		nacelle.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.1)))
-		add_child(nacelle)
+		var nacelle_fwd := MeshInstance3D.new()
+		nacelle_fwd.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var n_fwd_box := BoxMesh.new()
+		n_fwd_box.size = Vector3(0.50, 0.55, 0.95)
+		nacelle_fwd.mesh = n_fwd_box
+		nacelle_fwd.position = Vector3(sx * 1.30, 0.04, 0.20)
+		nacelle_fwd.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.08)))
+		add_child(nacelle_fwd)
+
+		var nacelle_aft := MeshInstance3D.new()
+		nacelle_aft.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var n_aft_box := BoxMesh.new()
+		n_aft_box.size = Vector3(0.46, 0.50, 0.90)
+		nacelle_aft.mesh = n_aft_box
+		nacelle_aft.position = Vector3(sx * 1.30, -0.02, -0.78)
+		nacelle_aft.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.16)))
+		add_child(nacelle_aft)
+
+		# Cooling-fin band — three thin slabs ringing the nacelle
+		# join so the gap between fwd / aft sections reads as a
+		# real machined seam instead of a stuck-on box.
+		for fin_y: int in 3:
+			var fin := MeshInstance3D.new()
+			fin.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var fb := BoxMesh.new()
+			fb.size = Vector3(0.58, 0.05, 0.10)
+			fin.mesh = fb
+			var fy: float = (float(fin_y) - 1.0) * 0.18
+			fin.position = Vector3(sx * 1.30, fy, -0.30)
+			fin.set_surface_override_material(0, _aircraft_metal_mat(Color(0.10, 0.10, 0.12, 1.0)))
+			add_child(fin)
 
 		# Intake grille on the nacelle face — shallow recess + cross-bars
 		# so the front of the engine reads as an air intake, not a brick.
@@ -1131,14 +1198,62 @@ func _build_wraith() -> void:
 	var team: Color = _team_color()
 	var body_color := Color(0.06, 0.06, 0.10, 1.0)
 
-	# Wide flat flying-wing fuselage.
-	var fuselage := MeshInstance3D.new()
-	fuselage.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var fuse_box := BoxMesh.new()
-	fuse_box.size = Vector3(2.2, 0.30, 3.0)
-	fuselage.mesh = fuse_box
-	fuselage.set_surface_override_material(0, _aircraft_metal_mat(body_color))
-	add_child(fuselage)
+	# Fuselage broken into a tapered four-section spine instead of a
+	# single 2.2×0.30×3.0 brick. Going (back to front): rear vent
+	# block (narrow), mid-rear bay (wide, deep), mid-front lift
+	# section (full width), and a slim front beak (narrowest, tall
+	# enough to take the cockpit blister). Each section nudges the
+	# colour one shade so the joins read.
+	var seg_back := MeshInstance3D.new()
+	seg_back.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var seg_back_box := BoxMesh.new()
+	seg_back_box.size = Vector3(1.55, 0.22, 0.85)
+	seg_back.mesh = seg_back_box
+	seg_back.position = Vector3(0, -0.02, -1.05)
+	seg_back.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.08)))
+	add_child(seg_back)
+
+	var seg_mid_rear := MeshInstance3D.new()
+	seg_mid_rear.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var seg_mr_box := BoxMesh.new()
+	seg_mr_box.size = Vector3(2.2, 0.32, 0.95)
+	seg_mid_rear.mesh = seg_mr_box
+	seg_mid_rear.position = Vector3(0, 0.0, -0.30)
+	seg_mid_rear.set_surface_override_material(0, _aircraft_metal_mat(body_color))
+	add_child(seg_mid_rear)
+
+	var seg_mid_fwd := MeshInstance3D.new()
+	seg_mid_fwd.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var seg_mf_box := BoxMesh.new()
+	seg_mf_box.size = Vector3(2.0, 0.30, 0.85)
+	seg_mid_fwd.mesh = seg_mf_box
+	seg_mid_fwd.position = Vector3(0, 0.01, 0.50)
+	seg_mid_fwd.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.04)))
+	add_child(seg_mid_fwd)
+
+	var seg_beak := MeshInstance3D.new()
+	seg_beak.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var seg_beak_box := BoxMesh.new()
+	seg_beak_box.size = Vector3(1.10, 0.36, 0.90)
+	seg_beak.mesh = seg_beak_box
+	seg_beak.position = Vector3(0, 0.04, 1.20)
+	seg_beak.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.10)))
+	add_child(seg_beak)
+
+	# Two slim triangular gap-fillers tucked between segments so the
+	# steps in width don't read as ledges from above.
+	for filler_z: int in 2:
+		var filler := MeshInstance3D.new()
+		filler.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var ff := BoxMesh.new()
+		ff.size = Vector3(2.0, 0.05, 0.30)
+		filler.mesh = ff
+		var fz: float = 0.10 if filler_z == 0 else -0.85
+		var frot: float = 0.18 if filler_z == 0 else -0.18
+		filler.position = Vector3(0, 0.13, fz)
+		filler.rotation.x = frot
+		filler.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.16)))
+		add_child(filler)
 
 	# Forward delta wings — large swept slabs angled out from the
 	# nose, giving the unmistakable stealth-bomber silhouette.

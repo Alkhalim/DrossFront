@@ -32,3 +32,13 @@ extends Resource
 ## to [0.30, 0.99] in CombatComponent so no shot is impossible and no
 ## non-elite shot is guaranteed.
 @export_range(0.0, 1.0, 0.01) var base_accuracy: float = 0.82
+
+## Per-shot salvo count. Default 1 = standard one-projectile-per-cooldown
+## fire. Set higher (e.g. 6 for the Hammerhead's underwing missile pods)
+## to fire a multi-projectile burst on every fire tick. Each projectile
+## in the salvo deals the weapon's damage independently — set the per-
+## projectile damage_tier lower when raising salvo_count so the total
+## per-cooldown damage stays in budget. CombatTables-aware code
+## (DPS readout in HUD, fire loop in CombatComponent) multiplies by
+## salvo_count automatically.
+@export_range(1, 12, 1) var salvo_count: int = 1
