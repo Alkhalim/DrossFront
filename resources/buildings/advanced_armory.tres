@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+building_name = "Advanced Armory"
+building_id = &"advanced_armory"
+hp = 1500
+cost_salvage = 320
+build_time = 38.0
+power_consumption = 12
+power_production = 0
+footprint_size = Vector3(6.5, 3.0, 4.0)
+placeholder_color = Color(0.32, 0.30, 0.34, 1)
+is_advanced = true
+prerequisites = [&"basic_armory"]

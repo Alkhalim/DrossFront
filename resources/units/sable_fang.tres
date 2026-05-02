@@ -28,6 +28,7 @@ cost_salvage = 195
 cost_fuel = 25
 build_time = 24.0
 built_at = &"aerodrome"
+unlock_prerequisite = &"advanced_armory"
 primary_weapon = SubResource("weapon_micro_missile")
 squad_strength_bonus = 0.10
 special_description = "Sable swarm of 10 light drones."

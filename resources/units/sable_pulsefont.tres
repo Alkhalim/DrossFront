@@ -28,6 +28,7 @@ cost_salvage = 335
 cost_fuel = 42
 build_time = 28.0
 built_at = &"advanced_foundry"
+unlock_prerequisite = &"advanced_armory"
 primary_weapon = SubResource("weapon_pulse_sidearm")
 detection_radius = 100.0
 mesh_provider_radius = 16.0

@@ -29,6 +29,7 @@ cost_salvage = 420
 cost_fuel = 56
 build_time = 48.0
 built_at = &"aerodrome"
+unlock_prerequisite = &"advanced_armory"
 primary_weapon = SubResource("weapon_pintle")
 ability_name = "Missile Barrage"
 ability_hotkey = "D"

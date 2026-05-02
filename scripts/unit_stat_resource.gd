@@ -42,6 +42,15 @@ extends Resource
 ## Building required: "headquarters", "basic_foundry", "advanced_foundry", "aerodrome"
 @export var built_at: StringName = &"basic_foundry"
 
+## Optional tech-tree gate. Empty = always available once `built_at`
+## exists. Non-empty = the listed building (by building_id) must also
+## be constructed before this unit can be queued. Building.get_producible_units()
+## filters trained-from lists by this prereq, so a unit hidden behind
+## an Advanced Armory still lives in its production building's
+## producible_units array — the gate just hides it until the prereq
+## is satisfied. One id only; the unit/building tech tree is shallow.
+@export var unlock_prerequisite: StringName = &""
+
 @export_group("Weapons")
 ## Primary weapon.
 @export var primary_weapon: WeaponResource

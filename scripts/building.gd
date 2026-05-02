@@ -245,6 +245,7 @@ func _add_building_details() -> void:
 		&"advanced_foundry": _detail_foundry(true)
 		&"basic_generator": _detail_generator()
 		&"basic_armory": _detail_armory()
+		&"advanced_armory": _detail_advanced_armory()
 		&"salvage_yard": _detail_salvage_yard()
 		&"gun_emplacement": _detail_gun_emplacement()
 		&"aerodrome": _detail_aerodrome()
@@ -1028,6 +1029,92 @@ func _detail_armory() -> void:
 	lip.position = Vector3(0, fs.y, -fs.z * 0.5 - 0.15)
 	lip.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.2, 0.18)))
 	_attach_visual(lip)
+
+
+func _detail_advanced_armory() -> void:
+	## Advanced Armory silhouette — reads as "upgraded armory" rather
+	## than a different building. Keeps the rib panels + dock door of
+	## the basic armory so the family resemblance is obvious, then
+	## adds: a raised research bay with skylights on the roof, a
+	## dish/scanner on top, and violet emissive accents (vs the basic
+	## armory's amber strip) so the player can pick it out at range.
+	var fs: Vector3 = stats.footprint_size
+	# Vertical rib panels along each side wall — same as basic armory.
+	for side: int in 2:
+		var sx: float = -fs.x * 0.5 if side == 0 else fs.x * 0.5
+		for i: int in 3:
+			var rib := MeshInstance3D.new()
+			var rib_box := BoxMesh.new()
+			rib_box.size = Vector3(0.06, fs.y * 0.7, 0.18)
+			rib.mesh = rib_box
+			var rib_z: float = (float(i) - 1.0) * fs.z * 0.3
+			rib.position = Vector3(sx + (-0.04 if side == 0 else 0.04), fs.y * 0.5, rib_z)
+			rib.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.20, 0.18, 0.20)))
+			_attach_visual(rib)
+
+	# Raised research bay on the roof — a smaller setback box that
+	# reads as a second story / clean room. The skylight strips on
+	# its sides hint at the optics work happening inside.
+	var bay := MeshInstance3D.new()
+	var bay_box := BoxMesh.new()
+	bay_box.size = Vector3(fs.x * 0.6, fs.y * 0.45, fs.z * 0.55)
+	bay.mesh = bay_box
+	bay.position = Vector3(0, fs.y + bay_box.size.y * 0.5, 0)
+	bay.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.26, 0.24, 0.28)))
+	_attach_visual(bay)
+
+	# Violet skylight strip wrapping the bay's long sides — distinguishes
+	# Advanced Armory from Basic Armory's amber indicator.
+	for side: int in 2:
+		var sx: float = -bay_box.size.x * 0.5 - 0.02 if side == 0 else bay_box.size.x * 0.5 + 0.02
+		var skylight := MeshInstance3D.new()
+		var sk_box := BoxMesh.new()
+		sk_box.size = Vector3(0.04, bay_box.size.y * 0.4, bay_box.size.z * 0.85)
+		skylight.mesh = sk_box
+		skylight.position = Vector3(sx, fs.y + bay_box.size.y * 0.55, 0)
+		skylight.set_surface_override_material(0, _detail_emissive_mat(Color(0.78, 0.45, 1.0), 1.6))
+		_attach_visual(skylight)
+
+	# Dish / scanner mast on the roof bay — angled slightly so the
+	# silhouette reads from the side as well as above.
+	var mast := MeshInstance3D.new()
+	var mast_box := BoxMesh.new()
+	mast_box.size = Vector3(0.08, bay_box.size.y * 0.9, 0.08)
+	mast.mesh = mast_box
+	mast.position = Vector3(fs.x * 0.18, fs.y + bay_box.size.y + mast_box.size.y * 0.5, fs.z * 0.05)
+	mast.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.16, 0.18)))
+	_attach_visual(mast)
+
+	var dish := MeshInstance3D.new()
+	var dish_cyl := CylinderMesh.new()
+	dish_cyl.top_radius = 0.36
+	dish_cyl.bottom_radius = 0.36
+	dish_cyl.height = 0.06
+	dish.mesh = dish_cyl
+	dish.position = Vector3(fs.x * 0.18, fs.y + bay_box.size.y + mast_box.size.y, fs.z * 0.05)
+	dish.rotation = Vector3(deg_to_rad(20.0), 0.0, 0.0)
+	dish.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.30, 0.28, 0.32)))
+	_attach_visual(dish)
+
+	# Loading dock door on the front — same layout as basic armory so
+	# the building still reads as an armory at a glance.
+	var dock := MeshInstance3D.new()
+	var dock_box := BoxMesh.new()
+	dock_box.size = Vector3(fs.x * 0.4, fs.y * 0.55, 0.08)
+	dock.mesh = dock_box
+	dock.position = Vector3(0, fs.y * 0.3, -fs.z * 0.5 - 0.04)
+	dock.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.14, 0.13, 0.14)))
+	_attach_visual(dock)
+
+	# Violet edge piping around the dock — the second giveaway that
+	# this is the upgraded armory.
+	var pipe_top := MeshInstance3D.new()
+	var pipe_top_box := BoxMesh.new()
+	pipe_top_box.size = Vector3(dock_box.size.x + 0.08, 0.04, 0.04)
+	pipe_top.mesh = pipe_top_box
+	pipe_top.position = Vector3(0, fs.y * 0.3 + dock_box.size.y * 0.5 + 0.04, -fs.z * 0.5 - 0.085)
+	pipe_top.set_surface_override_material(0, _detail_emissive_mat(Color(0.78, 0.45, 1.0), 1.4))
+	_attach_visual(pipe_top)
 
 
 func _detail_salvage_yard() -> void:
@@ -1910,7 +1997,7 @@ func _roof_color_for_category() -> Color:
 			return _ROOF_PRODUCTION
 		&"salvage_yard":
 			return _ROOF_ECONOMY
-		&"basic_armory":
+		&"basic_armory", &"advanced_armory":
 			return _ROOF_TECH
 		&"basic_generator":
 			return _ROOF_POWER
@@ -2357,9 +2444,27 @@ func queue_unit(unit_stats: UnitStatResource) -> bool:
 ## per building_id, falling back to the Anvil list for tiers Sable
 ## hasn't filled in yet (V3 incremental rollout — Sable engineer/light/
 ## medium/heavy + air units exist; Crawler is shared with Anvil).
+##
+## After the faction lookup runs we apply unit-side tech gates: any
+## UnitStatResource with unlock_prerequisite set is filtered out unless
+## the owner has constructed that building. This is how Forgemaster /
+## Hammerhead / Wraith / etc. are hidden behind the Advanced Armory
+## (or Black Pylon, for Wraith) — the building keeps the unit in its
+## producible_units list and the unit's gate decides visibility.
 func get_producible_units() -> Array[UnitStatResource]:
 	if not stats:
 		return []
+	var unfiltered: Array[UnitStatResource] = _faction_producible_list()
+	if unfiltered.is_empty():
+		return unfiltered
+	var out: Array[UnitStatResource] = []
+	for u: UnitStatResource in unfiltered:
+		if u and _unit_unlock_prerequisite_met(u):
+			out.append(u)
+	return out
+
+
+func _faction_producible_list() -> Array[UnitStatResource]:
 	var faction_id: int = _resolve_faction_id()
 	# 0 = Anvil (default), 1 = Sable per MatchSettingsClass.FactionId.
 	if faction_id != 1:
@@ -2367,6 +2472,10 @@ func get_producible_units() -> Array[UnitStatResource]:
 
 	# Sable lookup — keyed by building_id. Each entry is a list of
 	# resource paths that we lazy-load and resolve to UnitStatResources.
+	# Tech gates (Advanced Armory / Black Pylon) are applied by the
+	# caller via unit.unlock_prerequisite, so the lists below are the
+	# *full* roster — the gate filter hides what the player hasn't
+	# unlocked yet.
 	var sable_paths: Array[String] = []
 	match stats.building_id:
 		&"headquarters":
@@ -2379,23 +2488,19 @@ func get_producible_units() -> Array[UnitStatResource]:
 			sable_paths = [
 				"res://resources/units/sable_specter.tres",
 				"res://resources/units/sable_jackal.tres",
-				"res://resources/units/sable_courier_tank.tres",
 			]
 		&"advanced_foundry":
 			sable_paths = [
 				"res://resources/units/sable_harbinger.tres",
+				"res://resources/units/sable_courier_tank.tres",
 				"res://resources/units/sable_pulsefont.tres",
 			]
 		&"aerodrome":
 			sable_paths = [
-				"res://resources/units/sable_fang.tres",
 				"res://resources/units/sable_switchblade.tres",
+				"res://resources/units/sable_fang.tres",
+				"res://resources/units/sable_wraith.tres",
 			]
-			# Wraith stealth bomber requires a constructed Black Pylon
-			# (V3 spec). Players who have one can train Wraith from the
-			# aerodrome too; otherwise the entry is hidden.
-			if _local_player_has_built(&"black_pylon"):
-				sable_paths.append("res://resources/units/sable_wraith.tres")
 		_:
 			# Building type without a Sable-specific roster — fall back
 			# to the default list (e.g., salvage_yard has no produced
@@ -2412,6 +2517,18 @@ func get_producible_units() -> Array[UnitStatResource]:
 	if out.is_empty():
 		return stats.producible_units
 	return out
+
+
+func _unit_unlock_prerequisite_met(u: UnitStatResource) -> bool:
+	## True when the owner has met the unit's tech gate. No gate set =
+	## always true. The gate is a single building_id — keep it simple,
+	## the unit/building tech tree is shallow.
+	if not u:
+		return true
+	var prereq: StringName = u.unlock_prerequisite
+	if prereq == &"":
+		return true
+	return _local_player_has_built(prereq)
 
 
 func _apply_sable_building_silhouette() -> void:

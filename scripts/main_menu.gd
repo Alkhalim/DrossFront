@@ -707,26 +707,37 @@ func _start_match() -> void:
 
 
 const _FACTION_ROSTER: Dictionary = {
-	# Anvil — same role-keyed table the test arena uses.
+	# Per-faction roster keyed by the slot the in-match tech tree
+	# fills — keys map to the chain rows in _show_faction_tech_tree.
+	# light_a/light_b are the two baseline Foundry units, heavy_base
+	# is the Adv-Foundry baseline, heavy_adv is the Adv-Armory-gated
+	# heavy slot, air_base is the Aerodrome baseline, air_adv is the
+	# Adv-Armory-gated air slot, transport_adv is Sable's third Adv-
+	# Foundry unit (Courier Tank), pylon_air is the Black-Pylon-gated
+	# Wraith. Anvil leaves slots it doesn't fill empty.
 	0: {
 		"label": "Anvil Directive",
-		"engineer": "res://resources/units/anvil_ratchet.tres",
-		"light":    "res://resources/units/anvil_hound.tres",
-		"medium":   "res://resources/units/anvil_rook.tres",
-		"heavy":    "res://resources/units/anvil_bulwark.tres",
-		"crawler":  "res://resources/units/anvil_crawler.tres",
-		"air_drone":"res://resources/units/anvil_phalanx.tres",
-		"air_heavy":"res://resources/units/anvil_hammerhead.tres",
+		"engineer":      "res://resources/units/anvil_ratchet.tres",
+		"crawler":       "res://resources/units/anvil_crawler.tres",
+		"light_a":       "res://resources/units/anvil_rook.tres",
+		"light_b":       "res://resources/units/anvil_hound.tres",
+		"heavy_base":    "res://resources/units/anvil_bulwark.tres",
+		"heavy_adv":     "res://resources/units/anvil_forgemaster.tres",
+		"air_base":      "res://resources/units/anvil_phalanx.tres",
+		"air_adv":       "res://resources/units/anvil_hammerhead.tres",
 	},
 	1: {
 		"label": "Sable Concord",
-		"engineer": "res://resources/units/sable_rigger.tres",
-		"light":    "res://resources/units/sable_specter.tres",
-		"medium":   "res://resources/units/sable_jackal.tres",
-		"heavy":    "res://resources/units/sable_harbinger.tres",
-		"crawler":  "res://resources/units/anvil_crawler.tres",  # shared chassis (faction overlay handles look)
-		"air_drone":"res://resources/units/sable_fang.tres",
-		"air_heavy":"res://resources/units/sable_switchblade.tres",
+		"engineer":      "res://resources/units/sable_rigger.tres",
+		"crawler":       "res://resources/units/anvil_crawler.tres",  # shared chassis
+		"light_a":       "res://resources/units/sable_specter.tres",
+		"light_b":       "res://resources/units/sable_jackal.tres",
+		"heavy_base":    "res://resources/units/sable_harbinger.tres",
+		"heavy_adv":     "res://resources/units/sable_pulsefont.tres",
+		"transport_adv": "res://resources/units/sable_courier_tank.tres",
+		"air_base":      "res://resources/units/sable_switchblade.tres",
+		"air_adv":       "res://resources/units/sable_fang.tres",
+		"pylon_air":     "res://resources/units/sable_wraith.tres",
 	},
 }
 
@@ -780,12 +791,16 @@ func _show_faction_tech_tree(faction_id: int) -> void:
 
 	# Build chain — each entry shows the building gate + the units
 	# unlocked at that gate. Reads top-down as the actual progression
-	# the player follows in match.
+	# the player follows in match. Slots a roster doesn't fill (e.g.
+	# Anvil has no transport_adv, Sable has no pylon_air for Anvil)
+	# are silently skipped by the per-tier role iteration below.
 	var chain: Array[Dictionary] = [
 		{"gate": "Headquarters (start)", "roles": ["engineer", "crawler"]},
-		{"gate": "Basic Foundry (250 S)", "roles": ["light", "medium"]},
-		{"gate": "Advanced Foundry (350 S, requires Basic Foundry)", "roles": ["heavy"]},
-		{"gate": "Aerodrome (300 S, requires Advanced Foundry)", "roles": ["air_drone", "air_heavy"]},
+		{"gate": "Basic Foundry (250 S, requires Headquarters)", "roles": ["light_a", "light_b"]},
+		{"gate": "Advanced Foundry (350 S, requires Basic Foundry)", "roles": ["heavy_base"]},
+		{"gate": "Aerodrome (300 S, requires Advanced Foundry)", "roles": ["air_base"]},
+		{"gate": "Advanced Armory (320 S, requires Basic Armory) — unlocks the second slot at Adv Foundry & Aerodrome and houses their branch upgrades", "roles": ["heavy_adv", "transport_adv", "air_adv"]},
+		{"gate": "Black Pylon (Sable only, requires Basic Armory) — Mesh anchor; unlocks the Wraith bomber", "roles": ["pylon_air"]},
 	]
 	for tier: Dictionary in chain:
 		var tier_lbl := Label.new()

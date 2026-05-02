@@ -1114,16 +1114,16 @@ func _update_building_panel(building: Building) -> void:
 	# while a research project is in flight, where we rebuild every frame
 	# so the percentage label stays live.
 	var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
-	var armory_in_progress: bool = (
+	var is_armory: bool = (
 		building.stats.building_id == &"basic_armory"
-		and rm
-		and rm.is_in_progress()
+		or building.stats.building_id == &"advanced_armory"
 	)
+	var armory_in_progress: bool = is_armory and rm and rm.is_in_progress()
 	if bid != _last_building_id or armory_in_progress:
 		_last_building_id = bid
 		_last_unit_ids.clear()
 		_showing_build_buttons = false
-		if building.stats.building_id == &"basic_armory":
+		if is_armory:
 			_rebuild_armory_buttons(building)
 		elif building.has_node("TurretComponent"):
 			_rebuild_turret_profile_buttons(building)
@@ -1157,7 +1157,7 @@ func _update_building_panel(building: Building) -> void:
 			_show_progress(yard.get_spawn_progress(), Color(0.55, 0.95, 0.55, 0.95))
 		else:
 			_hide_progress()
-	elif building.stats.building_id == &"basic_armory":
+	elif building.stats.building_id == &"basic_armory" or building.stats.building_id == &"advanced_armory":
 		var bcm: Node = get_tree().current_scene.get_node_or_null("BranchCommitManager")
 		if bcm and bcm.has_method("is_committing") and bcm.is_committing():
 			var bname: String = bcm.get_commit_branch_name()
@@ -2285,29 +2285,36 @@ func _turret_profile_tooltip(key: StringName, data: Dictionary) -> String:
 	return "\n".join(lines)
 
 
-## Faction roster of base units that have a branch commit. Only base
-## units listed here surface in the Armory. Order matters — the panel
-## renders these top-to-bottom in the same order the player sees in
-## the Foundry production lineup.
-const ANVIL_BRANCHED_UNITS: Array[String] = [
+## Faction roster of base units that have a branch commit, split by
+## the armory that hosts them. The Basic Armory hosts upgrades for
+## units the player gets from the production buildings on their own
+## (Foundry baseline / Adv Foundry baseline / Aerodrome baseline).
+## The Advanced Armory hosts upgrades for the units it itself unlocks
+## via the Advanced Armory tech gate. Order matters — rendered top
+## to bottom in the same order the production lineup uses.
+const ANVIL_BASIC_BRANCHED_UNITS: Array[String] = [
 	"res://resources/units/anvil_rook.tres",
 	"res://resources/units/anvil_hound.tres",
-	"res://resources/units/anvil_phalanx.tres",
-	"res://resources/units/anvil_hammerhead.tres",
 	"res://resources/units/anvil_bulwark.tres",
-	"res://resources/units/anvil_forgemaster.tres",
+	"res://resources/units/anvil_phalanx.tres",
 ]
-const SABLE_BRANCHED_UNITS: Array[String] = [
+const ANVIL_ADVANCED_BRANCHED_UNITS: Array[String] = [
+	"res://resources/units/anvil_forgemaster.tres",
+	"res://resources/units/anvil_hammerhead.tres",
+]
+const SABLE_BASIC_BRANCHED_UNITS: Array[String] = [
 	"res://resources/units/sable_specter.tres",
 	"res://resources/units/sable_jackal.tres",
+	"res://resources/units/sable_harbinger.tres",
+	"res://resources/units/sable_switchblade.tres",
+]
+const SABLE_ADVANCED_BRANCHED_UNITS: Array[String] = [
 	"res://resources/units/sable_courier_tank.tres",
 	"res://resources/units/sable_fang.tres",
-	"res://resources/units/sable_switchblade.tres",
-	"res://resources/units/sable_harbinger.tres",
 ]
 
 
-func _rebuild_armory_buttons(_building: Building) -> void:
+func _rebuild_armory_buttons(building: Building) -> void:
 	_clear_buttons()
 
 	var bcm: Node = get_tree().current_scene.get_node_or_null("BranchCommitManager")
@@ -2315,20 +2322,26 @@ func _rebuild_armory_buttons(_building: Building) -> void:
 		_action_label.text = "No commit manager"
 		return
 
-	# Pick the player's faction's branch roster. Sable factions use
-	# the Sable list; everyone else gets Anvil.
+	# Pick the player's faction's branch roster, then narrow to the
+	# slice this building hosts. Selecting Basic Armory shows the
+	# baseline-unlocked units' branches; Advanced Armory shows the
+	# branches for units the Adv Armory itself gates.
 	var settings: Node = get_node_or_null("/root/MatchSettings")
 	var player_faction: int = 0
 	if settings and "player_faction" in settings:
 		player_faction = settings.get("player_faction") as int
-	var paths: Array[String] = ANVIL_BRANCHED_UNITS
+	var is_advanced_armory: bool = building and building.stats and building.stats.building_id == &"advanced_armory"
+	var paths: Array[String]
 	if player_faction == 1:
-		paths = SABLE_BRANCHED_UNITS
+		paths = SABLE_ADVANCED_BRANCHED_UNITS if is_advanced_armory else SABLE_BASIC_BRANCHED_UNITS
+	else:
+		paths = ANVIL_ADVANCED_BRANCHED_UNITS if is_advanced_armory else ANVIL_BASIC_BRANCHED_UNITS
 
+	var armory_label: String = "Advanced Armory — branch upgrades" if is_advanced_armory else "Armory — branch upgrades"
 	if bcm.is_committing():
 		_action_label.text = "Commit in progress: %s" % bcm.get_commit_branch_name()
 	else:
-		_action_label.text = "Armory — branch upgrades"
+		_action_label.text = armory_label
 
 	# Branch upgrades cost the same across every base unit in v1 —
 	# pulled from BranchCommitManager constants. Bake the cost line
@@ -2353,11 +2366,14 @@ func _rebuild_armory_buttons(_building: Building) -> void:
 			continue
 		_button_grid.add_child(_make_armory_row(base_stats, bcm, cost_suffix))
 
-	# Anchor Mode research button — bottom of the list. Same currency
-	# mix as a branch commit so the resource pressure is consistent.
-	var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
-	if rm:
-		_button_grid.add_child(_make_anchor_research_row(rm, cost_suffix))
+	# Anchor Mode research button — bottom of the Basic Armory only.
+	# It's a Crawler / economy upgrade, baseline-tier; the Advanced
+	# Armory's slot is reserved for the bigger-ticket branch commits
+	# of the units it gates, so don't double up.
+	if not is_advanced_armory:
+		var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
+		if rm:
+			_button_grid.add_child(_make_anchor_research_row(rm, cost_suffix))
 
 
 func _make_armory_row(base_stats: UnitStatResource, bcm: Node, cost_suffix: String) -> Control:
@@ -3371,6 +3387,7 @@ func _building_role_hint(stat: BuildingStatResource) -> String:
 		&"advanced_foundry": return "Heavy Mech Production"
 		&"basic_generator": return "Power Source"
 		&"basic_armory": return "Tech Upgrades"
+		&"advanced_armory": return "Advanced Tech & Unit Unlocks"
 		&"salvage_yard": return "Static Salvage Harvester"
 		&"gun_emplacement": return "Defensive Turret"
 		&"aerodrome": return "Aircraft Production"
@@ -3385,19 +3402,21 @@ func _building_description(id: StringName) -> String:
 		&"headquarters":
 			return "Your command center. Trains engineers, holds rally point. Losing it is a loss condition."
 		&"basic_foundry":
-			return "Trains light + medium ground mechs. You'll want at least one early; multiple foundries let you produce in parallel."
+			return "Trains your two baseline ground mechs (Anvil: Rook + Hound, Sable: Specter + Jackal). You'll want at least one early; multiple foundries let you produce in parallel."
 		&"advanced_foundry":
-			return "Unlocks heavy ground units (Bulwark / Harbinger). Requires a basic foundry."
+			return "Trains the heavy mech baseline (Anvil: Bulwark, Sable: Harbinger). An Advanced Armory unlocks the rest of the heavy-tier roster from this same building."
 		&"basic_generator":
 			return "Provides power. Power-starved buildings produce more slowly, so build a generator before stacking foundries."
 		&"basic_armory":
-			return "Hosts branch upgrades for your existing unit lines. Branch commits are irreversible."
+			return "Hosts branch upgrades for the units your production buildings unlock on their own. Branch commits are irreversible."
+		&"advanced_armory":
+			return "Unlocks the second unit slot at the Advanced Foundry and the Aerodrome (and a third at the Sable Adv Foundry). Hosts branch upgrades for the units it unlocks. Branch commits are irreversible."
 		&"salvage_yard":
 			return "Stationary harvester with a fixed work radius. Crawlers go further but are slower; yards are best on dense scrap fields."
 		&"gun_emplacement":
 			return "Manned turret. Choose a profile (anti-light / anti-heavy / anti-air / balanced) after construction."
 		&"aerodrome":
-			return "Trains aircraft (Phalanx Drone, Hammerhead Gunship). Aircraft only fall to AAir-tagged weapons or SAM Sites."
+			return "Trains the baseline aircraft (Anvil: Phalanx, Sable: Switchblade). An Advanced Armory unlocks the heavier airframe (Hammerhead / Fang) from the same building."
 		&"sam_site":
 			return "Anti-air missile rack. Heavy damage vs aircraft, near-zero vs ground. Pair with turrets to cover both axes."
 	return ""

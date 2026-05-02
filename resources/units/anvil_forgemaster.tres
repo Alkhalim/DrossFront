@@ -38,6 +38,7 @@ cost_salvage = 335
 cost_fuel = 45
 build_time = 32.0
 built_at = &"advanced_foundry"
+unlock_prerequisite = &"advanced_armory"
 primary_weapon = SubResource("weapon_riveter")
 secondary_weapon = SubResource("weapon_skyspike")
 ability_name = "Factory Pulse"

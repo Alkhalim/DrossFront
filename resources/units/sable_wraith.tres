@@ -27,6 +27,7 @@ cost_salvage = 320
 cost_fuel = 56
 build_time = 38.0
 built_at = &"aerodrome"
+unlock_prerequisite = &"black_pylon"
 primary_weapon = SubResource("weapon_wraith_bomb_bay")
 is_aircraft = true
 flight_altitude = 9.0
