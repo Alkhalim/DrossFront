@@ -884,8 +884,12 @@ func _setup_player() -> void:
 	# to the nearest wreck field.
 	# Tutorial mode: skip the starter Crawler. The TutorialMission
 	# hands one to the player at stage 2 ("crawler") so the
-	# discovery beat actually plays.
+	# discovery beat actually plays. Also prune the .tscn-placed
+	# starter army down to just one Rook squad and re-position it
+	# at world origin — the mission opens with a single scout
+	# squad walking northward into the unknown.
 	if in_tutorial:
+		_prepare_tutorial_starter_units()
 		return
 	if hq:
 		var crawler_scene: PackedScene = load("res://scenes/salvage_crawler.tscn") as PackedScene
@@ -903,6 +907,16 @@ func _setup_player() -> void:
 
 
 func _setup_ai() -> void:
+	# Tutorial mode: skip the normal AI roster entirely and drop a
+	# stationary fortified Sable enclave at the south end of the map
+	# instead. The enemy doesn't push toward the player; they just
+	# defend their camp until the player + the late-arriving Sable
+	# ally crack it open.
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if settings and settings.get("tutorial_mode"):
+		_setup_tutorial_enemy_camp()
+		return
+
 	# Spawn one AI HQ + starter army + AIController per non-human entry in
 	# the roster. The 1v1 path lights up player_id=1 only; the 2v2 path
 	# lights up the ally (1) plus two enemies (3, 4).
@@ -910,6 +924,123 @@ func _setup_ai() -> void:
 		if entry["human"] as bool:
 			continue
 		_spawn_ai_player(entry["id"] as int, entry["name"] as String)
+
+
+func _prepare_tutorial_starter_units() -> void:
+	## Trim the .tscn-placed starter army down to a single Rook
+	## squad and drop it at world origin. The mission opens with
+	## a small scout group with no HQ; everything else is unlocked
+	## as the player progresses through tutorial stages.
+	var units_node: Node = get_node_or_null("Units")
+	if not units_node:
+		return
+	var kept: bool = false
+	for child: Node in units_node.get_children():
+		var keep: bool = false
+		if not kept and ("stats" in child):
+			var s: UnitStatResource = child.get("stats") as UnitStatResource
+			if s and s.unit_class == &"light":
+				keep = true
+				kept = true
+		if keep:
+			(child as Node3D).global_position = Vector3(0.0, 0.0, 0.0)
+		else:
+			child.queue_free()
+
+
+func _setup_neutral_patrols_or_skip() -> bool:
+	## Tutorial mode skips the standard neutral patrols entirely so
+	## the only enemies on the map are the southern fortified camp.
+	## Returns true when the standard patrol setup should be skipped
+	## (i.e. tutorial is active). Hooked into _setup_neutral_patrols
+	## via an early-exit guard.
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	return settings != null and settings.get("tutorial_mode")
+
+
+func _setup_tutorial_enemy_camp() -> void:
+	## Stationary Sable enclave at the south end of the map.
+	## Builds:
+	##   - 1 Headquarters (provides building targets)
+	##   - 2 Gun Emplacements (anti-ground turrets)
+	##   - 1 SAM Site (anti-air, mainly to make the AlertManager-
+	##     side learning curve feel real)
+	##   - 1 Sable Fang drone squad (air swarm, AAir-vulnerable)
+	##   - 1 Sable Specter ground squad (stationary defenders)
+	## Owner_id = 2 (neutral team — the player + ally treat them
+	## as enemies, the camp engages anything that walks in range
+	## but doesn't move toward the player on its own).
+	var ai_res := ResourceManager.new()
+	ai_res.name = "TutorialEnemyResources"
+	add_child(ai_res)
+	# Camp structures.
+	var hq_path: String = "res://resources/buildings/headquarters.tres"
+	var gun_path: String = "res://resources/buildings/gun_emplacement.tres"
+	var sam_path: String = "res://resources/buildings/sam_site.tres"
+	_spawn_tutorial_enemy_building(hq_path, Vector3(0.0, 0.0, -90.0), ai_res, 2)
+	_spawn_tutorial_enemy_building(gun_path, Vector3(-12.0, 0.0, -82.0), ai_res, 2)
+	_spawn_tutorial_enemy_building(gun_path, Vector3(12.0, 0.0, -82.0), ai_res, 2)
+	_spawn_tutorial_enemy_building(sam_path, Vector3(0.0, 0.0, -78.0), ai_res, 2)
+	# Defenders.
+	_spawn_tutorial_enemy_unit("res://resources/units/sable_fang.tres", Vector3(0.0, 0.0, -85.0), 2)
+	_spawn_tutorial_enemy_unit("res://resources/units/sable_specter.tres", Vector3(-8.0, 0.0, -88.0), 2)
+	_spawn_tutorial_enemy_unit("res://resources/units/sable_specter.tres", Vector3(8.0, 0.0, -88.0), 2)
+	# owner_id 2 is the registry's pre-registered NEUTRAL player —
+	# treated as enemy by every other player and never allies with
+	# anyone, which is exactly the relationship we want for the
+	# tutorial enclave (player attacks them; the late-game Sable
+	# ally also attacks them).
+	# Demote player_id 1 (the would-be 1v1 enemy AI) onto the
+	# player's team so the late-arriving Sable strike force the
+	# TutorialMission spawns at owner_id 1 reads as friendly.
+	# PlayerRegistry's are_allied lookup goes through team_id.
+	var registry_for_ally: PlayerRegistry = get_node_or_null("PlayerRegistry") as PlayerRegistry
+	if registry_for_ally:
+		var ally_state: PlayerState = registry_for_ally.get_state(1)
+		if ally_state:
+			ally_state.team_id = 0
+			# Wipe the cached are_allied lookup so the change
+			# takes effect for any subsequent query.
+			registry_for_ally.set("_allied_cache", {})
+
+
+func _spawn_tutorial_enemy_building(stats_path: String, pos: Vector3, rm: ResourceManager, owner_id: int) -> void:
+	var stats: BuildingStatResource = load(stats_path) as BuildingStatResource
+	if not stats:
+		return
+	var building_scene: PackedScene = load("res://scenes/building.tscn") as PackedScene
+	if not building_scene:
+		return
+	var b: Building = building_scene.instantiate() as Building
+	if not b:
+		return
+	b.stats = stats
+	b.owner_id = owner_id
+	b.is_constructed = true
+	b.resource_manager = rm
+	add_child(b)
+	b.global_position = pos
+
+
+func _spawn_tutorial_enemy_unit(stats_path: String, pos: Vector3, owner_id: int) -> void:
+	var stats: UnitStatResource = load(stats_path) as UnitStatResource
+	if not stats:
+		return
+	var scene_path: String = "res://scenes/aircraft.tscn" if stats.is_aircraft else "res://scenes/unit.tscn"
+	var ps: PackedScene = load(scene_path) as PackedScene
+	if not ps:
+		return
+	var node: Node3D = ps.instantiate() as Node3D
+	if not node:
+		return
+	node.set("stats", stats)
+	node.set("owner_id", owner_id)
+	var units_node: Node = get_node_or_null("Units")
+	if units_node:
+		units_node.add_child(node)
+	else:
+		add_child(node)
+	node.global_position = pos
 
 
 func _spawn_ai_player(player_id: int, display_name: String) -> void:
@@ -3245,6 +3376,10 @@ func _build_skyline_pylon(root: Node3D, color: Color, height: float) -> void:
 
 
 func _setup_neutral_patrols() -> void:
+	# Skip the standard patrols entirely in tutorial mode so the
+	# only enemies on the map are the southern fortified camp.
+	if _setup_neutral_patrols_or_skip():
+		return
 	# Patrols don't move on their own — they're stationary and rely on the
 	# combat component's auto-engage to defend their deposit. Neutrals share
 	# owner_id = 2, which makes both player and AI see them as enemies (and
