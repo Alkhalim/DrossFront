@@ -229,6 +229,7 @@ func _build_setup_panel() -> void:
 
 	_build_mode_section(left_col)
 	_build_faction_section(left_col)
+	_build_color_section(left_col)
 	_build_ai_section(left_col)
 	_build_map_section(right_col)
 	_build_setup_buttons()
@@ -403,6 +404,78 @@ func _refresh_faction_summary() -> void:
 	tech_btn.custom_minimum_size = Vector2(180, 28)
 	tech_btn.pressed.connect(_show_faction_tech_tree.bind(int(_selected_faction)))
 	text_col.add_child(tech_btn)
+
+
+## Active player-colour swatch buttons. Held in an array so the
+## click handler can flip pressed-state on the lot in one pass
+## (toggle group: only one selected at a time).
+var _color_swatches: Array[Button] = []
+
+
+func _build_color_section(parent: Container) -> void:
+	var heading := Label.new()
+	heading.text = "Your Color:"
+	heading.add_theme_font_size_override("font_size", 16)
+	heading.add_theme_color_override("font_color", COLOR_HEADING)
+	parent.add_child(heading)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	parent.add_child(row)
+
+	_color_swatches.clear()
+	# Pre-select whichever palette index matches the current
+	# MatchSettings.player_color (or 0 if nothing matches).
+	var sel: int = 0
+	for i: int in MatchSettingsClass.PLAYER_COLOR_PALETTE.size():
+		if MatchSettingsClass.PLAYER_COLOR_PALETTE[i].is_equal_approx(MatchSettings.player_color):
+			sel = i
+			break
+
+	for i: int in MatchSettingsClass.PLAYER_COLOR_PALETTE.size():
+		var col: Color = MatchSettingsClass.PLAYER_COLOR_PALETTE[i]
+		var swatch := Button.new()
+		swatch.toggle_mode = true
+		swatch.custom_minimum_size = Vector2(40, 32)
+		swatch.tooltip_text = MatchSettingsClass.PLAYER_COLOR_NAMES[i]
+		# StyleBoxFlat per state so the swatch reads as a coloured
+		# tile with a thin border that brightens when toggled.
+		var fill := StyleBoxFlat.new()
+		fill.bg_color = col
+		fill.border_color = Color(0.10, 0.10, 0.12, 1.0)
+		fill.border_width_top = 2
+		fill.border_width_bottom = 2
+		fill.border_width_left = 2
+		fill.border_width_right = 2
+		fill.corner_radius_top_left = 4
+		fill.corner_radius_top_right = 4
+		fill.corner_radius_bottom_left = 4
+		fill.corner_radius_bottom_right = 4
+		swatch.add_theme_stylebox_override("normal", fill)
+		swatch.add_theme_stylebox_override("hover", fill)
+		swatch.add_theme_stylebox_override("focus", fill)
+		var fill_pressed := fill.duplicate() as StyleBoxFlat
+		fill_pressed.border_color = Color(1.0, 0.95, 0.78, 1.0)
+		fill_pressed.border_width_top = 3
+		fill_pressed.border_width_bottom = 3
+		fill_pressed.border_width_left = 3
+		fill_pressed.border_width_right = 3
+		swatch.add_theme_stylebox_override("pressed", fill_pressed)
+		swatch.button_pressed = (i == sel)
+		swatch.pressed.connect(_on_color_swatch_pressed.bind(i))
+		_color_swatches.append(swatch)
+		row.add_child(swatch)
+
+
+func _on_color_swatch_pressed(index: int) -> void:
+	if index < 0 or index >= MatchSettingsClass.PLAYER_COLOR_PALETTE.size():
+		return
+	MatchSettings.player_color = MatchSettingsClass.PLAYER_COLOR_PALETTE[index]
+	# Toggle group -- enforce one-of selection by depressing the
+	# others; pressed-state needs a manual sync because Button's
+	# toggle_mode doesn't natively group siblings.
+	for i: int in _color_swatches.size():
+		_color_swatches[i].button_pressed = (i == index)
 
 
 func _build_ai_section(parent: Container) -> void:

@@ -34,6 +34,24 @@ var mode: Mode = Mode.ONE_V_ONE
 var map_id: MapId = MapId.FOUNDRY_BELT
 ## Local human player's faction.
 var player_faction: FactionId = FactionId.ANVIL
+
+## Player team colour. Picked on the match-setup screen.
+## TestArenaController._setup_player_registry overrides the local
+## player's roster colour with this value, then auto-shuffles any
+## AI colour that collides with a player or earlier-AI pick so no
+## two participants share the same swatch.
+const PLAYER_COLOR_PALETTE: Array[Color] = [
+	Color(0.08, 0.25, 0.85, 1.0),  # blue
+	Color(0.80, 0.10, 0.10, 1.0),  # red
+	Color(0.18, 0.72, 0.22, 1.0),  # green
+	Color(0.95, 0.55, 0.10, 1.0),  # orange
+	Color(0.78, 0.35, 1.00, 1.0),  # violet
+	Color(0.15, 0.78, 0.95, 1.0),  # cyan
+]
+const PLAYER_COLOR_NAMES: Array[String] = [
+	"Blue", "Red", "Green", "Orange", "Violet", "Cyan",
+]
+var player_color: Color = Color(0.08, 0.25, 0.85, 1.0)
 ## Faction the AI opponent (or each AI enemy in 2v2) plays. ANVIL by
 ## default — Sable AI gets enabled once Sable's roster is wired up.
 var enemy_faction: FactionId = FactionId.ANVIL

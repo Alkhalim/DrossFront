@@ -514,11 +514,17 @@ func _setup_player_registry() -> void:
 	registry.name = "PlayerRegistry"
 	add_child(registry)
 
-	for entry: Dictionary in _current_roster():
+	# Apply the player's colour pick (MatchSettings.player_color)
+	# and reshuffle any AI colour that collides with it -- so no two
+	# participants share the same swatch even if the player picks a
+	# colour that the default roster had assigned to an AI.
+	var resolved_colors: Array[Color] = _resolve_player_colors(_current_roster())
+	for i: int in _current_roster().size():
+		var entry: Dictionary = _current_roster()[i]
 		var state: PlayerState = PlayerState.make(
 			entry["id"] as int,
 			entry["team"] as int,
-			entry["color"] as Color,
+			resolved_colors[i],
 			entry["human"] as bool,
 			entry["name"] as String
 		)
@@ -538,6 +544,60 @@ func _setup_player_registry() -> void:
 		),
 		null
 	)
+
+
+func _resolve_player_colors(roster: Array[Dictionary]) -> Array[Color]:
+	## Builds the per-roster-entry colour list. Local human takes
+	## MatchSettings.player_color; every AI keeps its default unless
+	## that default collides with an already-claimed colour, in which
+	## case the AI gets reassigned to the next free swatch in
+	## PLAYER_COLOR_PALETTE. Falls back to MatchSettings.player_color
+	## or the original entry colour if MatchSettings isn't loaded
+	## (headless test scenes without the autoload).
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	var human_pick: Color = Color(0.08, 0.25, 0.85, 1.0)
+	var palette: Array[Color] = []
+	if settings:
+		human_pick = settings.get("player_color") as Color
+		palette = settings.PLAYER_COLOR_PALETTE
+	var out: Array[Color] = []
+	out.resize(roster.size())
+	# Pass 1: place the human's pick (slot id 0).
+	var taken: Array[Color] = []
+	for i: int in roster.size():
+		var entry: Dictionary = roster[i]
+		if entry.get("human", false) as bool:
+			out[i] = human_pick
+			taken.append(human_pick)
+		else:
+			out[i] = Color()  # placeholder, filled in pass 2
+	# Pass 2: AI slots. Keep the default if it doesn't collide; else
+	# pick the next palette colour not already in `taken`.
+	for i: int in roster.size():
+		var entry: Dictionary = roster[i]
+		if entry.get("human", false) as bool:
+			continue
+		var default_col: Color = entry["color"] as Color
+		if not _color_taken(default_col, taken):
+			out[i] = default_col
+			taken.append(default_col)
+			continue
+		# Reassign from the unused-palette pool.
+		var picked: Color = default_col
+		for cand: Color in palette:
+			if not _color_taken(cand, taken):
+				picked = cand
+				break
+		out[i] = picked
+		taken.append(picked)
+	return out
+
+
+func _color_taken(c: Color, taken: Array[Color]) -> bool:
+	for t: Color in taken:
+		if t.is_equal_approx(c):
+			return true
+	return false
 
 
 func _setup_alerts() -> void:
