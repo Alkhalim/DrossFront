@@ -616,13 +616,16 @@ func _build_hq_corner_mg_nest(corner: Vector3) -> Node3D:
 	base_plate.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.20, 0.18)))
 	_attach_visual(base_plate)
 
-	# Vertical pintle post rising from the plate -- everything that
-	# rotates with the gun lives under the pivot above this post.
+	# Vertical pintle post -- tall enough that the cradle + barrel
+	# clear the sandbag stack (bottom course at corner.y + bag_h
+	# = 0.30, second course top at ~corner.y + 0.555). Post tip at
+	# corner.y + 0.78 puts the barrel comfortably above the bags so
+	# the gunner is firing OVER cover, not into it.
 	var post := MeshInstance3D.new()
 	var post_cyl := CylinderMesh.new()
 	post_cyl.top_radius = 0.06
-	post_cyl.bottom_radius = 0.08
-	post_cyl.height = 0.30
+	post_cyl.bottom_radius = 0.10
+	post_cyl.height = 0.70
 	post.mesh = post_cyl
 	post.position = Vector3(corner.x, corner.y + 0.08 + post_cyl.height * 0.5, corner.z)
 	post.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.16, 0.14)))
@@ -631,7 +634,7 @@ func _build_hq_corner_mg_nest(corner: Vector3) -> Node3D:
 	# Tracking pivot at the top of the post. Each nest gets its own.
 	var pivot := Node3D.new()
 	pivot.name = "MGNestPivot"
-	pivot.position = Vector3(corner.x, corner.y + 0.40, corner.z)
+	pivot.position = Vector3(corner.x, corner.y + 0.80, corner.z)
 	_attach_visual(pivot)
 
 	# Horizontal swivel cradle -- a short box cradling the barrel,

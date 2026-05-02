@@ -28,7 +28,6 @@ cost_fuel = 25
 build_time = 22.0
 built_at = &"aerodrome"
 primary_weapon = SubResource("weapon_harasser_repeater")
-squad_strength_bonus = 0.10
 is_aircraft = true
 flight_altitude = 5.5
 flight_speed = 22.0

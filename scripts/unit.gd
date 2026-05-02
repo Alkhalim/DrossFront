@@ -3779,12 +3779,6 @@ func is_damaged() -> bool:
 	return get_total_hp() < stats.hp_total
 
 
-func get_squad_strength_ratio() -> float:
-	if not stats or stats.squad_size <= 0:
-		return 0.0
-	return float(alive_count) / float(stats.squad_size)
-
-
 func _die() -> void:
 	squad_destroyed.emit()
 	if _hp_bar and is_instance_valid(_hp_bar):

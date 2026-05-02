@@ -36,6 +36,5 @@ build_time = 40.0
 built_at = &"advanced_foundry"
 primary_weapon = SubResource("weapon_overseer_railgun")
 secondary_weapon = SubResource("weapon_overseer_drone_swarm")
-squad_strength_bonus = 0.18
 mesh_provider_radius = 42.0
 special_description = "Harbinger Overseer — extends the Mesh aura far beyond the base form (42u radius) and adds a touch of armour. Reads as the army's command vehicle; protect it to keep your Sable forces in the Mesh."

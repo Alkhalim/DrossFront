@@ -36,6 +36,5 @@ build_time = 38.0
 built_at = &"advanced_foundry"
 primary_weapon = SubResource("weapon_marshal_railgun")
 secondary_weapon = SubResource("weapon_marshal_drone_swarm")
-squad_strength_bonus = 0.18
 mesh_provider_radius = 26.0
 special_description = "Harbinger Swarm Marshal — bigger drone bay, faster drone-launch cadence. Trades a slightly tighter Mesh aura for sustained drone pressure. Reads as the all-in attack carrier."

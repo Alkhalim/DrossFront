@@ -30,7 +30,6 @@ cost_fuel = 0
 build_time = 14.5
 built_at = &"basic_foundry"
 primary_weapon = SubResource("weapon_pulse_repeater")
-squad_strength_bonus = 0.10
 is_stealth_capable = true
 detection_radius = 80.0
 stealth_restore_time = 4.0

@@ -103,10 +103,6 @@ func resolved_armor_reduction() -> float:
 ## Secondary weapon (if any).
 @export var secondary_weapon: WeaponResource
 
-@export_group("Squad Bonus")
-## Accuracy bonus at full squad strength (0.0 = none, 0.12 = +12%).
-@export var squad_strength_bonus: float = 0.0
-
 @export_group("Special")
 ## Brief description of special abilities for tooltips.
 @export_multiline var special_description: String = ""

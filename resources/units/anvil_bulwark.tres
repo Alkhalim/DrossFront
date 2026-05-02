@@ -38,7 +38,6 @@ build_time = 38.5
 built_at = &"advanced_foundry"
 primary_weapon = SubResource("weapon_rotary_cannon")
 secondary_weapon = SubResource("weapon_missile_pod")
-squad_strength_bonus = 0.20
 special_description = "Squad strength bonus +20% accuracy. Heavy chassis can knock down lighter mechs in melee."
 branch_a_name = "Siegebreaker"
 branch_b_name = "Ironwall"

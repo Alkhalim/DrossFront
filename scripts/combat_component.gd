@@ -487,13 +487,12 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	var salvo_count: int = maxi(int(weapon.salvo_count), 1)
 	var shots: int = (_unit.get("alive_count") as int) * salvo_count
 
-	# Squad strength accuracy bonus
+	# Accuracy starts at 1.0 -- the natural "fewer survivors fire
+	# fewer shots" effect already scales squad output by alive_count
+	# above, so no extra full-strength bonus is layered on top.
 	var stats: UnitStatResource = _unit.get("stats") as UnitStatResource
 	var accuracy: float = 1.0
-	if stats.squad_strength_bonus > 0.0:
-		var strength_ratio: float = _unit.get_squad_strength_ratio()
-		accuracy += stats.squad_strength_bonus * strength_ratio
-	# Mesh accuracy bonus — additive on top of squad-strength.
+	# Mesh accuracy bonus.
 	if mesh_sys and mesh_sys.has_method("accuracy_bonus"):
 		accuracy += mesh_sys.call("accuracy_bonus", mesh_strength) as float
 

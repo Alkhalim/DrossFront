@@ -28,7 +28,6 @@ cost_fuel = 28
 build_time = 24.0
 built_at = &"aerodrome"
 primary_weapon = SubResource("weapon_hunter_at")
-squad_strength_bonus = 0.10
 is_aircraft = true
 flight_altitude = 5.5
 flight_speed = 18.0

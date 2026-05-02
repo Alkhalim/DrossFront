@@ -37,5 +37,4 @@ build_time = 23.5
 built_at = &"basic_foundry"
 primary_weapon = SubResource("weapon_widow_needles")
 secondary_weapon = SubResource("weapon_widow_jump")
-squad_strength_bonus = 0.12
 special_description = "Jackal Widow branch — long-range coilgun needles + jump pack stays but on a longer cooldown. Picks targets at extreme range, then jumps to reposition. Lower HP, longer reach."

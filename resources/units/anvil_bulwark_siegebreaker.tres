@@ -38,5 +38,4 @@ build_time = 42.0
 built_at = &"advanced_foundry"
 primary_weapon = SubResource("weapon_artillery_cannon")
 secondary_weapon = SubResource("weapon_siege_pod")
-squad_strength_bonus = 0.20
 special_description = "Bulwark Siegebreaker — swaps the Heavy AP Cannon for a long-range Siege Mortar (AS-tagged, extreme damage vs structures). The siege variant — sit back, lob shells over enemy turret cover. Same chassis durability as base Bulwark."

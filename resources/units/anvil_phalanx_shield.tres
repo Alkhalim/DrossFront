@@ -28,7 +28,6 @@ cost_fuel = 21
 build_time = 22.0
 built_at = &"aerodrome"
 primary_weapon = SubResource("weapon_shield_drone_mg")
-squad_strength_bonus = 0.10
 is_aircraft = true
 flight_altitude = 5.5
 flight_speed = 14.0

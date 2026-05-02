@@ -1621,12 +1621,6 @@ func get_total_hp() -> int:
 	return maxi(current_hp, 0)
 
 
-func get_squad_strength_ratio() -> float:
-	if not stats or stats.squad_size <= 0:
-		return 0.0
-	return float(current_hp) / float(maxi(stats.hp_total, 1))
-
-
 func get_combat() -> Node:
 	return _combat
 

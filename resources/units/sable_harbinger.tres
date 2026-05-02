@@ -38,7 +38,6 @@ build_time = 36.0
 built_at = &"advanced_foundry"
 primary_weapon = SubResource("weapon_harbinger_railgun")
 secondary_weapon = SubResource("weapon_drone_swarm")
-squad_strength_bonus = 0.18
 mesh_provider_radius = 30.0
 special_description = "Sable heavy drone carrier (V3 §Pillar 1). Spinal railgun + drone bay releases + Mesh aura provider. Requires Black Pylon to build."
 branch_a_name = "Swarm Marshal"

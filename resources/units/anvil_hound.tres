@@ -38,7 +38,6 @@ build_time = 24.5
 built_at = &"basic_foundry"
 primary_weapon = SubResource("weapon_autocannons")
 secondary_weapon = SubResource("weapon_at_missiles")
-squad_strength_bonus = 0.15
 special_description = "Squad strength bonus +15% accuracy. Coordinated targeting: missiles fire in sync."
 branch_a_stats = ExtResource("3")
 branch_b_stats = ExtResource("4")

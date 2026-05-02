@@ -3402,10 +3402,6 @@ func _effective_accuracy(unit: Node3D) -> float:
 		return 0.0
 	var base: float = stats.primary_weapon.base_accuracy
 	var bonus: float = 0.0
-	# Squad-strength full-strength bonus.
-	if stats.squad_strength_bonus > 0.0 and unit.has_method("get_squad_strength_ratio"):
-		var ratio: float = unit.call("get_squad_strength_ratio") as float
-		bonus += stats.squad_strength_bonus * ratio
 	# Mesh bonus from the scene-level singleton.
 	var mesh_sys: Node = get_tree().current_scene.get_node_or_null("MeshSystem") if get_tree() else null
 	if mesh_sys and mesh_sys.has_method("strength_for") and mesh_sys.has_method("accuracy_bonus"):
@@ -3626,8 +3622,6 @@ func _unit_tooltip(stat: UnitStatResource) -> String:
 			str(stat.secondary_weapon.role_tag),
 			int(stat.secondary_weapon.base_accuracy * 100.0),
 		])
-	if stat.squad_strength_bonus > 0.0:
-		lines.append("Full-strength accuracy bonus: +%d%%" % int(stat.squad_strength_bonus * 100.0))
 	if stat.special_description != "":
 		lines.append("")
 		lines.append(stat.special_description)
