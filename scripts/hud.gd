@@ -3957,7 +3957,7 @@ func _building_description(id: StringName) -> String:
 		&"basic_generator":
 			return "Power source. Adds capacity so additional production buildings stay at full output."
 		&"advanced_generator":
-			return "High-output power plant. 75 power for less salvage-per-watt than two basic generators, but costs fuel."
+			return "Reactor -- 75 power for less salvage-per-watt than two generators. Requires Basic Foundry and costs fuel."
 		&"basic_armory":
 			return "Branch-upgrade workshop for baseline units. Commits are irreversible."
 		&"advanced_armory":

@@ -4,7 +4,7 @@
 
 [resource]
 script = ExtResource("1")
-building_name = "Advanced Generator"
+building_name = "Reactor"
 building_id = &"advanced_generator"
 hp = 600
 cost_salvage = 280
@@ -14,5 +14,5 @@ power_consumption = 0
 power_production = 75
 footprint_size = Vector3(4, 6, 4)
 placeholder_color = Color(0.20, 0.28, 0.42, 1)
-is_advanced = true
+is_advanced = false
 prerequisites = [&"basic_foundry"]
