@@ -24,7 +24,12 @@
       "Bash(cp \"/d/Downloads/Missile Launch \\(1\\).mp3\" \"D:/Dokumente/Gamedesign/DrossFront/DrossFront/assets/audio/\")",
       "Bash(cp \"/d/Downloads/Missile Launch \\(2\\).mp3\" \"D:/Dokumente/Gamedesign/DrossFront/DrossFront/assets/audio/\")",
       "Bash(cp \"/d/Downloads/Missile Launch \\(3\\).mp3\" \"D:/Dokumente/Gamedesign/DrossFront/DrossFront/assets/audio/\")",
-      "Bash(cp \"/d/Downloads/Missile Launch \\(4\\).mp3\" \"D:/Dokumente/Gamedesign/DrossFront/DrossFront/assets/audio/\")"
+      "Bash(cp \"/d/Downloads/Missile Launch \\(4\\).mp3\" \"D:/Dokumente/Gamedesign/DrossFront/DrossFront/assets/audio/\")",
+      "Bash(awk 'NR>=895 && NR<=1085 {print \"\\\\t\" $0; next} {print}' scripts/unit.gd)",
+      "Bash(mv scripts/unit.gd.tmp scripts/unit.gd)",
+      "Bash(awk 'NR>=1086 && NR<=1089 {print \"\\\\t\" $0; next} {print}' scripts/unit.gd)",
+      "Bash(sed -n '1083,1092p' scripts/unit.gd)",
+      "Bash(awk 'NR>=1086 && NR<=1089 {sub\\(/^\\\\t/, \"\"\\); print; next} {print}' scripts/unit.gd)"
     ]
   }
 }
