@@ -147,62 +147,76 @@ func _spawn_player_unit(stats_path: String, pos: Vector3) -> void:
 ## --- Stage definitions ---------------------------------------------------
 
 func _install_stages() -> void:
-	# All discovery beats sit progressively further south (positive
-	# Z in world space). Every dialogue line points the player in
-	# the same direction so the navigation cue stays consistent
-	# from start to finish.
+	# Cast:
+	#   Steelmaster Kress  — Anvil dispatch officer. Player's contact.
+	#   Riven Yul          — Sable strike-force lead, ex-shadow ops,
+	#                        recently turned. Arrives at stage 5.
+	#
+	# Discovery beats sit progressively further NORTH (positive Z
+	# in world space — +Z reads as "up the screen" with the camera's
+	# 50 deg pitch and is the direction of the team-A spawn corner).
+	# Every cue points the player in the same direction.
+
 	# Stage 0 — opening. The player has just their Rook scouts.
 	_stages.append({
 		"id": &"open",
-		"dialogue": "Field Command: \"Scouts, advance south. There's a wreckage cache about a hundred meters out — survivors might be holed up there.\"",
-		"objective": "Move your Rooks south to the wreckage.",
+		"dialogue": "Steelmaster Kress: \"Scouts, advance north. There's a wreckage cache a hundred meters out — survivors might be holed up there.\"",
+		"objective": "Move your Rooks north to the wreckage.",
 		"on_enter": Callable(self, "_stage_open_enter"),
 		"trigger": Callable(self, "_stage_open_done"),
 	})
 	# Stage 1 — reinforcements found.
 	_stages.append({
 		"id": &"reinforce",
-		"dialogue": "Field Command: \"Two more Rook squads are intact. Keep pushing south — we have a Salvage Crawler hulk on the long-range scope.\"",
-		"objective": "Keep moving south to find the Crawler.",
+		"dialogue": "Steelmaster Kress: \"Two more Rook squads are intact. Keep pushing north — we have a Salvage Crawler hulk on the long-range scope.\"",
+		"objective": "Keep moving north to find the Crawler.",
 		"on_enter": Callable(self, "_stage_reinforce_enter"),
 		"trigger": Callable(self, "_stage_reinforce_done"),
 	})
 	# Stage 2 — Crawler.
 	_stages.append({
 		"id": &"crawler",
-		"dialogue": "Field Command: \"That Crawler still runs — bring it with you. Push further south to the abandoned foundry.\"",
-		"objective": "Continue south to the foundry ruin.",
+		"dialogue": "Steelmaster Kress: \"That Crawler still runs — bring it with you. Push further north to the abandoned foundry.\"",
+		"objective": "Continue north to the foundry ruin.",
 		"on_enter": Callable(self, "_stage_crawler_enter"),
 		"trigger": Callable(self, "_stage_crawler_done"),
 	})
 	# Stage 3 — base reclaimed. Player gets HQ + economy unlock.
 	_stages.append({
 		"id": &"base",
-		"dialogue": "Field Command: \"Welcome to your forward base, commander. Build a Basic Foundry and a Salvage Yard — get production rolling.\"",
+		"dialogue": "Steelmaster Kress: \"Welcome to your forward base, commander. Build a Basic Foundry and a Salvage Yard — get production rolling.\"",
 		"objective": "Build a Basic Foundry and a Salvage Yard.",
 		"on_enter": Callable(self, "_stage_base_enter"),
 		"trigger": Callable(self, "_stage_base_done"),
 	})
-	# Stage 4 — assemble strike force.
+	# Stage 4 — power the base.
+	_stages.append({
+		"id": &"reactors",
+		"dialogue": "Steelmaster Kress: \"Brownouts on every line. Drop three Reactors next to your foundry — full power or your queue stalls.\"",
+		"objective": "Build 3 Generators (Reactors) to fully power your base.",
+		"on_enter": Callable(self, "_stage_reactors_enter"),
+		"trigger": Callable(self, "_stage_reactors_done"),
+	})
+	# Stage 5 — assemble strike force.
 	_stages.append({
 		"id": &"force",
-		"dialogue": "Field Command: \"Train six combat units. The Sable enclave is dug in further south — we're going to dislodge them.\"",
-		"objective": "Train at least 6 combat units (Rooks, Hounds, Phalanx).",
+		"dialogue": "Steelmaster Kress: \"Train at least three additional units — Rooks for speed, Hounds for the punch. The Sable enclave is dug in further north and we are going to dislodge them.\"",
+		"objective": "Train at least 3 additional combat units (Rooks or Hounds).",
 		"on_enter": Callable(self, "_stage_force_enter"),
 		"trigger": Callable(self, "_stage_force_done"),
 	})
-	# Stage 5 — Sable ally arrives.
+	# Stage 6 — Sable ally arrives.
 	_stages.append({
 		"id": &"ally",
-		"dialogue": "Field Command: \"A Sable strike force has dropped at our position. Coordinate with them and finish the enclave to the south.\"",
-		"objective": "Push south and destroy the Sable enclave alongside your ally.",
+		"dialogue": "Riven Yul: \"Easy, commander — drop the targeting solution. Yes, Sable colours, no, not the same outfit you used to chase. Reformed, retrained, and offering you a Harbinger plus two Switchblades to crack that camp. Let's not waste them.\"",
+		"objective": "Push north and destroy the Sable enclave alongside your ally.",
 		"on_enter": Callable(self, "_stage_ally_enter"),
 		"trigger": Callable(self, "_stage_ally_done"),
 	})
-	# Stage 6 — victory.
+	# Stage 7 — victory.
 	_stages.append({
 		"id": &"win",
-		"dialogue": "Field Command: \"Enclave neutralised. Tutorial complete — head back to the main menu when you're ready.\"",
+		"dialogue": "Steelmaster Kress: \"Enclave neutralised. Tutorial complete — head back to the main menu when you're ready.\"",
 		"objective": "(Tutorial complete.)",
 		"on_enter": Callable(self, "_stage_win_enter"),
 		"trigger": Callable(self, "_stage_win_done"),
@@ -309,12 +323,23 @@ func _stage_base_done() -> bool:
 	return has_foundry and has_yard
 
 
+## Snapshot of combat unit count at the moment the FORCE stage
+## fires, so the trigger can require "3 ADDITIONAL units trained"
+## rather than counting the Rooks the player already has.
+var _force_baseline_count: int = 0
+
+
 func _stage_force_enter() -> void:
-	pass
+	_force_baseline_count = _count_player_combat_units()
 
 
 func _stage_force_done() -> bool:
-	# Six combat-capable units (anything but engineers / crawlers).
+	# Three more combat units (Rooks / Hounds / Phalanx) than what
+	# the player had at the start of this stage.
+	return _count_player_combat_units() >= _force_baseline_count + 3
+
+
+func _count_player_combat_units() -> int:
 	var combat: int = 0
 	for u: Node3D in _player_units():
 		var s: UnitStatResource = u.get("stats") as UnitStatResource
@@ -323,7 +348,27 @@ func _stage_force_done() -> bool:
 		if s.unit_class == &"engineer" or s.unit_class == &"crawler":
 			continue
 		combat += 1
-	return combat >= 6
+	return combat
+
+
+func _stage_reactors_enter() -> void:
+	pass
+
+
+func _stage_reactors_done() -> bool:
+	# Three constructed Generators on the player's account.
+	var generators: int = 0
+	for n: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(n):
+			continue
+		if not ("owner_id" in n) or n.get("owner_id") != 0:
+			continue
+		var b: Building = n as Building
+		if not b or not b.stats or not b.is_constructed:
+			continue
+		if b.stats.building_id == &"basic_generator":
+			generators += 1
+	return generators >= 3
 
 
 func _stage_ally_enter() -> void:
