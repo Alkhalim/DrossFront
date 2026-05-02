@@ -37,6 +37,10 @@ text = "Salvage: 200"
 layout_mode = 2
 text = "Fuel: 0 / 500"
 
+[node name="MicrochipsLabel" type="Label" parent="TopBar"]
+layout_mode = 2
+text = "Chips: 0"
+
 [node name="PowerLabel" type="Label" parent="TopBar"]
 layout_mode = 2
 text = "Power: 0 / 0"

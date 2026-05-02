@@ -4,12 +4,18 @@ extends Node
 
 signal salvage_changed(amount: int)
 signal fuel_changed(amount: int)
+signal microchips_changed(amount: int)
 signal power_changed(production: int, consumption: int)
 signal population_changed(current: int, cap: int)
 
 ## Starting values per the design doc.
 const SALVAGE_CAP: int = 9999
 const FUEL_CAP_BASE: int = 500
+## Microchips are deliberately a small-number resource — branch
+## upgrades cost 1-3, the field starts with 2-4, satellite crashes
+## drop a couple at a time. Capped low so the player can't squirrel
+## away a stockpile that trivialises the late game.
+const MICROCHIPS_CAP: int = 30
 const HQ_SALVAGE_TRICKLE: float = 5.0
 ## Population scales with infrastructure: a baseline cap from the HQ
 ## itself + a per-production-building bonus, hard-capped at the upper
@@ -26,6 +32,7 @@ var owner_id: int = 0
 
 var salvage: int = 300
 var fuel: int = 0
+var microchips: int = 0
 var fuel_cap: int = FUEL_CAP_BASE
 var power_production: int = 0
 var power_consumption: int = 0
@@ -74,6 +81,17 @@ func can_afford(salvage_cost: int, fuel_cost: int) -> bool:
 	return salvage >= salvage_cost and fuel >= fuel_cost
 
 
+func can_afford_microchips(amount: int) -> bool:
+	return microchips >= amount
+
+
+func can_afford_full(salvage_cost: int, fuel_cost: int, microchip_cost: int) -> bool:
+	## Combined affordability check for upgrade costs that span all
+	## three currencies. Branch researches use this — they need
+	## microchips + a small salvage + a heavier fuel down-payment.
+	return salvage >= salvage_cost and fuel >= fuel_cost and microchips >= microchip_cost
+
+
 func has_population(pop_cost: int) -> bool:
 	return population + pop_cost <= population_cap
 
@@ -88,6 +106,21 @@ func spend(salvage_cost: int, fuel_cost: int) -> bool:
 	return true
 
 
+func spend_full(salvage_cost: int, fuel_cost: int, microchip_cost: int) -> bool:
+	## Atomic deduction across all three resources. Used by the branch
+	## research path so a click that's affordable on salvage+fuel but
+	## not on microchips doesn't half-pay.
+	if not can_afford_full(salvage_cost, fuel_cost, microchip_cost):
+		return false
+	salvage -= salvage_cost
+	fuel -= fuel_cost
+	microchips -= microchip_cost
+	salvage_changed.emit(salvage)
+	fuel_changed.emit(fuel)
+	microchips_changed.emit(microchips)
+	return true
+
+
 func add_salvage(amount: int) -> void:
 	salvage = mini(salvage + amount, SALVAGE_CAP)
 	salvage_changed.emit(salvage)
@@ -98,6 +131,14 @@ func add_fuel(amount: int) -> void:
 	fuel = mini(fuel + amount, fuel_cap)
 	fuel_changed.emit(fuel)
 	_record_income(0, amount)
+
+
+func add_microchips(amount: int) -> void:
+	## Microchips arrive in small lumps (satellite-crash piles, the
+	## occasional special objective drop). The cap is intentionally
+	## low — overflow gets clamped silently.
+	microchips = mini(microchips + amount, MICROCHIPS_CAP)
+	microchips_changed.emit(microchips)
 
 
 func _record_income(salvage_amt: int, fuel_amt: int) -> void:

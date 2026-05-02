@@ -54,6 +54,7 @@ var _pause_overlay: Control = null
 
 @onready var _salvage_label: Label = $TopBar/SalvageLabel as Label
 @onready var _fuel_label: Label = $TopBar/FuelLabel as Label
+@onready var _microchips_label: Label = $TopBar/MicrochipsLabel as Label
 @onready var _power_label: Label = $TopBar/PowerLabel as Label
 @onready var _pop_label: Label = $TopBar/PopLabel as Label
 
@@ -75,6 +76,7 @@ var _match_time: float = 0.0
 ## Resource label palette — accent colors so each line is instantly readable.
 const COLOR_SALVAGE := Color(0.95, 0.78, 0.32, 1.0)   # warm gold
 const COLOR_FUEL := Color(0.4, 0.85, 1.0, 1.0)        # cyan
+const COLOR_MICROCHIPS := Color(0.85, 0.55, 1.0, 1.0) # violet — distinct from gold/cyan
 const COLOR_POWER := Color(1.0, 0.85, 0.35, 1.0)      # yellow
 const COLOR_POP := Color(0.55, 0.95, 0.55, 1.0)       # green
 const COLOR_TIMER := Color(0.85, 0.85, 0.85, 1.0)
@@ -618,6 +620,7 @@ func _apply_theme() -> void:
 func _apply_resource_colors() -> void:
 	if _salvage_label: _salvage_label.add_theme_color_override("font_color", COLOR_SALVAGE)
 	if _fuel_label: _fuel_label.add_theme_color_override("font_color", COLOR_FUEL)
+	if _microchips_label: _microchips_label.add_theme_color_override("font_color", COLOR_MICROCHIPS)
 	if _power_label: _power_label.add_theme_color_override("font_color", COLOR_POWER)
 	if _pop_label: _pop_label.add_theme_color_override("font_color", COLOR_POP)
 	if _timer_label: _timer_label.add_theme_color_override("font_color", COLOR_TIMER)
@@ -658,6 +661,14 @@ func _update_resource_display() -> void:
 		"font_color",
 		COLOR_WARN if fuel_pct < 0.2 else COLOR_FUEL
 	)
+
+	# Microchips — small-number resource. Format intentionally tight
+	# ("Chips 2 / 30") so the readout fits in the topbar without
+	# crowding the salvage / fuel counters.
+	if _microchips_label:
+		var chips_now: int = (_resource_manager.get("microchips") as int) if "microchips" in _resource_manager else 0
+		var chips_cap: int = ResourceManager.MICROCHIPS_CAP
+		_microchips_label.text = "Chips  %d / %d" % [chips_now, chips_cap]
 
 	# Power — bar shows consumption-vs-production load. Color shifts green→
 	# yellow→red as the load grows, with an extra red flag when in deficit.
