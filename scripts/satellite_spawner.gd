@@ -403,6 +403,19 @@ func _pick_spawn_pos() -> Vector3:
 
 
 func _is_clear(p: Vector3) -> bool:
+	# Plateau / ramp keep-out -- piles dropped on a slope or under a
+	# plateau body get buried in the geometry and become unreachable.
+	# Cheap AABB test against every "elevation"-group collision shape
+	# instead of a raycast (raycast missed the ramp's convex-hull
+	# faces from straight above on a couple of attempts).
+	for elev_node: Node in get_tree().get_nodes_in_group("elevation"):
+		if not is_instance_valid(elev_node):
+			continue
+		var elev_body: StaticBody3D = elev_node as StaticBody3D
+		if not elev_body:
+			continue
+		if _point_inside_elevation(p, elev_body):
+			return false
 	# HQ keep-out.
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(node):
@@ -431,3 +444,28 @@ func _is_clear(p: Vector3) -> bool:
 		if p.distance_to(w_pos) < 25.0:
 			return false
 	return true
+
+
+func _point_inside_elevation(p: Vector3, body: StaticBody3D) -> bool:
+	## Returns true if `p` (XZ only) sits inside the AABB of any
+	## CollisionShape3D child of `body`. Plateau bodies use a Box,
+	## ramps use a ConvexPolygonShape3D -- both expose `get_aabb()` /
+	## bounding extents we can read after transforming to world space.
+	const PAD: float = 1.0
+	for child: Node in body.get_children():
+		var col: CollisionShape3D = child as CollisionShape3D
+		if not col or not col.shape:
+			continue
+		var aabb: AABB = col.shape.get_debug_mesh().get_aabb() if col.shape.has_method("get_debug_mesh") else AABB()
+		# Transform the local-space AABB to world space via the body
+		# + collision-shape combined transform so plateau placement
+		# offsets carry through.
+		var xform: Transform3D = body.global_transform * col.transform
+		var w_aabb: AABB = xform * aabb
+		w_aabb = w_aabb.grow(PAD)
+		if p.x < w_aabb.position.x or p.x > w_aabb.position.x + w_aabb.size.x:
+			continue
+		if p.z < w_aabb.position.z or p.z > w_aabb.position.z + w_aabb.size.z:
+			continue
+		return true
+	return false
