@@ -73,7 +73,7 @@ anchors_preset = 12
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_top = -120.0
+offset_top = -150.0
 offset_right = -185.0
 mouse_filter = 1
 
@@ -89,8 +89,13 @@ size_flags_horizontal = 3
 layout_mode = 2
 text = ""
 
-[node name="StatsLabel" type="Label" parent="BottomPanel/HBox/InfoSection"]
+[node name="StatsLabel" type="RichTextLabel" parent="BottomPanel/HBox/InfoSection"]
 layout_mode = 2
+custom_minimum_size = Vector2(0, 80)
+size_flags_vertical = 3
+bbcode_enabled = true
+fit_content = true
+scroll_active = false
 text = ""
 
 [node name="QueueLabel" type="Label" parent="BottomPanel/HBox/InfoSection"]

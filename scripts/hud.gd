@@ -63,7 +63,7 @@ var _pause_overlay: Control = null
 var _power_bar: ProgressBar = null
 var _power_bar_fill_style: StyleBoxFlat = null
 @onready var _name_label: Label = $BottomPanel/HBox/InfoSection/NameLabel as Label
-@onready var _stats_label: Label = $BottomPanel/HBox/InfoSection/StatsLabel as Label
+@onready var _stats_label: RichTextLabel = $BottomPanel/HBox/InfoSection/StatsLabel as RichTextLabel
 @onready var _queue_label: Label = $BottomPanel/HBox/InfoSection/QueueLabel as Label
 @onready var _action_label: Label = $BottomPanel/HBox/ActionSection/ActionLabel as Label
 @onready var _button_grid: GridContainer = $BottomPanel/HBox/ActionSection/ButtonGrid as GridContainer
@@ -625,7 +625,7 @@ func _apply_resource_colors() -> void:
 	if _pop_label: _pop_label.add_theme_color_override("font_color", COLOR_POP)
 	if _timer_label: _timer_label.add_theme_color_override("font_color", COLOR_TIMER)
 	if _name_label: _name_label.add_theme_color_override("font_color", COLOR_NAME)
-	if _stats_label: _stats_label.add_theme_color_override("font_color", COLOR_STATS)
+	if _stats_label: _stats_label.add_theme_color_override("default_color", COLOR_STATS)
 	if _queue_label: _queue_label.add_theme_color_override("font_color", COLOR_QUEUE)
 
 
@@ -802,7 +802,7 @@ func _update_enemy_inspect_panel(target: Node3D) -> void:
 		var bhp_now: int = (target.get("current_hp") as int) if "current_hp" in target else 0
 		var bhp_max: int = bstats.hp
 		_name_label.text = "%s (%s)" % [bstats.building_name, owner_label]
-		_stats_label.text = "Structure   HP %d / %d" % [bhp_now, bhp_max]
+		_stats_label.text = _build_building_stat_sheet(target, bstats, bhp_now)
 		var bhp_pct: float = float(bhp_now) / float(maxi(bhp_max, 1))
 		var bhp_color: Color = Color(0.95, 0.4, 0.35, 0.95)
 		if bhp_pct >= 0.5:
@@ -821,16 +821,14 @@ func _update_enemy_inspect_panel(target: Node3D) -> void:
 	elif "current_hp" in target:
 		hp_now = target.get("current_hp") as int
 	var hp_max: int = stats.hp_total if stats else hp_now
-	var alive: int = (target.get("alive_count") as int) if "alive_count" in target else 1
 
 	if stats:
 		_name_label.text = "%s (%s)" % [stats.unit_name, owner_label]
-		_stats_label.text = "%s   HP %d / %d   Squad %d / %d   Armor %s" % [
-			str(stats.unit_class).capitalize(),
-			hp_now, hp_max,
-			alive, stats.squad_size,
-			str(stats.armor_class).capitalize(),
-		]
+		# Same stat sheet as a friendly unit, but with cost / pop chips
+		# omitted — the player can't act on enemy stats. Damage (DPS
+		# vs Gnd / DPS vs Air) explicitly included so the player can
+		# see what an enemy unit threatens before engaging.
+		_stats_label.text = _build_unit_stat_sheet(target, false)
 		var hp_pct: float = float(hp_now) / float(maxi(hp_max, 1))
 		var hp_color: Color = Color(0.95, 0.4, 0.35, 0.95)
 		if hp_pct >= 0.5:
@@ -838,7 +836,7 @@ func _update_enemy_inspect_panel(target: Node3D) -> void:
 		_show_progress(hp_pct, hp_color)
 	else:
 		_name_label.text = "%s Unit" % owner_label
-		_stats_label.text = "HP %d" % hp_now
+		_stats_label.text = _build_stat_sheet([[_stat_chip("HP", str(hp_now), STAT_LABEL_COLOR_HP)]])
 
 
 func _update_crawler_panel(crawler: SalvageCrawler) -> void:
@@ -896,14 +894,17 @@ func _update_crawler_panel(crawler: SalvageCrawler) -> void:
 		SalvageCrawler.AnchorState.DEPLOYING: state_label = "Deploying"
 		SalvageCrawler.AnchorState.ANCHORED: state_label = "Anchored (+50% armor)"
 		SalvageCrawler.AnchorState.UNDEPLOYING: state_label = "Undeploying"
-	_stats_label.text = "%s   HP %d / %d   Workers %d / %d   Harvest %dm" % [
-		state_label,
-		crawler.current_hp,
-		max_hp,
-		worker_count,
-		max_workers,
-		int(harvest_radius),
-	]
+	_stats_label.text = _build_stat_sheet([
+		[
+			_stat_chip("HP", "%d / %d" % [crawler.current_hp, max_hp], STAT_LABEL_COLOR_HP),
+			_stat_chip("Class", "Crawler", STAT_LABEL_COLOR_DEFENSE),
+			_stat_chip("State", state_label, STAT_LABEL_COLOR_RANGE),
+		],
+		[
+			_stat_chip("Workers", "%d / %d" % [worker_count, max_workers], STAT_LABEL_COLOR_SQUAD),
+			_stat_chip("Harvest", "%dm" % int(harvest_radius), STAT_LABEL_COLOR_RANGE),
+		],
+	])
 
 	var hp_pct: float = float(crawler.current_hp) / float(maxi(max_hp, 1))
 	var hp_color: Color = Color(0.4, 0.95, 0.4, 0.95)
@@ -949,24 +950,15 @@ func _update_building_panel(building: Building) -> void:
 	# Under construction → show construction progress bar.
 	if not building.is_constructed:
 		_name_label.text = building.stats.building_name
-		_stats_label.text = "Under Construction"
+		_stats_label.text = _build_stat_sheet([
+			[_stat_chip("Status", "Under Construction", STAT_LABEL_COLOR_RANGE)],
+		])
 		_queue_label.text = ""
 		_show_progress(building.get_construction_percent(), Color(0.95, 0.78, 0.32, 0.95))
 		return
 
 	_name_label.text = building.stats.building_name
-
-	var stats_text: String = "HP %d / %d" % [building.current_hp, building.stats.hp]
-	if building.stats.power_production > 0:
-		stats_text += "    Power +%d" % building.stats.power_production
-	elif building.stats.power_consumption > 0:
-		stats_text += "    Power -%d" % building.stats.power_consumption
-	# Gun emplacements show their DPS so the player can compare to mech weapons.
-	var turret: Node = building.get_node_or_null("TurretComponent")
-	if turret:
-		var dps: float = float(TurretComponent.TURRET_DAMAGE) / TurretComponent.FIRE_INTERVAL
-		stats_text += "    DPS %.0f" % dps
-	_stats_label.text = stats_text
+	_stats_label.text = _build_building_stat_sheet(building, building.stats, building.current_hp)
 
 	# Salvage yard: show worker info + spawn progress
 	var yard: Node = building.get_node_or_null("SalvageYardComponent")
@@ -1186,8 +1178,11 @@ func _build_selection_roster() -> void:
 	_roster_strip.add_theme_constant_override("separation", 4)
 	_roster_strip.offset_left = 12
 	_roster_strip.offset_right = 12 + 168
-	_roster_strip.offset_top = -260
-	_roster_strip.offset_bottom = -120
+	# Bottom panel grew from 120 -> 150px tall to fit the new
+	# multi-row stat sheet, so the roster strip's bottom anchor
+	# moved up to clear it (roster sits ABOVE the panel).
+	_roster_strip.offset_top = -290
+	_roster_strip.offset_bottom = -160
 	_roster_strip.size_flags_horizontal = 0
 	_roster_strip.size_flags_vertical = 0
 	_roster_strip.mouse_filter = Control.MOUSE_FILTER_PASS
@@ -1746,6 +1741,140 @@ func _on_production_button(index: int) -> void:
 const RES_COLOR_SALVAGE: Color = Color(1.00, 0.78, 0.30, 1.0)  # warm gold
 const RES_COLOR_FUEL: Color = Color(0.30, 0.85, 1.00, 1.0)     # cyan
 const RES_COLOR_POP: Color = Color(0.78, 0.95, 0.55, 1.0)      # green-tan
+
+
+## --- Stat sheet builder ---------------------------------------------------
+##
+## Every selection panel — friendly unit, enemy unit, building, Crawler —
+## funnels its stat readout through `_build_stat_sheet` so the format stays
+## consistent regardless of what's selected. Each row is an array of "chips"
+## (label, value, color); chips on the same row are joined with a divider,
+## rows are joined with newlines. Reads as a real stat sheet at a glance
+## instead of a single comma-separated wall.
+
+const STAT_CHIP_DIVIDER: String = "    "
+const STAT_LABEL_COLOR_HP: String = "ff8a4a"        # warm orange (HP)
+const STAT_LABEL_COLOR_DEFENSE: String = "c5a05c"   # tan (armor / class)
+const STAT_LABEL_COLOR_DAMAGE: String = "ff5d5d"    # red (damage / DPS)
+const STAT_LABEL_COLOR_RANGE: String = "9bd1ff"     # pale blue (range / accuracy)
+const STAT_LABEL_COLOR_MOBILITY: String = "8feda0"  # green (speed)
+const STAT_LABEL_COLOR_SQUAD: String = "c8c8c8"     # neutral grey (squad / pop)
+const STAT_LABEL_COLOR_COST_S: String = "ffc850"    # salvage gold
+const STAT_LABEL_COLOR_COST_F: String = "66d8ff"    # fuel cyan
+const STAT_LABEL_COLOR_COST_M: String = "d88aff"    # microchips violet
+
+
+func _stat_chip(label: String, value: String, color_hex: String) -> String:
+	## A single labelled stat chip. Label is colour-tagged; value uses
+	## the RichTextLabel default colour so it stays at full brightness.
+	return "[color=#%s]%s[/color] %s" % [color_hex, label, value]
+
+
+func _build_stat_sheet(rows: Array) -> String:
+	## Joins an array-of-arrays of pre-formatted chips into a BBCode
+	## string. Expects each row entry to already be a chip string from
+	## `_stat_chip`. Empty rows are skipped so a missing-cost branch
+	## doesn't leave a blank line in the readout.
+	var lines: PackedStringArray = PackedStringArray()
+	for row: Variant in rows:
+		var chips: Array = row as Array
+		if chips.is_empty():
+			continue
+		lines.append(STAT_CHIP_DIVIDER.join(chips))
+	return "\n".join(lines)
+
+
+func _build_unit_stat_sheet(unit: Node3D, include_cost: bool) -> String:
+	## Three-row stat sheet for a unit. Used by both the friendly
+	## single-select panel and the enemy / neutral inspect panel
+	## (passing include_cost=false hides the salvage/fuel chips on
+	## enemy units since the player can't act on them). Rows in
+	## order: defense, combat, mobility/economy.
+	var stats: UnitStatResource = unit.stats as UnitStatResource
+	if not stats:
+		return ""
+	var hp_now: int = unit.get_total_hp() if unit.has_method("get_total_hp") else 0
+	if hp_now == 0 and "current_hp" in unit:
+		hp_now = unit.get("current_hp") as int
+	var alive: int = (unit.get("alive_count") as int) if "alive_count" in unit else 1
+
+	# Row 1 — defense.
+	var row_defense: Array = [
+		_stat_chip("HP", "%d / %d" % [hp_now, stats.hp_total], STAT_LABEL_COLOR_HP),
+		_stat_chip("Class", str(stats.unit_class).capitalize(), STAT_LABEL_COLOR_DEFENSE),
+		_stat_chip("Armor", str(stats.armor_class).capitalize(), STAT_LABEL_COLOR_DEFENSE),
+	]
+
+	# Row 2 — combat. Always show both DPS-vs-ground and DPS-vs-air
+	# with explicit labels so the player can read "this unit can / can't
+	# hit aircraft" without guessing from the role tag alone. Range
+	# and accuracy fall on the same row to keep all combat numbers
+	# in one scannable line.
+	var dps_ground: float = _compute_dps_vs(stats, &"medium")
+	var dps_air: float = _compute_dps_vs(stats, &"light_air")
+	var range_u: float = _max_weapon_range(stats)
+	var acc_pct: int = int(_effective_accuracy(unit) * 100.0)
+	var row_combat: Array = [
+		_stat_chip("DPS Gnd", "%.0f" % dps_ground, STAT_LABEL_COLOR_DAMAGE),
+		_stat_chip("DPS Air", "%.0f" % dps_air, STAT_LABEL_COLOR_DAMAGE),
+		_stat_chip("Range", "%.0fu" % range_u, STAT_LABEL_COLOR_RANGE),
+		_stat_chip("Acc", "%d%%" % acc_pct, STAT_LABEL_COLOR_RANGE),
+	]
+
+	# Row 3 — mobility + (player units only) cost / pop.
+	var row_mobility: Array = [
+		_stat_chip("Speed", _speed_label(stats.speed_tier), STAT_LABEL_COLOR_MOBILITY),
+		_stat_chip("Squad", "%d / %d" % [alive, stats.squad_size], STAT_LABEL_COLOR_SQUAD),
+	]
+	if include_cost:
+		row_mobility.append(_stat_chip("Pop", str(stats.population), STAT_LABEL_COLOR_SQUAD))
+		row_mobility.append(_stat_chip("Cost", "%dS / %dF" % [stats.cost_salvage, stats.cost_fuel], STAT_LABEL_COLOR_COST_S))
+
+	# Optional row 4 — weapon character. One short summary so the player
+	# knows whether the DPS comes from a slow cannon, a continuous beam,
+	# a missile salvo, etc. Pulled into its own row so the combat
+	# numbers row stays clean.
+	var weapon_summary: String = _weapon_summary(stats)
+	var row_weapons: Array = []
+	if weapon_summary != "":
+		row_weapons.append(_stat_chip("Weapons", weapon_summary, STAT_LABEL_COLOR_RANGE))
+
+	return _build_stat_sheet([row_defense, row_combat, row_mobility, row_weapons])
+
+
+func _build_building_stat_sheet(building: Node3D, bstats: BuildingStatResource, hp_now: int) -> String:
+	## Compact building / structure stat sheet. Shows HP, power impact,
+	## and (when applicable) turret DPS so the player can compare a
+	## gun-emplacement profile to a mech weapon at a glance.
+	var rows: Array = []
+	var defense_row: Array = [
+		_stat_chip("HP", "%d / %d" % [hp_now, bstats.hp], STAT_LABEL_COLOR_HP),
+		_stat_chip("Class", "Structure", STAT_LABEL_COLOR_DEFENSE),
+	]
+	if bstats.power_production > 0:
+		defense_row.append(_stat_chip("Power", "+%d" % bstats.power_production, STAT_LABEL_COLOR_MOBILITY))
+	elif bstats.power_consumption > 0:
+		defense_row.append(_stat_chip("Power", "-%d" % bstats.power_consumption, STAT_LABEL_COLOR_DAMAGE))
+	rows.append(defense_row)
+
+	# Turret stats (gun emplacements / SAM sites that have a
+	# TurretComponent attached). Mirrors the per-shot damage table used
+	# by the actual fire path.
+	var turret: Node = building.get_node_or_null("TurretComponent") if building else null
+	if turret:
+		var dps: float = float(TurretComponent.TURRET_DAMAGE) / TurretComponent.FIRE_INTERVAL
+		var combat_row: Array = [
+			_stat_chip("DPS", "%.0f" % dps, STAT_LABEL_COLOR_DAMAGE),
+			_stat_chip("Range", "%.0fu" % TurretComponent.TURRET_RANGE, STAT_LABEL_COLOR_RANGE),
+		]
+		rows.append(combat_row)
+
+	if not bstats.producible_units.is_empty():
+		var produces_row: Array = [
+			_stat_chip("Produces", "%d unit type(s)" % bstats.producible_units.size(), STAT_LABEL_COLOR_RANGE),
+		]
+		rows.append(produces_row)
+	return _build_stat_sheet(rows)
 
 
 func _set_label_button(btn: Button, prefix: String, name: String) -> void:
@@ -2324,34 +2453,7 @@ func _update_unit_panel(units: Array[Node3D]) -> void:
 		if unit.stats:
 			_name_label.text = "%s — %s" % [unit.stats.unit_name, _role_hint_for(unit.stats)]
 			var hp_pct: float = float(unit.get_total_hp()) / float(maxi(unit.stats.hp_total, 1))
-			var dps_ground: float = _compute_dps_vs(unit.stats, &"medium")
-			var dps_air: float = _compute_dps_vs(unit.stats, &"light_air")
-			# Two stacked lines: combat readout on top, mobility / cost
-			# / weapon character on the bottom. Each is parseable on its
-			# own, together they cover what the player needs to know about
-			# this unit's role at a glance.
-			var line1: String = "%s   HP %d / %d   Squad %d / %d   Armor %s   DPS %.0f vs Gnd / %.0f vs Air" % [
-				str(unit.stats.unit_class).capitalize(),
-				unit.get_total_hp(),
-				unit.stats.hp_total,
-				unit.alive_count,
-				unit.stats.squad_size,
-				str(unit.stats.armor_class).capitalize(),
-				dps_ground,
-				dps_air,
-			]
-			var range_u: float = _max_weapon_range(unit.stats)
-			var acc_pct: int = int(_effective_accuracy(unit) * 100.0)
-			var line2: String = "%s   Range %.0fu   %s   Acc %d%%   Pop %d   %dS / %dF" % [
-				_speed_label(unit.stats.speed_tier),
-				range_u,
-				_weapon_summary(unit.stats),
-				acc_pct,
-				unit.stats.population,
-				unit.stats.cost_salvage,
-				unit.stats.cost_fuel,
-			]
-			_stats_label.text = line1 + "\n" + line2
+			_stats_label.text = _build_unit_stat_sheet(unit, true)
 			# Use HP bar to mirror the on-world HP — quick eyeball read in the panel.
 			var hp_color: Color = Color(0.4, 0.95, 0.4, 0.95)
 			if hp_pct < 0.5: hp_color = Color(0.95, 0.78, 0.32, 0.95)
@@ -2373,9 +2475,11 @@ func _update_unit_panel(units: Array[Node3D]) -> void:
 
 		var parts: PackedStringArray = PackedStringArray()
 		for uname: String in counts:
-			parts.append("%dx %s" % [counts[uname], uname])
+			parts.append("%d %s" % [counts[uname], uname])
 		_name_label.text = "%d units selected" % units.size()
-		_stats_label.text = ", ".join(parts)
+		_stats_label.text = _build_stat_sheet([
+			[_stat_chip("Roster", "  •  ".join(parts), STAT_LABEL_COLOR_SQUAD)],
+		])
 
 
 func _rebuild_build_buttons() -> void:
