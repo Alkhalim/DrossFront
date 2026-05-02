@@ -376,8 +376,17 @@ var _raid_fired: bool = false
 ## march. Enemy enclave at -Z = north on screen.
 const ALLY_RALLY_POINT: Vector3 = Vector3(-50.0, 0.0, 108.0)
 const ALLY_RALLY_ARRIVE_SQ: float = 18.0 * 18.0
-const ALLY_FOLLOW_INTERVAL_SEC: float = 3.0
-const ALLY_TRAIL_OFFSET: float = 6.0  # ally rallies this far behind player centroid
+## Tightened from 3.0 -> 1.0 so the move target tracks the
+## player's army centroid in near real time. Previous 3s
+## interval meant the ally was always chasing a stale rally
+## point and visibly lagged behind a player on the move.
+const ALLY_FOLLOW_INTERVAL_SEC: float = 1.0
+## Trail offset shrunk from 6 -> 2u so the ally sits right
+## alongside the player's army instead of trailing visibly
+## behind. Negative would pull them ahead toward the enemy,
+## but a small positive keeps them just behind the lead so
+## the player's units take the front line.
+const ALLY_TRAIL_OFFSET: float = 2.0
 const ENEMY_ENCLAVE_CENTRE: Vector3 = Vector3(0.0, 0.0, -130.0)
 const ALLY_SPAWN_X: float = -50.0
 const ALLY_SPAWN_Z: float = 150.0
