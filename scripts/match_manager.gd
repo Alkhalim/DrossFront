@@ -140,13 +140,32 @@ func _on_hq_destroyed(destroyed_node: Node) -> void:
 		_end_match(false)
 		return
 
+	# Tutorial mode owns its own end-of-mission timing — the
+	# TutorialMission detects "enclave cleared" via its WIN stage
+	# trigger and fires _end_match(true) itself, with a closing
+	# dialogue beat in between. Skipping the auto-tally here also
+	# dodges the stale-team_id bug (the player's HQ registers as
+	# owner 2 = neutral ruin at scene start; its team_id cache
+	# never updates when the player claims it, so the auto-tally
+	# would mis-count surviving teams).
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if settings and settings.get("tutorial_mode"):
+		return
+
 	# Tally surviving HQs per team. Match ends as soon as one team has
-	# zero HQs left.
+	# zero HQs left. Re-query owner_id from the live HQ node so a
+	# captured ruin (owner flipped post-registration) tallies under
+	# its CURRENT team rather than the cached one from registration.
 	var local_team_alive: int = 0
 	var enemy_teams_alive: int = 0
 	var local_team_id: int = _local_team()
 	for entry: Dictionary in _hqs:
-		if (entry["team_id"] as int) == local_team_id:
+		var hq: Node = entry["hq"]
+		if not is_instance_valid(hq):
+			continue
+		var live_oid: int = hq.get("owner_id") as int
+		var live_tid: int = (_registry.get_team(live_oid) as int) if _registry else (0 if live_oid == 0 else 1)
+		if live_tid == local_team_id:
 			local_team_alive += 1
 		else:
 			enemy_teams_alive += 1
@@ -186,6 +205,11 @@ const VICTORY_DECLARATION_DELAY_SEC: float = 4.5
 
 
 func _end_match(victory: bool) -> void:
+	# Idempotent. Called from _on_hq_destroyed AND directly from
+	# TutorialMission._stage_win_enter; the second call must be a
+	# no-op or we'd stack a second end-screen overlay.
+	if _match_ended:
+		return
 	_match_ended = true
 	match_over.emit(victory)
 	# Match-end stinger — defeat sample on loss, synthesised major-

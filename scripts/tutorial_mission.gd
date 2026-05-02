@@ -881,9 +881,25 @@ func _stage_ally_done() -> bool:
 	return true
 
 
+## Beat between the closing dialogue line typing in and the
+## end-of-match overlay popping up. The HUD typewriter runs
+## ~32 chars/sec on stage entry — the closing line is ~110
+## chars (~3.4s) so this gives roughly one second of silence
+## after the line lands before the victory screen takes the
+## scene. MatchManager then layers its own ~4.5s grace delay
+## on top before fading the panel in.
+const WIN_DIALOGUE_BEAT_SEC: float = 5.0
+
+
 func _stage_win_enter() -> void:
-	# Trigger the match-end victory path so the player gets the
-	# normal end overlay.
+	# Closing dialogue is published the moment this stage is
+	# entered (the HUD picks it up via current_stage_dialogue()).
+	# Hold the actual match-end call long enough for the line to
+	# type out and breathe before the victory overlay appears.
+	get_tree().create_timer(WIN_DIALOGUE_BEAT_SEC).timeout.connect(_fire_victory)
+
+
+func _fire_victory() -> void:
 	var mm: Node = get_tree().current_scene.get_node_or_null("MatchManager")
 	if mm and mm.has_method("_end_match"):
 		mm.call("_end_match", true)
