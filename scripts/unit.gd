@@ -118,6 +118,16 @@ var _build_spark_timer: float = 0.0
 ## button so the player knows when it's available again.
 var _ability_cd_remaining: float = 0.0
 
+## Courier Tank passenger list — populated when this unit casts
+## Garrison and emptied on the second press (disembark). Each entry
+## is the passenger Unit. Empty when the tank isn't carrying anyone
+## or when this unit isn't a transport at all.
+var _garrison_passengers: Array[Unit] = []
+## Reverse pointer for passengers: the carrier unit they're riding
+## inside. While set, the passenger's _physics_process skips
+## movement / combat and the passenger is hidden + non-targetable.
+var _garrisoned_in: Unit = null
+
 ## SelectionManager flags this true while the mouse is hovering over the unit
 ## so we can pop up the HP bar even if the unit is at full health.
 var hp_bar_hovered: bool = false
@@ -2477,11 +2487,7 @@ func trigger_ability() -> bool:
 		"Reactor Surge":
 			fired = _ability_reactor_surge()
 		"Garrison":
-			# Courier Tank embark / disembark toggle — full
-			# implementation arrives in a follow-up. Stub returns
-			# true so the cooldown still rolls and the player gets
-			# button feedback, but no passenger logic yet.
-			fired = true
+			fired = _ability_garrison()
 		_:
 			# Unknown ability name on stats — don't crash, just
 			# refuse to fire so the player notices.
@@ -2600,6 +2606,87 @@ func _ability_reactor_surge() -> bool:
 	return hits > 0 or true
 
 
+func _ability_garrison() -> bool:
+	## Courier Tank embark / disembark toggle.
+	##   No passengers loaded -> board the nearest 3 friendly Anvil
+	##     light mechs / engineers within stats.ability_radius. Each
+	##     boarded unit hides, suppresses combat + movement, and
+	##     points _garrisoned_in at this tank. Tank's CombatComponent
+	##     enables the garrison damage + fire-rate buff.
+	##   Passengers loaded -> disembark all of them around the tank,
+	##     restore visibility / combat, clear the buff.
+	if _garrison_passengers.is_empty():
+		var origin: Vector3 = global_position
+		var radius_sq: float = stats.ability_radius * stats.ability_radius
+		var candidates: Array[Unit] = []
+		for node: Node in get_tree().get_nodes_in_group("units"):
+			if not is_instance_valid(node):
+				continue
+			var ally: Unit = node as Unit
+			if not ally or ally == self:
+				continue
+			if ally.owner_id != owner_id:
+				continue
+			if ally.alive_count <= 0:
+				continue
+			if ally._garrisoned_in != null:
+				continue
+			if not ally.stats:
+				continue
+			# Only light mechs and engineers fit in the transport.
+			# Mediums + heavies + transports + aircraft don't.
+			if ally.stats.unit_class != &"light" and ally.stats.unit_class != &"engineer":
+				continue
+			if ally.global_position.distance_squared_to(origin) > radius_sq:
+				continue
+			candidates.append(ally)
+		# Sort closest first and take up to 3 — the spec's transport
+		# capacity. Sort by squared distance to avoid the sqrt cost.
+		candidates.sort_custom(func(a: Unit, b: Unit) -> bool:
+			return a.global_position.distance_squared_to(origin) < b.global_position.distance_squared_to(origin)
+		)
+		var taken: int = 0
+		for ally: Unit in candidates:
+			if taken >= 3:
+				break
+			_garrison_passengers.append(ally)
+			ally._garrisoned_in = self
+			ally.visible = false
+			# Stop them in place so any active move order doesn't
+			# resume on disembark — the player can re-task after
+			# they're back on the field.
+			if ally.has_method("stop"):
+				ally.stop()
+			taken += 1
+		_set_garrison_buff(true)
+		return true
+
+	# Disembark — drop every passenger in a small ring around the
+	# tank, restore them, clear the buff.
+	var passengers: Array[Unit] = _garrison_passengers.duplicate()
+	_garrison_passengers.clear()
+	var n: int = passengers.size()
+	for i: int in n:
+		var ally: Unit = passengers[i]
+		if not is_instance_valid(ally):
+			continue
+		var angle: float = TAU * float(i) / float(maxi(n, 1))
+		var drop_pos: Vector3 = global_position + Vector3(cos(angle) * 3.0, 0.0, sin(angle) * 3.0)
+		ally.global_position = drop_pos
+		ally._garrisoned_in = null
+		ally.visible = true
+	_set_garrison_buff(false)
+	return true
+
+
+func _set_garrison_buff(active: bool) -> void:
+	## Toggles the carrier's CombatComponent garrison flag (fire
+	## rate + damage buff) and updates the visual cue.
+	var combat: Node = get_node_or_null("CombatComponent")
+	if combat and combat.has_method("set_garrison_active"):
+		combat.call("set_garrison_active", active)
+
+
 func apply_heal(amount: int) -> void:
 	## Distributes a heal across alive members. Caps at hp_per_unit
 	## per member so a single huge heal doesn't overheal one member
@@ -2680,6 +2767,23 @@ func _spawn_system_crash_visual(radius: float) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	# Garrisoned passenger short-circuit. While riding inside a
+	# Courier Tank, the passenger snaps to the carrier's position
+	# every tick and skips its own movement, combat, stuck-rescue,
+	# stealth, and damage-flash logic. The carrier dying clears
+	# _garrisoned_in (see take_damage / _die path) and the
+	# passenger resumes normal processing on the next tick.
+	if _garrisoned_in:
+		if not is_instance_valid(_garrisoned_in) or _garrisoned_in.alive_count <= 0:
+			# Carrier vanished mid-ride — drop out where we are
+			# so the passenger isn't permanently invisible.
+			_garrisoned_in = null
+			visible = true
+		else:
+			global_position = _garrisoned_in.global_position
+			velocity = Vector3.ZERO
+			return
+
 	# Damage flash countdown (cheap — runs every frame).
 	if _flash_timer > 0.0:
 		_flash_timer -= delta
@@ -3518,6 +3622,22 @@ func _die() -> void:
 	squad_destroyed.emit()
 	if _hp_bar and is_instance_valid(_hp_bar):
 		_hp_bar.queue_free()
+
+	# Carrier death — eject any garrisoned passengers in a small
+	# ring around the wreck position. Better the player keeps the
+	# infantry / engineers than them silently disappearing with
+	# the tank.
+	if not _garrison_passengers.is_empty():
+		var n: int = _garrison_passengers.size()
+		for i: int in n:
+			var ally: Unit = _garrison_passengers[i]
+			if not is_instance_valid(ally):
+				continue
+			var angle: float = TAU * float(i) / float(maxi(n, 1))
+			ally.global_position = global_position + Vector3(cos(angle) * 3.0, 0.0, sin(angle) * 3.0)
+			ally._garrisoned_in = null
+			ally.visible = true
+		_garrison_passengers.clear()
 
 	_spawn_squad_death_explosion()
 	_request_camera_shake(0.35)

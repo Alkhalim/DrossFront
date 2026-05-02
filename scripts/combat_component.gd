@@ -21,6 +21,14 @@ var _silence_remaining: float = 0.0
 ## expiry so a stale value can't leak into the next cast.
 var _damage_mult_remaining: float = 0.0
 var _damage_mult_value: float = 1.0
+
+## Garrison passive — set by Courier Tank's Garrison ability and
+## any future "passenger-buff" hook. When true, outgoing damage
+## scales by GARRISON_DAMAGE_MULT and fire cooldowns shrink by
+## GARRISON_FIRE_RATE_MULT (faster fire). Cleared on disembark.
+var _garrison_active: bool = false
+const GARRISON_DAMAGE_MULT: float = 1.5
+const GARRISON_FIRE_RATE_MULT: float = 1.2
 ## Cached PlayerRegistry — used to ask "is my owner allied with this owner?"
 ## instead of comparing raw owner_ids. Falls back to the raw compare when
 ## the registry isn't present, so headless / test scenes keep working.
@@ -90,7 +98,14 @@ func apply_damage_buff(multiplier: float, duration: float) -> void:
 
 
 func get_damage_buff_mult() -> float:
-	return _damage_mult_value if _damage_mult_remaining > 0.0 else 1.0
+	var aura: float = _damage_mult_value if _damage_mult_remaining > 0.0 else 1.0
+	if _garrison_active:
+		aura *= GARRISON_DAMAGE_MULT
+	return aura
+
+
+func set_garrison_active(active: bool) -> void:
+	_garrison_active = active
 
 
 func _is_hostile(my_owner: int, target_owner: int) -> bool:
@@ -390,6 +405,13 @@ func _is_valid_target(target: Node3D) -> bool:
 		var alive: int = target.get("alive_count")
 		if alive <= 0:
 			return false
+	# Garrisoned units (riding inside a Courier Tank) aren't on the
+	# board for combat purposes — they don't have a position the
+	# enemy can shoot at, and snapping fire to the carrier's pos
+	# would let one tank "tank" all the incoming AI shots away from
+	# its own crew. Filter them out at the targeting layer.
+	if "_garrisoned_in" in target and target.get("_garrisoned_in") != null:
+		return false
 	return true
 
 
@@ -427,6 +449,11 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 		reload_factor = mesh_sys.call("reload_factor", mesh_strength) as float
 
 	var rof: float = CombatTables.get_rof(weapon.rof_tier) * reload_factor
+	# Garrison fire-rate buff — divide cooldown by GARRISON_FIRE_RATE_MULT
+	# so fire happens faster (1.2x = 20% quicker rolls). Applied AFTER the
+	# Mesh reload factor so both effects compound multiplicatively.
+	if _garrison_active:
+		rof = rof / GARRISON_FIRE_RATE_MULT
 	if is_primary:
 		# Burst pattern for very high RoF: BURST_SHOTS quick shots, then a
 		# longer pause that keeps the average DPS the same.
