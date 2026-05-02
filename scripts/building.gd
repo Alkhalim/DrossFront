@@ -542,53 +542,88 @@ func _team_collar(width: float, height: float, depth: float, pos: Vector3) -> vo
 
 
 func _detail_hq_defense_turret() -> void:
-	## Small visible defensive turret cap on a roof corner of the HQ
-	## so the built-in HQ self-defense reads as "the HQ has a gun"
-	## rather than firing invisible shots from its centre. The
-	## pivoting + tracking is wired through the same turret_pivot
-	## convention the gun emplacement uses, so TurretComponent's
-	## _aim_at_target rotates it. Scaled down so it doesn't compete
-	## with the central command spire silhouette.
+	## Four tiny MG nests at the HQ roof corners -- reads as a
+	## position-secured-by-soldiers, not a proper turret fortification.
+	## Each nest is a sandbag-ringed open-top emplacement with a short
+	## MG barrel; one of them carries the actual TurretComponent
+	## tracking pivot so the firing animation has somewhere to anchor.
 	var fs: Vector3 = stats.footprint_size
-	var corner: Vector3 = Vector3(fs.x * 0.36, fs.y, fs.z * 0.36)
-	# Mounting plate so the turret doesn't look like it's floating.
-	var plate := MeshInstance3D.new()
-	var plate_cyl := CylinderMesh.new()
-	plate_cyl.top_radius = 0.30
-	plate_cyl.bottom_radius = 0.34
-	plate_cyl.height = 0.08
-	plate.mesh = plate_cyl
-	plate.position = corner + Vector3(0.0, 0.04, 0.0)
-	plate.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.20, 0.18, 0.16)))
-	_attach_visual(plate)
-	# Pivot — TurretComponent rotates this around Y to track targets.
-	var pivot := Node3D.new()
-	pivot.name = "TurretPivot"
-	pivot.position = corner + Vector3(0.0, 0.10, 0.0)
-	_attach_visual(pivot)
-	turret_pivot = pivot
-	# Compact dome + single short barrel. Hand-built rather than
-	# reusing rebuild_turret_visual because the gun-emplacement
-	# barrel scales off fs.x (=7 for the HQ), which would produce a
-	# 6u-long cannon dwarfing the rooftop spire.
-	var dome := MeshInstance3D.new()
-	var dome_sphere := SphereMesh.new()
-	dome_sphere.radius = 0.32
-	dome_sphere.height = 0.34
-	dome.mesh = dome_sphere
-	dome.position.y = 0.08
-	dome.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.28, 0.26, 0.24)))
-	pivot.add_child(dome)
+	var corners: Array[Vector3] = [
+		Vector3(fs.x * 0.40, fs.y, fs.z * 0.40),
+		Vector3(-fs.x * 0.40, fs.y, fs.z * 0.40),
+		Vector3(fs.x * 0.40, fs.y, -fs.z * 0.40),
+		Vector3(-fs.x * 0.40, fs.y, -fs.z * 0.40),
+	]
+	for i: int in corners.size():
+		var corner: Vector3 = corners[i]
+		# The first nest carries the real tracking pivot; the others
+		# are static decoration so the silhouette reads as "MG nests
+		# on every corner" without four pivots fighting over aim.
+		var carries_pivot: bool = (i == 0)
+		_build_hq_corner_mg_nest(corner, carries_pivot)
+
+
+func _build_hq_corner_mg_nest(corner: Vector3, carries_pivot: bool) -> void:
+	## Sandbag ring + tiny MG. Sandbags are 6 small box segments
+	## arranged in a rough hex around a centre point; the MG is a
+	## stubby barrel poking over the ring.
+	var ring_radius: float = 0.42
+	var bag_h: float = 0.16
+	for s: int in 6:
+		var ang: float = float(s) / 6.0 * TAU
+		var bx: float = corner.x + cos(ang) * ring_radius
+		var bz: float = corner.z + sin(ang) * ring_radius
+		var bag := MeshInstance3D.new()
+		var bg_box := BoxMesh.new()
+		bg_box.size = Vector3(0.22, bag_h, 0.34)
+		bag.mesh = bg_box
+		bag.position = Vector3(bx, corner.y + bag_h * 0.5, bz)
+		# Rotate each sandbag so its long axis follows the ring's
+		# tangent -- otherwise they read as a row of straight crates.
+		bag.rotation.y = ang + PI / 2
+		bag.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.30, 0.27, 0.20)))
+		_attach_visual(bag)
+
+	# MG mount -- a tiny tripod base inside the ring.
+	var mount := MeshInstance3D.new()
+	var mount_box := BoxMesh.new()
+	mount_box.size = Vector3(0.16, 0.10, 0.16)
+	mount.mesh = mount_box
+	mount.position = Vector3(corner.x, corner.y + 0.05, corner.z)
+	mount.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.20, 0.18, 0.16)))
+	_attach_visual(mount)
+
+	# Tracking pivot (only one nest carries it). The others get a
+	# static barrel parented under VisualRoot so they don't try to
+	# rotate.
+	var anchor: Node3D
+	if carries_pivot:
+		var pivot := Node3D.new()
+		pivot.name = "TurretPivot"
+		pivot.position = Vector3(corner.x, corner.y + 0.14, corner.z)
+		_attach_visual(pivot)
+		turret_pivot = pivot
+		anchor = pivot
+	else:
+		var static_pivot := Node3D.new()
+		static_pivot.position = Vector3(corner.x, corner.y + 0.14, corner.z)
+		# Aim outward from the building centre so the barrel reads
+		# as "covering its arc" rather than all four facing the same
+		# direction.
+		static_pivot.rotation.y = atan2(corner.x, corner.z)
+		_attach_visual(static_pivot)
+		anchor = static_pivot
+
 	var barrel := MeshInstance3D.new()
 	var bc := CylinderMesh.new()
-	bc.top_radius = 0.06
-	bc.bottom_radius = 0.07
-	bc.height = 0.85
+	bc.top_radius = 0.035
+	bc.bottom_radius = 0.045
+	bc.height = 0.42
 	barrel.mesh = bc
 	barrel.rotation.x = -PI / 2
-	barrel.position = Vector3(0.0, 0.18, -bc.height * 0.5 - 0.03)
-	barrel.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.16, 0.14, 0.14)))
-	pivot.add_child(barrel)
+	barrel.position = Vector3(0.0, 0.04, -bc.height * 0.5 - 0.05)
+	barrel.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.14, 0.13, 0.12)))
+	anchor.add_child(barrel)
 
 
 func _detail_headquarters() -> void:
