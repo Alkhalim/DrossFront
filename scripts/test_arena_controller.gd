@@ -396,11 +396,14 @@ func _apply_map_visuals() -> void:
 		# Iron Gate Crossing — semi-controlled district, overcast
 		# storm light. Cool desaturated palette so the colour pops
 		# from Sable violet + Anvil brass over a flat grey-green
-		# atmospheric base.
+		# atmospheric base. Pulled the ground tint cooler + darker
+		# so the "snow" reads as packed dirty winter ground rather
+		# than fresh-fallen sheet white; the spotty patches added
+		# in _setup_ground_patches do the rest of the texture work.
 		if ground:
 			var gmat2: StandardMaterial3D = ground.get_surface_override_material(0) as StandardMaterial3D
 			if gmat2:
-				gmat2.albedo_color = Color(0.75, 0.78, 0.72, 1.0)
+				gmat2.albedo_color = Color(0.58, 0.62, 0.62, 1.0)
 		if dir_light:
 			dir_light.light_color = Color(0.78, 0.82, 0.85, 1.0)
 			dir_light.light_energy = 0.95
@@ -2546,7 +2549,30 @@ func _setup_ground_patches() -> void:
 	# leans into pale-ash drift fields with a darker volcanic scar to
 	# break up the otherwise uniform plains.
 	var biomes: Array[Dictionary]
-	if _is_ashplains():
+	if _is_iron_gate():
+		# Iron Gate winter zone — packed slush + exposed asphalt
+		# under uneven snowpack. Big mottled patches break the
+		# otherwise-uniform pale ground into a textured wintry
+		# read. Mirrored across z=0 so the symmetry holds.
+		biomes = [
+			# Cleared road / vehicle-track zone running through the
+			# centre — darker exposed asphalt where the snow's been
+			# trampled or plowed.
+			{"pos": Vector3(0.0, 0.025, 0.0), "size": 60.0, "tint": Color(0.18, 0.20, 0.22, 0.55), "rough": 1.0},
+			# Slush drift zones flanking the spawns — slightly warmer
+			# tone so they read as melted-and-refrozen, not fresh.
+			{"pos": Vector3(0.0, 0.025, 80.0), "size": 80.0, "tint": Color(0.45, 0.48, 0.50, 0.45), "rough": 1.0},
+			{"pos": Vector3(0.0, 0.025, -80.0), "size": 80.0, "tint": Color(0.45, 0.48, 0.50, 0.45), "rough": 1.0},
+			# Iron-stained patches around the central ruins — the
+			# rust + cold mix that gives the map its name.
+			{"pos": Vector3(48.0, 0.025, 30.0), "size": 35.0, "tint": Color(0.30, 0.20, 0.16, 0.55), "rough": 1.0},
+			{"pos": Vector3(-48.0, 0.025, -30.0), "size": 35.0, "tint": Color(0.30, 0.20, 0.16, 0.55), "rough": 1.0},
+			# Far-flank dirt-windswept zones where the snow's been
+			# scoured off entirely.
+			{"pos": Vector3(95.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.22, 0.20, 0.16, 0.55), "rough": 1.0},
+			{"pos": Vector3(-95.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.22, 0.20, 0.16, 0.55), "rough": 1.0},
+		]
+	elif _is_ashplains():
 		biomes = [
 			# Pale-ash drift zones either side of the central ridge —
 			# wash out a wide swath of the open ground so it reads as
@@ -2598,6 +2624,11 @@ func _setup_ground_patches() -> void:
 	var detail_count: int = 80
 	const MAP_HALF: float = 135.0
 	var on_ash: bool = _is_ashplains()
+	var on_iron: bool = _is_iron_gate()
+	# Iron Gate gets denser detail patches — the ground is more
+	# uniform without them and reads as too-clean snowfield.
+	if on_iron:
+		detail_count = 130
 	for i: int in detail_count:
 		var pos := Vector3(
 			randf_range(-MAP_HALF, MAP_HALF),
@@ -2608,7 +2639,37 @@ func _setup_ground_patches() -> void:
 		if absf(pos.x) < 12.0 and absf(pos.z) > 95.0:
 			continue
 		var roll: float = randf()
-		if on_ash:
+		if on_iron:
+			# Wintry-grey palette: snow drifts (lighter), exposed
+			# rock (darker), iron-rust patches (warm), dirty packed
+			# slush (mid-grey). Higher overall density + a bit of
+			# variance in size makes the snowpack read as broken
+			# and lived-in rather than a flat sheet.
+			if roll < 0.28:
+				# Slush / packed dirty snow — grey wash with light
+				# alpha, soft-edged.
+				_spawn_soft_patch(pos, randf_range(3.5, 7.0), Color(0.40, 0.42, 0.44, randf_range(0.40, 0.60)), 1.0, false)
+			elif roll < 0.50:
+				# Exposed asphalt / dark rock — high-contrast dark
+				# patch breaking up the pale ground.
+				_spawn_soft_patch(pos, randf_range(2.5, 5.5), Color(0.10, 0.10, 0.12, randf_range(0.55, 0.78)), 1.0, false)
+			elif roll < 0.68:
+				# Iron-stained rust spot — warm orange-brown,
+				# sparse so it reads as stains, not background.
+				_spawn_soft_patch(pos, randf_range(2.5, 5.0), Color(0.42, 0.22, 0.13, randf_range(0.45, 0.65)), 1.0, false)
+			elif roll < 0.82:
+				# Drift snow — slightly brighter than the base
+				# tint, low alpha so it reads as light surface
+				# texture.
+				_spawn_soft_patch(pos, randf_range(3.0, 6.0), Color(0.78, 0.80, 0.78, randf_range(0.30, 0.45)), 1.0, false)
+			elif roll < 0.92:
+				# Frozen mud puddle — dark warm patch with a
+				# slightly cool blue undertone.
+				_spawn_soft_patch(pos, randf_range(2.5, 4.5), Color(0.18, 0.16, 0.14, randf_range(0.50, 0.72)), 1.0, false)
+			else:
+				# Sparse ice glaze — low-roughness reflective spot.
+				_spawn_soft_patch(pos, randf_range(2.0, 3.5), Color(0.80, 0.85, 0.92, randf_range(0.32, 0.48)), 0.40, false)
+		elif on_ash:
 			if roll < 0.24:
 				# Cracked-earth — dark warm patch with a slightly red
 				# undertone, reads as parched riverbed.
