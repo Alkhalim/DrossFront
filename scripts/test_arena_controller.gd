@@ -2487,14 +2487,18 @@ func _spawn_walkable_plateau(center: Vector3, top_size: Vector2, height: float, 
 	# orientation never causes invisibility. Plateau geometry is small
 	# (≈64 triangles per plateau) so the 2× draw cost is trivial.
 	var mat_top := StandardMaterial3D.new()
-	mat_top.albedo_color = Color(0.18, 0.16, 0.13, 1.0)
+	mat_top.albedo_color = Color(0.32, 0.28, 0.22, 1.0)
 	mat_top.albedo_texture = SharedTextures.get_metal_wear_texture()
 	mat_top.uv1_scale = Vector3(3.5, 3.5, 1.0)
 	mat_top.roughness = 0.95
 	mat_top.cull_mode = BaseMaterial3D.CULL_DISABLED
 
+	# Side / ramp tint pulled out of near-black -- the previous
+	# 0.09/0.08/0.07 read as flat black under most lighting and the
+	# user couldn't tell ramp from cliff face. Around 0.20 keeps the
+	# walls clearly darker than the top while staying lit.
 	var mat_side := StandardMaterial3D.new()
-	mat_side.albedo_color = Color(0.09, 0.08, 0.07, 1.0)
+	mat_side.albedo_color = Color(0.22, 0.19, 0.16, 1.0)
 	mat_side.albedo_texture = SharedTextures.get_metal_wear_texture()
 	mat_side.uv1_scale = Vector3(2.4, 2.4, 1.0)
 	mat_side.roughness = 0.95
@@ -2513,12 +2517,21 @@ func _spawn_walkable_plateau(center: Vector3, top_size: Vector2, height: float, 
 	# 4 corners by `corner_cut`. This breaks the perfectly-rectilinear
 	# silhouette without changing the collision footprint (collision
 	# stays the simpler Box, which is fine — the chamfer is small).
-	var corner_cut: float = minf(top_size.x, top_size.y) * 0.18
+	# Bumped from 0.18 to 0.30 so the chamfer is bigger and the
+	# silhouette reads less like a rectangular box.
+	var corner_cut: float = minf(top_size.x, top_size.y) * 0.30
 	var oct_top: PackedVector3Array = _octagon_corners(top_size, corner_cut, height)
 	var oct_bot: PackedVector3Array = _octagon_corners(top_size, corner_cut, 0.0)
 
 	var body_mesh := _build_octagonal_prism_mesh(oct_top, oct_bot, mat_top, mat_side)
 	root.add_child(body_mesh)
+
+	# Rocky scree against the side walls -- 8-12 small irregular blocks
+	# leaning against / projecting out of the cliff face. Breaks up the
+	# straight wall silhouette so the plateau reads as a weathered
+	# outcrop instead of a poured-concrete platform. Same darker side
+	# material so the scree blends rather than spotlights itself.
+	_decorate_plateau_scree(root, top_size, height, corner_cut, mat_side)
 
 	# --- Ramps ---
 	# Ramp width — generous enough that the bake's 1.5u agent_radius
@@ -2619,6 +2632,58 @@ func _plateau_top_perimeter_with_ramps(top_size: Vector2, cut: float, height: fl
 		verts.append(Vector3(+hx, height, -hw))
 	# Wraps back to vertex 0 implicitly.
 	return verts
+
+
+func _decorate_plateau_scree(root: Node3D, top_size: Vector2, height: float, cut: float, share_mat: StandardMaterial3D) -> void:
+	## Drops 8-14 small irregular blocks against the plateau side
+	## walls -- weathered scree / fallen hull plates leaning against
+	## the cliff. Helps the silhouette read as a natural outcrop
+	## instead of a poured-concrete prism. Blocks leak slightly past
+	## the wall plane so the silhouette shows them, and they don't
+	## affect collision (the underlying Box collider is unchanged).
+	var hx: float = top_size.x * 0.5
+	var hz: float = top_size.y * 0.5
+	const SCREE_COUNT: int = 11
+	for i: int in SCREE_COUNT:
+		# Pick a random side (0=+X, 1=-X, 2=+Z, 3=-Z) so coverage is
+		# spread roughly evenly around the plateau.
+		var side: int = i % 4
+		var t: float = randf_range(0.10, 0.90)
+		var pos: Vector3
+		var rot_y: float
+		match side:
+			0:  # +X face
+				var z_extent: float = hz - cut
+				pos = Vector3(hx + randf_range(0.10, 0.55), 0.0, lerp(-z_extent, z_extent, t))
+				rot_y = 0.0
+			1:  # -X face
+				var z_extent2: float = hz - cut
+				pos = Vector3(-hx - randf_range(0.10, 0.55), 0.0, lerp(-z_extent2, z_extent2, t))
+				rot_y = PI
+			2:  # +Z face
+				var x_extent: float = hx - cut
+				pos = Vector3(lerp(-x_extent, x_extent, t), 0.0, hz + randf_range(0.10, 0.55))
+				rot_y = PI * 0.5
+			_:  # -Z face
+				var x_extent2: float = hx - cut
+				pos = Vector3(lerp(-x_extent2, x_extent2, t), 0.0, -hz - randf_range(0.10, 0.55))
+				rot_y = -PI * 0.5
+		var block := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		var sx: float = randf_range(0.45, 1.20)
+		var sy: float = randf_range(height * 0.30, height * 0.85)
+		var sz: float = randf_range(0.45, 1.10)
+		box.size = Vector3(sx, sy, sz)
+		block.mesh = box
+		pos.y = sy * 0.5 + randf_range(-0.05, 0.10)
+		block.position = pos
+		block.rotation = Vector3(
+			randf_range(-0.20, 0.20),
+			rot_y + randf_range(-0.45, 0.45),
+			randf_range(-0.30, 0.30),
+		)
+		block.set_surface_override_material(0, share_mat)
+		root.add_child(block)
 
 
 func _octagon_corners(size: Vector2, cut: float, y: float) -> PackedVector3Array:
