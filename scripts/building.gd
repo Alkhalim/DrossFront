@@ -1979,7 +1979,11 @@ func _detail_sam_site() -> void:
 	## SAM Site — bunker base with a tilted missile launcher rack on
 	## top. V3 §"Pillar 4" anti-air defense.
 	var fs: Vector3 = stats.footprint_size
-	_team_collar(fs.x * 0.95, 0.1, fs.z * 0.95, Vector3(0, fs.y + 0.05, 0))
+	# Slim team band -- cylindrical pad got the same "team band ate
+	# the silhouette" treatment as the gun emplacement; trim to a
+	# thinner waist stripe so the player-colour cue stays visible
+	# without dominating the chassis.
+	_team_collar(fs.x * 0.55, 0.06, fs.z * 0.55, Vector3(0, fs.y + 0.05, 0))
 
 	# Rotating launcher base — a flat disc on top of the bunker.
 	var base_disc := MeshInstance3D.new()
