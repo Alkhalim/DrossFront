@@ -2475,6 +2475,11 @@ func _spawn_walkable_plateau(center: Vector3, top_size: Vector2, height: float, 
 	# and units couldn't path on/off them.
 	root.add_to_group("elevation")
 	root.add_to_group("terrain")
+	# Plateaus + ramps are permanent landmarks. Once explored they
+	# stay at full brightness even when not in current vision -- the
+	# FOW dim overlay composited with the side-wall material was
+	# producing near-solid-black plateau cliffs.
+	root.set_meta("_fow_skip_dim", true)
 	add_child(root)
 
 	# Two materials — same wear texture, two albedo shades. The top
@@ -2869,6 +2874,11 @@ func _spawn_plateau_ramp(plateau_center: Vector3, top_size: Vector2, height: flo
 	# walkable navmesh.
 	root.add_to_group("elevation")
 	root.add_to_group("terrain")
+	# Plateaus + ramps are permanent landmarks. Once explored they
+	# stay at full brightness even when not in current vision -- the
+	# FOW dim overlay composited with the side-wall material was
+	# producing near-solid-black plateau cliffs.
+	root.set_meta("_fow_skip_dim", true)
 	add_child(root)
 
 	# Mesh — sloped top + two side triangles + underside. UVs on every

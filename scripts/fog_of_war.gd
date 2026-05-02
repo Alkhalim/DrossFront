@@ -106,6 +106,12 @@ func _apply_fog_dim(node: Node3D, dim: bool) -> void:
 	## pay the walk cost on every 5Hz refresh.
 	if not is_instance_valid(node):
 		return
+	# Entire subtree opt-out -- terrain landmarks (plateaus, rocks,
+	# ruins) carry `_fow_skip_dim` so they stay at full brightness once
+	# explored. Composited dim was producing near-solid-black plateau
+	# walls.
+	if node.get_meta("_fow_skip_dim", false):
+		return
 	var current_dim: bool = node.get_meta("_fow_dimmed", false) as bool
 	if current_dim == dim:
 		return
