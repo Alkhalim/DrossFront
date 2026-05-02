@@ -2258,6 +2258,13 @@ func _update_unit_panel(units: Array[Node3D]) -> void:
 
 		if has_builder and not _showing_build_buttons:
 			_showing_build_buttons = true
+			# Default a freshly-opened build menu back to the Basic
+			# tab. Otherwise a player who placed an Advanced building
+			# (Advanced Foundry, Aerodrome, Black Pylon ...) and then
+			# clicked their engineer again would land on the Advanced
+			# tab — visually unhelpful and pushes the common build
+			# choices off-screen behind the prereq-locked entries.
+			_build_tab = "basic"
 			_rebuild_build_buttons()
 		elif not has_builder:
 			_showing_build_buttons = false
