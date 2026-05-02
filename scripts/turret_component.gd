@@ -43,6 +43,14 @@ const ANVIL_DAMAGE_MULT: float = 1.15
 
 var profile: StringName = &"balanced"
 
+## When set, overrides the parent building's shared `turret_pivot`
+## field. Lets a single building host multiple independent
+## TurretComponents (each with its own pivot) -- used by HQ corner
+## MG nests so all four corners track + fire individually instead
+## of all reading the same pivot. Falls back to building.turret_pivot
+## when null.
+var pivot_override: Node3D = null
+
 var _building: Node = null
 var _target: Node3D = null
 var _fire_timer: float = 0.0
@@ -174,19 +182,17 @@ func _process(delta: float) -> void:
 		# old map regions don't keep leaking VFX/SFX through the fog.
 		var observable: bool = _firing_observable()
 
-		# Projectile visual — spawns from the actual gun position
-		# (turret_pivot world origin) so the HQ's corner MG nests
-		# fire from the nest, not the building's centre of mass.
-		# Falls back to building centre + 2u when no pivot is set.
+		# Projectile visual — spawns from this turret's resolved pivot
+		# (HQ corner nests each have their own; standard emplacements
+		# share the building.turret_pivot field). Falls back to
+		# building centre + 2u when nothing is hooked up.
 		if observable:
 			var proj_script: GDScript = load("res://scripts/projectile.gd") as GDScript
 			if proj_script:
 				var fire_origin: Vector3 = _building.global_position + Vector3(0.0, 2.0, 0.0)
-				var pivot_v: Variant = _building.get("turret_pivot")
-				if typeof(pivot_v) == TYPE_OBJECT and is_instance_valid(pivot_v):
-					var pivot_n3d: Node3D = pivot_v as Node3D
-					if pivot_n3d:
-						fire_origin = pivot_n3d.global_position
+				var pivot_n3d: Node3D = _resolve_pivot()
+				if pivot_n3d and is_instance_valid(pivot_n3d):
+					fire_origin = pivot_n3d.global_position
 				var proj: Node3D = proj_script.create(
 					fire_origin,
 					_target.global_position,
@@ -196,7 +202,11 @@ func _process(delta: float) -> void:
 
 			var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
 			if audio and audio.has_method("play_weapon_fire"):
-				audio.play_weapon_fire(null, _building.global_position)
+				var sfx_pos: Vector3 = _building.global_position
+				var pivot_n3d2: Node3D = _resolve_pivot()
+				if pivot_n3d2 and is_instance_valid(pivot_n3d2):
+					sfx_pos = pivot_n3d2.global_position
+				audio.play_weapon_fire(null, sfx_pos)
 
 
 func _firing_observable() -> bool:
@@ -254,16 +264,19 @@ func _find_nearest_enemy() -> Node3D:
 
 
 func _aim_at_target(delta: float) -> void:
-	## Rotate the building's `turret_pivot` (created in _detail_gun_emplacement)
-	## around Y to face the current target. The pivot is parented under the
-	## building's VisualRoot, which itself has a slight randomized Y rotation
-	## per building, so we have to subtract that parent rotation when
-	## computing the local target angle — otherwise the turret aims off by the
-	## same amount the building was rotated.
-	var pivot: Node3D = _building.get("turret_pivot") as Node3D
+	## Rotate this turret's pivot around Y to face the current target.
+	## Reads pivot_override when set (HQ corner nests each have their
+	## own); falls back to building.turret_pivot. The pivot is parented
+	## under the building's VisualRoot, which itself has a slight
+	## randomized Y rotation per building, so we have to subtract that
+	## parent rotation when computing the local target angle.
+	var pivot: Node3D = _resolve_pivot()
 	if not pivot or not is_instance_valid(pivot):
 		return
-	var to_target: Vector3 = _target.global_position - _building.global_position
+	# Aim from the actual pivot world-position rather than the building
+	# centre so corner turrets (HQ nests) track relative to where they
+	# physically sit on the structure.
+	var to_target: Vector3 = _target.global_position - pivot.global_position
 	to_target.y = 0.0
 	if to_target.length_squared() < 0.01:
 		return
@@ -276,6 +289,14 @@ func _aim_at_target(delta: float) -> void:
 		compensation = (parent_root as Node3D).rotation.y
 	var target_y_local: float = target_y_world - compensation
 	pivot.rotation.y = lerp_angle(pivot.rotation.y, target_y_local, clampf(TURRET_TURN_SPEED * delta, 0.0, 1.0))
+
+
+func _resolve_pivot() -> Node3D:
+	if pivot_override and is_instance_valid(pivot_override):
+		return pivot_override
+	if not _building:
+		return null
+	return _building.get("turret_pivot") as Node3D
 
 
 func _is_valid_target(target: Node3D) -> bool:

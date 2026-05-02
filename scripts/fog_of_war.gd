@@ -34,6 +34,50 @@ const GRID_SIZE: int = int((MAP_HALF_EXTENT * 2.0) / CELL_SIZE)
 
 const FOW_REFRESH_HZ: float = 5.0
 
+## Material overlay applied to each MeshInstance3D inside an entity
+## sitting in an explored-but-not-currently-visible cell. Renders
+## on top of the regular material with the fog tint, so buildings /
+## rocks / wrecks dim along with the ground beneath them. Built
+## lazily so headless test scenes that never light up the visual
+## pipeline don't pay for it.
+var _fog_dim_overlay: Material = null
+
+
+func _make_fog_dim_overlay() -> Material:
+	if _fog_dim_overlay:
+		return _fog_dim_overlay
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(0.0, 0.0, 0.0, 0.55)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.no_depth_test = false
+	mat.cull_mode = BaseMaterial3D.CULL_BACK
+	_fog_dim_overlay = mat
+	return mat
+
+
+func _apply_fog_dim(node: Node3D, dim: bool) -> void:
+	## Walks down the entity's tree and toggles material_overlay on
+	## every MeshInstance3D / GeometryInstance3D it finds. Skips the
+	## traversal entirely when the existing dim state already matches,
+	## using a meta flag on the entity, so steady-state cells don't
+	## pay the walk cost on every 5Hz refresh.
+	if not is_instance_valid(node):
+		return
+	var current_dim: bool = node.get_meta("_fow_dimmed", false) as bool
+	if current_dim == dim:
+		return
+	node.set_meta("_fow_dimmed", dim)
+	var overlay: Material = _make_fog_dim_overlay() if dim else null
+	_apply_fog_dim_recursive(node, overlay)
+
+
+func _apply_fog_dim_recursive(node: Node, overlay: Material) -> void:
+	if node is GeometryInstance3D:
+		(node as GeometryInstance3D).material_overlay = overlay
+	for child: Node in node.get_children():
+		_apply_fog_dim_recursive(child, overlay)
+
 ## Sight-tier -> radius in world units. Units / buildings without
 ## a stat resource fall through DEFAULT_SIGHT_RADIUS.
 const DEFAULT_SIGHT_RADIUS: float = 18.0
@@ -255,6 +299,7 @@ func _apply_entity_visibility() -> void:
 		var owner_id: int = (node.get("owner_id") as int) if "owner_id" in node else local_player_id
 		if owner_id == local_player_id or _is_friendly(node):
 			b3d.visible = true
+			_apply_fog_dim(b3d, false)
 			continue
 		# Foundations the placing engineer hasn't reached yet are
 		# placement intent only -- they don't physically exist for
@@ -269,7 +314,14 @@ func _apply_entity_visibility() -> void:
 		# after losing live vision (terrain doesn't change, the
 		# building hasn't moved). Buildings the player has never
 		# seen stay hidden.
-		b3d.visible = is_explored_world(b3d.global_position)
+		var b_explored: bool = is_explored_world(b3d.global_position)
+		var b_visible: bool = is_visible_world(b3d.global_position)
+		b3d.visible = b_explored
+		# Dim the building when the player remembers it but isn't
+		# currently looking at it -- ground fog overlay alone leaves
+		# the structure reading at full brightness over a fogged
+		# floor, which breaks the "lights off in that cell" feel.
+		_apply_fog_dim(b3d, b_explored and not b_visible)
 
 	# Wrecks + fuel deposits behave like terrain features: the
 	# player should be able to see scrap piles / fuel tanks they've
@@ -280,13 +332,19 @@ func _apply_entity_visibility() -> void:
 			continue
 		var w3d: Node3D = node as Node3D
 		if w3d:
-			w3d.visible = is_explored_world(w3d.global_position)
+			var w_explored: bool = is_explored_world(w3d.global_position)
+			var w_visible: bool = is_visible_world(w3d.global_position)
+			w3d.visible = w_explored
+			_apply_fog_dim(w3d, w_explored and not w_visible)
 	for node: Node in get_tree().get_nodes_in_group("fuel_deposits"):
 		if not is_instance_valid(node):
 			continue
 		var f3d: Node3D = node as Node3D
 		if f3d:
-			f3d.visible = is_explored_world(f3d.global_position)
+			var f_explored: bool = is_explored_world(f3d.global_position)
+			var f_visible: bool = is_visible_world(f3d.global_position)
+			f3d.visible = f_explored
+			_apply_fog_dim(f3d, f_explored and not f_visible)
 
 	# Projectiles — strictly LOS-only. A missile fired from an
 	# unscouted Hammerhead would otherwise leak the unit's position
@@ -312,7 +370,10 @@ func _apply_entity_visibility() -> void:
 			continue
 		var t3d: Node3D = node as Node3D
 		if t3d:
-			t3d.visible = is_explored_world(t3d.global_position)
+			var t_explored: bool = is_explored_world(t3d.global_position)
+			var t_visible: bool = is_visible_world(t3d.global_position)
+			t3d.visible = t_explored
+			_apply_fog_dim(t3d, t_explored and not t_visible)
 
 
 func _is_friendly(node: Node) -> bool:

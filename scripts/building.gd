@@ -211,17 +211,10 @@ func _ready() -> void:
 			turret.name = "TurretComponent"
 			turret.set("profile", &"anti_air")
 			add_child(turret)
-		elif stats.building_id == &"headquarters":
-			# Built-in HQ self-defense. Light Universal autocannon
-			# (PROFILES["hq_defense"]) so an early bumrush has at
-			# least one tower of fire to chew through; not strong
-			# enough to replace dedicated emplacements. Anvil players
-			# can later upgrade this via the HQ defense research.
-			var turret_script: GDScript = load("res://scripts/turret_component.gd") as GDScript
-			var turret: Node = turret_script.new()
-			turret.name = "TurretComponent"
-			turret.set("profile", &"hq_defense")
-			add_child(turret)
+		# Headquarters self-defense -- one TurretComponent per corner
+		# MG nest, each with its own pivot. The components are
+		# created from inside _detail_hq_defense_turret once the
+		# corner pivots exist, so we don't pre-create one here.
 
 
 func _ensure_visual_root() -> void:
@@ -542,11 +535,13 @@ func _team_collar(width: float, height: float, depth: float, pos: Vector3) -> vo
 
 
 func _detail_hq_defense_turret() -> void:
-	## Four tiny MG nests at the HQ roof corners -- reads as a
-	## position-secured-by-soldiers, not a proper turret fortification.
-	## Each nest is a sandbag-ringed open-top emplacement with a short
-	## MG barrel; one of them carries the actual TurretComponent
-	## tracking pivot so the firing animation has somewhere to anchor.
+	## Four MG nests at the HQ roof corners -- reads as a
+	## position-secured-by-soldiers, not a turret fortification.
+	## Each nest is a sandbag-ringed open-top emplacement with a
+	## pintle-mounted MG, and each gets its own TurretComponent so
+	## all four corners track + fire independently. A single
+	## defensive turret ratting only one corner reads wrong; this
+	## way the player sees a 360-degree security cordon.
 	var fs: Vector3 = stats.footprint_size
 	var corners: Array[Vector3] = [
 		Vector3(fs.x * 0.40, fs.y, fs.z * 0.40),
@@ -554,78 +549,181 @@ func _detail_hq_defense_turret() -> void:
 		Vector3(fs.x * 0.40, fs.y, -fs.z * 0.40),
 		Vector3(-fs.x * 0.40, fs.y, -fs.z * 0.40),
 	]
+	var turret_script: GDScript = load("res://scripts/turret_component.gd") as GDScript
 	for i: int in corners.size():
 		var corner: Vector3 = corners[i]
-		# The first nest carries the real tracking pivot; the others
-		# are static decoration so the silhouette reads as "MG nests
-		# on every corner" without four pivots fighting over aim.
-		var carries_pivot: bool = (i == 0)
-		_build_hq_corner_mg_nest(corner, carries_pivot)
+		var pivot: Node3D = _build_hq_corner_mg_nest(corner)
+		# First corner mirrors its pivot into building.turret_pivot so
+		# legacy callers (HUD readouts, projectile-origin fallback)
+		# still find a pivot. Other corners get their TurretComponent
+		# pivot via pivot_override and don't need to fight for the
+		# shared field.
+		if i == 0:
+			turret_pivot = pivot
+		var turret: Node = turret_script.new()
+		# Name the first one "TurretComponent" so legacy callers
+		# (HUD readouts, selection_manager) that look up by exact
+		# name still find a representative component on the HQ;
+		# others get a numbered suffix so all four are unique
+		# children.
+		turret.name = "TurretComponent" if i == 0 else "TurretComponent_%d" % i
+		turret.set("profile", &"hq_defense")
+		turret.set("pivot_override", pivot)
+		add_child(turret)
 
 
-func _build_hq_corner_mg_nest(corner: Vector3, carries_pivot: bool) -> void:
-	## Sandbag ring + small MG. Sandbags are 6 box segments arranged
-	## in a rough hex around a centre point; the MG is a stubby
-	## barrel poking over the ring. Sized up ~40% from the original
-	## tiny pass so the nests actually read at typical RTS camera
-	## distance.
-	var ring_radius: float = 0.62
-	var bag_h: float = 0.22
-	for s: int in 6:
-		var ang: float = float(s) / 6.0 * TAU
+func _build_hq_corner_mg_nest(corner: Vector3) -> Node3D:
+	## Sandbag ring + pintle-mounted MG. Returns the tracking pivot
+	## the caller wires into a TurretComponent so every nest fires
+	## independently. Sized up over the original pass so the nest
+	## reads as a real weapon emplacement at standard RTS distance.
+	var ring_radius: float = 0.78
+	var bag_h: float = 0.30
+	# Sandbag ring -- 7 bags so the ring closes more solidly than 6.
+	for s: int in 7:
+		var ang: float = float(s) / 7.0 * TAU
 		var bx: float = corner.x + cos(ang) * ring_radius
 		var bz: float = corner.z + sin(ang) * ring_radius
 		var bag := MeshInstance3D.new()
 		var bg_box := BoxMesh.new()
-		bg_box.size = Vector3(0.32, bag_h, 0.50)
+		bg_box.size = Vector3(0.42, bag_h, 0.62)
 		bag.mesh = bg_box
 		bag.position = Vector3(bx, corner.y + bag_h * 0.5, bz)
-		# Rotate each sandbag so its long axis follows the ring's
-		# tangent -- otherwise they read as a row of straight crates.
 		bag.rotation.y = ang + PI / 2
-		bag.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.30, 0.27, 0.20)))
+		bag.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.32, 0.28, 0.20)))
 		_attach_visual(bag)
+		# Stack a smaller bag on top of every other ring bag so the
+		# silhouette reads as "piled" rather than a single course.
+		if s % 2 == 0:
+			var top_bag := MeshInstance3D.new()
+			var tb := BoxMesh.new()
+			tb.size = Vector3(0.36, bag_h * 0.85, 0.52)
+			top_bag.mesh = tb
+			top_bag.position = Vector3(bx, corner.y + bag_h + tb.size.y * 0.5, bz)
+			top_bag.rotation.y = ang + PI / 2 + 0.15
+			top_bag.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.30, 0.26, 0.18)))
+			_attach_visual(top_bag)
 
-	# MG mount -- tripod base inside the ring.
-	var mount := MeshInstance3D.new()
-	var mount_box := BoxMesh.new()
-	mount_box.size = Vector3(0.24, 0.14, 0.24)
-	mount.mesh = mount_box
-	mount.position = Vector3(corner.x, corner.y + 0.07, corner.z)
-	mount.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.20, 0.18, 0.16)))
-	_attach_visual(mount)
+	# Pintle base plate -- a flat disc bolted to the roof inside the
+	# sandbag ring; reads as "this is where the gun is mounted".
+	var base_plate := MeshInstance3D.new()
+	var plate_cyl := CylinderMesh.new()
+	plate_cyl.top_radius = 0.30
+	plate_cyl.bottom_radius = 0.34
+	plate_cyl.height = 0.08
+	base_plate.mesh = plate_cyl
+	base_plate.position = Vector3(corner.x, corner.y + 0.04, corner.z)
+	base_plate.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.20, 0.18)))
+	_attach_visual(base_plate)
 
-	# Tracking pivot (only one nest carries it). The others get a
-	# static barrel parented under VisualRoot so they don't try to
-	# rotate.
-	var anchor: Node3D
-	if carries_pivot:
-		var pivot := Node3D.new()
-		pivot.name = "TurretPivot"
-		pivot.position = Vector3(corner.x, corner.y + 0.20, corner.z)
-		_attach_visual(pivot)
-		turret_pivot = pivot
-		anchor = pivot
-	else:
-		var static_pivot := Node3D.new()
-		static_pivot.position = Vector3(corner.x, corner.y + 0.20, corner.z)
-		# Aim outward from the building centre so the barrel reads
-		# as "covering its arc" rather than all four facing the same
-		# direction.
-		static_pivot.rotation.y = atan2(corner.x, corner.z)
-		_attach_visual(static_pivot)
-		anchor = static_pivot
+	# Vertical pintle post rising from the plate -- everything that
+	# rotates with the gun lives under the pivot above this post.
+	var post := MeshInstance3D.new()
+	var post_cyl := CylinderMesh.new()
+	post_cyl.top_radius = 0.06
+	post_cyl.bottom_radius = 0.08
+	post_cyl.height = 0.30
+	post.mesh = post_cyl
+	post.position = Vector3(corner.x, corner.y + 0.08 + post_cyl.height * 0.5, corner.z)
+	post.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.16, 0.14)))
+	_attach_visual(post)
 
-	var barrel := MeshInstance3D.new()
-	var bc := CylinderMesh.new()
-	bc.top_radius = 0.05
-	bc.bottom_radius = 0.065
-	bc.height = 0.62
-	barrel.mesh = bc
-	barrel.rotation.x = -PI / 2
-	barrel.position = Vector3(0.0, 0.05, -bc.height * 0.5 - 0.05)
-	barrel.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.14, 0.13, 0.12)))
-	anchor.add_child(barrel)
+	# Tracking pivot at the top of the post. Each nest gets its own.
+	var pivot := Node3D.new()
+	pivot.name = "MGNestPivot"
+	pivot.position = Vector3(corner.x, corner.y + 0.40, corner.z)
+	_attach_visual(pivot)
+
+	# Horizontal swivel cradle -- a short box cradling the barrel,
+	# parented to pivot so it tracks. Gives the gun a real "yoke" feel.
+	var cradle := MeshInstance3D.new()
+	var cradle_box := BoxMesh.new()
+	cradle_box.size = Vector3(0.30, 0.14, 0.18)
+	cradle.mesh = cradle_box
+	cradle.position = Vector3(0.0, 0.0, 0.05)
+	cradle.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.20, 0.18)))
+	pivot.add_child(cradle)
+
+	# Cooling jacket -- a slightly fatter cylinder enclosing the
+	# inner barrel. The jacket has visible vent rings drawn as
+	# thin torus segments so the gun reads as machine-gun rather
+	# than smooth tube.
+	var jacket := MeshInstance3D.new()
+	var jc := CylinderMesh.new()
+	jc.top_radius = 0.085
+	jc.bottom_radius = 0.10
+	jc.height = 0.62
+	jacket.mesh = jc
+	jacket.rotation.x = -PI / 2
+	jacket.position = Vector3(0.0, 0.04, -jc.height * 0.5 - 0.10)
+	jacket.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.16, 0.15, 0.14)))
+	pivot.add_child(jacket)
+	# Three vent rings along the jacket (cosmetic detail).
+	for v: int in 3:
+		var ring := MeshInstance3D.new()
+		var ring_torus := TorusMesh.new()
+		ring_torus.inner_radius = 0.10
+		ring_torus.outer_radius = 0.12
+		ring_torus.rings = 12
+		ring_torus.ring_segments = 6
+		ring.mesh = ring_torus
+		ring.rotation.x = -PI / 2
+		var z: float = -0.25 - float(v) * 0.16
+		ring.position = Vector3(0.0, 0.04, z)
+		ring.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.10, 0.09, 0.08)))
+		pivot.add_child(ring)
+
+	# Inner barrel -- the actual rifling visible at the muzzle.
+	var inner_barrel := MeshInstance3D.new()
+	var ic := CylinderMesh.new()
+	ic.top_radius = 0.045
+	ic.bottom_radius = 0.05
+	ic.height = 0.78
+	inner_barrel.mesh = ic
+	inner_barrel.rotation.x = -PI / 2
+	inner_barrel.position = Vector3(0.0, 0.04, -ic.height * 0.5 - 0.10)
+	inner_barrel.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.10, 0.09, 0.08)))
+	pivot.add_child(inner_barrel)
+
+	# Muzzle compensator -- a short, slightly fatter cylinder at the
+	# tip with vertical slots (single emissive box reads as the
+	# muzzle flash port).
+	var muzzle := MeshInstance3D.new()
+	var mc := CylinderMesh.new()
+	mc.top_radius = 0.075
+	mc.bottom_radius = 0.075
+	mc.height = 0.10
+	muzzle.mesh = mc
+	muzzle.rotation.x = -PI / 2
+	muzzle.position = Vector3(0.0, 0.04, -ic.height - 0.14)
+	muzzle.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.07, 0.06, 0.05)))
+	pivot.add_child(muzzle)
+
+	# Ammo box on the side of the cradle -- distinct olive-drab
+	# colour so the player picks the gun out as a weapon. Includes
+	# a thin belt link projection on top.
+	var ammo := MeshInstance3D.new()
+	var ammo_box := BoxMesh.new()
+	ammo_box.size = Vector3(0.16, 0.22, 0.30)
+	ammo.mesh = ammo_box
+	ammo.position = Vector3(0.18, -0.06, 0.0)
+	ammo.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.30, 0.34, 0.18)))
+	pivot.add_child(ammo)
+	# Short belt feed link visible above the ammo box -- a thin
+	# slanted slab that hints at the feed connection.
+	var belt := MeshInstance3D.new()
+	var belt_box := BoxMesh.new()
+	belt_box.size = Vector3(0.10, 0.04, 0.16)
+	belt.mesh = belt_box
+	belt.position = Vector3(0.10, 0.06, -0.05)
+	belt.rotation.z = -0.35
+	belt.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.45, 0.38, 0.18)))
+	pivot.add_child(belt)
+
+	# Aim outward from the building centre so the barrel sits in
+	# its arc at construction-time before any target locks on.
+	pivot.rotation.y = atan2(corner.x, corner.z)
+	return pivot
 
 
 func _detail_headquarters() -> void:
