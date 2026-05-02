@@ -331,6 +331,14 @@ func _ready() -> void:
 
 	if stats:
 		_move_speed = SPEED_MAP.get(stats.speed_tier, 8.0)
+		# Anvil units run 5% slower than the speed-tier baseline so
+		# the heavy industrial silhouette also reads in motion — Sable
+		# units feel measurably quicker side-by-side without needing
+		# to bump every tier up. Applied at unit init so commit-time
+		# branch swaps re-pick up the modifier through their own
+		# _ready / _build_squad_visuals re-init path.
+		if _faction_id() == 0:
+			_move_speed *= 0.95
 		var shape: Dictionary = CLASS_SHAPES.get(stats.unit_class, CLASS_SHAPES[&"medium"])
 		_turn_speed = shape.get("turn_speed", 6.0) as float
 		# Avoidance radius — covers the LEADER's collision capsule with

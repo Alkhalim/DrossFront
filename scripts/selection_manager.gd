@@ -103,20 +103,21 @@ func _update_hover() -> void:
 
 func _update_cursor_kind(hovered: Node3D) -> void:
 	## Switch the system cursor based on what's under the pointer.
-	## Attack reticle when an enemy unit / aircraft is hovered;
-	## repair wrench when an engineer is selected and a damaged ally
-	## is hovered; default arrow otherwise.
+	## Attack reticle when an enemy unit / aircraft / building is
+	## hovered (and the player has units selected to actually attack
+	## with); repair wrench when an engineer is selected and a damaged
+	## ally is hovered; default arrow otherwise.
 	var cursor_mgr: Node = _get_cursor_manager()
 	if not cursor_mgr:
 		return
 	# CursorManager.Kind enum values inlined since the class_name may
 	# not be globally registered when this script first parses. Order
 	# matches `enum Kind`: 0 DEFAULT 1 ATTACK 2 REPAIR 3 BUILD 4 MOVE.
+	var registry: PlayerRegistry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
 	if hovered and is_instance_valid(hovered):
 		var owner_id: int = hovered.get("owner_id") as int if "owner_id" in hovered else -1
 		if owner_id >= 0 and owner_id != 0:
 			# Hostile or neutral non-player unit — attack reticle.
-			var registry: PlayerRegistry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
 			if registry and registry.are_enemies(0, owner_id):
 				cursor_mgr.set_kind(1)  # ATTACK
 				return
@@ -125,6 +126,26 @@ func _update_cursor_kind(hovered: Node3D) -> void:
 		if _has_engineer_selected() and _is_damaged(hovered):
 			cursor_mgr.set_kind(2)  # REPAIR
 			return
+
+	# No enemy unit under the cursor — check enemy / neutral buildings
+	# too so the player gets the same attack-reticle feedback when
+	# hovering over a structure they could right-click to attack.
+	# Skipped when nothing is selected (no unit to attack with) so the
+	# attack reticle doesn't flash on every passing structure during
+	# camera pans.
+	if not _selected_units.is_empty() or not _selected_crawlers.is_empty():
+		var screen_pos: Vector2 = get_viewport().get_mouse_position()
+		var building: Building = _find_building_at(screen_pos, false)
+		if building and building.owner_id != 0:
+			if registry and registry.are_enemies(0, building.owner_id):
+				cursor_mgr.set_kind(1)  # ATTACK
+				return
+			# Neutral structures (owner_id == 2) — also hostile-attack
+			# the player can manually engage them, so keep the reticle.
+			if building.owner_id == 2:
+				cursor_mgr.set_kind(1)
+				return
+
 	cursor_mgr.set_kind(0)  # DEFAULT
 
 
