@@ -1,7 +1,9 @@
-[gd_resource type="Resource" script_class="UnitStatResource" load_steps=4 format=3]
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+[ext_resource type="Resource" path="res://resources/units/anvil_hammerhead_bomber.tres" id="3"]
+[ext_resource type="Resource" path="res://resources/units/anvil_hammerhead_escort.tres" id="4"]
 
 [sub_resource type="Resource" id="weapon_chin_cannon"]
 script = ExtResource("2")
@@ -39,6 +41,8 @@ secondary_weapon = SubResource("weapon_underwing_missiles")
 special_description = "Heavy Anvil gunship. Chin cannon for ground sweeps + underwing missile pods. Branch A: Bomber (anti-structure carpet bombing). Branch B: Escort (anti-air + suppression)."
 branch_a_name = "Bomber"
 branch_b_name = "Escort"
+branch_a_stats = ExtResource("3")
+branch_b_stats = ExtResource("4")
 is_aircraft = true
 flight_altitude = 8.5
 flight_speed = 11.0

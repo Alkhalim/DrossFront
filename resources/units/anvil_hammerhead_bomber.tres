@@ -1,0 +1,34 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_bomb_run"]
+script = ExtResource("2")
+weapon_name = "Cluster Bomb Bay"
+role_tag = &"AS"
+damage_tier = &"very_high"
+range_tier = &"medium"
+rof_tier = &"slow"
+base_accuracy = 0.78
+
+[resource]
+script = ExtResource("1")
+unit_name = "Hammerhead (Bomber)"
+unit_class = &"aircraft"
+hp_total = 1320
+hp_per_unit = 1320
+armor_class = &"heavy_air"
+speed_tier = &"fast"
+sight_tier = &"long"
+squad_size = 1
+population = 18
+cost_salvage = 540
+cost_fuel = 90
+build_time = 36.0
+built_at = &"aerodrome"
+primary_weapon = SubResource("weapon_bomb_run")
+is_aircraft = true
+flight_altitude = 8.0
+flight_speed = 16.0
+special_description = "Hammerhead Bomber — anti-structure carpet bombing variant. AS-tagged Cluster Bomb Bay devastates buildings and squad formations. Slower in dogfights; pair with Escort Hammerheads or SAM cover."

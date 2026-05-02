@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_escort_aa"]
+script = ExtResource("2")
+weapon_name = "Tracking AA Missiles"
+role_tag = &"AAir"
+damage_tier = &"high"
+range_tier = &"long"
+rof_tier = &"moderate"
+base_accuracy = 0.92
+
+[sub_resource type="Resource" id="weapon_escort_chin_cannon"]
+script = ExtResource("2")
+weapon_name = "Suppression Chin Cannon"
+role_tag = &"AP"
+damage_tier = &"moderate"
+range_tier = &"medium"
+rof_tier = &"fast"
+base_accuracy = 0.84
+
+[resource]
+script = ExtResource("1")
+unit_name = "Hammerhead (Escort)"
+unit_class = &"aircraft"
+hp_total = 1280
+hp_per_unit = 1280
+armor_class = &"heavy_air"
+speed_tier = &"fast"
+sight_tier = &"long"
+squad_size = 1
+population = 18
+cost_salvage = 520
+cost_fuel = 90
+build_time = 36.0
+built_at = &"aerodrome"
+primary_weapon = SubResource("weapon_escort_aa")
+secondary_weapon = SubResource("weapon_escort_chin_cannon")
+is_aircraft = true
+flight_altitude = 8.0
+flight_speed = 18.0
+special_description = "Hammerhead Escort — anti-air gunship with a suppression chin cannon. AAir tracking missiles for enemy aircraft, AP chin cannon for ground harassment. The screening variant — flies with Bombers."
