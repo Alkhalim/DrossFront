@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+building_name = "Advanced Generator"
+building_id = &"advanced_generator"
+hp = 600
+cost_salvage = 280
+cost_fuel = 90
+build_time = 34.0
+power_consumption = 0
+power_production = 75
+footprint_size = Vector3(4, 6, 4)
+placeholder_color = Color(0.20, 0.28, 0.42, 1)
+is_advanced = true
+prerequisites = [&"basic_foundry"]

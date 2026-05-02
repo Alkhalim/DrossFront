@@ -29,11 +29,15 @@ const PROFILES: Dictionary = {
 	&"anti_light": { "damage": 24,  "fire": 0.4,  "range": 18.0, "role": &"AP",        "name": "Anti-Light" },
 	&"anti_heavy": { "damage": 135, "fire": 2.0,  "range": 22.0, "role": &"AP",        "name": "Anti-Heavy" },
 	&"anti_air":   { "damage": 36,  "fire": 0.25, "range": 24.0, "role": &"AAir",      "name": "Anti-Air" },
-	# Built-in HQ self-defense -- light Universal autocannon meant
-	# to discourage early bumrushes, not to replace a real turret
-	# line. Lower per-shot damage and shorter range than Balanced;
-	# Anvil players can ramp it up via the HQ defense upgrade.
-	&"hq_defense": { "damage": 28,  "fire": 0.7,  "range": 16.0, "role": &"Universal", "name": "HQ Defense" },
+	# Built-in HQ self-defense -- light Universal MG cluster meant
+	# to discourage early bumrushes. Range bumped 16 -> 22 so the
+	# HQ outranges short + medium-tier mech weapons (8u / 15u),
+	# giving the defender breathing room against light pushes.
+	# Burst fires `burst_count` projectiles per cooldown (with
+	# brief intra-burst gaps for the visual stagger) so the salvo
+	# reads as a real MG nest, not single-tap shots. Targets both
+	# ground AND air -- HQ MGs work as light flak.
+	&"hq_defense": { "damage": 14, "fire": 1.0, "range": 22.0, "role": &"Universal", "name": "HQ Defense", "burst_count": 3, "burst_gap": 0.08, "targets_air": true },
 }
 
 ## Anvil's industrial-doctrine turret hits harder than the baseline
@@ -194,38 +198,56 @@ func _process(delta: float) -> void:
 		_fire_timer /= maxf(efficiency, 0.1)
 
 		var damage: int = maxi(int(float(get_damage()) * efficiency), 1)
-		_target.take_damage(damage, _building as Node3D)
 
-		# FOW gate -- if both the turret and the target sit in scouted-
-		# but-not-currently-visible fog, skip the projectile + sound so
-		# old map regions don't keep leaking VFX/SFX through the fog.
-		var observable: bool = _firing_observable()
+		# Burst-fire support. profile_dict.burst_count > 1 schedules
+		# extra shots after the initial one with burst_gap seconds
+		# between them, so HQ MG nests fire a 3-round salvo per
+		# cooldown instead of a single tap.
+		var profile_dict: Dictionary = PROFILES[profile] as Dictionary
+		var burst_count: int = int(profile_dict.get("burst_count", 1))
+		var burst_gap: float = float(profile_dict.get("burst_gap", 0.0))
 
-		# Projectile visual — spawns from this turret's resolved pivot
-		# (HQ corner nests each have their own; standard emplacements
-		# share the building.turret_pivot field). Falls back to
-		# building centre + 2u when nothing is hooked up.
-		if observable:
-			var proj_script: GDScript = load("res://scripts/projectile.gd") as GDScript
-			if proj_script:
-				var fire_origin: Vector3 = _building.global_position + Vector3(0.0, 2.0, 0.0)
-				var pivot_n3d: Node3D = _resolve_pivot()
-				if pivot_n3d and is_instance_valid(pivot_n3d):
-					fire_origin = pivot_n3d.global_position
-				var proj: Node3D = proj_script.create(
-					fire_origin,
-					_target.global_position,
-					get_role()
-				)
-				get_tree().current_scene.add_child(proj)
+		# Initial shot lands now.
+		_fire_one_shot(damage)
+		# Trailing shots scheduled via SceneTreeTimer so the salvo
+		# stagger is independent of the per-process tick rate.
+		for i in range(1, burst_count):
+			var delay: float = burst_gap * float(i)
+			get_tree().create_timer(delay).timeout.connect(_fire_one_shot.bind(damage))
 
-			var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
-			if audio and audio.has_method("play_weapon_fire"):
-				var sfx_pos: Vector3 = _building.global_position
-				var pivot_n3d2: Node3D = _resolve_pivot()
-				if pivot_n3d2 and is_instance_valid(pivot_n3d2):
-					sfx_pos = pivot_n3d2.global_position
-				audio.play_weapon_fire(null, sfx_pos)
+
+func _fire_one_shot(damage: int) -> void:
+	## Single shot in a burst -- damage + projectile + audio. Validates
+	## the target each call so a target dying mid-salvo just drops
+	## the trailing shots silently instead of crashing.
+	if not _target or not is_instance_valid(_target):
+		return
+	if not _is_valid_target(_target):
+		return
+	_target.take_damage(damage, _building as Node3D)
+
+	var observable: bool = _firing_observable()
+	if not observable:
+		return
+	var proj_script: GDScript = load("res://scripts/projectile.gd") as GDScript
+	if proj_script:
+		var fire_origin: Vector3 = _building.global_position + Vector3(0.0, 2.0, 0.0)
+		var pivot_n3d: Node3D = _resolve_pivot()
+		if pivot_n3d and is_instance_valid(pivot_n3d):
+			fire_origin = pivot_n3d.global_position
+		var proj: Node3D = proj_script.create(
+			fire_origin,
+			_target.global_position,
+			get_role()
+		)
+		get_tree().current_scene.add_child(proj)
+	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
+	if audio and audio.has_method("play_weapon_fire"):
+		var sfx_pos: Vector3 = _building.global_position
+		var pivot_n3d2: Node3D = _resolve_pivot()
+		if pivot_n3d2 and is_instance_valid(pivot_n3d2):
+			sfx_pos = pivot_n3d2.global_position
+		audio.play_weapon_fire(null, sfx_pos)
 
 
 func _firing_observable() -> bool:
@@ -251,11 +273,14 @@ func _find_nearest_enemy() -> Node3D:
 	var nearest: Node3D = null
 	var nearest_dist: float = INF
 	var registry: PlayerRegistry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
-	# AAir profile turrets (SAM Sites etc.) only target aircraft and
-	# never engage ground units. Ground turrets ignore aircraft for now
-	# — the AAir tag exclusivity in CombatTables already gives them 0
-	# damage vs air armor, so engaging would just waste shots.
+	# Targeting filter:
+	#  - AAir profile (SAM Site, etc): air-only.
+	#  - Profiles with targets_air = true (HQ MG nests): both air
+	#    AND ground.
+	#  - Everything else: ground-only.
 	var is_aa: bool = get_role() == &"AA" or get_role() == &"AAir" or profile == &"anti_air"
+	var profile_dict: Dictionary = PROFILES[profile] as Dictionary
+	var dual_purpose: bool = bool(profile_dict.get("targets_air", false))
 
 	var units: Array[Node] = get_tree().get_nodes_in_group("units")
 	for node: Node in units:
@@ -270,9 +295,11 @@ func _find_nearest_enemy() -> Node3D:
 		if "alive_count" in node and node.get("alive_count") <= 0:
 			continue
 		var target_is_air: bool = node.is_in_group("aircraft")
+		# Air-only turrets ignore ground; ground-only turrets ignore air;
+		# dual-purpose turrets engage either.
 		if is_aa and not target_is_air:
 			continue
-		if not is_aa and target_is_air:
+		if not is_aa and not dual_purpose and target_is_air:
 			continue
 		var d: float = my_pos.distance_to(node.global_position)
 		if d <= range_v and d < nearest_dist:

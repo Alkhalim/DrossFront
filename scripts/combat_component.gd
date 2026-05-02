@@ -609,19 +609,30 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 		var aim_pos: Vector3 = _current_target.global_position
 		if not target_positions.is_empty():
 			aim_pos = target_positions[i % target_positions.size()]
-		# Misses jitter the impact point slightly off-target so the
-		# projectile visibly grazes past instead of vanishing into the
-		# target. Distance scales with how close the hit chance was to
-		# missing — bigger sprays for low-accuracy shots. A short
-		# spatial ricochet zip plays at the miss location so the
-		# player can hear shots flying past their squad.
+		# Missed shot -- offset the impact far enough that the projectile
+		# visibly flies PAST the target and lands on the ground beyond
+		# (or sails wide). Distance scales with how close the hit chance
+		# was to missing -- a 90%-accuracy shot grazes; a 30%-accuracy
+		# shot sails wide. If the offset shot happens to land near a
+		# different hostile unit / building, that one eats half damage
+		# (stray-shot rule).
 		if not hit:
-			var miss_offset: float = lerp(0.6, 2.4, 1.0 - hit_chance)
+			var miss_offset: float = lerp(2.5, 7.0, 1.0 - hit_chance)
 			aim_pos += Vector3(
 				randf_range(-miss_offset, miss_offset),
 				0.0,
 				randf_range(-miss_offset, miss_offset),
 			)
+			# Drop the aim Y to ground so the projectile arc terminates
+			# at floor level instead of vanishing in mid-air at unit
+			# height -- reads as "shot kicked up dirt over there" rather
+			# than "shot evaporated".
+			aim_pos.y = 0.0
+			# Stray-hit check.
+			var stray: Node3D = _find_stray_target(aim_pos, _current_target, my_owner)
+			if stray and stray.has_method("take_damage"):
+				var stray_dmg: int = maxi(int(round(float(per_member_dmg) * 0.5)), 1)
+				stray.take_damage(stray_dmg, _unit)
 			if firing_visible:
 				var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager") if get_tree() else null
 				if audio and audio.has_method("play_miss"):

@@ -3879,6 +3879,7 @@ func _building_role_hint(stat: BuildingStatResource) -> String:
 		&"basic_foundry": return "Production"
 		&"advanced_foundry": return "Production"
 		&"basic_generator": return "Power"
+		&"advanced_generator": return "Power"
 		&"basic_armory": return "Tech"
 		&"advanced_armory": return "Tech"
 		&"salvage_yard": return "Economy"
@@ -3941,6 +3942,8 @@ func _building_description(id: StringName) -> String:
 			return "Heavy-mech foundry. Trains Bulwarks; Adv Armory unlocks Forgemaster."
 		&"basic_generator":
 			return "Power source. Adds capacity so additional production buildings stay at full output."
+		&"advanced_generator":
+			return "High-output power plant. 75 power for less salvage-per-watt than two basic generators, but costs fuel."
 		&"basic_armory":
 			return "Branch-upgrade workshop for baseline units. Commits are irreversible."
 		&"advanced_armory":

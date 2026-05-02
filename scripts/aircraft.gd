@@ -356,9 +356,14 @@ func _build_visuals() -> void:
 			_build_drone_swarm(8, _team_color(), Color(0.45, 0.42, 0.36), 0.7, true)
 		"Fang Drone":
 			_build_drone_swarm(10, _team_color(), Color(0.10, 0.11, 0.13), 0.55, false)
-		"Hammerhead Gunship":
+		"Hammerhead Gunship", "Hammerhead (Bomber)", "Hammerhead (Escort)":
+			# All Hammerhead variants share the gunship hull build so
+			# the branches read as the same airframe with different
+			# loadouts -- not three different aircraft. Variant-
+			# specific accents (bomb bay tint / escort fairings) get
+			# layered on inside _build_hammerhead.
 			_build_hammerhead()
-		"Switchblade Interceptor":
+		"Switchblade Interceptor", "Switchblade (Dogfighter)", "Switchblade (Strafe Runner)":
 			_build_switchblade()
 		"Wraith Bomber":
 			_build_wraith()

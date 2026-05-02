@@ -99,13 +99,13 @@ const ROLE_VS_ARMOR: Dictionary = {
 	&"AS": {
 		# Anti-structure -- the dedicated building cracker (Wraith
 		# bombs, Hammerhead Bomber payload, Rook Sapper charges,
-		# Bulwark Siegebreaker). Hits structures hard; underperforms
-		# against mobile units so AS comps need a partner role to
-		# trade against ground / air. Without this row AS weapons
-		# fell through to Universal and capped at 1.0 vs medium,
-		# which made anti-structure builds soft against buildings.
+		# Bulwark Siegebreaker). Bumped structure multiplier
+		# 1.5 -> 2.5 per balance request: AS units were eating their
+		# anti-building punch against the recently-buffed structure
+		# armor (now 0.45 reduction), so a Hammerhead Bomber's bomb
+		# read as low even on its supposed-best target.
 		&"unarmored": 0.6, &"light": 0.6, &"medium": 0.6,
-		&"heavy": 0.7, &"structure": 1.5,
+		&"heavy": 0.7, &"structure": 2.5,
 		&"light_air": 0.2, &"heavy_air": 0.2,
 	},
 }

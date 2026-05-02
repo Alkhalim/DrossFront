@@ -11,6 +11,7 @@ damage_tier = &"very_high"
 range_tier = &"medium"
 rof_tier = &"slow"
 base_accuracy = 0.78
+damage_value = 27
 
 [resource]
 script = ExtResource("1")

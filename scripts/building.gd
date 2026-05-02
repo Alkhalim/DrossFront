@@ -264,7 +264,7 @@ func _add_building_details() -> void:
 		&"headquarters": _detail_headquarters()
 		&"basic_foundry": _detail_foundry(false)
 		&"advanced_foundry": _detail_foundry(true)
-		&"basic_generator": _detail_generator()
+		&"basic_generator", &"advanced_generator": _detail_generator()
 		&"basic_armory": _detail_armory()
 		&"advanced_armory": _detail_advanced_armory()
 		&"salvage_yard": _detail_salvage_yard()
@@ -2074,7 +2074,7 @@ func _apply_placeholder_shape() -> void:
 	#   everything else (production / economy / HQ / pylon) -> box
 	var fs: Vector3 = stats.footprint_size
 	match stats.building_id:
-		&"basic_generator":
+		&"basic_generator", &"advanced_generator":
 			var cyl := CylinderMesh.new()
 			cyl.top_radius = fs.x * 0.5
 			cyl.bottom_radius = fs.x * 0.55
@@ -2162,13 +2162,13 @@ func _apply_placeholder_shape() -> void:
 	# blocky industrial hulks. Generator stays cylindrical (its
 	# silhouette already contrasts), and HQ gets a stronger pyramid
 	# treatment downstream.
-	if _resolve_faction_id() == 1 and stats.building_id != &"basic_generator":
+	if _resolve_faction_id() == 1 and stats.building_id != &"basic_generator" and stats.building_id != &"advanced_generator":
 		_apply_sable_building_silhouette()
 	# Anvil brutalist treatment — heavy concrete corner pylons, a
 	# raised plinth at the base, and a crenellated parapet on top.
 	# Reads as Soviet-monolith industrial vs Sable's clean tower
 	# proportions.
-	if _resolve_faction_id() == 0 and stats.building_id != &"basic_generator" and stats.building_id != &"gun_emplacement" and stats.building_id != &"gun_emplacement_basic":
+	if _resolve_faction_id() == 0 and stats.building_id != &"basic_generator" and stats.building_id != &"advanced_generator" and stats.building_id != &"gun_emplacement" and stats.building_id != &"gun_emplacement_basic":
 		_apply_anvil_brutalist_extras()
 
 
@@ -2189,7 +2189,7 @@ func _apply_team_ring() -> void:
 	_team_ring = MeshInstance3D.new()
 	# Match the hull shape — cylinder body gets a cylindrical band so it
 	# wraps without weird edge clipping.
-	if stats.building_id == &"basic_generator":
+	if stats.building_id == &"basic_generator" or stats.building_id == &"advanced_generator":
 		var ring_cyl := CylinderMesh.new()
 		ring_cyl.top_radius = stats.footprint_size.x * 0.5 + 0.06
 		ring_cyl.bottom_radius = stats.footprint_size.x * 0.55 + 0.06
@@ -2256,7 +2256,7 @@ func _roof_color_for_category() -> Color:
 			return _ROOF_ECONOMY
 		&"basic_armory", &"advanced_armory":
 			return _ROOF_TECH
-		&"basic_generator":
+		&"basic_generator", &"advanced_generator":
 			return _ROOF_POWER
 		&"gun_emplacement", &"gun_emplacement_basic":
 			return _ROOF_DEFENSE
@@ -2280,7 +2280,7 @@ func _apply_function_roof_cap() -> void:
 
 	# Generator already has an emissive cap; the silhouette would clash if
 	# we also stuck a flat box on top. Skip the cap on cylindrical builds.
-	if stats.building_id == &"basic_generator":
+	if stats.building_id == &"basic_generator" or stats.building_id == &"advanced_generator":
 		return
 
 	# Roof slab — sits on top of the placeholder hull, slightly inset so
@@ -3260,7 +3260,7 @@ func _building_role_color() -> Color:
 			return _BUILDING_ROLE_TINT_TECH
 		&"gun_emplacement", &"gun_emplacement_basic", &"sam_site":
 			return _BUILDING_ROLE_TINT_DEFENSE
-		&"basic_generator":
+		&"basic_generator", &"advanced_generator":
 			return _BUILDING_ROLE_TINT_POWER
 		&"salvage_yard":
 			return _BUILDING_ROLE_TINT_ECONOMY

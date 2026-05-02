@@ -3704,6 +3704,7 @@ func _setup_buildable_buildings() -> void:
 			"res://resources/buildings/advanced_foundry.tres",
 			"res://resources/buildings/salvage_yard.tres",
 			"res://resources/buildings/basic_generator.tres",
+			"res://resources/buildings/advanced_generator.tres",
 			"res://resources/buildings/basic_armory.tres",
 			"res://resources/buildings/advanced_armory.tres",
 			"res://resources/buildings/gun_emplacement.tres",
