@@ -72,16 +72,14 @@ func resolved_armor_reduction() -> float:
 
 
 func can_target_air() -> bool:
-	## True only when at least one of the unit's weapons is tagged
-	## AAir. Auto-derived from the weapons rather than carried as a
-	## separate flag, so the rule is "if you don't pack an AAir
-	## weapon, you don't engage aircraft" -- AP / Universal weapons'
-	## tiny 0.1..0.4 trickle multipliers vs air don't earn a unit
-	## the right to be classified as anti-air in the panel or to
-	## auto-acquire aircraft as targets.
-	if primary_weapon and primary_weapon.role_tag == &"AAir":
+	## True when at least one of the unit's weapons can fire at air
+	## (per WeaponResource.engages_air()). Lets a unit qualify as
+	## anti-air via either an AAir-tag weapon OR a generalist
+	## weapon that opted in via can_hit_air, without committing the
+	## unit to a single-purpose role.
+	if primary_weapon and primary_weapon.engages_air():
 		return true
-	if secondary_weapon and secondary_weapon.role_tag == &"AAir":
+	if secondary_weapon and secondary_weapon.engages_air():
 		return true
 	return false
 

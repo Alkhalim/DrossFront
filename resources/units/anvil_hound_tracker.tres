@@ -10,6 +10,7 @@ role_tag = &"Universal"
 damage_tier = &"moderate"
 range_tier = &"medium"
 rof_tier = &"moderate"
+can_hit_air = true
 
 [resource]
 script = ExtResource("1")

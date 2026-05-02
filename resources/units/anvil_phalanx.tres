@@ -8,10 +8,11 @@
 [sub_resource type="Resource" id="weapon_drone_mg"]
 script = ExtResource("2")
 weapon_name = "Drone Light MG"
-role_tag = &"AP"
+role_tag = &"AAir_Light"
 damage_tier = &"low"
 range_tier = &"short"
 rof_tier = &"rapid"
+damage_value = 26
 
 [resource]
 script = ExtResource("1")

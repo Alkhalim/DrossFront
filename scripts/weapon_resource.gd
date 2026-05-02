@@ -61,6 +61,24 @@ extends Resource
 ## Seconds between shots. Lower = faster; matches CombatTables.ROF_MAP.
 @export var rof_seconds_value: float = -1.0
 
+## Per-weapon air-targeting opt-in. Default false. AAir / AAir_Light
+## roles auto-engage air through engages_air() regardless of this flag,
+## so set to true only when a non-AAir weapon should also fire at
+## aircraft (e.g. Hound's Universal autocannons + Jackal's AP SMGs --
+## fast generalist guns that can chip airframes; their slower AT
+## missile / rocket secondaries stay air-skipping).
+@export var can_hit_air: bool = false
+
+
+func engages_air() -> bool:
+	## True when the weapon should fire at aircraft. Auto-true for
+	## AAir and AAir_Light roles (their multipliers vs air are the
+	## whole point); explicit can_hit_air opt-in covers the
+	## "generalist primary that can also chip airframes" case.
+	if role_tag == &"AAir" or role_tag == &"AAir_Light":
+		return true
+	return can_hit_air
+
 
 func resolved_damage() -> int:
 	if damage_value >= 0:

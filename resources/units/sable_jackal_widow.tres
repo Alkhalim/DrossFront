@@ -11,6 +11,7 @@ damage_tier = &"moderate"
 range_tier = &"long"
 rof_tier = &"fast"
 base_accuracy = 0.92
+can_hit_air = true
 
 [sub_resource type="Resource" id="weapon_widow_jump"]
 script = ExtResource("2")

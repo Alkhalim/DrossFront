@@ -12,6 +12,7 @@ role_tag = &"AP"
 damage_tier = &"moderate"
 range_tier = &"medium"
 rof_tier = &"fast"
+can_hit_air = true
 
 [sub_resource type="Resource" id="weapon_jump_rockets"]
 script = ExtResource("2")

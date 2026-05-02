@@ -11,6 +11,7 @@ damage_tier = &"low"
 range_tier = &"medium"
 rof_tier = &"rapid"
 base_accuracy = 0.82
+can_hit_air = true
 
 [sub_resource type="Resource" id="weapon_sapper_demo"]
 script = ExtResource("2")

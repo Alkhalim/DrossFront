@@ -227,8 +227,17 @@ func _physics_process(delta: float) -> void:
 
 		_face_target()
 
+		# Per-weapon air gating: when the current target is in the
+		# aircraft group, only fire weapons whose engages_air()
+		# returns true. Lets a Hound's Universal autocannons engage
+		# air while its AT missile rack stays ground-only, and a
+		# Forgemaster's Skyspike fire at air while its Riveter
+		# autocannon ignores aircraft.
+		var target_is_air: bool = _current_target.is_in_group("aircraft")
+
 		if primary and _fire_cooldown <= 0.0 and _silence_remaining <= 0.0:
-			_fire_weapon(primary, true)
+			if not target_is_air or primary.engages_air():
+				_fire_weapon(primary, true)
 
 		# Autocast hook — units whose stats define an ability with
 		# ability_autocast = true (Hammerhead's Missile Barrage)
@@ -244,7 +253,8 @@ func _physics_process(delta: float) -> void:
 		if stats.secondary_weapon and _secondary_cooldown <= 0.0 and _silence_remaining <= 0.0:
 			var sec_range: float = stats.secondary_weapon.resolved_range()
 			if dist <= sec_range:
-				_fire_weapon(stats.secondary_weapon, false)
+				if not target_is_air or stats.secondary_weapon.engages_air():
+					_fire_weapon(stats.secondary_weapon, false)
 	else:
 		# Out of range — chase if we have a forced target (player-set, retaliated,
 		# or auto-engaged on sight). Pass `clear_combat=false` so command_move

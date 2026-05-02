@@ -96,6 +96,17 @@ const ROLE_VS_ARMOR: Dictionary = {
 		&"heavy": 0.8, &"structure": 0.8,
 		&"light_air": 0.4, &"heavy_air": 0.3,
 	},
+	&"AAir_Light": {
+		# Light anti-air with token ground capability. Used by units
+		# whose role is "shoot down aircraft, can chip ground" --
+		# Phalanx Drone is the canonical case: 1.0x vs LtAir cleanly,
+		# 0.2x vs HvAir (heavy gunships shrug it off), low ground
+		# multipliers so the unit's ground DPS reads as token
+		# self-defense rather than a real ground threat.
+		&"unarmored": 0.40, &"light": 0.35, &"medium": 0.28,
+		&"heavy": 0.10, &"structure": 0.15,
+		&"light_air": 1.0, &"heavy_air": 0.2,
+	},
 	&"AS": {
 		# Anti-structure -- the dedicated building cracker (Wraith
 		# bombs, Hammerhead Bomber payload, Rook Sapper charges,

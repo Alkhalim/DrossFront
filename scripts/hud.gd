@@ -2298,28 +2298,24 @@ func _build_unit_stat_sheet(unit: Node3D, _include_cost: bool = false) -> String
 		_stat_chip("Squad", "%d / %d" % [alive, stats.squad_size], STAT_LABEL_COLOR_SQUAD),
 	]
 
-	# Row 4 — weapon stars. Damage / range / fire rate as a 30-half-
-	# step quality readout. Pulls from resolved_*() so per-unit
-	# numeric overrides flow through.
-	var row_weapon_stars: Array = []
-	if stats.primary_weapon:
-		var w: WeaponResource = stats.primary_weapon
-		row_weapon_stars.append(_stat_chip("Dmg", _stars_for_damage(float(w.resolved_damage())), STAT_LABEL_COLOR_DAMAGE))
-		row_weapon_stars.append(_stat_chip("Rng", _stars_for_range(w.resolved_range()), STAT_LABEL_COLOR_RANGE))
-		row_weapon_stars.append(_stat_chip("RoF", _stars_for_rof(w.resolved_rof_seconds()), STAT_LABEL_COLOR_DAMAGE))
+	# (Weapon Dmg / Rng / RoF star row dropped per UX pass -- the
+	# attack-bonus matrix below already conveys "is this weapon
+	# good against X armor", and the DPS Gnd / DPS Air chips on
+	# row_combat carry the punchy summary number. Repeating the
+	# raw weapon stats here just made the panel longer.)
 
-	# Row 5 — attack bonus matrix. The role-vs-armor multipliers
+	# Row 4 — attack bonus matrix. The role-vs-armor multipliers
 	# explain why a Switchblade's raw DPS reads low or high against a
 	# specific class -- the multipliers are doing most of the work.
 	var row_attack_bonus: Array = _attack_bonus_chips(stats)
 
-	# Row 6 — defense (own armor reduction).
+	# Row 5 — defense (own armor reduction).
 	var row_defense_bonus: Array = []
 	var armor_red: float = stats.resolved_armor_reduction()
 	if armor_red > 0.0 or stats.armor_class != &"unarmored":
 		row_defense_bonus.append(_stat_chip("Armor", "%s  (-%d%%)" % [_stars_for_armor(armor_red), int(round(armor_red * 100.0))], STAT_LABEL_COLOR_DEFENSE))
 
-	return _build_stat_sheet([row_defense, row_combat, row_mobility, row_weapon_stars, row_attack_bonus, row_defense_bonus])
+	return _build_stat_sheet([row_defense, row_combat, row_mobility, row_attack_bonus, row_defense_bonus])
 
 
 func _attack_bonus_chips(stats: UnitStatResource) -> Array:
@@ -3580,8 +3576,15 @@ func _compute_dps_vs(stat: UnitStatResource, armor_class: StringName) -> float:
 	## Bakes in the role-vs-armor lookup so the displayed number actually
 	## reflects what the unit will do — AAir vs ground reads 0, AP vs heavy
 	## armor reads the reduced value, etc.
+	##
+	## When asking about an air armor class, only weapons whose
+	## engages_air() is true contribute -- a Hound's AT-missile
+	## secondary doesn't pad the DPS Air number even though its AA
+	## tag has a token air multiplier. Mirrors the per-weapon
+	## firing gate in CombatComponent so what you see is what fires.
 	if not stat:
 		return 0.0
+	var is_air_query: bool = (armor_class == &"light_air" or armor_class == &"heavy_air")
 	var dps: float = 0.0
 	var weapons: Array[WeaponResource] = []
 	if stat.primary_weapon:
@@ -3589,6 +3592,8 @@ func _compute_dps_vs(stat: UnitStatResource, armor_class: StringName) -> float:
 	if stat.secondary_weapon:
 		weapons.append(stat.secondary_weapon)
 	for weapon: WeaponResource in weapons:
+		if is_air_query and not weapon.engages_air():
+			continue
 		var raw: float = _weapon_dps(weapon) * float(stat.squad_size)
 		var role_mod: float = CombatTables.get_role_modifier(weapon.role_tag, armor_class)
 		var armor_red: float = CombatTables.get_armor_reduction(armor_class)
