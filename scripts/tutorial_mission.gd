@@ -427,21 +427,20 @@ var _raid_fired: bool = false
 ## arrives offset rather than crossing through the base mid-
 ## march. Enemy enclave at -Z = north on screen.
 const ALLY_RALLY_POINT: Vector3 = Vector3(-50.0, 0.0, 108.0)
-const ALLY_RALLY_ARRIVE_SQ: float = 18.0 * 18.0
-## Tightened from 3.0 -> 1.0 so the move target tracks the
-## player's army centroid in near real time. Previous 3s
-## interval meant the ally was always chasing a stale rally
-## point and visibly lagged behind a player on the move.
+const ALLY_RALLY_ARRIVE_SQ: float = 24.0 * 24.0  # any ally within 24u of rally counts as arrived
 const ALLY_FOLLOW_INTERVAL_SEC: float = 1.0
-## Trail offset shrunk from 6 -> 2u so the ally sits right
-## alongside the player's army instead of trailing visibly
-## behind. Negative would pull them ahead toward the enemy,
-## but a small positive keeps them just behind the lead so
-## the player's units take the front line.
+## Trail offset — small positive keeps the ally just behind the
+## lead so the player's units take the front line on a calm
+## advance. The combat-engaged override below ignores the
+## trail entirely and attack-moves straight at the enclave.
 const ALLY_TRAIL_OFFSET: float = 2.0
 const ENEMY_ENCLAVE_CENTRE: Vector3 = Vector3(0.0, 0.0, -130.0)
 const ALLY_SPAWN_X: float = -50.0
-const ALLY_SPAWN_Z: float = 150.0
+## Pulled in from 150 -> 135 so every spawn row (rows step +10
+## further south for tanks + jackals) stays inside the map's
+## playable area (-/+160 extent). Edge units were getting stuck
+## off the navmesh at z=170 in the old layout.
+const ALLY_SPAWN_Z: float = 135.0
 
 
 func _stage_force_enter() -> void:
@@ -599,14 +598,34 @@ func _tick_ally_behaviour(delta: float) -> void:
 	if _ally_units.is_empty():
 		return
 
+	# Combat override applies in BOTH marching and following states.
+	# As soon as ANY player or ally unit (or any neutral enclave
+	# unit) is in an active engagement, the strike force commits
+	# and attack-moves straight at the enclave. Earlier the
+	# override only fired in "following" state, so allies stuck
+	# in "marching" because of map-edge wedges never engaged.
+	if _any_friendly_in_combat() or _any_enclave_taking_fire():
+		for u_atk: Node3D in _ally_units:
+			var combat_atk: Node = u_atk.get_node_or_null("CombatComponent")
+			if combat_atk and combat_atk.has_method("command_attack_move"):
+				combat_atk.call("command_attack_move", ENEMY_ENCLAVE_CENTRE)
+			elif u_atk.has_method("command_move"):
+				u_atk.call("command_move", ENEMY_ENCLAVE_CENTRE)
+		# Stay in whatever state we were in — the override gets
+		# checked again next tick. If shooting stops the
+		# centroid-trail / march logic resumes.
+		return
+
 	if _ally_state == &"marching":
-		# Look at the centroid of the (still-alive) allies — when
-		# they're close enough to the player rally point, flip to
-		# follow mode.
-		var centroid: Vector3 = _ally_centroid()
-		if centroid.distance_squared_to(ALLY_RALLY_POINT) <= ALLY_RALLY_ARRIVE_SQ:
-			_ally_state = &"following"
-			_ally_follow_accum = ALLY_FOLLOW_INTERVAL_SEC  # fire immediately
+		# Switched from "centroid within radius" to "ANY ally
+		# unit within radius" — a single ally stuck on the map
+		# edge would otherwise drag the centroid out of range
+		# forever and the strike force never flipped to follow.
+		for u_check: Node3D in _ally_units:
+			if u_check.global_position.distance_squared_to(ALLY_RALLY_POINT) <= ALLY_RALLY_ARRIVE_SQ:
+				_ally_state = &"following"
+				_ally_follow_accum = ALLY_FOLLOW_INTERVAL_SEC  # fire immediately
+				break
 		return
 
 	if _ally_state == &"following":
@@ -614,21 +633,6 @@ func _tick_ally_behaviour(delta: float) -> void:
 		if _ally_follow_accum < ALLY_FOLLOW_INTERVAL_SEC:
 			return
 		_ally_follow_accum = 0.0
-		# Combat override — once anyone on either friendly side
-		# is engaged with an enemy, the strike force commits and
-		# attack-moves straight at the enclave instead of trailing
-		# the player's centroid. Reason: when the player produces
-		# a fresh unit at base mid-fight the centroid jumps
-		# rearward, and the trail-follow logic was visibly pulling
-		# the allies BACKWARDS out of an active engagement.
-		if _any_friendly_in_combat():
-			for u_atk: Node3D in _ally_units:
-				var combat_atk: Node = u_atk.get_node_or_null("CombatComponent")
-				if combat_atk and combat_atk.has_method("command_attack_move"):
-					combat_atk.call("command_attack_move", ENEMY_ENCLAVE_CENTRE)
-				elif u_atk.has_method("command_move"):
-					u_atk.call("command_move", ENEMY_ENCLAVE_CENTRE)
-			return
 		# Re-target: trail behind the player's army on its push
 		# toward the enclave. Aim at a point just behind the
 		# player centroid (offset toward the player's spawn) so
@@ -673,6 +677,47 @@ func _any_friendly_in_combat() -> bool:
 			return true
 		var forced: Node = combat.get("forced_target") as Node
 		if forced and is_instance_valid(forced):
+			return true
+	return false
+
+
+func _any_enclave_taking_fire() -> bool:
+	## True when an enclave unit OR enclave building is being
+	## shot at by friendly fire — caught via the targeting hook
+	## on enclave units (their CombatComponent gains a
+	## _current_target = friendly unit when retaliating) AND via
+	## current-HP-vs-max on enclave buildings (any structure
+	## below full HP must have been shot). Lets the strike force
+	## react to player-initiated combat even before either side's
+	## fire callback has fully resolved on the friendly half.
+	for n: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(n):
+			continue
+		var owner_id: int = (n.get("owner_id") as int) if "owner_id" in n else -1
+		if owner_id != 2:  # 2 = NEUTRAL pseudo-player == enclave
+			continue
+		if "alive_count" in n and (n.get("alive_count") as int) <= 0:
+			continue
+		var combat: Node = n.get_node_or_null("CombatComponent")
+		if combat:
+			var tgt: Node = combat.get("_current_target") as Node
+			if tgt and is_instance_valid(tgt):
+				return true
+		var stats: UnitStatResource = n.get("stats") as UnitStatResource if "stats" in n else null
+		if stats and "hp_total" in stats:
+			var hp: int = (n.get("get_total_hp") as Callable).call() as int if n.has_method("get_total_hp") else 0
+			if hp > 0 and hp < (stats.hp_total as int):
+				return true
+	for n: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(n):
+			continue
+		var b_owner: int = (n.get("owner_id") as int) if "owner_id" in n else -1
+		if b_owner != 2:
+			continue
+		var b: Building = n as Building
+		if not b or not b.stats:
+			continue
+		if b.current_hp > 0 and b.current_hp < (b.stats.hp as int):
 			return true
 	return false
 
