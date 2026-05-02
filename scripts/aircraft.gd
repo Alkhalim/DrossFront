@@ -1134,6 +1134,100 @@ func _build_hammerhead() -> void:
 			rivet.set_surface_override_material(0, rivet_mat)
 			add_child(rivet)
 
+	# Variant overlays. The base build is the gunship hull; the bomber
+	# stacks a stubby wing pair with downward-folded tips and a second
+	# engine on each side so the silhouette reads as a sturdy
+	# traditional bomber. Escort and base gunship take no overlay so
+	# the family resemblance is intact.
+	if stats and stats.unit_name == "Hammerhead (Bomber)":
+		_apply_hammerhead_bomber_extras(body_color)
+
+
+func _apply_hammerhead_bomber_extras(body_color: Color) -> void:
+	# Stubby main wings forward of the engines, with downward-folded
+	# wing tips. Reads as a heavy carrier-style bomber wing.
+	for wing_side: int in 2:
+		var wsx: float = 1.0 if wing_side == 0 else -1.0
+		var wing := MeshInstance3D.new()
+		wing.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var wing_box := BoxMesh.new()
+		wing_box.size = Vector3(1.50, 0.10, 0.85)
+		wing.mesh = wing_box
+		wing.position = Vector3(wsx * 1.85, 0.08, 0.30)
+		wing.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.10)))
+		add_child(wing)
+		# Downward folded tip — angled wing-tip stub off the outer
+		# edge, rotated ~45° down so the silhouette terminates in a
+		# fighter-bomber's anhedral.
+		var tip := MeshInstance3D.new()
+		tip.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var tip_box := BoxMesh.new()
+		tip_box.size = Vector3(0.42, 0.10, 0.75)
+		tip.mesh = tip_box
+		tip.position = Vector3(wsx * 2.70, -0.06, 0.25)
+		tip.rotation.z = wsx * deg_to_rad(45.0)
+		tip.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.20)))
+		add_child(tip)
+		# Second engine pod, slung under the wing outboard of the
+		# fuselage-mounted nacelle. Forward intake + aft thrust block
+		# match the gunship's twin-segment language.
+		var outer_fwd := MeshInstance3D.new()
+		outer_fwd.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var ofb := BoxMesh.new()
+		ofb.size = Vector3(0.42, 0.46, 0.85)
+		outer_fwd.mesh = ofb
+		outer_fwd.position = Vector3(wsx * 2.10, -0.20, 0.30)
+		outer_fwd.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.12)))
+		add_child(outer_fwd)
+		var outer_aft := MeshInstance3D.new()
+		outer_aft.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var oab := BoxMesh.new()
+		oab.size = Vector3(0.40, 0.44, 0.80)
+		outer_aft.mesh = oab
+		outer_aft.position = Vector3(wsx * 2.10, -0.22, -0.55)
+		outer_aft.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.20)))
+		add_child(outer_aft)
+		# Outer engine exhaust glow.
+		var outer_exh := MeshInstance3D.new()
+		outer_exh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var oeb := BoxMesh.new()
+		oeb.size = Vector3(0.30, 0.28, 0.14)
+		outer_exh.mesh = oeb
+		outer_exh.position = Vector3(wsx * 2.10, -0.22, -1.00)
+		var oem := StandardMaterial3D.new()
+		oem.albedo_color = Color(1.0, 0.45, 0.15, 1.0)
+		oem.emission_enabled = true
+		oem.emission = Color(1.0, 0.45, 0.10, 1.0)
+		oem.emission_energy_multiplier = 2.5
+		outer_exh.set_surface_override_material(0, oem)
+		add_child(outer_exh)
+	# Stretched bomb-bay belly under the central hull -- visible
+	# payload undercarriage so the bomber doesn't read as the gunship
+	# with extra wings.
+	var bay := MeshInstance3D.new()
+	bay.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var bay_box := BoxMesh.new()
+	bay_box.size = Vector3(1.20, 0.30, 1.80)
+	bay.mesh = bay_box
+	bay.position = Vector3(0.0, -0.40, 0.10)
+	bay.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.18)))
+	add_child(bay)
+	# Bay door seam — slim emissive strip running fore/aft so the
+	# undercarriage reads as a real bomb-bay door.
+	var seam := MeshInstance3D.new()
+	seam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var seam_box := BoxMesh.new()
+	seam_box.size = Vector3(0.05, 0.04, 1.70)
+	seam.mesh = seam_box
+	seam.position = Vector3(0.0, -0.55, 0.10)
+	var seam_mat := StandardMaterial3D.new()
+	seam_mat.albedo_color = Color(1.0, 0.50, 0.18, 1.0)
+	seam_mat.emission_enabled = true
+	seam_mat.emission = Color(1.0, 0.50, 0.18, 1.0)
+	seam_mat.emission_energy_multiplier = 1.4
+	seam.set_surface_override_material(0, seam_mat)
+	add_child(seam)
+
 
 func _build_switchblade() -> void:
 	# Sable interceptor — slim, angular, swept-back wings, cockpit
