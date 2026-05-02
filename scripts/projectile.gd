@@ -269,14 +269,15 @@ func _process(delta: float) -> void:
 
 
 func _spawn_trail_puff() -> void:
-	## Routes the missile trail into the central GPU-particle emitter —
-	## one `emit_particle` call instead of allocating a fresh
-	## MeshInstance3D + StandardMaterial3D + Tween per puff. The emitter's
-	## ParticleProcessMaterial owns the lifetime / scale-over-life /
-	## fade animation, so all per-particle update work runs on the GPU.
-	var _pem_scene: Node = get_tree().current_scene
-	var pem: Node = _pem_scene.get_node_or_null("ParticleEmitterManager") if _pem_scene else null
-	if not pem:
+	## Drops one smoke puff behind the missile. Direct MeshInstance3D +
+	## Tween — the GPU-particle path through ParticleEmitterManager
+	## was silently emitting nothing on the project's Godot build, so
+	## missile trails went invisible mid-match. Per-puff allocation is
+	## paid back by the missile-side trail interval (one puff every
+	## 70ms ≈ 14/sec across a salvo of 6 missiles = ~85/sec peak), and
+	## tween auto-frees the puff so memory stays bounded.
+	var scene: Node = get_tree().current_scene
+	if not scene:
 		return
 	# Drop just behind the missile body. global_basis.z is the local +Z
 	# direction in world space (missile's "backward" after look_at).
@@ -286,12 +287,36 @@ func _spawn_trail_puff() -> void:
 		randf_range(-0.05, 0.05),
 		randf_range(-0.05, 0.05),
 	)
-	var drift: Vector3 = Vector3(
+	var puff := MeshInstance3D.new()
+	puff.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.18
+	sphere.height = 0.36
+	sphere.radial_segments = 8
+	sphere.rings = 4
+	puff.mesh = sphere
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.78, 0.62, 0.45, 0.65)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	puff.set_surface_override_material(0, mat)
+	scene.add_child(puff)
+	puff.global_position = global_position + rear_offset
+	# Drift up + outward as the puff expands, fading to fully
+	# transparent over its life. ~0.7s gives a visible trail across
+	# the full missile arc without accumulating too many puffs at
+	# once.
+	var target_pos_drift: Vector3 = puff.global_position + Vector3(
 		randf_range(-0.15, 0.15),
-		randf_range(0.1, 0.4),
+		randf_range(0.4, 0.8),
 		randf_range(-0.15, 0.15),
 	)
-	pem.emit_smoke(global_position + rear_offset, drift, Color(0.65, 0.5, 0.4, 0.7))
+	var tween: Tween = puff.create_tween().set_parallel(true)
+	tween.tween_property(puff, "global_position", target_pos_drift, 0.7)
+	tween.tween_property(puff, "scale", Vector3(2.4, 2.4, 2.4), 0.7)
+	tween.tween_property(mat, "albedo_color:a", 0.0, 0.7)
+	tween.chain().tween_callback(puff.queue_free)
 
 
 func _spawn_impact() -> void:

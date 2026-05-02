@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://b5yqvhg0r7h3d"
+path="res://.godot/imported/Red Tundra March.mp3-5a77490ffc185da0c483a321319db7db.mp3str"
+
+[deps]
+
+source_file="res://assets/audio/Music/Anvil/Red Tundra March.mp3"
+dest_files=["res://.godot/imported/Red Tundra March.mp3-5a77490ffc185da0c483a321319db7db.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

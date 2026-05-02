@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://b8yu1ik1m5ck0"
+path="res://.godot/imported/Anvil Move 3.mp3-50c092f3e918e8483147c4686956f72c.mp3str"
+
+[deps]
+
+source_file="res://assets/audio/Voicelines/Anvil/Anvil Move 3.mp3"
+dest_files=["res://.godot/imported/Anvil Move 3.mp3-50c092f3e918e8483147c4686956f72c.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

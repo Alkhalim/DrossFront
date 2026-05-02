@@ -536,6 +536,20 @@ func play_weapon_fire(weapon: WeaponResource = null, at: Vector3 = Vector3.INF) 
 		# the recorded samples' loudness range.
 		var weight: float = _weapon_weight(weapon)
 		var volume_db: float = lerp(-10.0, -3.0, weight) + randf_range(-2.0, 1.0)
+		# Missile launch bank — the source MP3s are mastered at very
+		# different loudnesses (one variant clips a good 6-8 dB hotter
+		# than the rest), so a Hammerhead salvo would jump in volume
+		# track-to-track. Pull missiles to a tighter, lower band so
+		# the loudest sample sits at the same perceived volume as the
+		# quietest after _emit's playback.
+		var rof_for_audio: StringName = weapon.rof_tier if weapon else &""
+		var is_missile: bool = (
+			rof_for_audio == &"single"
+			or rof_for_audio == &"slow"
+			or rof_for_audio == &"volley"
+		) and not _sfx_missile_launch.is_empty()
+		if is_missile:
+			volume_db = randf_range(-9.0, -7.0)
 		# Pitch jitter — heavier weapons get tighter range so they
 		# stay recognizably "heavy"; lighter rapid weapons swing wider
 		# so a continuous burst sounds varied.

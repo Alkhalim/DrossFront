@@ -1785,6 +1785,7 @@ func _on_production_button(index: int) -> void:
 const RES_COLOR_SALVAGE: Color = Color(1.00, 0.78, 0.30, 1.0)  # warm gold
 const RES_COLOR_FUEL: Color = Color(0.30, 0.85, 1.00, 1.0)     # cyan
 const RES_COLOR_POP: Color = Color(0.78, 0.95, 0.55, 1.0)      # green-tan
+const RES_COLOR_MICROCHIPS: Color = Color(0.85, 0.55, 1.0, 1.0) # violet
 
 
 ## --- Stat sheet builder ---------------------------------------------------

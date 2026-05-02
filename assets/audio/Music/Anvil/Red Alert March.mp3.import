@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://tajba11et2ya"
+path="res://.godot/imported/Red Alert March.mp3-ae5007f77288e387a1cc1dcd04c3c7fc.mp3str"
+
+[deps]
+
+source_file="res://assets/audio/Music/Anvil/Red Alert March.mp3"
+dest_files=["res://.godot/imported/Red Alert March.mp3-ae5007f77288e387a1cc1dcd04c3c7fc.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

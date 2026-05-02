@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://3hq431ml0g6m"
+path="res://.godot/imported/Sable Select 5.mp3-e062974e36137e1ba20ad3a5bb20c5d3.mp3str"
+
+[deps]
+
+source_file="res://assets/audio/Voicelines/Sable/Sable Select 5.mp3"
+dest_files=["res://.godot/imported/Sable Select 5.mp3-e062974e36137e1ba20ad3a5bb20c5d3.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

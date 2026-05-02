@@ -19,7 +19,12 @@
       "Bash(/g/Programme/Python/python.exe *)",
       "Bash(population_cap)",
       "Bash(xargs -I {} grep \"footprint_size\" {})",
-      "Bash(timeout 30 godot --headless --quit-after 60)"
+      "Bash(timeout 30 godot --headless --quit-after 60)",
+      "Bash(cp \"/d/Downloads/Missile Launch.mp3\" \"D:/Dokumente/Gamedesign/DrossFront/DrossFront/assets/audio/\")",
+      "Bash(cp \"/d/Downloads/Missile Launch \\(1\\).mp3\" \"D:/Dokumente/Gamedesign/DrossFront/DrossFront/assets/audio/\")",
+      "Bash(cp \"/d/Downloads/Missile Launch \\(2\\).mp3\" \"D:/Dokumente/Gamedesign/DrossFront/DrossFront/assets/audio/\")",
+      "Bash(cp \"/d/Downloads/Missile Launch \\(3\\).mp3\" \"D:/Dokumente/Gamedesign/DrossFront/DrossFront/assets/audio/\")",
+      "Bash(cp \"/d/Downloads/Missile Launch \\(4\\).mp3\" \"D:/Dokumente/Gamedesign/DrossFront/DrossFront/assets/audio/\")"
     ]
   }
 }

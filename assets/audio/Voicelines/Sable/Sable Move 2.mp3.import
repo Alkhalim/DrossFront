@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://ciplxke6gsyi3"
+path="res://.godot/imported/Sable Move 2.mp3-6394aab4c5b4b915411541aad29cd946.mp3str"
+
+[deps]
+
+source_file="res://assets/audio/Voicelines/Sable/Sable Move 2.mp3"
+dest_files=["res://.godot/imported/Sable Move 2.mp3-6394aab4c5b4b915411541aad29cd946.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

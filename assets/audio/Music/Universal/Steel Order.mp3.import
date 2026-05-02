@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://xtpgc1n34rq8"
+path="res://.godot/imported/Steel Order.mp3-467531082dfbde75dfe517ec8d266ea1.mp3str"
+
+[deps]
+
+source_file="res://assets/audio/Music/Universal/Steel Order.mp3"
+dest_files=["res://.godot/imported/Steel Order.mp3-467531082dfbde75dfe517ec8d266ea1.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

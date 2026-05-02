@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://chhl4g1ho3paj"
+path="res://.godot/imported/Sable Attack 3.mp3-10d6af02ea0fa007ab112a3009f43f9e.mp3str"
+
+[deps]
+
+source_file="res://assets/audio/Voicelines/Sable/Sable Attack 3.mp3"
+dest_files=["res://.godot/imported/Sable Attack 3.mp3-10d6af02ea0fa007ab112a3009f43f9e.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

@@ -39,6 +39,12 @@ func _ready() -> void:
 	_player = AudioStreamPlayer.new()
 	_player.bus = "Music"
 	_player.volume_db = MUSIC_VOLUME_DB
+	# PROCESS_MODE_ALWAYS so the score keeps playing during the
+	# match-end pause (MatchManager._show_end_screen sets
+	# get_tree().paused = true). Without this the player hits
+	# silence the moment the victory / defeat screen appears.
+	_player.process_mode = Node.PROCESS_MODE_ALWAYS
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	_player.finished.connect(_on_track_finished)
 	add_child(_player)
 

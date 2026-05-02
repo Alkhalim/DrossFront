@@ -108,12 +108,18 @@ func _is_clear(p: Vector3) -> bool:
 			return false
 	# Other-satellite spacing — don't drop two piles on top of one
 	# another so the player has to actually move workers between them.
+	# Group iteration is defensive: any pre-existing wreck created
+	# before is_satellite was added doesn't have the property, so we
+	# duck-type the check via `in` rather than relying on the typed
+	# Wreck cast carrying the new field.
 	for node: Node in get_tree().get_nodes_in_group("wrecks"):
 		if not is_instance_valid(node):
 			continue
-		var w: Wreck = node as Wreck
-		if not w or not w.is_satellite:
+		if not ("is_satellite" in node):
 			continue
-		if p.distance_to(w.global_position) < 25.0:
+		if not (node.get("is_satellite") as bool):
+			continue
+		var w_pos: Vector3 = (node as Node3D).global_position
+		if p.distance_to(w_pos) < 25.0:
 			return false
 	return true
