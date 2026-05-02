@@ -2120,12 +2120,17 @@ func _build_stat_sheet(rows: Array) -> String:
 	return "\n".join(lines)
 
 
-func _build_unit_stat_sheet(unit: Node3D, include_cost: bool) -> String:
-	## Three-row stat sheet for a unit. Used by both the friendly
-	## single-select panel and the enemy / neutral inspect panel
-	## (passing include_cost=false hides the salvage/fuel chips on
-	## enemy units since the player can't act on them). Rows in
-	## order: defense, combat, mobility/economy.
+func _build_unit_stat_sheet(unit: Node3D, _include_cost: bool = false) -> String:
+	## Six-row stat sheet for a unit. Used by both the friendly
+	## single-select panel and the enemy / neutral inspect panel.
+	## Rows in order: defense, combat, mobility/sight/squad,
+	## weapon stars, attack bonuses, own armor.
+	##
+	## _include_cost is kept as a parameter for callsite compat
+	## but no longer affects the output -- pop / cost / weapon-
+	## summary rows moved out of the stat sheet (they're already
+	## visible on the production button + role hint, repeating
+	## them here was clutter).
 	var stats: UnitStatResource = unit.stats as UnitStatResource
 	if not stats:
 		return ""
@@ -2157,18 +2162,17 @@ func _build_unit_stat_sheet(unit: Node3D, include_cost: bool) -> String:
 		_stat_chip("Acc", "%d%%" % acc_pct, STAT_LABEL_COLOR_RANGE),
 	]
 
-	# Row 3 — mobility + (player units only) cost / pop. Speed and
-	# sight read as star bars (bronze->silver->gold across 30 half-
-	# steps) so the relative quality lands at a glance, with the raw
-	# value in parentheses for the balance reader.
+	# Row 3 — mobility. Speed and sight read as star bars
+	# (bronze->silver->gold across 30 half-steps) so the relative
+	# quality lands at a glance, with the raw value in parentheses
+	# for the balance reader. Population + cost moved out of the
+	# stat sheet -- the production button already shows them as
+	# chips, repeating them here was clutter.
 	var row_mobility: Array = [
 		_stat_chip("Speed", "%s  (%.0f)" % [_stars_for_speed(stats.resolved_speed()), stats.resolved_speed()], STAT_LABEL_COLOR_MOBILITY),
 		_stat_chip("Sight", "%s  (%.0f)" % [_stars_for_sight(stats.resolved_sight_radius()), stats.resolved_sight_radius()], STAT_LABEL_COLOR_RANGE),
 		_stat_chip("Squad", "%d / %d" % [alive, stats.squad_size], STAT_LABEL_COLOR_SQUAD),
 	]
-	if include_cost:
-		row_mobility.append(_stat_chip("Pop", str(stats.population), STAT_LABEL_COLOR_SQUAD))
-		row_mobility.append(_stat_chip("Cost", "%dS / %dF" % [stats.cost_salvage, stats.cost_fuel], STAT_LABEL_COLOR_COST_S))
 
 	# Row 4 — weapon stars. Damage / range / fire rate as a 30-half-
 	# step quality readout. Pulls from resolved_*() so per-unit
@@ -2191,16 +2195,7 @@ func _build_unit_stat_sheet(unit: Node3D, include_cost: bool) -> String:
 	if armor_red > 0.0 or stats.armor_class != &"unarmored":
 		row_defense_bonus.append(_stat_chip("Armor", "%s  (-%d%%)" % [_stars_for_armor(armor_red), int(round(armor_red * 100.0))], STAT_LABEL_COLOR_DEFENSE))
 
-	# Optional row 7 — weapon character. One short summary so the player
-	# knows whether the DPS comes from a slow cannon, a continuous beam,
-	# a missile salvo, etc. Pulled into its own row so the combat
-	# numbers row stays clean.
-	var weapon_summary: String = _weapon_summary(stats)
-	var row_weapons: Array = []
-	if weapon_summary != "":
-		row_weapons.append(_stat_chip("Weapons", weapon_summary, STAT_LABEL_COLOR_RANGE))
-
-	return _build_stat_sheet([row_defense, row_combat, row_mobility, row_weapon_stars, row_attack_bonus, row_defense_bonus, row_weapons])
+	return _build_stat_sheet([row_defense, row_combat, row_mobility, row_weapon_stars, row_attack_bonus, row_defense_bonus])
 
 
 func _attack_bonus_chips(stats: UnitStatResource) -> Array:

@@ -87,7 +87,7 @@ func get_faction_label(f: FactionId) -> String:
 func get_map_label() -> String:
 	match map_id:
 		MapId.ASHPLAINS_CROSSING: return "Ashplains Crossing"
-		MapId.IRON_GATE_CROSSING: return "Iron Gate Crossing"
+		MapId.IRON_GATE_CROSSING: return "Iron Gate Pass"
 		_: return "Foundry Belt"
 
 

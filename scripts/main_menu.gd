@@ -50,7 +50,7 @@ const _MAP_INFO: Dictionary = {
 		"blurb": "Volcanic ash flats with one elevated ridge.\nLong sightlines, sparse cover,\nfavours ranged combat.",
 	},
 	MatchSettingsClass.MapId.IRON_GATE_CROSSING: {
-		"label": "Iron Gate Crossing",
+		"label": "Iron Gate Pass",
 		"blurb": "Semi-controlled district between corp cores.\nDense ruin clusters favour stealth flanks,\ncentral corridor favours heavy push.",
 	},
 }
