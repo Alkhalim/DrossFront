@@ -173,6 +173,47 @@ func _recompute_visibility() -> void:
 		_stamp_visibility((node as Node3D).global_position, BUILDING_SIGHT_RADIUS)
 
 	revision += 1
+	# Apply the new grid to every enemy unit + building so the
+	# scene renders the player's view of the world. Friendly +
+	# neutral entities stay always-visible; enemies hide unless
+	# their cell is currently VISIBLE.
+	_apply_entity_visibility()
+
+
+func _apply_entity_visibility() -> void:
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node):
+			continue
+		var node3d: Node3D = node as Node3D
+		if not node3d:
+			continue
+		var owner_id: int = (node.get("owner_id") as int) if "owner_id" in node else local_player_id
+		# Friendly + ally entities stay visible regardless of FOW.
+		if owner_id == local_player_id or _is_friendly(node):
+			node3d.visible = true
+			continue
+		# Enemy / neutral unit — hide unless its current cell is
+		# in line of sight. Cell state is sampled at the entity's
+		# world position; aircraft sample the same way (the cell
+		# grid is 2D over X/Z, ignoring altitude).
+		node3d.visible = is_visible_world(node3d.global_position)
+
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var b3d: Node3D = node as Node3D
+		if not b3d:
+			continue
+		var owner_id: int = (node.get("owner_id") as int) if "owner_id" in node else local_player_id
+		if owner_id == local_player_id or _is_friendly(node):
+			b3d.visible = true
+			continue
+		# Enemy buildings stick around once explored — Age-of-Empires
+		# behaviour: the player remembers seeing the structure even
+		# after losing live vision (terrain doesn't change, the
+		# building hasn't moved). Buildings the player has never
+		# seen stay hidden.
+		b3d.visible = is_explored_world(b3d.global_position)
 
 
 func _is_friendly(node: Node) -> bool:
