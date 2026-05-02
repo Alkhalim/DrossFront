@@ -174,13 +174,21 @@ func _process(delta: float) -> void:
 		# old map regions don't keep leaking VFX/SFX through the fog.
 		var observable: bool = _firing_observable()
 
-		# Projectile visual — uses the profile's role tag so anti-air shoots AA
-		# missiles, anti-heavy spits AP shells, etc.
+		# Projectile visual — spawns from the actual gun position
+		# (turret_pivot world origin) so the HQ's corner MG nests
+		# fire from the nest, not the building's centre of mass.
+		# Falls back to building centre + 2u when no pivot is set.
 		if observable:
 			var proj_script: GDScript = load("res://scripts/projectile.gd") as GDScript
 			if proj_script:
+				var fire_origin: Vector3 = _building.global_position + Vector3(0.0, 2.0, 0.0)
+				var pivot_v: Variant = _building.get("turret_pivot")
+				if typeof(pivot_v) == TYPE_OBJECT and is_instance_valid(pivot_v):
+					var pivot_n3d: Node3D = pivot_v as Node3D
+					if pivot_n3d:
+						fire_origin = pivot_n3d.global_position
 				var proj: Node3D = proj_script.create(
-					_building.global_position + Vector3(0, 2.0, 0),
+					fire_origin,
 					_target.global_position,
 					get_role()
 				)
