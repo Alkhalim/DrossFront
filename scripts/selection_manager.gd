@@ -503,11 +503,11 @@ func _show_wreck_readout(wreck: Wreck) -> void:
 	if wreck.microchip_remaining > 0:
 		text += "\n%d chips" % wreck.microchip_remaining
 	label.text = text
-	# With fixed_size on, font_size is the on-screen pixel height.
-	# Sized down from 28 to 16 so the readout sits proportionate to
-	# the wreck instead of dominating the screen.
+	# Same fixed_size + small pixel_size combo as FloatingNumber so
+	# the wreck readout floats at a readable but un-dominating
+	# size at every zoom.
 	label.font_size = 16
-	label.pixel_size = 0.012
+	label.pixel_size = 0.003
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.fixed_size = true
 	label.no_depth_test = true

@@ -24,11 +24,13 @@ static func spawn(scene: Node, world_pos: Vector3, text: String, color: Color, l
 	var label := Label3D.new()
 	label.text = text
 	# fixed_size keeps the label at constant on-screen pixel height
-	# regardless of camera zoom. With fixed_size on, font_size IS
-	# the on-screen pixel height, so 18 reads clean without the
-	# "covers half the unit" problem the previous 32 had.
+	# regardless of camera zoom. With fixed_size on, the actual
+	# on-screen size depends on font_size * pixel_size combination
+	# (Label3D's fixed_size still respects pixel_size as the world
+	# scale). Pulled the multiplier down so "+12 S" pickups read
+	# as a small spec floating up the unit, not a banner.
 	label.font_size = 18
-	label.pixel_size = 0.012
+	label.pixel_size = 0.003
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.fixed_size = true
 	label.no_depth_test = true
