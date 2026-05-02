@@ -104,7 +104,7 @@ text = ""
 
 [node name="ActionSection" type="VBoxContainer" parent="BottomPanel/HBox"]
 layout_mode = 2
-custom_minimum_size = Vector2(250, 0)
+custom_minimum_size = Vector2(380, 0)
 
 [node name="ActionLabel" type="Label" parent="BottomPanel/HBox/ActionSection"]
 layout_mode = 2

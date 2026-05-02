@@ -2098,6 +2098,28 @@ func _turret_profile_tooltip(key: StringName, data: Dictionary) -> String:
 	return "\n".join(lines)
 
 
+## Faction roster of base units that have a branch commit. Only base
+## units listed here surface in the Armory. Order matters — the panel
+## renders these top-to-bottom in the same order the player sees in
+## the Foundry production lineup.
+const ANVIL_BRANCHED_UNITS: Array[String] = [
+	"res://resources/units/anvil_rook.tres",
+	"res://resources/units/anvil_hound.tres",
+	"res://resources/units/anvil_phalanx.tres",
+	"res://resources/units/anvil_hammerhead.tres",
+	"res://resources/units/anvil_bulwark.tres",
+	"res://resources/units/anvil_forgemaster.tres",
+]
+const SABLE_BRANCHED_UNITS: Array[String] = [
+	"res://resources/units/sable_specter.tres",
+	"res://resources/units/sable_jackal.tres",
+	"res://resources/units/sable_courier_tank.tres",
+	"res://resources/units/sable_fang.tres",
+	"res://resources/units/sable_switchblade.tres",
+	"res://resources/units/sable_harbinger.tres",
+]
+
+
 func _rebuild_armory_buttons(_building: Building) -> void:
 	_clear_buttons()
 
@@ -2106,81 +2128,131 @@ func _rebuild_armory_buttons(_building: Building) -> void:
 		_action_label.text = "No commit manager"
 		return
 
-	# Faction-aware branch pick. Anvil's armory commits the Hound's
-	# branches; Sable's commits the Specter's (Ghost / Glitch).
+	# Pick the player's faction's branch roster. Sable factions use
+	# the Sable list; everyone else gets Anvil.
 	var settings: Node = get_node_or_null("/root/MatchSettings")
 	var player_faction: int = 0
 	if settings and "player_faction" in settings:
 		player_faction = settings.get("player_faction") as int
-	var base_path: String = "res://resources/units/anvil_hound.tres"
+	var paths: Array[String] = ANVIL_BRANCHED_UNITS
 	if player_faction == 1:
-		base_path = "res://resources/units/sable_specter.tres"
-
-	var hound_stats: UnitStatResource = load(base_path) as UnitStatResource
-	if not hound_stats or not hound_stats.branch_a_stats:
-		_action_label.text = "No branches available"
-		return
-
-	if bcm.has_committed(hound_stats.unit_name):
-		var committed: UnitStatResource = bcm.get_committed_stats(hound_stats.unit_name)
-		_action_label.text = "Committed: %s" % committed.unit_name
-		return
+		paths = SABLE_BRANCHED_UNITS
 
 	if bcm.is_committing():
-		_action_label.text = "Commit in progress..."
-		return
+		_action_label.text = "Commit in progress: %s" % bcm.get_commit_branch_name()
+	else:
+		_action_label.text = "Armory — branch upgrades"
 
-	_action_label.text = "%s Branch (irreversible)" % hound_stats.unit_name
 	# Branch upgrades cost the same across every base unit in v1 —
-	# pulled from BranchCommitManager constants. The cost suffix is
-	# baked into the tooltip so the player sees what they'll pay
-	# without leaving the panel.
+	# pulled from BranchCommitManager constants. Bake the cost line
+	# into each tooltip so the player sees the price up-front.
 	var cost_suffix: String = "  •  %dM / %dF / %dS" % [
 		BranchCommitManager.COMMIT_COST_MICROCHIPS,
 		BranchCommitManager.COMMIT_COST_FUEL,
 		BranchCommitManager.COMMIT_COST_SALVAGE,
 	]
 
-	var btn_a := Button.new()
-	btn_a.custom_minimum_size = Vector2(140, 56)
-	_set_label_button(btn_a, "[Q]", hound_stats.branch_a_name)
-	btn_a.tooltip_text = _unit_tooltip(hound_stats.branch_a_stats) + "\n\nUpgrade cost:" + cost_suffix
-	btn_a.pressed.connect(_on_branch_commit.bind(hound_stats, hound_stats.branch_a_stats, hound_stats.branch_a_name))
-	_button_grid.add_child(btn_a)
-	_attach_research_cost_widget(btn_a)
+	# Re-key the button grid to one column so each "row" we add lays
+	# out vertically. Each row is itself an HBoxContainer holding the
+	# unit name + branch A button + branch B button. This keeps the
+	# armory layout aligned regardless of how many base units the
+	# faction has.
+	_button_grid.columns = 1
 
-	var btn_b := Button.new()
-	btn_b.custom_minimum_size = Vector2(140, 56)
-	_set_label_button(btn_b, "[W]", hound_stats.branch_b_name)
-	btn_b.tooltip_text = _unit_tooltip(hound_stats.branch_b_stats) + "\n\nUpgrade cost:" + cost_suffix
-	btn_b.pressed.connect(_on_branch_commit.bind(hound_stats, hound_stats.branch_b_stats, hound_stats.branch_b_name))
-	_button_grid.add_child(btn_b)
-	_attach_research_cost_widget(btn_b)
+	# Render each branched base unit as one row.
+	for path: String in paths:
+		var base_stats: UnitStatResource = load(path) as UnitStatResource
+		if not base_stats or not base_stats.branch_a_stats or not base_stats.branch_b_stats:
+			continue
+		_button_grid.add_child(_make_armory_row(base_stats, bcm, cost_suffix))
 
-	# Anchor Mode research button (v3.3 §3.1) — researched here, applies to
-	# every present and future Crawler. Costs same currency mix as a
-	# branch commit so the resource pressure is consistent.
+	# Anchor Mode research button — bottom of the list. Same currency
+	# mix as a branch commit so the resource pressure is consistent.
 	var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
 	if rm:
-		var anchor_btn := Button.new()
-		anchor_btn.custom_minimum_size = Vector2(160, 56)
-		if rm.is_researched(&"anchor_mode"):
-			anchor_btn.text = "Anchor Mode\nResearched"
-			anchor_btn.disabled = true
-		elif rm.is_in_progress() and rm.current_id == &"anchor_mode":
-			anchor_btn.text = "Anchor Mode\n%d%%" % int(rm.get_progress() * 100.0)
-			anchor_btn.disabled = true
-		else:
-			anchor_btn.text = "[E] Anchor Mode"
-			anchor_btn.tooltip_text = (
-				"Crawlers gain a stationary Anchor command.\n"
-				+ "Anchored: +50% armor, +25% workers, +25% range.\n"
-				+ "5s deploy / 5s undeploy (vulnerable during).\n\n"
-				+ "Upgrade cost:" + cost_suffix
-			)
-			anchor_btn.pressed.connect(_on_research_anchor)
-			_attach_research_cost_widget(anchor_btn)
-		_button_grid.add_child(anchor_btn)
+		_button_grid.add_child(_make_anchor_research_row(rm, cost_suffix))
+
+
+func _make_armory_row(base_stats: UnitStatResource, bcm: Node, cost_suffix: String) -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	# Name label — short header so the player can read the row's
+	# subject before scanning the branch buttons.
+	var name_lbl := Label.new()
+	name_lbl.text = base_stats.unit_name
+	name_lbl.custom_minimum_size = Vector2(110, 0)
+	name_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	name_lbl.add_theme_color_override("font_color", Color(0.85, 0.82, 0.70, 1.0))
+	row.add_child(name_lbl)
+
+	if bcm.has_committed(base_stats.unit_name):
+		# Already committed — show the committed branch name in
+		# place of the two buttons so the row still reads clearly.
+		var committed: UnitStatResource = bcm.get_committed_stats(base_stats.unit_name)
+		var done_lbl := Label.new()
+		done_lbl.text = "Committed: %s" % committed.unit_name
+		done_lbl.add_theme_color_override("font_color", Color(0.55, 0.95, 0.55, 1.0))
+		done_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(done_lbl)
+		return row
+
+	var committing_now: bool = bcm.is_committing()
+	row.add_child(_make_branch_button(base_stats, base_stats.branch_a_stats, base_stats.branch_a_name, cost_suffix, committing_now))
+	row.add_child(_make_branch_button(base_stats, base_stats.branch_b_stats, base_stats.branch_b_name, cost_suffix, committing_now))
+	return row
+
+
+func _make_branch_button(
+	base_stats: UnitStatResource,
+	branch_stats: UnitStatResource,
+	branch_name: String,
+	cost_suffix: String,
+	disabled: bool,
+) -> Button:
+	var btn := Button.new()
+	btn.custom_minimum_size = Vector2(120, 50)
+	_set_label_button(btn, "", branch_name)
+	btn.tooltip_text = _unit_tooltip(branch_stats) + "\n\nUpgrade cost:" + cost_suffix
+	btn.pressed.connect(_on_branch_commit.bind(base_stats, branch_stats, branch_name))
+	btn.disabled = disabled
+	_attach_research_cost_widget(btn)
+	return btn
+
+
+func _make_anchor_research_row(rm: Node, cost_suffix: String) -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var lbl := Label.new()
+	lbl.text = "Crawler"
+	lbl.custom_minimum_size = Vector2(110, 0)
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.add_theme_color_override("font_color", Color(0.85, 0.82, 0.70, 1.0))
+	row.add_child(lbl)
+
+	var anchor_btn := Button.new()
+	anchor_btn.custom_minimum_size = Vector2(160, 50)
+	if rm.is_researched(&"anchor_mode"):
+		anchor_btn.text = "Anchor Mode\nResearched"
+		anchor_btn.disabled = true
+	elif rm.is_in_progress() and rm.current_id == &"anchor_mode":
+		anchor_btn.text = "Anchor Mode\n%d%%" % int(rm.get_progress() * 100.0)
+		anchor_btn.disabled = true
+	else:
+		anchor_btn.text = "[E] Anchor Mode"
+		anchor_btn.tooltip_text = (
+			"Crawlers gain a stationary Anchor command.\n"
+			+ "Anchored: +50% armor, +25% workers, +25% range.\n"
+			+ "5s deploy / 5s undeploy (vulnerable during).\n\n"
+			+ "Upgrade cost:" + cost_suffix
+		)
+		anchor_btn.pressed.connect(_on_research_anchor)
+		_attach_research_cost_widget(anchor_btn)
+	row.add_child(anchor_btn)
+	return row
 
 
 func _attach_research_cost_widget(btn: Button) -> void:
@@ -2750,6 +2822,12 @@ func _clear_buttons() -> void:
 	for child: Node in _button_grid.get_children():
 		child.queue_free()
 	_action_buttons.clear()
+	# Reset column count to the standard 3 so panels other than the
+	# Armory (which switches to columns=1 for its row layout) get
+	# the original grid back. Without this, the next panel rebuild
+	# would inherit the armory's single-column layout.
+	if _button_grid:
+		_button_grid.columns = 3
 	# Hide the build tab row when leaving build mode (production /
 	# armory / turret button rebuilds reach this same path).
 	if _build_tab_row and is_instance_valid(_build_tab_row):
