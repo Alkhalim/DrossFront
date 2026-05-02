@@ -247,6 +247,14 @@ func _find_nearest_enemy(max_range: float) -> Node3D:
 		var node_alive: int = node.get("alive_count")
 		if node_alive <= 0:
 			continue
+		# V3 stealth — auto-target ignores stealth-capable units that
+		# aren't currently revealed. The player can still manually
+		# right-click them to engage; this only gates the autonomous
+		# "find nearest enemy" pass.
+		if "stealth_revealed" in node and not (node.get("stealth_revealed") as bool):
+			var their_stats: UnitStatResource = node.get("stats") as UnitStatResource
+			if their_stats and their_stats.is_stealth_capable:
+				continue
 		var d: float = my_pos.distance_to(node.global_position)
 		if d <= max_range and d < nearest_dist:
 			nearest_dist = d

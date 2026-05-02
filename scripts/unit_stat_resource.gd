@@ -67,6 +67,20 @@ extends Resource
 ## (v2 spec §1.3) — produced at the HQ but mechanically distinct from a mech.
 @export var is_crawler: bool = false
 
+@export_group("Stealth")
+## V3 §"Pillar 1 — Stealth System" — when true the unit camouflages
+## itself when no enemy is within `detection_radius` and no recent
+## damage. Auto-target skips revealed=false stealth units; firing
+## doesn't break stealth (Specter can fire from concealment).
+@export var is_stealth_capable: bool = false
+## Distance at which an enemy unit reveals stealth-capable targets.
+## Standard ground = 80, engineers = 100, Glitch Specter = 150,
+## Spotter Rook = 200. The unit also stays revealed for
+## `stealth_restore_time` after taking damage.
+@export var detection_radius: float = 80.0
+## Seconds after the last damage before stealth re-applies.
+@export var stealth_restore_time: float = 4.0
+
 @export_group("Aircraft")
 ## V3 §"Pillar 3" — when true the unit spawns as an aircraft (extends
 ## Aircraft scene, uses simple flight movement instead of NavigationAgent3D

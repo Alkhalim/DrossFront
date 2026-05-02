@@ -127,6 +127,16 @@ const FLASH_DURATION: float = 0.12
 ## Navigation.
 var _nav_agent: NavigationAgent3D = null
 var _stuck_timer: float = 0.0
+
+## V3 Stealth — see UnitStatResource.is_stealth_capable. `is_revealed`
+## is true while an enemy is within detection range OR the unit took
+## damage in the last `stealth_restore_time` seconds. Auto-targeting
+## (CombatComponent._find_nearest_enemy) skips stealth-capable units
+## with is_revealed == false.
+var stealth_revealed: bool = true
+var _stealth_damage_timer: float = 0.0
+var _stealth_check_throttle: float = 0.0
+const STEALTH_CHECK_INTERVAL: float = 0.4
 var _last_position: Vector3 = Vector3.ZERO
 
 ## Home position used by neutral patrol behaviour. When set (i.e. not
@@ -348,6 +358,13 @@ func _ready() -> void:
 		# here and reuse from the HP-bar repositioning hot path instead
 		# of a CLASS_SHAPES lookup per frame.
 		_cached_total_height = _mech_total_height()
+
+		# Stealth-capable units start concealed; the periodic stealth
+		# check below will reveal them when an enemy detector closes
+		# the distance.
+		if stats.is_stealth_capable:
+			stealth_revealed = false
+			_apply_stealth_visual(true)
 
 
 func _init_hp() -> void:
@@ -1774,6 +1791,18 @@ func _physics_process(delta: float) -> void:
 
 	_physics_frame_counter += 1
 
+	# Stealth tick — only stealth-capable units do real work here.
+	# Throttled to ~2.5 Hz; reveal proximity changes much slower
+	# than the 60 Hz physics loop, and walking the units group is
+	# the main cost per check.
+	if stats and stats.is_stealth_capable and alive_count > 0:
+		_stealth_check_throttle -= delta
+		if _stealth_damage_timer > 0.0:
+			_stealth_damage_timer -= delta
+		if _stealth_check_throttle <= 0.0:
+			_stealth_check_throttle = STEALTH_CHECK_INTERVAL
+			_tick_stealth()
+
 	# 1-in-3 frame stagger — each unit runs heavy work every 3rd physics
 	# frame (~20Hz) instead of every frame (60Hz). At 360+ units the
 	# half-frame stagger still ate the whole frame budget; tightening
@@ -2472,6 +2501,14 @@ func take_damage(amount: int, attacker: Node3D = null) -> void:
 	if alive_count <= 0:
 		return
 
+	# Stealth break — taking damage forces the unit into the
+	# "revealed" state for stealth_restore_time seconds. Per V3
+	# stealth rules, FIRING does NOT break stealth (Specter can
+	# fire from concealment); only being shot does.
+	if stats and stats.is_stealth_capable:
+		_stealth_damage_timer = stats.stealth_restore_time
+		_set_stealth_revealed(true)
+
 	# Player-only "we're under attack" alert. Channel-keyed by squad
 	# instance id so the AlertManager's per-channel cooldown gates
 	# the voiceline — a single squad taking sustained fire only
@@ -2748,6 +2785,78 @@ func get_muzzle_positions() -> Array[Vector3]:
 
 
 ## --- Faction-aware visual identity (V3 §"Pillar 1") ----------------------
+
+## --- V3 Stealth -----------------------------------------------------------
+
+func _tick_stealth() -> void:
+	## Reveal logic: walk the units group, find the closest enemy, and
+	## flip stealth_revealed based on whether anyone is inside our
+	## detection bubble. The damage-break timer keeps us revealed for
+	## stealth_restore_time seconds after the last hit regardless of
+	## proximity.
+	if _stealth_damage_timer > 0.0:
+		if not stealth_revealed:
+			_set_stealth_revealed(true)
+		return
+	var registry: PlayerRegistry = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	var detect_r2: float = stats.detection_radius * stats.detection_radius
+	var spotted: bool = false
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node) or node == self:
+			continue
+		if not ("alive_count" in node) or (node.get("alive_count") as int) <= 0:
+			continue
+		var other_owner: int = node.get("owner_id") as int
+		# Allies don't reveal us. Use the registry's are_allied check
+		# so 2v2 teammates count as allies.
+		if registry:
+			if registry.are_allied(owner_id, other_owner):
+				continue
+		else:
+			if other_owner == owner_id:
+				continue
+		# Each unit's OWN detection_radius defines how far IT can see
+		# stealth — Engineer 100, Glitch 150, Spotter 200, others 80.
+		var their_r: float = 80.0
+		if "stats" in node:
+			var their_stats: UnitStatResource = node.get("stats") as UnitStatResource
+			if their_stats:
+				their_r = their_stats.detection_radius
+		var their_r2: float = their_r * their_r
+		var dx: float = (node as Node3D).global_position.x - global_position.x
+		var dz: float = (node as Node3D).global_position.z - global_position.z
+		var d2: float = dx * dx + dz * dz
+		if d2 <= their_r2 or d2 <= detect_r2:
+			spotted = true
+			break
+	if spotted != stealth_revealed:
+		_set_stealth_revealed(spotted)
+
+
+func _set_stealth_revealed(revealed: bool) -> void:
+	stealth_revealed = revealed
+	_apply_stealth_visual(not revealed)
+
+
+func _apply_stealth_visual(concealed: bool) -> void:
+	## Fades the squad members' rendering so concealed units read as
+	## a faint shimmer. GeometryInstance3D.transparency in 0..1 is a
+	## per-instance fade — 0 = opaque, 1 = invisible. We use 0.7 so
+	## the silhouette is barely there but still distinguishable to
+	## the controlling player.
+	var t: float = 0.7 if concealed else 0.0
+	for member: Node3D in _member_meshes:
+		if not is_instance_valid(member):
+			continue
+		_apply_transparency_recursive(member, t)
+
+
+func _apply_transparency_recursive(node: Node, t: float) -> void:
+	if node is GeometryInstance3D:
+		(node as GeometryInstance3D).transparency = t
+	for child: Node in node.get_children():
+		_apply_transparency_recursive(child, t)
+
 
 func _faction_id() -> int:
 	# Resolve the unit's faction by routing the owner_id through the

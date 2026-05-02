@@ -28,6 +28,7 @@ cost_fuel = 0
 build_time = 10.5
 built_at = &"headquarters"
 primary_weapon = SubResource("weapon_pistol")
+detection_radius = 100.0
 special_description = "Builds structures. Repairs at 8 HP/sec. Can manually salvage neutral structures."
 can_build = true
 repair_rate = 8.0
