@@ -7,7 +7,7 @@ extends RefCounted
 ## Usage:
 ##   FloatingNumber.spawn(get_tree().current_scene, world_pos, "+25 F", FloatingNumber.COLOR_FUEL)
 
-const COLOR_SALVAGE: Color = Color(1.00, 0.78, 0.30, 1.0)   # warm gold
+const COLOR_SALVAGE: Color = Color(1.00, 0.55, 0.18, 1.0)   # warm orange
 const COLOR_FUEL: Color = Color(0.30, 0.85, 1.00, 1.0)      # cyan
 const COLOR_MICROCHIPS: Color = Color(0.85, 0.55, 1.00, 1.0) # violet
 const COLOR_HEAL: Color = Color(0.60, 1.00, 0.55, 1.0)      # bright green

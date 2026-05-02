@@ -1241,7 +1241,7 @@ func _spawn_crush_burst(world_pos: Vector3, salvage_gained: int) -> void:
 	label.pixel_size = 0.012
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.no_depth_test = true
-	label.modulate = Color(0.95, 0.78, 0.32, 1.0)
+	label.modulate = Color(1.00, 0.55, 0.18, 1.0)  # salvage orange
 	label.outline_size = 8
 	label.outline_modulate = Color(0, 0, 0, 1)
 	var label_pos: Vector3 = world_pos + Vector3(0, 1.2, 0)

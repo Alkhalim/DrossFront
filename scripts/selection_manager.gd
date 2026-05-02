@@ -511,7 +511,7 @@ func _show_wreck_readout(wreck: Wreck) -> void:
 	# numbers shrunk into illegibility when the player zoomed out.
 	label.fixed_size = true
 	label.no_depth_test = true
-	label.modulate = Color(0.95, 0.78, 0.32, 1.0)
+	label.modulate = Color(1.00, 0.55, 0.18, 1.0)  # salvage orange
 	label.outline_size = 8
 	label.outline_modulate = Color(0.0, 0.0, 0.0, 1.0)
 	var label_pos: Vector3 = wreck.global_position + Vector3(0.0, 1.4, 0.0)

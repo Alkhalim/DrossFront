@@ -83,10 +83,10 @@ var _power_bar_fill_style: StyleBoxFlat = null
 var _match_time: float = 0.0
 
 ## Resource label palette — accent colors so each line is instantly readable.
-const COLOR_SALVAGE := Color(0.95, 0.78, 0.32, 1.0)   # warm gold
+const COLOR_SALVAGE := Color(1.00, 0.55, 0.18, 1.0)   # warm orange — distinct from power yellow
 const COLOR_FUEL := Color(0.4, 0.85, 1.0, 1.0)        # cyan
 const COLOR_MICROCHIPS := Color(0.85, 0.55, 1.0, 1.0) # violet — distinct from gold/cyan
-const COLOR_POWER := Color(1.0, 0.85, 0.35, 1.0)      # yellow
+const COLOR_POWER := Color(1.00, 0.95, 0.20, 1.0)      # bright yellow — distinct from salvage orange
 const COLOR_POP := Color(0.55, 0.95, 0.55, 1.0)       # green
 const COLOR_TIMER := Color(0.85, 0.85, 0.85, 1.0)
 const COLOR_WARN := Color(1.0, 0.4, 0.35, 1.0)        # red — low fuel / power deficit
@@ -2185,7 +2185,7 @@ func _on_production_button(index: int) -> void:
 ## Color codes used by `_attach_cost_widget` for the salvage / fuel /
 ## population swatches on production + build buttons. Each swatch +
 ## number reads at a glance even when the eye is busy elsewhere.
-const RES_COLOR_SALVAGE: Color = Color(1.00, 0.78, 0.30, 1.0)  # warm gold
+const RES_COLOR_SALVAGE: Color = Color(1.00, 0.55, 0.18, 1.0)  # warm orange
 const RES_COLOR_FUEL: Color = Color(0.30, 0.85, 1.00, 1.0)     # cyan
 const RES_COLOR_POP: Color = Color(0.78, 0.95, 0.55, 1.0)      # green-tan
 const RES_COLOR_MICROCHIPS: Color = Color(0.85, 0.55, 1.0, 1.0) # violet
@@ -2207,7 +2207,7 @@ const STAT_LABEL_COLOR_DAMAGE: String = "ff5d5d"    # red (damage / DPS)
 const STAT_LABEL_COLOR_RANGE: String = "9bd1ff"     # pale blue (range / accuracy)
 const STAT_LABEL_COLOR_MOBILITY: String = "8feda0"  # green (speed)
 const STAT_LABEL_COLOR_SQUAD: String = "c8c8c8"     # neutral grey (squad / pop)
-const STAT_LABEL_COLOR_COST_S: String = "ffc850"    # salvage gold
+const STAT_LABEL_COLOR_COST_S: String = "ff8c2e"    # salvage orange
 const STAT_LABEL_COLOR_COST_F: String = "66d8ff"    # fuel cyan
 const STAT_LABEL_COLOR_COST_M: String = "d88aff"    # microchips violet
 
