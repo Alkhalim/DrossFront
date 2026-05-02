@@ -795,20 +795,38 @@ func _is_attack_target(target_owner: int, registry: PlayerRegistry) -> bool:
 
 
 func _select_all_of_type(unit_name: String) -> void:
+	## Double-click cohort. Picks up both ground Units AND Aircraft --
+	## the previous strict `as Unit` cast silently dropped Aircraft so
+	## a player double-clicking a Phalanx got a single-aircraft
+	## selection instead of every on-screen Phalanx.
 	_clear_selection()
 	_deselect_building()
 	var viewport_rect := get_viewport().get_visible_rect()
 	var all_units: Array[Node] = get_tree().get_nodes_in_group("units")
 	var added: bool = false
 	for node: Node in all_units:
-		var unit: Unit = node as Unit
-		if not unit or unit.owner_id != 0 or unit.alive_count <= 0:
+		if not is_instance_valid(node) or not ("owner_id" in node):
 			continue
-		if not unit.stats or unit.stats.unit_name != unit_name:
+		if (node.get("owner_id") as int) != 0:
 			continue
-		var screen_pos: Vector2 = _camera.unproject_position(unit.global_position)
+		# alive_count exists on both Unit and Aircraft; treat 0 as
+		# dead. Default to 1 if the property is missing for some
+		# reason so a misconfigured unit doesn't get silently
+		# excluded.
+		var alive: int = (node.get("alive_count") as int) if "alive_count" in node else 1
+		if alive <= 0:
+			continue
+		if not ("stats" in node):
+			continue
+		var stats: UnitStatResource = node.get("stats") as UnitStatResource
+		if not stats or stats.unit_name != unit_name:
+			continue
+		var n3d: Node3D = node as Node3D
+		if not n3d:
+			continue
+		var screen_pos: Vector2 = _camera.unproject_position(n3d.global_position)
 		if viewport_rect.has_point(screen_pos):
-			_add_to_selection(unit, false)
+			_add_to_selection(n3d, false)
 			added = true
 	if added and _audio:
 		# Unit selections speak instead of chiming — voiceline only.
