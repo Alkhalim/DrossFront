@@ -866,18 +866,21 @@ func _spawn_tutorial_raid_unit(stats_path: String, pos: Vector3) -> Node3D:
 
 
 func _stage_ally_done() -> bool:
-	# Win when no enemy combat units / buildings remain in the
-	# enclave. Enemy team is id 2 (the AI in tutorial setup).
-	for n: Node in get_tree().get_nodes_in_group("units"):
-		if is_instance_valid(n) and ("owner_id" in n):
-			var oid: int = n.get("owner_id") as int
-			if oid != 0 and oid != 1 and (n.get("alive_count") as int) > 0:
-				return false
+	# Win the moment the enemy HQ falls -- the player having to also
+	# clean up every remaining turret made the climactic beat fizzle
+	# into a chip-damage cleanup phase. Enemy team is id 2 in tutorial.
 	for n: Node in get_tree().get_nodes_in_group("buildings"):
-		if is_instance_valid(n) and ("owner_id" in n):
-			var oid: int = n.get("owner_id") as int
-			if oid != 0 and oid != 1:
-				return false
+		if not is_instance_valid(n):
+			continue
+		if not ("owner_id" in n):
+			continue
+		var oid: int = n.get("owner_id") as int
+		if oid == 0 or oid == 1:
+			continue
+		var bstats: BuildingStatResource = (n.get("stats") as BuildingStatResource) if "stats" in n else null
+		if bstats and bstats.building_id == &"headquarters":
+			# Enemy HQ still standing -- mission isn't over yet.
+			return false
 	return true
 
 

@@ -1131,18 +1131,13 @@ func _setup_tutorial_enemy_camp() -> void:
 	# ring at z=-115 denies the approach corridor; inner core
 	# sits at z=-130 to -140.
 	_spawn_tutorial_enemy_building(hq_path, Vector3(0.0, 0.0, -134.0), ai_res, 2)
-	# Inner ring of gun emplacements + SAM coverage behind. Tight
-	# overlap on every approach axis.
+	# Defensive ring -- thinned from 8 emplacements + 2 SAMs to 3
+	# emplacements + 1 SAM. The dense ring made the climactic assault
+	# feel like a chip-damage slog instead of a satisfying breach.
 	_spawn_tutorial_enemy_building(gun_path, Vector3(-14.0, 0.0, -124.0), ai_res, 2)
 	_spawn_tutorial_enemy_building(gun_path, Vector3(14.0, 0.0, -124.0), ai_res, 2)
-	_spawn_tutorial_enemy_building(gun_path, Vector3(-10.0, 0.0, -140.0), ai_res, 2)
-	_spawn_tutorial_enemy_building(gun_path, Vector3(10.0, 0.0, -140.0), ai_res, 2)
+	_spawn_tutorial_enemy_building(gun_path, Vector3(0.0, 0.0, -140.0), ai_res, 2)
 	_spawn_tutorial_enemy_building(sam_path, Vector3(0.0, 0.0, -118.0), ai_res, 2)
-	_spawn_tutorial_enemy_building(sam_path, Vector3(0.0, 0.0, -146.0), ai_res, 2)
-	# Outer ring — two more emplacements pushed forward (closer
-	# to the player) to deny the obvious approach lane.
-	_spawn_tutorial_enemy_building(gun_path, Vector3(-22.0, 0.0, -115.0), ai_res, 2)
-	_spawn_tutorial_enemy_building(gun_path, Vector3(22.0, 0.0, -115.0), ai_res, 2)
 	# Defenders — two Fang drone swarms (the air drones the player
 	# will need AA for) + a couple of Specter ground squads patrolling
 	# the camp interior.
