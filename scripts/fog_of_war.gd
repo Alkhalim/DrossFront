@@ -285,6 +285,21 @@ func _apply_entity_visibility() -> void:
 		if p3d:
 			p3d.visible = is_visible_world(p3d.global_position)
 
+	# Terrain decoration — rocks, ramps, plateaus, ruins, ammo
+	# dumps. Same rule as wrecks / fuel deposits: hidden until
+	# scouted, then sticks around once explored. The ground
+	# collision shape itself is also in the "terrain" group; it's
+	# invisible by default so toggling its `visible` is harmless.
+	# Skip terrain whose owner is a building (some terrain pieces
+	# get parented to live structures and shouldn't fight with the
+	# building-side visibility hook).
+	for node: Node in get_tree().get_nodes_in_group("terrain"):
+		if not is_instance_valid(node):
+			continue
+		var t3d: Node3D = node as Node3D
+		if t3d:
+			t3d.visible = is_explored_world(t3d.global_position)
+
 
 func _is_friendly(node: Node) -> bool:
 	if not ("owner_id" in node):
@@ -292,6 +307,14 @@ func _is_friendly(node: Node) -> bool:
 	var owner_id: int = node.get("owner_id") as int
 	if owner_id == local_player_id:
 		return true
+	# Lazy registry lookup — FOW._ready can run before
+	# TestArenaController has finished wiring the PlayerRegistry,
+	# in which case _registry started as null and ally vision
+	# never engaged. Refetch every check until we have one (cheap
+	# get_node_or_null) so allies start contributing the moment
+	# the registry exists.
+	if not _registry:
+		_registry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
 	if _registry and _registry.has_method("are_allied"):
 		return _registry.are_allied(local_player_id, owner_id)
 	return false

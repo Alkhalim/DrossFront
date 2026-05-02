@@ -1120,15 +1120,10 @@ func _swap_starter_units_to_player_faction() -> void:
 				continue
 			_spawn_ai_unit(new_stats, spec["pos"] as Vector3, 0)
 
-	# Bonus starter heavy — one Bulwark / Harbinger spawned just outside
-	# the player's HQ so the heavy mech silhouette can be eyeballed
-	# without grinding through advanced-foundry build times. Useful for
-	# faction-comparison playtests; harmless in regular play (it just
-	# means the player opens with a free heavy).
-	var heavy_stats: UnitStatResource = _unit_for_role(player_faction, "heavy")
-	if heavy_stats:
-		var heavy_pos := Vector3(0.0, 0.0, 92.0)  # slightly forward of HQ on the player side
-		_spawn_ai_unit(heavy_stats, heavy_pos, 0)
+	# Removed the free starter heavy (Bulwark / Harbinger) — was a
+	# faction-comparison playtest aid, not real economy. Players
+	# now have to grind through the foundry build path to see
+	# their heavy on the field, which matches every other unit.
 
 
 func _setup_fuel_deposits() -> void:
