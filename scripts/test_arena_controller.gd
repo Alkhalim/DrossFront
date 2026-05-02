@@ -1558,18 +1558,18 @@ func _setup_terrain_foundry_belt() -> void:
 	# track threats in their kill zone. Owned by the neutral player so
 	# they're hostile to everyone; destroying them drops a wreck (35%
 	# salvage refund of build cost) which doubles as a reason to push
-	# into the mid-map.
+	# into the mid-map. Both groups are skipped in tutorial mode —
+	# the foundries clutter the lane the tutorial drives the player
+	# down + the dead-centre turret was killing the starting Rook
+	# squad before they could move.
+	var settings_for_neutrals: Node = get_node_or_null("/root/MatchSettings")
+	var skip_neutrals: bool = settings_for_neutrals != null and settings_for_neutrals.get("tutorial_mode")
 	var foundry_stats: BuildingStatResource = load("res://resources/buildings/basic_foundry.tres") as BuildingStatResource
-	if foundry_stats:
+	if foundry_stats and not skip_neutrals:
 		_spawn_neutral_building(foundry_stats, Vector3(38, 0, 22), 0.4)
 		_spawn_neutral_building(foundry_stats, Vector3(-38, 0, -22), -0.4)
 	var turret_stats: BuildingStatResource = load("res://resources/buildings/gun_emplacement.tres") as BuildingStatResource
-	# Tutorial mode skips the abandoned-foundry turrets entirely —
-	# the dead-centre turret was killing the player's starting Rook
-	# squad in the first few seconds before they could move.
-	var settings_for_turrets: Node = get_node_or_null("/root/MatchSettings")
-	var skip_turrets: bool = settings_for_turrets != null and settings_for_turrets.get("tutorial_mode")
-	if turret_stats and not skip_turrets:
+	if turret_stats and not skip_neutrals:
 		_spawn_neutral_building(turret_stats, Vector3(0, 0, 0), 0.0)
 		_spawn_neutral_building(turret_stats, Vector3(70, 0, 8), 0.0)
 		_spawn_neutral_building(turret_stats, Vector3(-70, 0, -8), 0.0)

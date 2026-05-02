@@ -185,8 +185,8 @@ func _install_stages() -> void:
 	# Stage 2 — Crawler.
 	_stages.append({
 		"id": &"crawler",
-		"dialogue": "Steelmaster Kress: \"That Crawler still runs — bring it with you. Push further south to the abandoned foundry.\"",
-		"objective": "Continue south to the foundry ruin.",
+		"dialogue": "Steelmaster Kress: \"That Crawler still runs — bring it with you. Push further south to the abandoned command outpost — we should be able to reclaim it.\"",
+		"objective": "Continue south to the abandoned HQ.",
 		"on_enter": Callable(self, "_stage_crawler_enter"),
 		"trigger": Callable(self, "_stage_crawler_done"),
 	})
