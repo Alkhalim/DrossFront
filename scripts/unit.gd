@@ -811,81 +811,163 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		cannon_pivot.position = Vector3(0, gun_y, front_z - 0.05)
 		torso_pivot.add_child(cannon_pivot)
 
-		# Main barrel — round for Anvil, square (4-sided prism) for
-		# Sable. Both use the cylinder/-PI/2 X rotation so the length
-		# axis points -Z. Sable's barrel is also rotated 45° on Z so
-		# its corner edges sit at 12-o'clock from a top-down view —
-		# the silhouette reads as a sharp-edged blade rather than a
-		# soft tube.
-		var barrel_segs: int = 4 if is_sable_heavy else 64
 		var barrel_len: float = cannon_size.z
-		var barrel := MeshInstance3D.new()
-		var barrel_cyl := CylinderMesh.new()
-		barrel_cyl.top_radius = cannon_size.x
-		barrel_cyl.bottom_radius = cannon_size.x * 1.05
-		barrel_cyl.height = barrel_len
-		barrel_cyl.radial_segments = barrel_segs
-		barrel.mesh = barrel_cyl
-		# Same rotation-order trap as the mantlet — use object-local
-		# rotates so the cross-section spin happens AROUND the
-		# cylinder's length axis, not around world Y.
-		barrel.rotate_object_local(Vector3.RIGHT, -PI / 2)
 		if is_sable_heavy:
-			barrel.rotate_object_local(Vector3.UP, deg_to_rad(45.0))
-		barrel.position.z = -barrel_len * 0.5
-		var barrel_mat := _make_metal_mat(trim_dark)
-		barrel.set_surface_override_material(0, barrel_mat)
-		cannon_pivot.add_child(barrel)
-		mats.append(barrel_mat)
+			# Sable Harbinger fires a Spinal Railgun + drone-bay
+			# releases — neither reads as a kinetic cannon. Replace
+			# the barrel + sleeve + muzzle with a missile-launcher
+			# block: an angled rectangular housing with four
+			# vertically-stacked tubes facing forward, missile noses
+			# protruding from the openings, and a chamfered top
+			# breech. cannon_pivot still receives the launcher so
+			# recoil + muzzle-position lookups continue to work.
+			var housing_len: float = barrel_len * 0.75
+			var housing_w: float = cannon_size.x * 3.6
+			var housing_h: float = cannon_size.x * 4.2
+			var housing := MeshInstance3D.new()
+			var housing_box := BoxMesh.new()
+			housing_box.size = Vector3(housing_w, housing_h, housing_len)
+			housing.mesh = housing_box
+			# Tip the launcher up slightly so the tubes read as
+			# pointed forward-and-up, not straight ahead.
+			housing.rotate_object_local(Vector3.RIGHT, deg_to_rad(-12.0))
+			housing.position.z = -housing_len * 0.5
+			housing.position.y = housing_h * 0.05
+			var housing_mat := _make_metal_mat(darker)
+			housing.set_surface_override_material(0, housing_mat)
+			cannon_pivot.add_child(housing)
+			mats.append(housing_mat)
 
-		# Recoil sleeve — wider section near the breech. For Sable the
-		# square sleeve is rotated 0° on Z (corners up/right/down/left)
-		# while the barrel is rotated 45° → the two share a length
-		# axis but their corners alternate by 45°, so the joint reads
-		# as two separate machined parts catching light differently.
-		var sleeve_len: float = barrel_len * 0.22
-		var sleeve := MeshInstance3D.new()
-		var sleeve_cyl := CylinderMesh.new()
-		sleeve_cyl.top_radius = cannon_size.x * 1.3
-		sleeve_cyl.bottom_radius = cannon_size.x * 1.3
-		sleeve_cyl.height = sleeve_len
-		sleeve_cyl.radial_segments = barrel_segs
-		sleeve.mesh = sleeve_cyl
-		# Tipped forward only — no cross-section roll, so the
-		# sleeve's facets sit at 0° while the barrel above is at
-		# 45°, and the two stagger like separate machined parts.
-		sleeve.rotate_object_local(Vector3.RIGHT, -PI / 2)
-		sleeve.position.z = -barrel_len * 0.55
-		var sleeve_mat := _make_metal_mat(darker)
-		sleeve.set_surface_override_material(0, sleeve_mat)
-		cannon_pivot.add_child(sleeve)
-		mats.append(sleeve_mat)
+			# Top breech cap — slimmer angled plate covering the rear
+			# upper edge of the housing. Reads as the launcher's
+			# closed-bolt mechanism.
+			var cap := MeshInstance3D.new()
+			var cap_box := BoxMesh.new()
+			cap_box.size = Vector3(housing_w * 0.95, housing_h * 0.18, housing_len * 0.45)
+			cap.mesh = cap_box
+			cap.rotate_object_local(Vector3.RIGHT, deg_to_rad(-12.0))
+			cap.position.z = housing.position.z + housing_len * 0.35
+			cap.position.y = housing.position.y + housing_h * 0.55
+			var cap_mat := _make_metal_mat(Color(0.10, 0.10, 0.14))
+			cap.set_surface_override_material(0, cap_mat)
+			cannon_pivot.add_child(cap)
+			mats.append(cap_mat)
 
-		# Muzzle brake — wider cap at the tip. Sable's flares wider on
-		# the leading edge for an angular bayonet-tip silhouette and
-		# inherits the 45° z-rotation so its corners stay aligned
-		# with the barrel above it.
-		var muzzle := MeshInstance3D.new()
-		var muzzle_cyl := CylinderMesh.new()
-		muzzle_cyl.top_radius = cannon_size.x * 1.55 if is_sable_heavy else cannon_size.x * 1.4
-		muzzle_cyl.bottom_radius = cannon_size.x * 1.2
-		muzzle_cyl.height = 0.18 if is_sable_heavy else 0.15
-		muzzle_cyl.radial_segments = barrel_segs
-		muzzle.mesh = muzzle_cyl
-		muzzle.rotate_object_local(Vector3.RIGHT, -PI / 2)
-		if is_sable_heavy:
-			muzzle.rotate_object_local(Vector3.UP, deg_to_rad(45.0))
-		muzzle.position.z = -barrel_len - 0.07
-		var muzzle_mat := _make_metal_mat(Color(0.1, 0.1, 0.1))
-		muzzle.set_surface_override_material(0, muzzle_mat)
-		cannon_pivot.add_child(muzzle)
-		mats.append(muzzle_mat)
+			# Four launch tubes — 2x2 grid on the front face. Each
+			# tube is a short cylinder protruding forward, with a
+			# small cone-tip missile poking out of the mouth.
+			var tube_radius: float = cannon_size.x * 0.55
+			var tube_len: float = housing_len * 0.30
+			var tube_x_off: float = housing_w * 0.22
+			var tube_y_off: float = housing_h * 0.20
+			for tx_i: int in 2:
+				for ty_i: int in 2:
+					var tx: float = (-tube_x_off) if tx_i == 0 else tube_x_off
+					var ty: float = (-tube_y_off) if ty_i == 0 else tube_y_off
+					var tube := MeshInstance3D.new()
+					var tube_cyl := CylinderMesh.new()
+					tube_cyl.top_radius = tube_radius
+					tube_cyl.bottom_radius = tube_radius
+					tube_cyl.height = tube_len
+					tube_cyl.radial_segments = 8
+					tube.mesh = tube_cyl
+					tube.rotate_object_local(Vector3.RIGHT, deg_to_rad(-12.0) - PI / 2)
+					tube.position = Vector3(
+						tx,
+						housing.position.y + ty,
+						housing.position.z - housing_len * 0.45,
+					)
+					var tube_mat := _make_metal_mat(Color(0.06, 0.06, 0.08))
+					tube.set_surface_override_material(0, tube_mat)
+					cannon_pivot.add_child(tube)
+					mats.append(tube_mat)
 
-		shoulders.append(mantlet)
-		cannons.append(cannon_pivot)
-		cannon_rest_z.append(cannon_pivot.position.z)
-		# Bulwark muzzle sits at -barrel_len - 0.07 in pivot-local space.
-		cannon_muzzle_z.append(barrel_len + 0.07)
+					# Missile tip — small cone poking out of the
+					# tube. Tinted Sable violet emissive so the
+					# loaded-and-armed read carries at any zoom.
+					var tip := MeshInstance3D.new()
+					var tip_cyl := CylinderMesh.new()
+					tip_cyl.top_radius = 0.0
+					tip_cyl.bottom_radius = tube_radius * 0.75
+					tip_cyl.height = tube_len * 0.55
+					tip_cyl.radial_segments = 8
+					tip.mesh = tip_cyl
+					tip.rotate_object_local(Vector3.RIGHT, deg_to_rad(-12.0) - PI / 2)
+					tip.position = Vector3(
+						tx,
+						housing.position.y + ty + 0.02,
+						housing.position.z - housing_len * 0.62,
+					)
+					var tip_mat := StandardMaterial3D.new()
+					tip_mat.albedo_color = Color(0.78, 0.42, 1.0, 1.0)
+					tip_mat.emission_enabled = true
+					tip_mat.emission = Color(0.78, 0.42, 1.0, 1.0)
+					tip_mat.emission_energy_multiplier = 1.6
+					tip_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+					tip.set_surface_override_material(0, tip_mat)
+					cannon_pivot.add_child(tip)
+					mats.append(tip_mat)
+
+			shoulders.append(mantlet)
+			cannons.append(cannon_pivot)
+			cannon_rest_z.append(cannon_pivot.position.z)
+			# Muzzle position = front face of the housing where the
+			# missile tubes are. Used by combat code for projectile
+			# spawn.
+			cannon_muzzle_z.append(housing_len + 0.18)
+		else:
+			# Anvil Bulwark — keep the original round-barrel cannon
+			# (period industrial AP gun). Round barrel, recoil sleeve,
+			# muzzle brake.
+			var barrel := MeshInstance3D.new()
+			var barrel_cyl := CylinderMesh.new()
+			barrel_cyl.top_radius = cannon_size.x
+			barrel_cyl.bottom_radius = cannon_size.x * 1.05
+			barrel_cyl.height = barrel_len
+			barrel_cyl.radial_segments = 64
+			barrel.mesh = barrel_cyl
+			barrel.rotate_object_local(Vector3.RIGHT, -PI / 2)
+			barrel.position.z = -barrel_len * 0.5
+			var barrel_mat := _make_metal_mat(trim_dark)
+			barrel.set_surface_override_material(0, barrel_mat)
+			cannon_pivot.add_child(barrel)
+			mats.append(barrel_mat)
+
+			# Recoil sleeve — wider section near the breech.
+			var sleeve_len: float = barrel_len * 0.22
+			var sleeve := MeshInstance3D.new()
+			var sleeve_cyl := CylinderMesh.new()
+			sleeve_cyl.top_radius = cannon_size.x * 1.3
+			sleeve_cyl.bottom_radius = cannon_size.x * 1.3
+			sleeve_cyl.height = sleeve_len
+			sleeve_cyl.radial_segments = 64
+			sleeve.mesh = sleeve_cyl
+			sleeve.rotate_object_local(Vector3.RIGHT, -PI / 2)
+			sleeve.position.z = -barrel_len * 0.55
+			var sleeve_mat := _make_metal_mat(darker)
+			sleeve.set_surface_override_material(0, sleeve_mat)
+			cannon_pivot.add_child(sleeve)
+			mats.append(sleeve_mat)
+
+			# Muzzle brake — wider cap at the tip.
+			var muzzle := MeshInstance3D.new()
+			var muzzle_cyl := CylinderMesh.new()
+			muzzle_cyl.top_radius = cannon_size.x * 1.4
+			muzzle_cyl.bottom_radius = cannon_size.x * 1.2
+			muzzle_cyl.height = 0.15
+			muzzle_cyl.radial_segments = 64
+			muzzle.mesh = muzzle_cyl
+			muzzle.rotate_object_local(Vector3.RIGHT, -PI / 2)
+			muzzle.position.z = -barrel_len - 0.07
+			var muzzle_mat := _make_metal_mat(Color(0.1, 0.1, 0.1))
+			muzzle.set_surface_override_material(0, muzzle_mat)
+			cannon_pivot.add_child(muzzle)
+			mats.append(muzzle_mat)
+
+			shoulders.append(mantlet)
+			cannons.append(cannon_pivot)
+			cannon_rest_z.append(cannon_pivot.position.z)
+			cannon_muzzle_z.append(barrel_len + 0.07)
 	elif cannon_kind != "none":
 		# Sentinel-style mounts cannons at the cockpit (top of head); standard
 		# bipeds mount them on the torso shoulders.
