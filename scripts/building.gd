@@ -1292,6 +1292,7 @@ func _detail_foundry(advanced: bool) -> void:
 
 func _detail_generator() -> void:
 	var fs: Vector3 = stats.footprint_size
+	var is_advanced: bool = stats.building_id == &"advanced_generator"
 	# Team collar at the base of the central core tower.
 	_team_collar(fs.x * 0.7, 0.1, fs.z * 0.7, Vector3(0, fs.y + 0.05, 0))
 	# Central cylindrical core protruding above the housing.
@@ -1386,6 +1387,91 @@ func _detail_generator() -> void:
 	stripe.position = Vector3(0, fs.y * 0.25, 0)
 	stripe.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.7, 0.1), 1.0))
 	_attach_visual(stripe)
+
+	# Advanced Generator (Reactor) support structures -- a ring of
+	# external coolant towers + radial pylon supports + a stout
+	# secondary stack so the upgraded tier reads as 'industrial
+	# reactor', not just a bigger basic generator.
+	if is_advanced:
+		_apply_reactor_support_structures(fs)
+
+
+func _apply_reactor_support_structures(fs: Vector3) -> void:
+	# Ring of external coolant towers around the main core. Four short
+	# cylinders set just outside the chassis at compass points -- each
+	# capped with a slight emissive glow so the reactor reads as
+	# 'multiple stage cooling system' from any angle.
+	for i: int in 4:
+		var ang: float = float(i) * (PI * 0.5) + PI * 0.25
+		var tower := MeshInstance3D.new()
+		var t_cyl := CylinderMesh.new()
+		t_cyl.top_radius = fs.x * 0.12
+		t_cyl.bottom_radius = fs.x * 0.14
+		t_cyl.height = fs.y * 0.85
+		t_cyl.radial_segments = 12
+		tower.mesh = t_cyl
+		var tx: float = sin(ang) * fs.x * 0.62
+		var tz: float = cos(ang) * fs.z * 0.62
+		tower.position = Vector3(tx, t_cyl.height * 0.5, tz)
+		tower.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.18, 0.20)))
+		_attach_visual(tower)
+		# Radial pylon connecting the tower to the main chassis --
+		# slim diagonal box that reads as a coolant pipe / structural
+		# brace tying the support tower to the core.
+		var pylon := MeshInstance3D.new()
+		var py_box := BoxMesh.new()
+		py_box.size = Vector3(0.10, 0.08, fs.x * 0.30)
+		pylon.mesh = py_box
+		pylon.position = Vector3(tx * 0.55, fs.y * 0.55, tz * 0.55)
+		pylon.rotation.y = ang
+		pylon.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.16, 0.15, 0.14)))
+		_attach_visual(pylon)
+		# Glowing top cap -- small emissive disc on each tower so the
+		# support cluster sells the 'high-power reactor' read at zoom.
+		var glow := MeshInstance3D.new()
+		var g_cyl := CylinderMesh.new()
+		g_cyl.top_radius = fs.x * 0.10
+		g_cyl.bottom_radius = fs.x * 0.10
+		g_cyl.height = 0.06
+		glow.mesh = g_cyl
+		glow.position = Vector3(tx, t_cyl.height + 0.04, tz)
+		glow.set_surface_override_material(0, _detail_emissive_mat(Color(0.30, 0.85, 1.0), 1.6))
+		_attach_visual(glow)
+	# Secondary thicker exhaust stack rising off the rear of the
+	# chassis -- offset so it doesn't fight the central core for
+	# silhouette and gives the reactor a real industrial-stack
+	# profile.
+	var stack := MeshInstance3D.new()
+	var stack_cyl := CylinderMesh.new()
+	stack_cyl.top_radius = fs.x * 0.16
+	stack_cyl.bottom_radius = fs.x * 0.20
+	stack_cyl.height = fs.y * 1.30
+	stack_cyl.radial_segments = 16
+	stack.mesh = stack_cyl
+	stack.position = Vector3(fs.x * 0.30, fs.y + stack_cyl.height * 0.5, -fs.z * 0.10)
+	stack.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.16, 0.15, 0.14)))
+	_attach_visual(stack)
+	# Stack rim collar so the exhaust mouth has machined character.
+	var rim := MeshInstance3D.new()
+	var rim_cyl := CylinderMesh.new()
+	rim_cyl.top_radius = fs.x * 0.18
+	rim_cyl.bottom_radius = fs.x * 0.18
+	rim_cyl.height = 0.06
+	rim.mesh = rim_cyl
+	rim.position = Vector3(stack.position.x, fs.y + stack_cyl.height + 0.04, stack.position.z)
+	rim.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.10, 0.09, 0.08)))
+	_attach_visual(rim)
+	# Hot core inside the stack -- emissive disc deep enough to read
+	# as a real venting opening when the camera drifts off-axis.
+	var core_glow := MeshInstance3D.new()
+	var cg_cyl := CylinderMesh.new()
+	cg_cyl.top_radius = fs.x * 0.13
+	cg_cyl.bottom_radius = fs.x * 0.13
+	cg_cyl.height = 0.06
+	core_glow.mesh = cg_cyl
+	core_glow.position = Vector3(stack.position.x, fs.y + stack_cyl.height - 0.04, stack.position.z)
+	core_glow.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.45, 0.10), 2.6))
+	_attach_visual(core_glow)
 
 
 func _detail_armory() -> void:
