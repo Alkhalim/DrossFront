@@ -3416,6 +3416,13 @@ func _spawn_damage_number(amount: int) -> void:
 	var scene: Node = get_tree().current_scene
 	if not scene:
 		return
+	# FOW gate -- damage numbers spawning over a unit the local player
+	# can't currently see leaks the unit's position through fog. Only
+	# pop them when the cell is in live vision.
+	var fow: Node = scene.get_node_or_null("FogOfWar")
+	if fow and fow.has_method("is_visible_world"):
+		if not fow.call("is_visible_world", global_position):
+			return
 	var label := Label3D.new()
 	label.text = "%d" % amount
 	label.font_size = 36

@@ -582,6 +582,15 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 		0.30, 0.99
 	)
 
+	# FOW gate -- if neither the shooter nor the target are in the
+	# local player's current vision, skip every visible / audible
+	# side-effect (projectile spawn, miss-zip, muzzle flash, fire
+	# sound). Damage already applied above, so the engagement still
+	# resolves; the player just doesn't see / hear it through the
+	# fog. Friendly units always pass because they're their own
+	# visibility source.
+	var firing_visible: bool = _firing_observable()
+
 	for i: int in shots:
 		var hit: bool = randf() < hit_chance
 		if hit:
@@ -605,11 +614,12 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 				0.0,
 				randf_range(-miss_offset, miss_offset),
 			)
-			var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager") if get_tree() else null
-			if audio and audio.has_method("play_miss"):
-				audio.call("play_miss", aim_pos)
+			if firing_visible:
+				var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager") if get_tree() else null
+				if audio and audio.has_method("play_miss"):
+					audio.call("play_miss", aim_pos)
 
-		if proj_script:
+		if firing_visible and proj_script:
 			var fire_pos: Vector3 = _unit.global_position
 			# Modulo so salvo shots (i past the muzzle count) cycle
 			# back through the available muzzles instead of all
@@ -639,17 +649,38 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 				get_tree().current_scene.add_child(proj)
 
 	# Muzzle flash on each member — colored by the weapon's role.
-	_spawn_squad_muzzle_flash(_muzzle_color_for(weapon))
-
-	# Trigger cannon recoil animation on the unit.
+	# Recoil animation runs even off-screen so units that re-enter
+	# vision mid-burst don't snap-pose; the muzzle flash + sound are
+	# the bits that should respect FOW.
+	if firing_visible:
+		_spawn_squad_muzzle_flash(_muzzle_color_for(weapon))
 	if _unit.has_method("play_shoot_anim"):
 		_unit.play_shoot_anim()
 
 	# Sound — pass the weapon so the audio manager can color the layered
-	# generators based on damage tier, fire rate, and role.
-	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
-	if audio and audio.has_method("play_weapon_fire"):
-		audio.play_weapon_fire(weapon, _unit.global_position)
+	# generators based on damage tier, fire rate, and role. Skip when
+	# the firing unit + target are both in fog.
+	if firing_visible:
+		var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
+		if audio and audio.has_method("play_weapon_fire"):
+			audio.play_weapon_fire(weapon, _unit.global_position)
+
+
+func _firing_observable() -> bool:
+	## True when the local player can see the shooter or the target.
+	## Both being in fog means the engagement is happening off-screen
+	## and shouldn't leak audio / muzzle flashes / projectile trails
+	## through scouted-but-not-currently-visible cells.
+	var fow: Node = get_tree().current_scene.get_node_or_null("FogOfWar") if get_tree() else null
+	if not fow or not fow.has_method("is_visible_world"):
+		return true  # No FOW system = no gate.
+	if _unit and is_instance_valid(_unit):
+		if fow.call("is_visible_world", _unit.global_position):
+			return true
+	if _current_target and is_instance_valid(_current_target):
+		if fow.call("is_visible_world", _current_target.global_position):
+			return true
+	return false
 
 
 func _muzzle_color_for(weapon: WeaponResource) -> Color:

@@ -169,20 +169,42 @@ func _process(delta: float) -> void:
 		var damage: int = maxi(int(float(get_damage()) * efficiency), 1)
 		_target.take_damage(damage, _building as Node3D)
 
+		# FOW gate -- if both the turret and the target sit in scouted-
+		# but-not-currently-visible fog, skip the projectile + sound so
+		# old map regions don't keep leaking VFX/SFX through the fog.
+		var observable: bool = _firing_observable()
+
 		# Projectile visual — uses the profile's role tag so anti-air shoots AA
 		# missiles, anti-heavy spits AP shells, etc.
-		var proj_script: GDScript = load("res://scripts/projectile.gd") as GDScript
-		if proj_script:
-			var proj: Node3D = proj_script.create(
-				_building.global_position + Vector3(0, 2.0, 0),
-				_target.global_position,
-				get_role()
-			)
-			get_tree().current_scene.add_child(proj)
+		if observable:
+			var proj_script: GDScript = load("res://scripts/projectile.gd") as GDScript
+			if proj_script:
+				var proj: Node3D = proj_script.create(
+					_building.global_position + Vector3(0, 2.0, 0),
+					_target.global_position,
+					get_role()
+				)
+				get_tree().current_scene.add_child(proj)
 
-		var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
-		if audio and audio.has_method("play_weapon_fire"):
-			audio.play_weapon_fire(null, _building.global_position)
+			var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
+			if audio and audio.has_method("play_weapon_fire"):
+				audio.play_weapon_fire(null, _building.global_position)
+
+
+func _firing_observable() -> bool:
+	## True when the local player can currently see either the firing
+	## turret or its target. Skips projectile spawn + fire sound when
+	## an off-screen turret duels with an off-screen target.
+	var fow: Node = get_tree().current_scene.get_node_or_null("FogOfWar") if get_tree() else null
+	if not fow or not fow.has_method("is_visible_world"):
+		return true
+	if _building and is_instance_valid(_building):
+		if fow.call("is_visible_world", _building.global_position):
+			return true
+	if _target and is_instance_valid(_target):
+		if fow.call("is_visible_world", _target.global_position):
+			return true
+	return false
 
 
 func _find_nearest_enemy() -> Node3D:
