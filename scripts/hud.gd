@@ -3096,6 +3096,15 @@ func _send_gift(to_id: int, salvage: int, fuel: int) -> void:
 
 var _alert_label: Label = null
 var _alert_tween: Tween = null
+## Sticky warning bar for long-running countdowns (satellite impact,
+## upkeep timers, etc). Lives below the transient `_alert_label` so
+## flash alerts and persistent warnings can coexist without one hiding
+## the other.
+var _warning_label: Label = null
+## Active persistent warnings keyed by caller-chosen string. Each entry
+## stores {message, severity}; the HUD repaints the bar each call so
+## per-second updating just re-invokes set_persistent_warning.
+var _persistent_warnings: Dictionary = {}
 
 
 func _build_alert_banner() -> void:
@@ -3112,6 +3121,21 @@ func _build_alert_banner() -> void:
 	_alert_label.modulate.a = 0.0
 	_alert_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_alert_label)
+
+	_warning_label = Label.new()
+	_warning_label.name = "PersistentWarningBanner"
+	_warning_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	_warning_label.offset_top = 100.0
+	_warning_label.offset_bottom = 132.0
+	_warning_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_warning_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_warning_label.add_theme_font_size_override("font_size", 20)
+	_warning_label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.95))
+	_warning_label.add_theme_constant_override("outline_size", 6)
+	_warning_label.add_theme_color_override("font_color", Color(1.0, 0.78, 0.32, 1.0))
+	_warning_label.modulate.a = 0.0
+	_warning_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_warning_label)
 
 	# Children _ready before parents in Godot, so AlertManager (created in
 	# TestArenaController._ready) doesn't exist yet — connect on the next
@@ -3148,6 +3172,54 @@ func _on_alert(message: String, severity: int, _world_pos: Vector3) -> void:
 	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
 	if audio and audio.has_method("play_alert"):
 		audio.play_alert(severity)
+
+
+func set_persistent_warning(key: String, message: String, severity: int = 1) -> void:
+	## Show or update a sticky warning that persists until cleared.
+	## The caller updates the message each tick (e.g. once per second
+	## for a countdown) and the bar repaints in place. Severity picks
+	## the colour: 0 = info teal, 1 = warning amber, 2 = critical red.
+	if not _warning_label:
+		return
+	_persistent_warnings[key] = {"message": message, "severity": severity}
+	_refresh_warning_label()
+
+
+func clear_persistent_warning(key: String) -> void:
+	## Remove a sticky warning. The bar hides automatically when the
+	## last warning is cleared.
+	if not _warning_label:
+		return
+	if _persistent_warnings.erase(key):
+		_refresh_warning_label()
+
+
+func _refresh_warning_label() -> void:
+	if not _warning_label:
+		return
+	if _persistent_warnings.is_empty():
+		_warning_label.modulate.a = 0.0
+		_warning_label.text = ""
+		return
+	# Pick the highest-severity entry's tint and concatenate messages
+	# so multiple sticky warnings stack in one banner instead of
+	# fighting for the same row.
+	var top_severity: int = -1
+	var lines: Array[String] = []
+	for entry: Dictionary in _persistent_warnings.values():
+		var sev: int = (entry.get("severity", 1) as int)
+		if sev > top_severity:
+			top_severity = sev
+		lines.append(entry.get("message", "") as String)
+	var tint: Color = Color(1.0, 0.78, 0.32, 1.0)  # warning amber default
+	match top_severity:
+		2:
+			tint = Color(1.0, 0.4, 0.35, 1.0)
+		0:
+			tint = Color(0.85, 0.95, 0.85, 1.0)
+	_warning_label.text = "\n".join(lines)
+	_warning_label.add_theme_color_override("font_color", tint)
+	_warning_label.modulate.a = 1.0
 
 
 ## --- Unit panel ---

@@ -24,6 +24,16 @@ var _pings: Array[Dictionary] = []
 const PING_LIFETIME: float = 1.6
 const PING_MAX_RADIUS: float = 18.0
 
+## Persistent pulsing pins keyed by caller-chosen string. Each entry
+## holds {pos, color}. Drawn every frame as a sin-pulsed ring + filled
+## core so the eye is anchored to long-running events (incoming
+## satellite, beacon dropped by an ability) until the caller clears
+## the pin via stop_pulse_pin().
+var _pulse_pins: Dictionary = {}
+const PULSE_PIN_INNER: float = 4.5
+const PULSE_PIN_OUTER: float = 11.0
+const PULSE_PIN_HZ: float = 1.4
+
 
 func _ready() -> void:
 	# Resolve the player's faction once and cache the accent colour
@@ -46,6 +56,17 @@ func ping(world_pos: Vector3, color: Color = Color.WHITE) -> void:
 		"t_start": Time.get_ticks_msec() / 1000.0,
 		"color": color,
 	})
+
+
+func start_pulse_pin(key: String, world_pos: Vector3, color: Color) -> void:
+	## Place a persistent pulsing ring on the minimap until cleared
+	## via stop_pulse_pin(). Used for long-running threats (satellite
+	## impact countdown) where a one-shot ping isn't sticky enough.
+	_pulse_pins[key] = {"pos": world_pos, "color": color}
+
+
+func stop_pulse_pin(key: String) -> void:
+	_pulse_pins.erase(key)
 
 
 func _draw_fog_tint(fow: FogOfWar, map_origin: Vector2, map_size: Vector2, half_world: float) -> void:
@@ -272,6 +293,30 @@ func _draw() -> void:
 			Vector2(view_half * 2.0, view_half * 1.2)
 		)
 		draw_rect(view_rect, Color(1.0, 1.0, 1.0, 0.3), false, 1.0)
+
+	# Persistent pulse pins (incoming-satellite warning, etc). Drawn
+	# UNDER the active flash pings so a single-tick ping still pops on
+	# top, but ABOVE unit dots / camera rect so the pulse stays
+	# readable through the scene.
+	var pulse_now: float = Time.get_ticks_msec() / 1000.0
+	for pin: Dictionary in _pulse_pins.values():
+		var pin_pos: Vector2 = _world_to_map(pin["pos"] as Vector3, map_size, half_world)
+		var pulse_t: float = (sin(pulse_now * TAU * PULSE_PIN_HZ) + 1.0) * 0.5
+		var pulse_radius: float = lerp(PULSE_PIN_INNER, PULSE_PIN_OUTER, pulse_t)
+		var pin_color: Color = pin["color"] as Color
+		var ring_color: Color = pin_color
+		ring_color.a = lerp(0.45, 1.0, 1.0 - pulse_t)
+		draw_arc(pin_pos, pulse_radius, 0.0, TAU, 24, ring_color, 2.0, true)
+		var core_color: Color = pin_color
+		core_color.a = 0.95
+		draw_circle(pin_pos, PULSE_PIN_INNER * 0.55, core_color)
+		# Crosshair tick — 4 short stubs at compass points so the pin
+		# reads as a marked target, not just another dot.
+		var stub: float = PULSE_PIN_OUTER + 2.0
+		draw_line(pin_pos + Vector2(0, -stub), pin_pos + Vector2(0, -stub + 3.0), pin_color, 1.5)
+		draw_line(pin_pos + Vector2(0, stub), pin_pos + Vector2(0, stub - 3.0), pin_color, 1.5)
+		draw_line(pin_pos + Vector2(-stub, 0), pin_pos + Vector2(-stub + 3.0, 0), pin_color, 1.5)
+		draw_line(pin_pos + Vector2(stub, 0), pin_pos + Vector2(stub - 3.0, 0), pin_color, 1.5)
 
 	# Active pings — expanding rings + filled dot, fading over
 	# PING_LIFETIME seconds. Drawn last so they render on top of

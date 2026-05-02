@@ -65,11 +65,13 @@ const IMPACT_REVEAL_DURATION_SEC: float = 8.0
 
 var _next_spawn_in: float = 0.0
 
-## Pending crashes -- each entry { pos, fires_at_sec, last_ping_sec }.
-## _process steps through this list every frame; warnings re-ping
-## every WARNING_PING_INTERVAL_SEC and the impact triggers when
-## fires_at_sec elapses.
+## Pending crashes -- each entry { pos, fires_at_sec, last_ping_sec,
+## warning_key, last_banner_sec }. _process steps through this list
+## every frame; warnings re-ping every WARNING_PING_INTERVAL_SEC and
+## the impact triggers when fires_at_sec elapses. The HUD countdown
+## banner re-renders every second so the ticker visibly updates.
 var _pending_crashes: Array[Dictionary] = []
+var _next_warning_key: int = 0
 
 
 func _ready() -> void:
@@ -94,27 +96,33 @@ func _process(delta: float) -> void:
 	# impact when their countdown lands).
 	if not _pending_crashes.is_empty():
 		var now_sec: float = float(Time.get_ticks_msec()) / 1000.0
+		var hud: Node = _find_hud()
 		var i: int = _pending_crashes.size() - 1
 		while i >= 0:
 			var entry: Dictionary = _pending_crashes[i]
 			if (entry["fires_at"] as float) <= now_sec:
+				if hud and hud.has_method("clear_persistent_warning"):
+					hud.call("clear_persistent_warning", entry["warning_key"] as String)
+				var minimap_done: Node = _find_minimap()
+				if minimap_done and minimap_done.has_method("stop_pulse_pin"):
+					minimap_done.call("stop_pulse_pin", entry["warning_key"] as String)
 				_trigger_crash(entry["pos"] as Vector3)
 				_pending_crashes.remove_at(i)
-			elif now_sec - (entry["last_ping"] as float) >= WARNING_PING_INTERVAL_SEC:
-				_ping_warning(entry["pos"] as Vector3)
-				# Re-emit the countdown so the player sees the time
-				# remaining shrinking instead of just a static "90s"
-				# alert that fired once at scheduling.
-				var remaining: int = int(maxf((entry["fires_at"] as float) - now_sec, 0.0))
-				var alerts: Node = get_tree().current_scene.get_node_or_null("AlertManager")
-				if alerts and alerts.has_method("emit_alert") and remaining > 0:
-					alerts.call(
-						"emit_alert",
-						"Satellite incoming — %ds to impact" % remaining,
-						0,
-						entry["pos"] as Vector3,
-					)
-				entry["last_ping"] = now_sec
+			else:
+				var remaining: int = int(ceilf((entry["fires_at"] as float) - now_sec))
+				# Per-second banner refresh so the countdown visibly
+				# ticks down rather than fading away after one paint.
+				var last_banner: float = entry.get("last_banner", -1.0) as float
+				if hud and hud.has_method("set_persistent_warning") and (last_banner < 0.0 or floorf(last_banner) != floorf(now_sec)):
+					var msg: String = "Satellite incoming — %ds to impact" % remaining
+					hud.call("set_persistent_warning", entry["warning_key"] as String, msg, 1)
+					entry["last_banner"] = now_sec
+				# Periodic flash ping kept alongside the persistent
+				# pulse pin so the audio / minimap-flash cue still
+				# triggers every WARNING_PING_INTERVAL_SEC.
+				if now_sec - (entry["last_ping"] as float) >= WARNING_PING_INTERVAL_SEC:
+					_ping_warning(entry["pos"] as Vector3)
+					entry["last_ping"] = now_sec
 				_pending_crashes[i] = entry
 			i -= 1
 
@@ -162,10 +170,14 @@ func _schedule_crash() -> void:
 	if pos == Vector3.INF:
 		return
 	var now_sec: float = float(Time.get_ticks_msec()) / 1000.0
+	var key: String = "satellite_%d" % _next_warning_key
+	_next_warning_key += 1
 	_pending_crashes.append({
 		"pos": pos,
 		"fires_at": now_sec + WARNING_LEAD_TIME_SEC,
 		"last_ping": now_sec,
+		"warning_key": key,
+		"last_banner": -1.0,
 	})
 	# Initial alert + ping so the player knows immediately.
 	var alerts: Node = get_tree().current_scene.get_node_or_null("AlertManager")
@@ -177,6 +189,11 @@ func _schedule_crash() -> void:
 			pos,
 		)
 	_ping_warning(pos)
+	# Persistent pulse pin so the eye stays anchored to the impact
+	# site for the whole 90s lead time, not just the 1.5s flash.
+	var minimap: Node = _find_minimap()
+	if minimap and minimap.has_method("start_pulse_pin"):
+		minimap.call("start_pulse_pin", key, pos, Color(0.78, 0.42, 1.0, 1.0))
 
 
 func _ping_warning(pos: Vector3) -> void:
@@ -184,15 +201,25 @@ func _ping_warning(pos: Vector3) -> void:
 	## impact point. Called once on schedule + every
 	## WARNING_PING_INTERVAL_SEC during the lead window so the eye
 	## stays anchored to where the crash will land.
-	var hud: Node = get_tree().current_scene.get_node_or_null("HUD")
+	var minimap: Node = _find_minimap()
+	if minimap and minimap.has_method("ping"):
+		minimap.call("ping", pos, Color(0.78, 0.42, 1.0, 1.0))
+
+
+func _find_hud() -> Node:
+	var hud: Node = get_tree().current_scene.get_node_or_null("HUD") if get_tree() else null
 	if not hud:
-		var canvas: Node = get_tree().current_scene.get_node_or_null("HUDCanvas")
+		var canvas: Node = get_tree().current_scene.get_node_or_null("HUDCanvas") if get_tree() else null
 		if canvas:
 			hud = canvas.get_node_or_null("HUD")
+	return hud
+
+
+func _find_minimap() -> Node:
+	var hud: Node = _find_hud()
 	if hud:
-		var minimap: Node = hud.get_node_or_null("Minimap")
-		if minimap and minimap.has_method("ping"):
-			minimap.call("ping", pos, Color(0.78, 0.42, 1.0, 1.0))
+		return hud.get_node_or_null("Minimap")
+	return null
 
 
 func _trigger_crash(pos: Vector3) -> void:
