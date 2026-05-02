@@ -116,10 +116,13 @@ func _ready() -> void:
 	_apply_tooltip_delay(0.18)
 
 	# Tutorial overlay — shown only when the player launched via the Tutorial
-	# button on the main menu. Dismisses with TAB or its own close button.
+	# button on the main menu. The mission-style banner reads its current
+	# objective + dialogue from the TutorialMission node every frame; the
+	# legacy task-checklist overlay stays available as a controls reference.
 	var settings: Node = get_node_or_null("/root/MatchSettings")
 	if settings and settings.get("tutorial_mode"):
 		_build_tutorial_overlay()
+		_build_tutorial_mission_banner()
 
 
 ## Tutorial state — tracked per step so the checklist can tick off as the
@@ -136,6 +139,16 @@ const TUTORIAL_TASKS: Array[Dictionary] = [
 
 var _tutorial_task_labels: Array = []  # Labels for ticking off
 var _tutorial_progress: Dictionary = {}  # task_id → completed bool
+
+## Mission-style banner (separate from the legacy task-checklist
+## overlay). Shows the current TutorialMission stage's dialogue +
+## objective at the top of the screen and updates whenever the
+## mission advances.
+var _tutorial_banner_panel: PanelContainer = null
+var _tutorial_banner_dialogue: Label = null
+var _tutorial_banner_objective: Label = null
+var _tutorial_banner_progress: Label = null
+var _tutorial_banner_last_index: int = -2  # never matches a real stage
 
 
 func _build_tutorial_overlay() -> void:
@@ -197,6 +210,70 @@ func _build_tutorial_overlay() -> void:
 
 	# Cache so the TAB handler can free it.
 	set_meta("tutorial_overlay", overlay)
+
+
+func _build_tutorial_mission_banner() -> void:
+	## Centred-top banner panel that shows the current
+	## TutorialMission stage's dialogue + objective. Lives above
+	## the existing topbar but stays out of the way of the
+	## minimap. Updates every HUD tick via
+	## _refresh_tutorial_mission_banner.
+	_tutorial_banner_panel = PanelContainer.new()
+	_tutorial_banner_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	_tutorial_banner_panel.offset_left = 220
+	_tutorial_banner_panel.offset_right = -260
+	_tutorial_banner_panel.offset_top = 38
+	_tutorial_banner_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(_tutorial_banner_panel)
+	var inner := VBoxContainer.new()
+	inner.add_theme_constant_override("separation", 2)
+	_tutorial_banner_panel.add_child(inner)
+	_tutorial_banner_progress = Label.new()
+	_tutorial_banner_progress.text = ""
+	_tutorial_banner_progress.add_theme_font_size_override("font_size", 12)
+	_tutorial_banner_progress.add_theme_color_override("font_color", Color(0.78, 0.85, 0.95, 0.85))
+	_tutorial_banner_progress.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	inner.add_child(_tutorial_banner_progress)
+	_tutorial_banner_dialogue = Label.new()
+	_tutorial_banner_dialogue.text = ""
+	_tutorial_banner_dialogue.add_theme_font_size_override("font_size", 16)
+	_tutorial_banner_dialogue.add_theme_color_override("font_color", Color(0.95, 0.92, 0.78, 1.0))
+	_tutorial_banner_dialogue.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_tutorial_banner_dialogue.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	inner.add_child(_tutorial_banner_dialogue)
+	_tutorial_banner_objective = Label.new()
+	_tutorial_banner_objective.text = ""
+	_tutorial_banner_objective.add_theme_font_size_override("font_size", 14)
+	_tutorial_banner_objective.add_theme_color_override("font_color", Color(0.55, 0.95, 0.55, 1.0))
+	_tutorial_banner_objective.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_tutorial_banner_objective.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	inner.add_child(_tutorial_banner_objective)
+
+
+func _refresh_tutorial_mission_banner() -> void:
+	## Polls TutorialMission for its current stage and pushes the
+	## text into the banner. Skips the work when the stage hasn't
+	## changed so the labels don't churn each tick.
+	if not _tutorial_banner_panel:
+		return
+	var mission_nodes: Array[Node] = get_tree().get_nodes_in_group("tutorial_mission")
+	if mission_nodes.is_empty():
+		_tutorial_banner_panel.visible = false
+		return
+	var mission: Node = mission_nodes[0]
+	if not is_instance_valid(mission):
+		return
+	var idx: int = mission.call("current_stage_index") as int
+	if idx == _tutorial_banner_last_index:
+		return
+	_tutorial_banner_last_index = idx
+	_tutorial_banner_panel.visible = true
+	var dialogue: String = mission.call("current_stage_dialogue") as String
+	var objective: String = mission.call("current_stage_objective") as String
+	var total: int = mission.call("total_stages") as int
+	_tutorial_banner_dialogue.text = dialogue
+	_tutorial_banner_objective.text = "Objective: %s" % objective
+	_tutorial_banner_progress.text = "Stage %d / %d" % [idx + 1, total]
 
 
 func _check_tutorial_progress() -> void:
@@ -497,6 +574,7 @@ func _process(delta: float) -> void:
 	_update_button_affordability()
 	_update_selection_roster()
 	_check_tutorial_progress()
+	_refresh_tutorial_mission_banner()
 	_refresh_gift_panel()
 	_refresh_global_queue()
 

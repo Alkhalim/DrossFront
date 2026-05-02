@@ -147,6 +147,18 @@ func _ready() -> void:
 		var player_faction: int = _faction_id_for_player(0)
 		music_mgr.call("start", player_faction)
 
+	# Tutorial mission scaffold — only when MatchSettings.tutorial_mode
+	# is true. Adds a TutorialMission node that owns the stage state,
+	# spawns reinforcements at trigger zones, and ends the match on
+	# completion. Banner UI is in HUD; mission is otherwise self-
+	# contained.
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if settings and settings.get("tutorial_mode"):
+		var tut_script: GDScript = preload("res://scripts/tutorial_mission.gd")
+		var tutorial: Node = tut_script.new()
+		tutorial.name = "TutorialMission"
+		add_child(tutorial)
+
 
 func _setup_map_signature_features() -> void:
 	# Per-map distinctive features that go beyond the shared
@@ -796,6 +808,15 @@ func _hq_position_for(player_id: int) -> Vector3:
 
 
 func _setup_player() -> void:
+	# Tutorial mode plays out as a mini-mission: the player starts
+	# with just a Rook squad and no HQ. The TutorialMission script
+	# hands them a Crawler + an HQ as they progress through stages.
+	# So if tutorial_mode is on, position the .tscn-placed HQ at
+	# the eventual reclaim point but leave it visually un-owned
+	# until the mission flips it.
+	var settings_for_tut: Node = get_node_or_null("/root/MatchSettings")
+	var in_tutorial: bool = settings_for_tut and settings_for_tut.get("tutorial_mode")
+
 	# Mark the HQ as already constructed
 	var hq: Building = $PlayerHQ as Building
 	var hq_offset: Vector3 = Vector3.ZERO
@@ -807,6 +828,10 @@ func _setup_player() -> void:
 		# it at world origin for editor convenience, but real matches want
 		# both bases pushed to opposite ends of the map.
 		var new_pos: Vector3 = _hq_position_for(0)
+		# Tutorial: HQ sits at the foundry-ruin reclaim point so
+		# the player walks UP TO it rather than starting on it.
+		if in_tutorial:
+			new_pos = Vector3(0.0, 0.0, 95.0)
 		hq_offset = new_pos - hq.global_position
 		hq.global_position = new_pos
 		hq._apply_placeholder_shape()
@@ -857,6 +882,11 @@ func _setup_player() -> void:
 	# cycle to produce one. Anchored just outside the HQ in the
 	# direction of map center so the crawler can immediately push out
 	# to the nearest wreck field.
+	# Tutorial mode: skip the starter Crawler. The TutorialMission
+	# hands one to the player at stage 2 ("crawler") so the
+	# discovery beat actually plays.
+	if in_tutorial:
+		return
 	if hq:
 		var crawler_scene: PackedScene = load("res://scenes/salvage_crawler.tscn") as PackedScene
 		if crawler_scene:
