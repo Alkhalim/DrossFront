@@ -70,10 +70,10 @@ func _schedule_next_spawn() -> void:
 func _initial_drop() -> void:
 	var count: int = randi_range(STARTING_PILES_MIN, STARTING_PILES_MAX)
 	for i: int in count:
-		_spawn_one()
+		_spawn_one(true)
 
 
-func _spawn_one() -> void:
+func _spawn_one(is_initial: bool = false) -> void:
 	var pos: Vector3 = _pick_spawn_pos()
 	if pos == Vector3.INF:
 		return
@@ -85,6 +85,12 @@ func _spawn_one() -> void:
 	pile.wreck_size = Vector3(2.6, 0.7, 2.6)
 	pile.position = pos
 	get_tree().current_scene.add_child.call_deferred(pile)
+	# Initial piles are part of the map setup, not a crash event --
+	# the player should have to discover them. Skip the alert /
+	# fog-reveal / minimap-ping / flare; they only fire for piles
+	# that spawn in via mid-match crash events.
+	if is_initial:
+		return
 	# Surface a one-line alert so the player learns the cue —
 	# AlertManager handles routing to the HUD ticker if present.
 	var alerts: Node = get_tree().current_scene.get_node_or_null("AlertManager")

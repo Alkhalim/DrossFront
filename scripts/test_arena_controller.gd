@@ -2025,6 +2025,12 @@ func _spawn_terrain_piece(pos: Vector3, piece_size: Vector3, kind: String) -> vo
 			continue
 		return  # overlap → silently drop the piece
 
+	# Also skip placement overlapping any queued plateau footprint --
+	# placing a ground-level deco piece inside a plateau footprint
+	# leaves it visually half-submerged in the raised platform geometry.
+	if _overlaps_plateau_footprint(pos, piece_size, 0.0):
+		return
+
 	# Queue the piece's 2D footprint as a blocked region so the ground
 	# strip-decomposition navmesh carves a hole at this position. Without
 	# this, units' nav agents path THROUGH terrain (the navmesh covers
@@ -3250,6 +3256,13 @@ func _spawn_skyline_feature(pos: Vector3, kind: String, height: float) -> void:
 	# Tall visual mass is built from MeshInstance3D children that sit
 	# above the collider, so units can't stand on top but the silhouette
 	# reads as a real structure.
+	# Skip if the trunk would land inside a plateau footprint -- the
+	# trunk is at y=0 and the plateau top is ~1.5-2u up, so the result
+	# reads as a tower half-submerged in the platform.
+	var trunk_radius_check: float = 1.4 if kind != "pylon" else 0.9
+	var trunk_check_size: Vector3 = Vector3(trunk_radius_check * 1.6, 1.0, trunk_radius_check * 1.6)
+	if _overlaps_plateau_footprint(pos, trunk_check_size, 0.0):
+		return
 	var root := StaticBody3D.new()
 	root.collision_layer = 4
 	root.collision_mask = 0
