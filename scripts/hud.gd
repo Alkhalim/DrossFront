@@ -1142,22 +1142,26 @@ func _class_swatch_color(unit_class: String) -> Color:
 
 
 func _build_selection_roster() -> void:
-	## Vertical chip column on the LEFT edge of the bottom panel.
-	## Each chip = one unit class in the current selection, with a
-	## count + a thin HP sliver. Click to deselect that class.
-	if not _bottom_panel:
-		return
+	## Vertical chip column floating ABOVE the bottom panel on the
+	## left edge of the screen, NOT inside the bottom panel itself.
+	## Earlier the strip was a child of _bottom_panel — its layout
+	## could pour HP-sliver chips over the production / build /
+	## command buttons in the action grid. Making it a HUD-root child
+	## anchored bottom-left guarantees it floats to the left of the
+	## panel and never collides with the action buttons.
 	_roster_strip = VBoxContainer.new()
 	_roster_strip.name = "SelectionRoster"
-	_roster_strip.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+	_roster_strip.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	_roster_strip.add_theme_constant_override("separation", 4)
-	_roster_strip.offset_left = -150
-	_roster_strip.offset_right = -8
-	_roster_strip.offset_top = 4
-	_roster_strip.offset_bottom = -4
+	_roster_strip.offset_left = 12
+	_roster_strip.offset_right = 12 + 168
+	_roster_strip.offset_top = -260
+	_roster_strip.offset_bottom = -120
+	_roster_strip.size_flags_horizontal = 0
+	_roster_strip.size_flags_vertical = 0
 	_roster_strip.mouse_filter = Control.MOUSE_FILTER_PASS
 	_roster_strip.visible = false
-	_bottom_panel.add_child(_roster_strip)
+	add_child(_roster_strip)
 
 
 var _mesh_overlay_on: bool = false
@@ -2560,7 +2564,7 @@ func _role_hint_for(stat: UnitStatResource) -> String:
 		&"AP":
 			if cls == "heavy":
 				return "Heavy Brawler"
-			return "Anti-Personnel"
+			return "Anti-Light"
 		&"AS":
 			return "Siege / Anti-Structure"
 		_:
