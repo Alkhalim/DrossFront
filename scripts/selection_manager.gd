@@ -312,6 +312,15 @@ func _input(event: InputEvent) -> void:
 				_attack_move_mode = false
 				get_viewport().set_input_as_handled()
 				return
+			# Delete key = self-destruct selected own units / buildings /
+			# foundations. Owner-gated so the player can't accidentally
+			# wipe an enemy with a stray keystroke. Buildings + foundations
+			# call take_damage with a huge value to route through the
+			# normal destruction path (drops a wreck, frees pop, etc.).
+			if key.keycode == KEY_DELETE:
+				if _delete_selected_owned_entities():
+					get_viewport().set_input_as_handled()
+					return
 			# D key = trigger active ability on every selected unit
 			# whose stats define one. Cooldown gating happens
 			# per-unit inside trigger_ability so a half-cooled
@@ -339,6 +348,47 @@ func _input(event: InputEvent) -> void:
 					return
 
 			_handle_build_hotkey(key)
+
+
+func _delete_selected_owned_entities() -> bool:
+	## Self-destructs every player-owned entity in the current selection.
+	## Units / Crawlers / buildings / foundations all route through their
+	## existing take_damage path with a huge value so the standard
+	## destruction flow runs (wreck drops, pop refund, navmesh bake,
+	## audio cues). Returns true when at least one entity was zapped.
+	const SELF_DESTRUCT: int = 999_999
+	var killed_any: bool = false
+	# Units (and Crawler subclasses).
+	for u: Node3D in _selected_units:
+		if not is_instance_valid(u):
+			continue
+		var u_owner: int = (u.get("owner_id") as int) if "owner_id" in u else -1
+		if u_owner != 0:
+			continue
+		if u.has_method("take_damage"):
+			u.call("take_damage", SELF_DESTRUCT, null)
+			killed_any = true
+	for c: SalvageCrawler in _selected_crawlers:
+		if not is_instance_valid(c):
+			continue
+		var c_owner: int = (c.get("owner_id") as int) if "owner_id" in c else -1
+		if c_owner != 0:
+			continue
+		if c.has_method("take_damage"):
+			c.call("take_damage", SELF_DESTRUCT, null)
+			killed_any = true
+	# Selected building (constructed or foundation -- both route through
+	# take_damage on Building).
+	if _selected_building and is_instance_valid(_selected_building):
+		var b_owner: int = (_selected_building.get("owner_id") as int) if "owner_id" in _selected_building else -1
+		if b_owner == 0 and _selected_building.has_method("take_damage"):
+			_selected_building.call("take_damage", SELF_DESTRUCT, null)
+			killed_any = true
+	if killed_any:
+		_selected_units.clear()
+		_selected_crawlers.clear()
+		_selected_building = null
+	return killed_any
 
 
 func _handle_build_hotkey(key: InputEventKey) -> void:
