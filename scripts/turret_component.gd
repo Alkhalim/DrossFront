@@ -235,10 +235,16 @@ func _fire_one_shot(damage: int) -> void:
 		var pivot_n3d: Node3D = _resolve_pivot()
 		if pivot_n3d and is_instance_valid(pivot_n3d):
 			fire_origin = pivot_n3d.global_position
+		var building_faction: int = 0
+		if _building and _building.has_method("_resolve_faction_id"):
+			building_faction = _building.call("_resolve_faction_id") as int
 		var proj: Node3D = proj_script.create(
 			fire_origin,
 			_target.global_position,
-			get_role()
+			get_role(),
+			&"moderate",
+			&"",
+			building_faction,
 		)
 		get_tree().current_scene.add_child(proj)
 	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")

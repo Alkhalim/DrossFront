@@ -59,7 +59,7 @@ const ROF_STYLES: Dictionary = {
 }
 
 
-static func create(from: Vector3, to: Vector3, role_tag: StringName, rof_tier: StringName = &"moderate", style_override: StringName = &"") -> Projectile:
+static func create(from: Vector3, to: Vector3, role_tag: StringName, rof_tier: StringName = &"moderate", style_override: StringName = &"", shooter_faction: int = 0) -> Projectile:
 	var proj := Projectile.new()
 	var fire_y: float = from.y + 1.0
 	proj.start_pos = Vector3(from.x, fire_y, from.z)
@@ -71,6 +71,11 @@ static func create(from: Vector3, to: Vector3, role_tag: StringName, rof_tier: S
 	proj.position = proj.start_pos
 
 	var color: Color = ROLE_COLORS.get(role_tag, Color(0.9, 0.6, 0.2, 1.0)) as Color
+	# Sable tracers read whiter / colder than Anvil's warm orange so a
+	# friendly Sable squad's trails are visually distinguishable from
+	# an Anvil ally's at a glance. Lerp 40% toward white.
+	if shooter_faction == 1:
+		color = color.lerp(Color(1.0, 1.0, 1.0, color.a), 0.4)
 	var style: String = ROF_STYLES.get(rof_tier, "bullet") as String
 	# Explicit override wins. Lets the Ratchet's "Light Pistol Gun" render as
 	# a cutting beam without forcing a faster RoF tier on it.

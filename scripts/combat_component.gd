@@ -693,10 +693,10 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 					pellet_target.y = aim_pos.y
 					# Force "fast" tier so Projectile renders these as bullet
 					# slugs regardless of the parent weapon's classification.
-					var pellet: Node3D = proj_script.create(fire_pos, pellet_target, weapon.role_tag, &"fast")
+					var pellet: Node3D = proj_script.create(fire_pos, pellet_target, weapon.role_tag, &"fast", &"", _shooter_faction_id())
 					get_tree().current_scene.add_child(pellet)
 			else:
-				var proj: Node3D = proj_script.create(fire_pos, aim_pos, weapon.role_tag, weapon.rof_tier, weapon.projectile_style)
+				var proj: Node3D = proj_script.create(fire_pos, aim_pos, weapon.role_tag, weapon.rof_tier, weapon.projectile_style, _shooter_faction_id())
 				get_tree().current_scene.add_child(proj)
 
 	# Muzzle flash on each member — colored by the weapon's role.
@@ -751,6 +751,22 @@ func _find_stray_target(aim_pos: Vector3, primary: Node3D, my_owner: int) -> Nod
 				nearest_dist = d
 				nearest = n3
 	return nearest
+
+
+func _shooter_faction_id() -> int:
+	## Returns 0 for Anvil, 1 for Sable. Used to tint projectile
+	## tracers (Sable reads whiter than Anvil's warm orange). Falls
+	## back to 0 when the unit doesn't expose a _faction_id helper.
+	if _unit and _unit.has_method("_faction_id"):
+		return _unit.call("_faction_id") as int
+	# Aircraft don't currently carry _faction_id; derive from
+	# MatchSettings via owner_id 0 = local player faction.
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if settings and "player_faction" in settings:
+		var owner_id: int = (_unit.get("owner_id") as int) if _unit and "owner_id" in _unit else 0
+		if owner_id == 0:
+			return settings.get("player_faction") as int
+	return 0
 
 
 func _firing_observable() -> bool:
