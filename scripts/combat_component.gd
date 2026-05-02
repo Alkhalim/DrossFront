@@ -685,6 +685,42 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 			audio.play_weapon_fire(weapon, _unit.global_position)
 
 
+## Stray-shot landing radius. A miss that drifts within this many
+## world-units of a different hostile target nicks them for half
+## damage. Tight enough that wide misses still feel like misses.
+const STRAY_HIT_RADIUS: float = 2.5
+
+
+func _find_stray_target(aim_pos: Vector3, primary: Node3D, my_owner: int) -> Node3D:
+	## Returns the nearest hostile unit/building within
+	## STRAY_HIT_RADIUS of `aim_pos`, excluding `primary` (the unit
+	## we already missed). Used to award half-damage stray hits when
+	## a missed shot lands near a different enemy.
+	var nearest: Node3D = null
+	var nearest_dist: float = STRAY_HIT_RADIUS
+	for group_name in ["units", "buildings"]:
+		for node: Node in get_tree().get_nodes_in_group(group_name):
+			if not is_instance_valid(node) or node == primary:
+				continue
+			if not node.has_method("take_damage"):
+				continue
+			if "auto_targetable" in node and not node.get("auto_targetable"):
+				continue
+			var node_owner: int = node.get("owner_id") as int
+			if not _is_hostile(my_owner, node_owner):
+				continue
+			if "alive_count" in node and (node.get("alive_count") as int) <= 0:
+				continue
+			var n3: Node3D = node as Node3D
+			if not n3:
+				continue
+			var d: float = aim_pos.distance_to(n3.global_position)
+			if d < nearest_dist:
+				nearest_dist = d
+				nearest = n3
+	return nearest
+
+
 func _firing_observable() -> bool:
 	## True when the local player can see the shooter or the target.
 	## Both being in fog means the engagement is happening off-screen
