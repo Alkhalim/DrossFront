@@ -1,7 +1,9 @@
-[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+[ext_resource type="Resource" path="res://resources/units/sable_switchblade_dogfighter.tres" id="3"]
+[ext_resource type="Resource" path="res://resources/units/sable_switchblade_strafe_runner.tres" id="4"]
 
 [sub_resource type="Resource" id="weapon_pulse_cannons"]
 script = ExtResource("2")
@@ -30,6 +32,8 @@ primary_weapon = SubResource("weapon_pulse_cannons")
 special_description = "Fast Sable interceptor. Tuned for anti-air work but can ground-strafe with branch B. Branch A: Dogfighter (anti-air specialist). Branch B: Strafe Runner (anti-ground gun runs)."
 branch_a_name = "Dogfighter"
 branch_b_name = "Strafe Runner"
+branch_a_stats = ExtResource("3")
+branch_b_stats = ExtResource("4")
 is_aircraft = true
 flight_altitude = 7.0
 flight_speed = 22.0

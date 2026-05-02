@@ -1,0 +1,34 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_dogfighter"]
+script = ExtResource("2")
+weapon_name = "Twin Pulse Cannons (AAir)"
+role_tag = &"AAir"
+damage_tier = &"high"
+range_tier = &"long"
+rof_tier = &"fast"
+base_accuracy = 0.94
+
+[resource]
+script = ExtResource("1")
+unit_name = "Switchblade (Dogfighter)"
+unit_class = &"aircraft"
+hp_total = 1020
+hp_per_unit = 510
+armor_class = &"light_air"
+speed_tier = &"very_fast"
+sight_tier = &"long"
+squad_size = 2
+population = 14
+cost_salvage = 420
+cost_fuel = 70
+build_time = 32.0
+built_at = &"aerodrome"
+primary_weapon = SubResource("weapon_dogfighter")
+is_aircraft = true
+flight_altitude = 7.5
+flight_speed = 24.0
+special_description = "Switchblade Dogfighter — anti-air specialist. Higher accuracy, longer range, AAir tag stays. The pure interceptor build."
