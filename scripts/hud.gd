@@ -3322,6 +3322,7 @@ func _ensure_build_tab_row() -> void:
 	_build_tab_row = row
 	_build_tab_basic = Button.new()
 	_build_tab_basic.text = "Basic"
+	_build_tab_basic.tooltip_text = "Basic tier — buildings available from match start (Foundry, Yard, Generator, Gun Emplacement)."
 	_build_tab_basic.custom_minimum_size = Vector2(72, 26)
 	_build_tab_basic.toggle_mode = true
 	_build_tab_basic.button_pressed = _build_tab == "basic"
@@ -3329,6 +3330,7 @@ func _ensure_build_tab_row() -> void:
 	row.add_child(_build_tab_basic)
 	_build_tab_advanced = Button.new()
 	_build_tab_advanced.text = "Advanced"
+	_build_tab_advanced.tooltip_text = "Advanced tier — gated behind a basic foundry (Adv Foundry, Aerodrome, Armory, SAM, Adv Generator, Black Pylon)."
 	_build_tab_advanced.custom_minimum_size = Vector2(86, 26)
 	_build_tab_advanced.toggle_mode = true
 	_build_tab_advanced.button_pressed = _build_tab == "advanced"
