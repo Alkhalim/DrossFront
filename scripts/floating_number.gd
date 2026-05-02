@@ -26,6 +26,10 @@ static func spawn(scene: Node, world_pos: Vector3, text: String, color: Color, l
 	label.font_size = 32
 	label.pixel_size = 0.012
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	# fixed_size keeps the label at constant on-screen pixel height
+	# regardless of camera zoom -- without it, "+12 S" pickups
+	# shrunk to invisible at zoomed-out framings.
+	label.fixed_size = true
 	label.no_depth_test = true
 	label.modulate = color
 	label.outline_size = 8

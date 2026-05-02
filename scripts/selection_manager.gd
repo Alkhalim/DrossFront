@@ -491,16 +491,25 @@ func _raycast_wreck(screen_pos: Vector2) -> Wreck:
 
 
 func _show_wreck_readout(wreck: Wreck) -> void:
-	## Spawn a tiny floating Label3D above the wreck displaying its
-	## remaining salvage. Auto-fades after a couple of seconds so the
-	## battlefield doesn't accumulate stale readouts.
+	## Floating readout above the clicked wreck. Shows salvage and,
+	## for satellite-crash piles, the microchip payload too. Reads
+	## at a fixed on-screen size regardless of camera zoom -- using
+	## fixed_size billboarding so the label doesn't shrink to nothing
+	## when the player zooms out.
 	if not is_instance_valid(wreck):
 		return
 	var label := Label3D.new()
-	label.text = "%d salvage" % wreck.salvage_remaining
+	var text: String = "%d salvage" % wreck.salvage_remaining
+	if wreck.microchip_remaining > 0:
+		text += "\n%d chips" % wreck.microchip_remaining
+	label.text = text
 	label.font_size = 28
 	label.pixel_size = 0.012
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	# fixed_size keeps the label at a constant on-screen pixel
+	# height regardless of camera distance -- without this the
+	# numbers shrunk into illegibility when the player zoomed out.
+	label.fixed_size = true
 	label.no_depth_test = true
 	label.modulate = Color(0.95, 0.78, 0.32, 1.0)
 	label.outline_size = 8
