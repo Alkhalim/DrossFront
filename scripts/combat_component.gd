@@ -585,8 +585,14 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	var weapon_range: float = weapon.resolved_range()
 	var dist_to_target: float = _unit.global_position.distance_to(_current_target.global_position)
 	var range_t: float = clampf(dist_to_target / maxf(weapon_range, 0.01), 0.0, 1.0)
+	# Range band: point-blank shots get a small accuracy bonus, mid
+	# range is baseline, the far third of the weapon's reach drops
+	# 10%. Closer = more reliable hits, so a player kiting in close
+	# is genuinely rewarded for the positioning work.
 	var range_penalty: float = 0.0
-	if range_t >= 0.80:
+	if range_t <= 0.30:
+		range_penalty = 0.08
+	elif range_t >= 0.80:
 		range_penalty = -0.10
 	var movement_penalty: float = 0.0
 	if Vector2(_unit.velocity.x, _unit.velocity.z).length() > 0.5:
