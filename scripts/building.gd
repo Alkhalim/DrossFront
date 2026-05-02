@@ -843,6 +843,13 @@ func _build_hq_corner_mg_nest(corner: Vector3) -> Node3D:
 	muzzle.position = Vector3(0.0, 0.04, -ic.height - 0.14)
 	muzzle.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.07, 0.06, 0.05)))
 	pivot.add_child(muzzle)
+	# Muzzle marker -- TurretComponent looks up a 'Muzzle' child of
+	# the pivot when picking the projectile spawn point so tracers
+	# leave from the actual barrel tip instead of the pivot centre.
+	var muzzle_marker := Marker3D.new()
+	muzzle_marker.name = "Muzzle"
+	muzzle_marker.position = Vector3(0.0, 0.04, -ic.height - 0.20)
+	pivot.add_child(muzzle_marker)
 
 	# Ammo box on the side of the cradle -- distinct olive-drab
 	# colour so the player picks the gun out as a weapon. Includes

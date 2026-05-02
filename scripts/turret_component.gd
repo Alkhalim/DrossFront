@@ -235,6 +235,14 @@ func _fire_one_shot(damage: int) -> void:
 		var pivot_n3d: Node3D = _resolve_pivot()
 		if pivot_n3d and is_instance_valid(pivot_n3d):
 			fire_origin = pivot_n3d.global_position
+		# Prefer a 'Muzzle' Marker3D child of the pivot if the building
+		# detail layer placed one (HQ MG nests, gun emplacement barrels)
+		# so tracers leave from the barrel tip instead of the pivot
+		# centre. Falls through to the pivot's own world position.
+		if pivot_n3d:
+			var muzzle: Node3D = pivot_n3d.get_node_or_null("Muzzle") as Node3D
+			if muzzle:
+				fire_origin = muzzle.global_position
 		var building_faction: int = 0
 		if _building and _building.has_method("_resolve_faction_id"):
 			building_faction = _building.call("_resolve_faction_id") as int
