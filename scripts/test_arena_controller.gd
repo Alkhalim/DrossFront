@@ -1515,12 +1515,21 @@ func _setup_terrain_foundry_belt() -> void:
 
 	# Rock outcrops — bigger, multi-faceted natural rock formations
 	# (5-7 box chunks fused at angles) for organic stone silhouettes
-	# rather than monolithic boxes.
-	for outcrop_pos: Vector3 in [
+	# rather than monolithic boxes. The two centre-line outcrops
+	# (z=+75 / -90) are skipped in tutorial mode because they sit
+	# right where the mission scripts the Crawler hand-off + the
+	# enemy enclave approach, and were either swallowing the
+	# spawned Crawler or wedging units against unexpected cover.
+	var settings_for_outcrops: Node = get_node_or_null("/root/MatchSettings")
+	var skip_centre_outcrops: bool = settings_for_outcrops != null and settings_for_outcrops.get("tutorial_mode")
+	var outcrop_positions: Array[Vector3] = [
 		Vector3(-25, 0, 60), Vector3(25, 0, -60),
 		Vector3(55, 0, 12), Vector3(-55, 0, -12),
-		Vector3(0, 0, 75), Vector3(0, 0, -90),
-	]:
+	]
+	if not skip_centre_outcrops:
+		outcrop_positions.append(Vector3(0, 0, 75))
+		outcrop_positions.append(Vector3(0, 0, -90))
+	for outcrop_pos: Vector3 in outcrop_positions:
 		_spawn_rock_outcrop(outcrop_pos, randf_range(4.0, 6.5))
 
 	# Ruined building complexes — multi-block collapsed industrial
