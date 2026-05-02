@@ -1845,6 +1845,13 @@ func _ability_missile_barrage() -> bool:
 	# combat component hasn't ticked again yet.
 	if "alive_count" in target and (target.get("alive_count") as int) <= 0:
 		return false
+	# AA variant -- skip when the current target isn't an aircraft.
+	# The Escort's barrage tubes carry air-to-air missiles; firing
+	# them at ground squads (especially under autocast) wasted the
+	# salvo on a target the warhead role multiplier can't punish
+	# anyway. Anvil's standard Hammerhead barrage stays generalist.
+	if stats.ability_name == "AA Missile Barrage" and not target.is_in_group("aircraft"):
+		return false
 	var per_missile: int = 45
 	if stats.unit_name.findn("Escort") >= 0:
 		per_missile = 54
