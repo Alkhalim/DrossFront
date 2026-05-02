@@ -772,18 +772,21 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		if is_sable_heavy:
 			# Tapered square block — narrower at the muzzle end, wider
 			# at the chassis end. 4 radial segments → a wedge-prism
-			# silhouette with crisp corners. Rotated 45° on Z so the
-			# corners face up/down/left/right rather than aligning
-			# face-up with the deck (reads sharper from a top-down
-			# camera).
+			# silhouette with crisp corners. The 45° spin needs to
+			# rotate around the cylinder's OWN length axis after the
+			# forward tilt, otherwise (with rotation.z and Godot's
+			# YXZ Euler order) the prism ends up tilted in world space
+			# and the barrel attaches at an odd angle. Use
+			# rotate_object_local so each rotation is applied in the
+			# node's local frame, in the order written.
 			var mant_facet := CylinderMesh.new()
 			mant_facet.top_radius = mantlet_radius * 0.7
 			mant_facet.bottom_radius = mantlet_radius * 1.15
 			mant_facet.height = mantlet_radius * 1.7
 			mant_facet.radial_segments = 4
 			mantlet.mesh = mant_facet
-			mantlet.rotation.x = -PI / 2
-			mantlet.rotation.z = deg_to_rad(45.0)
+			mantlet.rotate_object_local(Vector3.RIGHT, -PI / 2)
+			mantlet.rotate_object_local(Vector3.UP, deg_to_rad(45.0))
 		else:
 			var mantlet_mesh := SphereMesh.new()
 			mantlet_mesh.radius = mantlet_radius
@@ -816,9 +819,12 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		barrel_cyl.height = barrel_len
 		barrel_cyl.radial_segments = barrel_segs
 		barrel.mesh = barrel_cyl
-		barrel.rotation.x = -PI / 2
+		# Same rotation-order trap as the mantlet — use object-local
+		# rotates so the cross-section spin happens AROUND the
+		# cylinder's length axis, not around world Y.
+		barrel.rotate_object_local(Vector3.RIGHT, -PI / 2)
 		if is_sable_heavy:
-			barrel.rotation.z = deg_to_rad(45.0)
+			barrel.rotate_object_local(Vector3.UP, deg_to_rad(45.0))
 		barrel.position.z = -barrel_len * 0.5
 		var barrel_mat := _make_metal_mat(trim_dark)
 		barrel.set_surface_override_material(0, barrel_mat)
@@ -838,9 +844,10 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		sleeve_cyl.height = sleeve_len
 		sleeve_cyl.radial_segments = barrel_segs
 		sleeve.mesh = sleeve_cyl
-		sleeve.rotation.x = -PI / 2
-		# (Sable sleeve stays at z-rot 0 so its facets stagger 45°
-		#  against the barrel above; Anvil sleeve doesn't care.)
+		# Tipped forward only — no cross-section roll, so the
+		# sleeve's facets sit at 0° while the barrel above is at
+		# 45°, and the two stagger like separate machined parts.
+		sleeve.rotate_object_local(Vector3.RIGHT, -PI / 2)
 		sleeve.position.z = -barrel_len * 0.55
 		var sleeve_mat := _make_metal_mat(darker)
 		sleeve.set_surface_override_material(0, sleeve_mat)
@@ -858,9 +865,9 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		muzzle_cyl.height = 0.18 if is_sable_heavy else 0.15
 		muzzle_cyl.radial_segments = barrel_segs
 		muzzle.mesh = muzzle_cyl
-		muzzle.rotation.x = -PI / 2
+		muzzle.rotate_object_local(Vector3.RIGHT, -PI / 2)
 		if is_sable_heavy:
-			muzzle.rotation.z = deg_to_rad(45.0)
+			muzzle.rotate_object_local(Vector3.UP, deg_to_rad(45.0))
 		muzzle.position.z = -barrel_len - 0.07
 		var muzzle_mat := _make_metal_mat(Color(0.1, 0.1, 0.1))
 		muzzle.set_surface_override_material(0, muzzle_mat)
