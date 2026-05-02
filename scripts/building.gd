@@ -142,19 +142,15 @@ func _ready() -> void:
 	_process_phase = int(get_instance_id() & 1)
 	if stats:
 		current_hp = stats.hp
-		# Default rally point sits right outside the building's
-		# footprint on the side facing the map centre — close enough
-		# that newly spawned units cluster at the building rather than
-		# walking off toward the middle, but with enough margin
-		# (~2u) that they don't overlap the footprint or each other.
-		var to_center: Vector3 = Vector3.ZERO - global_position
-		to_center.y = 0.0
-		if to_center.length_squared() > 0.0001:
-			to_center = to_center.normalized()
-		else:
-			to_center = Vector3(0.0, 0.0, -1.0)
-		var rally_dist: float = stats.footprint_size.z * 0.5 + 2.0
-		rally_point = global_position + to_center * rally_dist
+		# Default rally point sits a couple of units SOUTH of the
+		# building (always +Z in world space — south on the standard
+		# top-down camera). Used to point toward map-centre, which
+		# meant Aerodromes spawned aircraft into the middle of the
+		# enemy front by default; a fixed-direction default is more
+		# predictable for the player and easier to reason about
+		# regardless of the building's spawn corner.
+		var rally_dist: float = stats.footprint_size.z * 0.5 + 2.5
+		rally_point = global_position + Vector3(0.0, 0.0, rally_dist)
 		_ensure_visual_root()
 		_apply_placeholder_shape()
 		_add_nav_obstacle()

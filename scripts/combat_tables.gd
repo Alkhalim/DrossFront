@@ -53,8 +53,11 @@ const ARMOR_MAP: Dictionary = {
 ## AAir weapons are essentially the only way to reliably hit Light/Heavy Air.
 const ROLE_VS_ARMOR: Dictionary = {
 	&"AP": {
+		# Per player feedback — AP / anti-light / high-RoF weapons
+		# do 20% less damage to buildings (0.5 -> 0.4) so heavy
+		# structures aren't melted by chaingun spam.
 		&"unarmored": 1.0, &"light": 1.0, &"medium": 0.7,
-		&"heavy": 0.3, &"structure": 0.5,
+		&"heavy": 0.3, &"structure": 0.4,
 		&"light_air": 0.2, &"heavy_air": 0.1,
 	},
 	&"AA": {

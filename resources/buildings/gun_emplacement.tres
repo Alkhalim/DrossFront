@@ -6,7 +6,7 @@
 script = ExtResource("1")
 building_name = "Gun Emplacement"
 building_id = &"gun_emplacement"
-hp = 600
+hp = 810
 cost_salvage = 150
 build_time = 14.0
 power_consumption = 3

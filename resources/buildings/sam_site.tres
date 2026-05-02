@@ -6,7 +6,7 @@
 script = ExtResource("1")
 building_name = "SAM Site"
 building_id = &"sam_site"
-hp = 720
+hp = 970
 cost_salvage = 180
 build_time = 30.0
 power_consumption = 8
