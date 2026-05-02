@@ -147,34 +147,38 @@ func _spawn_player_unit(stats_path: String, pos: Vector3) -> void:
 ## --- Stage definitions ---------------------------------------------------
 
 func _install_stages() -> void:
+	# All discovery beats sit progressively further south (positive
+	# Z in world space). Every dialogue line points the player in
+	# the same direction so the navigation cue stays consistent
+	# from start to finish.
 	# Stage 0 — opening. The player has just their Rook scouts.
 	_stages.append({
 		"id": &"open",
-		"dialogue": "Field Command: \"Scouts, your transport's wreckage is on the eastern slope. Move out — there's a foundry ruin further north that's still partly intact.\"",
-		"objective": "Move your Rooks east to investigate the wreckage.",
+		"dialogue": "Field Command: \"Scouts, advance south. There's a wreckage cache about a hundred meters out — survivors might be holed up there.\"",
+		"objective": "Move your Rooks south to the wreckage.",
 		"on_enter": Callable(self, "_stage_open_enter"),
 		"trigger": Callable(self, "_stage_open_done"),
 	})
 	# Stage 1 — reinforcements found.
 	_stages.append({
 		"id": &"reinforce",
-		"dialogue": "Field Command: \"Survivors! Two more Rook squads are intact at the cache. Bring them online.\"",
-		"objective": "Continue north — a Salvage Crawler hulk is still operational up the ridge.",
+		"dialogue": "Field Command: \"Two more Rook squads are intact. Keep pushing south — we have a Salvage Crawler hulk on the long-range scope.\"",
+		"objective": "Keep moving south to find the Crawler.",
 		"on_enter": Callable(self, "_stage_reinforce_enter"),
 		"trigger": Callable(self, "_stage_reinforce_done"),
 	})
 	# Stage 2 — Crawler.
 	_stages.append({
 		"id": &"crawler",
-		"dialogue": "Field Command: \"That Crawler still runs — get it salvaging immediately. Salvage builds your war machine.\"",
-		"objective": "Push north to the foundry ruin and reclaim it.",
+		"dialogue": "Field Command: \"That Crawler still runs — bring it with you. Push further south to the abandoned foundry.\"",
+		"objective": "Continue south to the foundry ruin.",
 		"on_enter": Callable(self, "_stage_crawler_enter"),
 		"trigger": Callable(self, "_stage_crawler_done"),
 	})
 	# Stage 3 — base reclaimed. Player gets HQ + economy unlock.
 	_stages.append({
 		"id": &"base",
-		"dialogue": "Field Command: \"Welcome to your forward base, commander. Build a Basic Foundry and a Salvage Yard, get production rolling.\"",
+		"dialogue": "Field Command: \"Welcome to your forward base, commander. Build a Basic Foundry and a Salvage Yard — get production rolling.\"",
 		"objective": "Build a Basic Foundry and a Salvage Yard.",
 		"on_enter": Callable(self, "_stage_base_enter"),
 		"trigger": Callable(self, "_stage_base_done"),
@@ -182,7 +186,7 @@ func _install_stages() -> void:
 	# Stage 4 — assemble strike force.
 	_stages.append({
 		"id": &"force",
-		"dialogue": "Field Command: \"Build six combat units. The Sable enclave has dug in to the south — we're going to dislodge them.\"",
+		"dialogue": "Field Command: \"Train six combat units. The Sable enclave is dug in further south — we're going to dislodge them.\"",
 		"objective": "Train at least 6 combat units (Rooks, Hounds, Phalanx).",
 		"on_enter": Callable(self, "_stage_force_enter"),
 		"trigger": Callable(self, "_stage_force_done"),
@@ -190,8 +194,8 @@ func _install_stages() -> void:
 	# Stage 5 — Sable ally arrives.
 	_stages.append({
 		"id": &"ally",
-		"dialogue": "Field Command: \"A Sable strike force has dropped at our position. They want the same enclave dead. Coordinate with them and finish this.\"",
-		"objective": "Destroy the Sable enclave to the south alongside your ally.",
+		"dialogue": "Field Command: \"A Sable strike force has dropped at our position. Coordinate with them and finish the enclave to the south.\"",
+		"objective": "Push south and destroy the Sable enclave alongside your ally.",
 		"on_enter": Callable(self, "_stage_ally_enter"),
 		"trigger": Callable(self, "_stage_ally_done"),
 	})
@@ -216,22 +220,23 @@ func _stage_open_enter() -> void:
 
 func _stage_open_done() -> bool:
 	# Player walks any Rook into the wreckage cache zone.
-	return _any_player_unit_in_radius(Vector3(20.0, 0.0, 30.0), VISIT_RADIUS_SQ)
+	return _any_player_unit_in_radius(Vector3(0.0, 0.0, 28.0), VISIT_RADIUS_SQ)
 
 
 func _stage_reinforce_enter() -> void:
-	# Two more Rook squads spawn at the cache.
-	_spawn_player_unit("res://resources/units/anvil_rook.tres", Vector3(22.0, 0.0, 28.0))
-	_spawn_player_unit("res://resources/units/anvil_rook.tres", Vector3(18.0, 0.0, 32.0))
+	# Two more Rook squads spawn at the cache, slightly off-axis
+	# so they don't all overlap the lead squad.
+	_spawn_player_unit("res://resources/units/anvil_rook.tres", Vector3(-3.0, 0.0, 28.0))
+	_spawn_player_unit("res://resources/units/anvil_rook.tres", Vector3(3.0, 0.0, 28.0))
 
 
 func _stage_reinforce_done() -> bool:
-	# Player walks units to the Crawler discovery point.
-	return _any_player_unit_in_radius(Vector3(0.0, 0.0, 60.0), VISIT_RADIUS_SQ)
+	# Player walks units to the Crawler discovery point — further south.
+	return _any_player_unit_in_radius(Vector3(0.0, 0.0, 58.0), VISIT_RADIUS_SQ)
 
 
 func _stage_crawler_enter() -> void:
-	# A Salvage Crawler joins the player.
+	# A Salvage Crawler joins the player at the discovery point.
 	var crawler_scene: PackedScene = load("res://scenes/salvage_crawler.tscn") as PackedScene
 	if not crawler_scene:
 		return
@@ -240,17 +245,17 @@ func _stage_crawler_enter() -> void:
 		return
 	crawler.set("owner_id", 0)
 	get_tree().current_scene.add_child(crawler)
-	crawler.global_position = Vector3(0.0, 0.0, 60.0)
+	crawler.global_position = Vector3(0.0, 0.0, 58.0)
 
 
 func _stage_crawler_done() -> bool:
-	# Player advances to the foundry ruin position.
-	return _any_player_unit_in_radius(Vector3(0.0, 0.0, 95.0), VISIT_RADIUS_SQ)
+	# Player advances south to the foundry ruin position.
+	return _any_player_unit_in_radius(Vector3(0.0, 0.0, 88.0), VISIT_RADIUS_SQ)
 
 
 func _stage_base_enter() -> void:
 	# Hand the abandoned HQ over to the player. TestArenaController
-	# parks it at (0, 0, 95) with owner_id 2 (neutral ruin) at
+	# parks it at (0, 0, 88) with owner_id 2 (neutral ruin) at
 	# match start; flipping owner_id to 0 here unlocks production,
 	# vision, and resource flow as the discovery beat resolves.
 	for n: Node in get_tree().get_nodes_in_group("buildings"):
@@ -267,7 +272,7 @@ func _stage_base_enter() -> void:
 			continue
 		# Distance check so we don't accidentally claim the wrong
 		# neutral HQ if the map ever has more than one.
-		if b.global_position.distance_squared_to(Vector3(0.0, 0.0, 95.0)) > 30.0 * 30.0:
+		if b.global_position.distance_squared_to(Vector3(0.0, 0.0, 88.0)) > 30.0 * 30.0:
 			continue
 		b.owner_id = 0
 		var rm: Node = get_tree().current_scene.get_node_or_null("ResourceManager")
@@ -277,6 +282,12 @@ func _stage_base_enter() -> void:
 		# rebuilding the placeholder shape.
 		if b.has_method("_apply_placeholder_shape"):
 			b._apply_placeholder_shape()
+	# Hand the player a couple of Ratchet engineers so they can
+	# actually act on the next objective ("build a Foundry + Yard")
+	# without first having to produce engineers from scratch — a
+	# fresh tutorial-mode HQ doesn't auto-spawn anything.
+	_spawn_player_unit("res://resources/units/anvil_ratchet.tres", Vector3(-4.0, 0.0, 92.0))
+	_spawn_player_unit("res://resources/units/anvil_ratchet.tres", Vector3(4.0, 0.0, 92.0))
 
 
 func _stage_base_done() -> bool:
@@ -319,7 +330,7 @@ func _stage_ally_enter() -> void:
 	# Sable ally drops in: a Harbinger heavy + two Switchblades for
 	# anti-air. Owner_id = 1 with team 0 (allied to player) —
 	# PlayerRegistry handles the alliance lookup.
-	var ally_pos: Vector3 = Vector3(0.0, 0.0, 90.0)
+	var ally_pos: Vector3 = Vector3(0.0, 0.0, 80.0)
 	_spawn_ally_unit("res://resources/units/sable_harbinger.tres", ally_pos)
 	_spawn_ally_unit("res://resources/units/sable_switchblade.tres", ally_pos + Vector3(8.0, 0.0, 0.0))
 	_spawn_ally_unit("res://resources/units/sable_switchblade.tres", ally_pos + Vector3(-8.0, 0.0, 0.0))
