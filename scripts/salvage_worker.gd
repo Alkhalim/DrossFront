@@ -440,6 +440,27 @@ func _return_to_yard(delta: float) -> void:
 			resource_manager.add_salvage(_carried_salvage)
 			if _carried_microchips > 0 and resource_manager.has_method("add_microchips"):
 				resource_manager.add_microchips(_carried_microchips)
+		# Floating "+N S" / "+N M" readouts above the home yard
+		# every time a worker drops cargo. Player-side only so
+		# enemy economy doesn't broadcast through visible yards.
+		if owner_id == 0 and is_instance_valid(home_yard):
+			var drop_pos: Vector3 = home_yard.global_position + Vector3(
+				randf_range(-0.6, 0.6), 1.6, randf_range(-0.6, 0.6)
+			)
+			if _carried_salvage > 0:
+				FloatingNumber.spawn(
+					get_tree().current_scene,
+					drop_pos,
+					"+%d S" % _carried_salvage,
+					FloatingNumber.COLOR_SALVAGE,
+				)
+			if _carried_microchips > 0:
+				FloatingNumber.spawn(
+					get_tree().current_scene,
+					drop_pos + Vector3(0.0, 0.5, 0.0),
+					"+%d M" % _carried_microchips,
+					FloatingNumber.COLOR_MICROCHIPS,
+				)
 		_carried_salvage = 0
 		_carried_microchips = 0
 		state = State.IDLE

@@ -5,8 +5,17 @@ extends Node3D
 signal captured(new_owner: int)
 signal contested
 
-## Fuel generated per second when captured.
-@export var fuel_per_second: float = 5.0
+## Fuel generated per second when captured. Halved from the previous
+## 5.0 so a captured deposit takes twice as long to bankroll a heavy
+## mech — the player has to actually defend the fuel income now,
+## not just plant the flag and walk off. Income is paid in batched
+## chunks every FUEL_PAYOUT_INTERVAL_SEC so the floating "+N F"
+## readout doesn't strobe.
+@export var fuel_per_second: float = 2.5
+
+## Seconds between fuel payout chunks. ~10s feels like a tide
+## rather than a stream — visible income event without spam.
+const FUEL_PAYOUT_INTERVAL_SEC: float = 10.0
 
 ## Radius in which units can capture or contest.
 @export var capture_radius: float = 12.0
@@ -189,11 +198,26 @@ func _generate_fuel(delta: float) -> void:
 	if not rm or not rm.has_method("add_fuel"):
 		return
 
+	# Accumulate fuel internally, but only PAY OUT in chunks every
+	# FUEL_PAYOUT_INTERVAL_SEC seconds. The chunk gets a floating
+	# "+N F" cyan number above the deposit so the player notices
+	# the tick coming in. Per-second drip would either spam the
+	# screen with ones or stay invisible at sub-pixel intervals.
 	_fuel_accumulator += fuel_per_second * delta
-	if _fuel_accumulator >= 1.0:
+	if _fuel_accumulator >= fuel_per_second * FUEL_PAYOUT_INTERVAL_SEC:
 		var amount: int = int(_fuel_accumulator)
 		_fuel_accumulator -= float(amount)
 		rm.add_fuel(amount)
+		# Floating chunk readout — player-side deposits only so an
+		# enemy capturing the same node doesn't broadcast their
+		# income through a still-visible cell.
+		if owner_id == 0:
+			FloatingNumber.spawn(
+				get_tree().current_scene,
+				global_position + Vector3(0.0, 2.4, 0.0),
+				"+%d F" % amount,
+				FloatingNumber.COLOR_FUEL,
+			)
 
 
 ## --- Visuals ---
