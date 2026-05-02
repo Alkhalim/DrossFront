@@ -14,9 +14,10 @@ const MUSIC_DIR_UNIVERSAL: String = "res://assets/audio/Music/Universal"
 const MUSIC_DIR_ANVIL: String = "res://assets/audio/Music/Anvil"
 const MUSIC_DIR_SABLE: String = "res://assets/audio/Music/Sable"
 
-## Playback volume on the music bus. -8 dB sits the score under SFX
-## without disappearing.
-const MUSIC_VOLUME_DB: float = -8.0
+## Playback volume on the music bus. -14 dB sits the score well
+## under SFX (~50% perceived loudness vs the previous -8 dB) so
+## the score stays present without competing with combat audio.
+const MUSIC_VOLUME_DB: float = -14.0
 
 ## Gap between tracks so the next one doesn't slam in immediately.
 const TRACK_GAP_SEC: float = 1.4
@@ -29,11 +30,26 @@ var _started: bool = false
 
 
 func _ready() -> void:
+	# Ensure the "Music" bus exists before the player is wired up so
+	# the pause-menu Music slider (which routes via that bus) can
+	# actually change music volume. AudioManager also creates this
+	# bus, but MusicManager runs in main_menu where there's no
+	# AudioManager — make our own.
+	_ensure_music_bus()
 	_player = AudioStreamPlayer.new()
-	_player.bus = "Master"
+	_player.bus = "Music"
 	_player.volume_db = MUSIC_VOLUME_DB
 	_player.finished.connect(_on_track_finished)
 	add_child(_player)
+
+
+func _ensure_music_bus() -> void:
+	if AudioServer.get_bus_index("Music") >= 0:
+		return
+	var idx: int = AudioServer.bus_count
+	AudioServer.add_bus(idx)
+	AudioServer.set_bus_name(idx, "Music")
+	AudioServer.set_bus_send(idx, "Master")
 
 
 func _process(delta: float) -> void:
