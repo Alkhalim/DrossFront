@@ -3774,9 +3774,18 @@ func heal(amount: float) -> void:
 
 
 func is_damaged() -> bool:
+	## True only when at least one LIVING squad member is below their
+	## per-member max HP. A 4-Rook squad with 1 dead + 3 full-HP
+	## survivors counts as not-damaged for repair purposes -- engineers
+	## can heal HP but can't resurrect dead members, so flagging the
+	## squad as damaged just put engineers on a job they couldn't do.
 	if alive_count <= 0 or not stats:
 		return false
-	return get_total_hp() < stats.hp_total
+	var per_max: int = stats.hp_per_unit
+	for hp: int in member_hp:
+		if hp > 0 and hp < per_max:
+			return true
+	return false
 
 
 func _die() -> void:

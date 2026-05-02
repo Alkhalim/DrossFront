@@ -24,6 +24,15 @@ var _build_tab_row: HBoxContainer = null
 var _build_tab_basic: Button = null
 var _build_tab_advanced: Button = null
 
+## HQ panel tab state: "train" shows engineer + crawler production;
+## "defense" shows the Anvil-only HQ Plating + HQ Battery upgrades.
+## Lives in its own tab row so the upgrades don't pile into the
+## "Train Units" grid.
+var _hq_tab: String = "train"
+var _hq_tab_row: HBoxContainer = null
+var _hq_tab_train: Button = null
+var _hq_tab_defense: Button = null
+
 ## Track what we're showing to avoid rebuilding buttons every frame.
 var _last_building_id: int = -1
 var _last_unit_ids: Array[int] = []
@@ -1982,6 +1991,30 @@ func _rebuild_production_buttons(building: Building) -> void:
 
 	# Faction-aware producible list — Sable HQ shows Sable units, etc.
 	var producible: Array[UnitStatResource] = building.get_producible_units()
+	# HQ + Anvil player + own HQ + constructed -> show the Train /
+	# Defense tab row. Defense tab holds the HQ-only upgrade buttons
+	# (HQ Plating, HQ Battery), so they don't clutter the Train tab.
+	var show_hq_tabs: bool = _hq_defense_tab_eligible(building)
+	if show_hq_tabs:
+		_ensure_hq_tab_row()
+		if _hq_tab_row:
+			_hq_tab_row.visible = true
+			if _hq_tab_train:
+				_hq_tab_train.button_pressed = _hq_tab == "train"
+			if _hq_tab_defense:
+				_hq_tab_defense.button_pressed = _hq_tab == "defense"
+	else:
+		# Non-HQ buildings hide the tab row so the production grid
+		# starts at the top of the action section like before.
+		if _hq_tab_row:
+			_hq_tab_row.visible = false
+
+	# Defense tab: render the upgrade buttons and skip the unit grid.
+	if show_hq_tabs and _hq_tab == "defense":
+		_action_label.text = "HQ Defense Upgrades"
+		_append_hq_upgrade_buttons(building)
+		return
+
 	if producible.is_empty():
 		_action_label.text = "No production"
 		return
@@ -2006,11 +2039,63 @@ func _rebuild_production_buttons(building: Building) -> void:
 		var chip_refs: Dictionary = _attach_cost_widget(btn, unit_stat.cost_salvage, unit_stat.cost_fuel, unit_stat.population)
 		_action_buttons.append({ "button": btn, "kind": "produce", "stat": unit_stat, "chips": chip_refs })
 
-	# Anvil HQ defensive upgrades — appended after the standard
-	# production buttons so the train + upgrade actions all live on
-	# one panel. Visible only on Anvil-player headquarters; each
-	# upgrade is one-time per HQ (button hides after purchase).
-	_maybe_append_hq_upgrade_buttons(building)
+
+func _hq_defense_tab_eligible(building: Building) -> bool:
+	if not building or not building.stats:
+		return false
+	if building.stats.building_id != &"headquarters":
+		return false
+	if building.owner_id != 0:
+		return false
+	if not building.is_constructed:
+		return false
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if not settings or not ("player_faction" in settings):
+		return false
+	return (settings.get("player_faction") as int) == 0
+
+
+func _ensure_hq_tab_row() -> void:
+	if _hq_tab_row and is_instance_valid(_hq_tab_row):
+		return
+	var section: Node = _button_grid.get_parent() if _button_grid else null
+	if not section:
+		return
+	var row := HBoxContainer.new()
+	row.name = "HQTabRow"
+	row.add_theme_constant_override("separation", 6)
+	row.alignment = BoxContainer.ALIGNMENT_BEGIN
+	section.add_child(row)
+	# Sit above the button grid; equivalent to the build_tab_row
+	# pattern so HQ panel and build menu read consistently.
+	section.move_child(row, _button_grid.get_index())
+	_hq_tab_row = row
+	_hq_tab_train = Button.new()
+	_hq_tab_train.text = "Train"
+	_hq_tab_train.custom_minimum_size = Vector2(72, 26)
+	_hq_tab_train.toggle_mode = true
+	_hq_tab_train.button_pressed = _hq_tab == "train"
+	_hq_tab_train.pressed.connect(_on_hq_tab_pressed.bind("train"))
+	row.add_child(_hq_tab_train)
+	_hq_tab_defense = Button.new()
+	_hq_tab_defense.text = "Defense"
+	_hq_tab_defense.custom_minimum_size = Vector2(86, 26)
+	_hq_tab_defense.toggle_mode = true
+	_hq_tab_defense.button_pressed = _hq_tab == "defense"
+	_hq_tab_defense.pressed.connect(_on_hq_tab_pressed.bind("defense"))
+	row.add_child(_hq_tab_defense)
+
+
+func _on_hq_tab_pressed(tab: String) -> void:
+	if _hq_tab == tab:
+		# Reflect the toggle state even if the tab didn't change.
+		if _hq_tab_train:
+			_hq_tab_train.button_pressed = _hq_tab == "train"
+		if _hq_tab_defense:
+			_hq_tab_defense.button_pressed = _hq_tab == "defense"
+		return
+	_hq_tab = tab
+	_last_building_id = -1  # force a panel rebuild on the next tick
 
 
 ## Anvil HQ defensive upgrade definitions. Each one-time upgrade
@@ -2025,26 +2110,11 @@ const HQ_BATTERY_COST_FUEL: int = 80
 const HQ_PLATING_HP_MULT: float = 1.25
 
 
-func _maybe_append_hq_upgrade_buttons(building: Building) -> void:
-	if not building or not building.stats:
-		return
-	if building.stats.building_id != &"headquarters":
-		return
-	# Player faction has to be Anvil (id 0). Sable HQs don't get
-	# this upgrade line for now -- the user spec calls them out as
-	# Anvil-specific industrial-doctrine extras.
-	var settings: Node = get_node_or_null("/root/MatchSettings")
-	var player_faction: int = 0
-	if settings and "player_faction" in settings:
-		player_faction = settings.get("player_faction") as int
-	if player_faction != 0:
-		return
-	# Only the local player's own HQ gets the buttons.
-	if building.owner_id != 0:
-		return
-	if not building.is_constructed:
-		return
-
+func _append_hq_upgrade_buttons(building: Building) -> void:
+	## Renders the HQ Plating + HQ Battery buttons. Eligibility check
+	## (Anvil-only, own HQ, constructed) lives in
+	## _hq_defense_tab_eligible -- this function assumes the caller
+	## already gated on it.
 	if not bool(building.get("hq_plating_active")):
 		_button_grid.add_child(_make_hq_upgrade_button(
 			building,
