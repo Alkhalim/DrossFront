@@ -118,6 +118,13 @@ var _build_spark_timer: float = 0.0
 ## button so the player knows when it's available again.
 var _ability_cd_remaining: float = 0.0
 
+## Accumulator for healing overflow — used by Factory Pulse to
+## convert "wasted" heal (everyone already at full HP) into
+## restored squad members. Once this passes hp_per_unit, one
+## dead member comes back with full HP. Persists across casts so
+## a partial top-up adds to the next.
+var _heal_overflow_accum: int = 0
+
 ## Courier Tank passenger list — populated when this unit casts
 ## Garrison and emptied on the second press (disembark). Each entry
 ## is the passenger Unit. Empty when the tank isn't carrying anyone
@@ -2629,9 +2636,13 @@ func _ability_factory_pulse() -> bool:
 	## to get the full benefit. Ticker registered as a Timer-driven
 	## callback chain anchored on the Forgemaster itself; if the
 	## caster dies mid-pulse the timer dies with it.
-	var per_tick: int = 80
+	# Per-tick heal trimmed 20% (was 80 / 100) — Factory Pulse now
+	# converts its overflow into squad-member restorations, so the
+	# raw HP throughput can come down without making the ability
+	# weaker overall.
+	var per_tick: int = 64
 	if stats.unit_name.findn("Foreman") >= 0:
-		per_tick = 100
+		per_tick = 80
 	var ticks_left: int = 5
 	var radius: float = stats.ability_radius
 	# Every second: heal allies in radius for per_tick + spawn a
@@ -2782,7 +2793,12 @@ func apply_heal(amount: int) -> void:
 	## Distributes a heal across alive members. Caps at hp_per_unit
 	## per member so a single huge heal doesn't overheal one member
 	## past full while another sits at 1 HP. Walks the array and
-	## dumps excess into the next still-wounded member.
+	## dumps excess into the next still-wounded member; whatever's
+	## still left over after all alive members are full feeds
+	## _heal_overflow_accum, which restores ONE dead squad member
+	## per hp_per_unit accumulated. Lets sustained Factory Pulse
+	## casts gradually rebuild a wounded squad instead of just
+	## healing the survivors.
 	if alive_count <= 0 or not stats:
 		return
 	var remaining: int = amount
@@ -2797,7 +2813,40 @@ func apply_heal(amount: int) -> void:
 		var apply_amt: int = mini(deficit, remaining)
 		member_hp[i] += apply_amt
 		remaining -= apply_amt
+	# Overflow converts to dead-member restorations. Only when the
+	# squad has at least one missing member; otherwise the heal
+	# vanishes (a full squad shouldn't bank a free revive for
+	# later future casualties — would be too generous).
+	if remaining > 0 and alive_count < stats.squad_size:
+		_heal_overflow_accum += remaining
+		while _heal_overflow_accum >= stats.hp_per_unit and alive_count < stats.squad_size:
+			_heal_overflow_accum -= stats.hp_per_unit
+			_restore_dead_member()
+	elif alive_count >= stats.squad_size:
+		# No use for accumulated overflow once the squad is full —
+		# clear the bucket so a long lull at full strength doesn't
+		# bank revival juice for the next casualty.
+		_heal_overflow_accum = 0
 	_update_hp_bar()
+
+
+func _restore_dead_member() -> void:
+	## Brings one dead squad member back with full HP. Picks the
+	## first slot whose member_hp is 0; restores the visual mesh
+	## (set visible) and bumps alive_count. No-op when there are
+	## no dead slots.
+	if not stats:
+		return
+	for i: int in member_hp.size():
+		if member_hp[i] > 0:
+			continue
+		member_hp[i] = stats.hp_per_unit
+		alive_count = mini(alive_count + 1, stats.squad_size)
+		if i < _member_meshes.size():
+			var mesh: Node3D = _member_meshes[i]
+			if is_instance_valid(mesh):
+				mesh.visible = true
+		break
 
 
 func _spawn_pulse_visual(radius: float, tint: Color) -> void:

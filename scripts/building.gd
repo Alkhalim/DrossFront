@@ -142,15 +142,25 @@ func _ready() -> void:
 	_process_phase = int(get_instance_id() & 1)
 	if stats:
 		current_hp = stats.hp
-		# Default rally point sits a couple of units SOUTH of the
-		# building (always +Z in world space — south on the standard
-		# top-down camera). Used to point toward map-centre, which
-		# meant Aerodromes spawned aircraft into the middle of the
-		# enemy front by default; a fixed-direction default is more
-		# predictable for the player and easier to reason about
-		# regardless of the building's spawn corner.
+		# Default rally point sits just OUTSIDE the building's
+		# footprint, in the direction AWAY from the world origin.
+		# A building at z=+110 (player base, north end of map)
+		# rallies further north so freshly-produced units stay
+		# safely behind the line. A building at z=-110 (AI base,
+		# south) rallies further south. Fixed +Z south used to
+		# default the player's units straight toward the enemy
+		# front. Faction-agnostic — the heuristic just looks at
+		# where the building actually is relative to the map.
+		var away_from_origin: Vector3 = global_position
+		away_from_origin.y = 0.0
+		if away_from_origin.length_squared() > 0.0001:
+			away_from_origin = away_from_origin.normalized()
+		else:
+			# Building parked at exact origin — fall back to a
+			# fixed +Z offset.
+			away_from_origin = Vector3(0.0, 0.0, 1.0)
 		var rally_dist: float = stats.footprint_size.z * 0.5 + 2.5
-		rally_point = global_position + Vector3(0.0, 0.0, rally_dist)
+		rally_point = global_position + away_from_origin * rally_dist
 		_ensure_visual_root()
 		_apply_placeholder_shape()
 		_add_nav_obstacle()
