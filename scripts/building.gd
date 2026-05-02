@@ -2978,6 +2978,13 @@ func _faction_tint_building_chassis(c: Color) -> Color:
 	## even before the cyan accent strip catches the eye. Brightness
 	## contrast between buildings (basic_foundry vs salvage_yard etc.)
 	## is preserved by re-multiplying the input rather than replacing.
+	##
+	## Neutral structures (rogue salvager outposts / abandoned ruins,
+	## owner_id 2) bypass the faction palette and route to a desaturated
+	## rust + grime tint so they read as scrap-cobbled rather than as
+	## a "third faction" with its own clean visual language.
+	if owner_id == 2:
+		return _scrappy_neutral_building_tint(c)
 	if _resolve_faction_id() != 1:
 		return c
 	var avg: float = (c.r + c.g + c.b) / 3.0
@@ -2988,6 +2995,24 @@ func _faction_tint_building_chassis(c: Color) -> Color:
 		darkened * 1.20,
 		c.a,
 	)
+
+
+func _scrappy_neutral_building_tint(c: Color) -> Color:
+	## Mirror of unit-side _scrappy_neutral_tint: desaturate, mix toward
+	## a warm rust hue, dim brightness. Building-side jitter seeds off
+	## the building's spawn position so two ruins on the same map have
+	## slightly different rust amounts.
+	var avg: float = (c.r + c.g + c.b) / 3.0
+	var grey: Color = Color(avg, avg, avg, c.a)
+	var rust: Color = Color(0.42, 0.24, 0.16, c.a)
+	var jitter: int = int(global_position.x * 11.0 + global_position.z * 5.0) & 0xff
+	var rust_mix: float = 0.55 + float(jitter) / 255.0 * 0.20  # 0.55..0.75
+	var mixed: Color = grey.lerp(rust, rust_mix)
+	mixed.r *= 0.78
+	mixed.g *= 0.74
+	mixed.b *= 0.72
+	mixed.a = c.a
+	return mixed
 
 
 func _process(delta: float) -> void:

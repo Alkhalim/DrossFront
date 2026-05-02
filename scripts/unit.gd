@@ -4086,6 +4086,13 @@ func _faction_tint_chassis(c: Color) -> Color:
 	# matching `03_factions.md` §"Sable Network → Aesthetic". Hue shift
 	# is a multiplicative remap so the per-class brightness contrast
 	# (heavies darker than lights) survives the re-tint.
+	#
+	# Neutral mechs (rogue salvagers / deserter patrols, owner_id 2)
+	# bypass the faction palette entirely and get a desaturated rust /
+	# grime treatment so they read as scrap-cobbled rather than mistaken
+	# for a player or enemy unit.
+	if owner_id == 2:
+		return _scrappy_neutral_tint(c)
 	if _faction_id() != 1:  # not Sable → no change
 		return c
 	# Sable per-class palette. The Anvil unit base colors all collapsed
@@ -4116,3 +4123,25 @@ func _faction_tint_chassis(c: Color) -> Color:
 		clampf(palette.z + bias, 0.0, 1.0),
 		c.a,
 	)
+
+
+func _scrappy_neutral_tint(c: Color) -> Color:
+	## Rogue / deserter salvager look — desaturate hard, push toward a
+	## warm rust palette, dim overall brightness so the unit reads as
+	## "patched together from scrap" rather than a polished faction
+	## chassis. Per-instance jitter (seeded by a hash of the position so
+	## it stays stable per unit between frames) varies the rust amount
+	## across a squad so they don't all look identical.
+	var avg: float = (c.r + c.g + c.b) / 3.0
+	var grey: Color = Color(avg, avg, avg, c.a)
+	# Mix toward a rust hue (~ Color(0.42, 0.24, 0.16)). Then darken so
+	# neutrals never read brighter than a player chassis.
+	var rust: Color = Color(0.42, 0.24, 0.16, c.a)
+	var jitter: int = int(global_position.x * 13.0 + global_position.z * 7.0) & 0xff
+	var rust_mix: float = 0.55 + float(jitter) / 255.0 * 0.20  # 0.55..0.75
+	var mixed: Color = grey.lerp(rust, rust_mix)
+	mixed.r *= 0.78
+	mixed.g *= 0.74
+	mixed.b *= 0.72
+	mixed.a = c.a
+	return mixed
