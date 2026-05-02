@@ -40,6 +40,9 @@ var _phys_frame: int = 0
 var _phase: int = 0
 
 var _cargo_mat: StandardMaterial3D = null
+## Microchips picked up from a satellite-pile harvest tick. Carried
+## back home alongside salvage and deposited in the same drop.
+var _carried_microchips: int = 0
 
 ## Stuck detection — workers don't path with NavigationAgent3D, just
 ## push toward the target with move_and_slide. When something blocks
@@ -414,6 +417,12 @@ func _harvest(delta: float) -> void:
 		_harvest_timer -= 1.0
 		var amount: int = _target_wreck.extract(int(HARVEST_RATE))
 		_carried_salvage += amount
+		# Satellite piles drop their chip payload on the first tick
+		# that actually pulled salvage. claim_microchips clears the
+		# wreck-side counter so subsequent ticks don't double-count
+		# even if the wreck survives.
+		if amount > 0 and is_instance_valid(_target_wreck) and _target_wreck.has_method("claim_microchips"):
+			_carried_microchips += _target_wreck.claim_microchips()
 
 		if _carried_salvage >= CARRY_CAPACITY or not is_instance_valid(_target_wreck):
 			state = State.RETURNING
@@ -422,13 +431,17 @@ func _harvest(delta: float) -> void:
 func _return_to_yard(delta: float) -> void:
 	if not is_instance_valid(home_yard):
 		_carried_salvage = 0
+		_carried_microchips = 0
 		state = State.IDLE
 		return
 
 	if _move_toward(home_yard.global_position, delta):
 		if resource_manager:
 			resource_manager.add_salvage(_carried_salvage)
+			if _carried_microchips > 0 and resource_manager.has_method("add_microchips"):
+				resource_manager.add_microchips(_carried_microchips)
 		_carried_salvage = 0
+		_carried_microchips = 0
 		state = State.IDLE
 
 

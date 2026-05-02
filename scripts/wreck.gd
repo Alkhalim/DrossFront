@@ -8,6 +8,17 @@ extends StaticBody3D
 ## Salvage remaining to be extracted.
 var salvage_remaining: int = 0
 
+## Microchip payload — non-zero only on satellite-crash piles.
+## Workers grant the chips on the first extraction tick that
+## actually pulls salvage; chips are an all-or-nothing pop, not
+## a per-extract trickle.
+@export var microchip_value: int = 0
+var microchip_remaining: int = 0
+
+## Set true on satellite piles so the spawner can give them a
+## distinct visual (taller wreckage + warm violet emissive core).
+@export var is_satellite: bool = false
+
 ## Visual size based on unit class.
 var wreck_size: Vector3 = Vector3(1.0, 0.5, 1.0)
 
@@ -15,9 +26,12 @@ var wreck_size: Vector3 = Vector3(1.0, 0.5, 1.0)
 func _ready() -> void:
 	add_to_group("wrecks")
 	salvage_remaining = salvage_value
+	microchip_remaining = microchip_value
 	collision_layer = 8
 
 	_build_wreck_visuals()
+	if is_satellite:
+		_build_satellite_landmark()
 
 	var col := CollisionShape3D.new()
 	var shape := BoxShape3D.new()
@@ -238,6 +252,87 @@ func extract(amount: int) -> int:
 	if salvage_remaining <= 0:
 		queue_free()
 	return extracted
+
+
+## Pulls and clears the microchip payload (if any). Workers call
+## this once on a successful harvest pickup so chips drop in a
+## single lump rather than tricking out per-extract. Returns the
+## number of chips claimed (0 when the wreck has none / they were
+## already collected).
+func claim_microchips() -> int:
+	if microchip_remaining <= 0:
+		return 0
+	var out: int = microchip_remaining
+	microchip_remaining = 0
+	return out
+
+
+func _build_satellite_landmark() -> void:
+	## Visible "satellite crashed here" marker — a leaning antenna
+	## spar + a violet emissive core + an OmniLight so the pile
+	## reads as a high-value drop from any zoom. Sits on top of the
+	## existing wreck geometry rather than replacing it.
+	var max_extent: float = maxf(wreck_size.x, wreck_size.z)
+
+	# Bent satellite mast — leaning thin pillar.
+	var mast := MeshInstance3D.new()
+	var mast_box := BoxMesh.new()
+	var mast_h: float = wreck_size.y * 4.0 + 0.6
+	mast_box.size = Vector3(0.18, mast_h, 0.18)
+	mast.mesh = mast_box
+	mast.position = Vector3(
+		max_extent * 0.18,
+		wreck_size.y * 0.4 + mast_h * 0.5,
+		max_extent * -0.10,
+	)
+	mast.rotation = Vector3(
+		randf_range(0.18, 0.30),
+		randf_range(0.0, TAU),
+		randf_range(-0.20, 0.20),
+	)
+	mast.set_surface_override_material(0, _make_wreck_material(Color(0.10, 0.10, 0.14, 1.0)))
+	add_child(mast)
+
+	# Dish near the top of the mast — slightly tilted disc reading
+	# as an antenna dish that took a hit on landing.
+	var dish := MeshInstance3D.new()
+	var dish_cyl := CylinderMesh.new()
+	dish_cyl.top_radius = 0.55
+	dish_cyl.bottom_radius = 0.42
+	dish_cyl.height = 0.10
+	dish_cyl.radial_segments = 16
+	dish.mesh = dish_cyl
+	dish.position = Vector3(0, mast_h * 0.45, 0)
+	dish.rotation.x = deg_to_rad(40.0)
+	var dish_mat := _make_wreck_material(Color(0.16, 0.13, 0.18, 1.0))
+	dish.set_surface_override_material(0, dish_mat)
+	mast.add_child(dish)
+
+	# Glowing violet core poking out of the wreck — the chip
+	# payload visual cue.
+	var core := MeshInstance3D.new()
+	var core_box := BoxMesh.new()
+	core_box.size = Vector3(0.55, 0.40, 0.55)
+	core.mesh = core_box
+	core.position = Vector3(0, wreck_size.y * 0.65, 0)
+	var core_mat := StandardMaterial3D.new()
+	core_mat.albedo_color = Color(0.10, 0.05, 0.16, 1.0)
+	core_mat.emission_enabled = true
+	core_mat.emission = Color(0.78, 0.42, 1.0, 1.0)
+	core_mat.emission_energy_multiplier = 2.6
+	core_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	core.set_surface_override_material(0, core_mat)
+	add_child(core)
+
+	# Real violet light point so the pile reads at minimap distance
+	# and at low zoom — different colour from the apex amber so the
+	# player learns the cue.
+	var glow := OmniLight3D.new()
+	glow.light_color = Color(0.78, 0.42, 1.0, 1.0)
+	glow.light_energy = 1.6
+	glow.omni_range = max_extent * 3.0 + 4.0
+	glow.position = Vector3(0, wreck_size.y * 1.0, 0)
+	add_child(glow)
 
 
 ## Create a wreck from a destroyed unit's stats.
