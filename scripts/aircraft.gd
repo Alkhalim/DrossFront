@@ -725,16 +725,31 @@ func _build_hammerhead() -> void:
 		chamfer.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.10)))
 		add_child(chamfer)
 
-	# Tapered nose — angled slab in front.
+	# Tapered nose — angled slab in front. Width pulled in from 1.5
+	# -> 1.10 so the silhouette pinches toward the front instead of
+	# reading as a brick all the way to the tip; depth bumped a hair
+	# so the taper still has length.
 	var nose := MeshInstance3D.new()
 	nose.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var nose_box := BoxMesh.new()
-	nose_box.size = Vector3(1.5, 0.45, 0.95)
+	nose_box.size = Vector3(1.10, 0.42, 1.05)
 	nose.mesh = nose_box
 	nose.position = Vector3(0, -0.04, 2.0)
 	nose.rotation.x = -0.20
 	nose.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.05)))
 	add_child(nose)
+	# Forward nose-tip cap -- a smaller wedge in FRONT of the nose
+	# block, shrinking again so the silhouette tapers in two stages
+	# instead of one big slab. Reads as a real aircraft beak.
+	var nose_tip := MeshInstance3D.new()
+	nose_tip.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var nt_box := BoxMesh.new()
+	nt_box.size = Vector3(0.70, 0.32, 0.65)
+	nose_tip.mesh = nt_box
+	nose_tip.position = Vector3(0, -0.18, 2.65)
+	nose_tip.rotation.x = -0.30
+	nose_tip.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.10)))
+	add_child(nose_tip)
 
 	# Cockpit canopy — small angled bubble on top of the nose. Adds
 	# silhouette focal point near the front + reads as a real cockpit.
@@ -754,6 +769,59 @@ func _build_hammerhead() -> void:
 	canopy_mat.roughness = 0.20
 	canopy.set_surface_override_material(0, canopy_mat)
 	add_child(canopy)
+	# Armored cage over the cockpit -- five thin metal bars running
+	# fore-aft + two thicker hoops crosswise so the canopy reads as
+	# protected by a roll cage instead of an exposed bubble.
+	var cage_mat: StandardMaterial3D = _aircraft_metal_mat(Color(0.10, 0.10, 0.12, 1.0))
+	for bar_i: int in 5:
+		var bar := MeshInstance3D.new()
+		bar.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var bb := BoxMesh.new()
+		bb.size = Vector3(0.04, 0.05, 0.95)
+		bar.mesh = bb
+		var bx: float = (float(bar_i) - 2.0) * 0.18
+		bar.position = Vector3(bx, 0.50, 1.55)
+		bar.rotation.x = -0.16
+		bar.set_surface_override_material(0, cage_mat)
+		add_child(bar)
+	for hoop_i: int in 2:
+		var hoop := MeshInstance3D.new()
+		hoop.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var hb := BoxMesh.new()
+		hb.size = Vector3(0.95, 0.06, 0.06)
+		hoop.mesh = hb
+		var hz: float = 1.55 + (float(hoop_i) - 0.5) * 0.55
+		hoop.position = Vector3(0, 0.52, hz)
+		hoop.rotation.x = -0.16
+		hoop.set_surface_override_material(0, cage_mat)
+		add_child(hoop)
+	# Side cockpit shoulder -- two slim plates flanking the canopy at
+	# the same angle so the cage reads as part of a fortified pilot
+	# capsule rather than bolted-on bars over a bubble.
+	for sx_i: int in 2:
+		var ssx: float = -1.0 if sx_i == 0 else 1.0
+		var shoulder := MeshInstance3D.new()
+		shoulder.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var sb := BoxMesh.new()
+		sb.size = Vector3(0.10, 0.30, 0.95)
+		shoulder.mesh = sb
+		shoulder.position = Vector3(ssx * 0.50, 0.30, 1.55)
+		shoulder.rotation.x = -0.16
+		shoulder.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.20)))
+		add_child(shoulder)
+
+	# Tapered tail -- pinched cap behind the rear hull so the
+	# fuselage doesn't end in a hard rectangle. Slim wedge that
+	# narrows the silhouette toward the boom.
+	var tail_taper := MeshInstance3D.new()
+	tail_taper.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var tt_box := BoxMesh.new()
+	tt_box.size = Vector3(1.10, 0.40, 0.75)
+	tail_taper.mesh = tt_box
+	tail_taper.position = Vector3(0, -0.06, -1.95)
+	tail_taper.rotation.x = 0.18
+	tail_taper.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.10)))
+	add_child(tail_taper)
 
 	# Twin engine nacelles flanking the body. Each nacelle is now
 	# split into a forward intake block + an aft thrust block, with
