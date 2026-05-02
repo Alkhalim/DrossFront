@@ -2257,11 +2257,18 @@ func _build_unit_stat_sheet(unit: Node3D, _include_cost: bool = false) -> String
 		hp_now = unit.get("current_hp") as int
 	var alive: int = (unit.get("alive_count") as int) if "alive_count" in unit else 1
 
-	# Row 1 — defense.
+	# Row 1 — defense. Armor reduction percentage merged into the
+	# Armor chip as "(-X%)" right after the type label so the
+	# defensive headline reads at a glance instead of being split
+	# across rows.
+	var armor_pct: int = int(round(stats.resolved_armor_reduction() * 100.0))
+	var armor_label: String = str(stats.armor_class).capitalize()
+	if armor_pct > 0:
+		armor_label += "  (-%d%%)" % armor_pct
 	var row_defense: Array = [
 		_stat_chip("HP", "%d / %d" % [hp_now, stats.hp_total], STAT_LABEL_COLOR_HP),
 		_stat_chip("Class", str(stats.unit_class).capitalize(), STAT_LABEL_COLOR_DEFENSE),
-		_stat_chip("Armor", str(stats.armor_class).capitalize(), STAT_LABEL_COLOR_DEFENSE),
+		_stat_chip("Armor", armor_label, STAT_LABEL_COLOR_DEFENSE),
 	]
 
 	# Row 2 — combat. Always show both DPS-vs-ground and DPS-vs-air
@@ -2286,15 +2293,11 @@ func _build_unit_stat_sheet(unit: Node3D, _include_cost: bool = false) -> String
 	row_combat.append(_stat_chip("Range", "%.0fu" % range_u, STAT_LABEL_COLOR_RANGE))
 	row_combat.append(_stat_chip("Acc", "%d%%" % acc_pct, STAT_LABEL_COLOR_RANGE))
 
-	# Row 3 — mobility. Speed and sight read as star bars
-	# (bronze->silver->gold across 30 half-steps) so the relative
-	# quality lands at a glance, with the raw value in parentheses
-	# for the balance reader. Population + cost moved out of the
-	# stat sheet -- the production button already shows them as
-	# chips, repeating them here was clutter.
+	# Row 3 — mobility. Plain numeric readouts (the star bars
+	# stayed too busy alongside the rest of the panel content).
 	var row_mobility: Array = [
-		_stat_chip("Speed", "%s  (%.0f)" % [_stars_for_speed(stats.resolved_speed()), stats.resolved_speed()], STAT_LABEL_COLOR_MOBILITY),
-		_stat_chip("Sight", "%s  (%.0f)" % [_stars_for_sight(stats.resolved_sight_radius()), stats.resolved_sight_radius()], STAT_LABEL_COLOR_RANGE),
+		_stat_chip("Speed", "%.0f" % stats.resolved_speed(), STAT_LABEL_COLOR_MOBILITY),
+		_stat_chip("Sight", "%.0fu" % stats.resolved_sight_radius(), STAT_LABEL_COLOR_RANGE),
 		_stat_chip("Squad", "%d / %d" % [alive, stats.squad_size], STAT_LABEL_COLOR_SQUAD),
 	]
 
@@ -2309,13 +2312,10 @@ func _build_unit_stat_sheet(unit: Node3D, _include_cost: bool = false) -> String
 	# specific class -- the multipliers are doing most of the work.
 	var row_attack_bonus: Array = _attack_bonus_chips(stats)
 
-	# Row 5 — defense (own armor reduction).
-	var row_defense_bonus: Array = []
-	var armor_red: float = stats.resolved_armor_reduction()
-	if armor_red > 0.0 or stats.armor_class != &"unarmored":
-		row_defense_bonus.append(_stat_chip("Armor", "%s  (-%d%%)" % [_stars_for_armor(armor_red), int(round(armor_red * 100.0))], STAT_LABEL_COLOR_DEFENSE))
+	# (Bottom-row armor reduction chip removed -- the percentage now
+	# lives inline on the Armor chip in row_defense.)
 
-	return _build_stat_sheet([row_defense, row_combat, row_mobility, row_attack_bonus, row_defense_bonus])
+	return _build_stat_sheet([row_defense, row_combat, row_mobility, row_attack_bonus])
 
 
 func _attack_bonus_chips(stats: UnitStatResource) -> Array:
