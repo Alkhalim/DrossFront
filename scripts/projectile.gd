@@ -2,6 +2,15 @@ class_name Projectile
 extends Node3D
 ## Visual projectile. Missiles arc, bullets fly straight, beams are instant lines.
 
+func _ready() -> void:
+	# Group membership lets FogOfWar.apply_visibility hide
+	# projectiles whose current cell isn't currently in line of
+	# sight. Without this filter, a Hammerhead in unscouted
+	# territory would still leak its position to the player by
+	# rendering missile arcs through the fog.
+	add_to_group("projectiles")
+
+
 var target_pos: Vector3 = Vector3.ZERO
 var start_pos: Vector3 = Vector3.ZERO
 var speed: float = 40.0
@@ -184,7 +193,25 @@ func _create_beam_mesh(color: Color, from: Vector3, to: Vector3) -> void:
 	add_child(_mesh)
 
 
+## Cached FogOfWar reference — looked up lazily on the first
+## physics tick so the projectile doesn't pay the lookup cost when
+## fog isn't part of the active scene.
+var _fow: Node = null
+var _fow_lookup_done: bool = false
+
+
 func _process(delta: float) -> void:
+	# Per-frame FOW visibility — projectiles tick fast enough that
+	# the 5 Hz FogOfWar group sweep can leave them visible for
+	# up to 200ms after they enter fog. Self-checking here gives
+	# tight visual gating without measurably increasing combat
+	# cost (typically <15 projectiles in flight at peak).
+	if not _fow_lookup_done:
+		_fow_lookup_done = true
+		_fow = get_tree().current_scene.get_node_or_null("FogOfWar")
+	if _fow and _fow.has_method("is_visible_world"):
+		visible = _fow.is_visible_world(global_position)
+
 	# Beam — instant, fade out
 	if speed > 500.0:
 		if _mesh:

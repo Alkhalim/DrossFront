@@ -232,6 +232,17 @@ func _apply_entity_visibility() -> void:
 		if f3d:
 			f3d.visible = is_explored_world(f3d.global_position)
 
+	# Projectiles — strictly LOS-only. A missile fired from an
+	# unscouted Hammerhead would otherwise leak the unit's position
+	# by drawing its arc through the fog. Only currently-VISIBLE
+	# cells render projectiles; once they enter LOS they show.
+	for node: Node in get_tree().get_nodes_in_group("projectiles"):
+		if not is_instance_valid(node):
+			continue
+		var p3d: Node3D = node as Node3D
+		if p3d:
+			p3d.visible = is_visible_world(p3d.global_position)
+
 
 func _is_friendly(node: Node) -> bool:
 	if not ("owner_id" in node):
