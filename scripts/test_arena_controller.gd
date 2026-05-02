@@ -1510,8 +1510,19 @@ func _setup_terrain_foundry_belt() -> void:
 		{"pos": Vector3(0, 0, 50), "size": Vector3(6.0, 0.9, 4.5), "kind": "scrap_pile"},
 		{"pos": Vector3(0, 0, -65), "size": Vector3(5.5, 1.0, 5.0), "kind": "scrap_pile"},
 	]
+	# Tutorial mode skips every piece sitting on the centre-line
+	# (X = 0) — the southward discovery walk runs along that
+	# axis and the player's reinforce / Crawler / Ratchet
+	# spawns kept landing inside scrap piles + rock chunks.
+	# Off-centerline pieces (which the player passes BUT doesn't
+	# stand on) stay so the map still reads as inhabited.
+	var settings_for_terrain: Node = get_node_or_null("/root/MatchSettings")
+	var skip_centerline: bool = settings_for_terrain != null and settings_for_terrain.get("tutorial_mode")
 	for piece: Dictionary in pieces:
-		_spawn_terrain_piece(piece["pos"] as Vector3, piece["size"] as Vector3, piece["kind"] as String)
+		var p_pos: Vector3 = piece["pos"] as Vector3
+		if skip_centerline and absf(p_pos.x) < 0.5:
+			continue
+		_spawn_terrain_piece(p_pos, piece["size"] as Vector3, piece["kind"] as String)
 
 	# Rock outcrops — bigger, multi-faceted natural rock formations
 	# (5-7 box chunks fused at angles) for organic stone silhouettes
