@@ -1547,7 +1547,12 @@ func _setup_terrain_foundry_belt() -> void:
 		_spawn_neutral_building(foundry_stats, Vector3(38, 0, 22), 0.4)
 		_spawn_neutral_building(foundry_stats, Vector3(-38, 0, -22), -0.4)
 	var turret_stats: BuildingStatResource = load("res://resources/buildings/gun_emplacement.tres") as BuildingStatResource
-	if turret_stats:
+	# Tutorial mode skips the abandoned-foundry turrets entirely —
+	# the dead-centre turret was killing the player's starting Rook
+	# squad in the first few seconds before they could move.
+	var settings_for_turrets: Node = get_node_or_null("/root/MatchSettings")
+	var skip_turrets: bool = settings_for_turrets != null and settings_for_turrets.get("tutorial_mode")
+	if turret_stats and not skip_turrets:
 		_spawn_neutral_building(turret_stats, Vector3(0, 0, 0), 0.0)
 		_spawn_neutral_building(turret_stats, Vector3(70, 0, 8), 0.0)
 		_spawn_neutral_building(turret_stats, Vector3(-70, 0, -8), 0.0)

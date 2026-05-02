@@ -102,7 +102,13 @@ func _ready() -> void:
 	_build_pause_overlay()
 	_build_power_widget()
 	_build_alert_banner()
-	_build_gifting_panel()
+	# Gift-allies panel — hide in tutorial since the lone Sable
+	# strike force the mission spawns isn't a real player slot
+	# the human can transfer resources to. Rest of the modes
+	# keep the panel.
+	var settings_for_gift: Node = get_node_or_null("/root/MatchSettings")
+	if not (settings_for_gift and settings_for_gift.get("tutorial_mode")):
+		_build_gifting_panel()
 	_build_global_queue_panel()
 	_build_fps_counter()
 	_build_faction_watermark()
@@ -152,6 +158,7 @@ var _tutorial_banner_dialogue: Label = null
 var _tutorial_banner_objective: Label = null
 var _tutorial_banner_progress: Label = null
 var _tutorial_banner_last_index: int = -2  # never matches a real stage
+var _tutorial_banner_dialogue_tween: Tween = null
 
 
 func _build_tutorial_overlay() -> void:
@@ -274,9 +281,29 @@ func _refresh_tutorial_mission_banner() -> void:
 	var dialogue: String = mission.call("current_stage_dialogue") as String
 	var objective: String = mission.call("current_stage_objective") as String
 	var total: int = mission.call("total_stages") as int
-	_tutorial_banner_dialogue.text = dialogue
 	_tutorial_banner_objective.text = "Objective: %s" % objective
 	_tutorial_banner_progress.text = "Stage %d / %d" % [idx + 1, total]
+	# Typewriter dialogue — drop the full text in but clamp
+	# visible_characters to 0 and tween it up to the full length
+	# over a duration proportional to the line length (~32 chars
+	# per second). Reads as someone speaking the line rather than
+	# a wall of text appearing all at once. Kill the previous
+	# tween if a stage flips before the last one finishes so we
+	# don't get two animations stacked on the same Label.
+	_tutorial_banner_dialogue.text = dialogue
+	_tutorial_banner_dialogue.visible_characters = 0
+	if _tutorial_banner_dialogue_tween and _tutorial_banner_dialogue_tween.is_valid():
+		_tutorial_banner_dialogue_tween.kill()
+	var char_count: int = dialogue.length()
+	if char_count > 0:
+		var dur: float = clampf(float(char_count) / 32.0, 0.6, 4.0)
+		_tutorial_banner_dialogue_tween = create_tween()
+		_tutorial_banner_dialogue_tween.tween_property(
+			_tutorial_banner_dialogue,
+			"visible_characters",
+			char_count,
+			dur,
+		)
 
 
 func _check_tutorial_progress() -> void:

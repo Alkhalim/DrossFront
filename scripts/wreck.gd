@@ -369,7 +369,6 @@ func _build_satellite_landmark() -> void:
 		)
 		shard.set_surface_override_material(0, shard_mat)
 		add_child(shard)
-	add_child(glow)
 
 
 ## Create a wreck from a destroyed unit's stats.

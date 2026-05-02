@@ -38,6 +38,17 @@ var _next_spawn_in: float = 0.0
 
 
 func _ready() -> void:
+	# Tutorial mode strips out the satellite-crash mechanic — the
+	# mission has its own scripted pacing and a satellite-flare
+	# pop-up + microchip economy on top would just be noise that
+	# the tutorial banner never explains. Disable the spawner
+	# entirely on tutorial scenes.
+	var settings: Node = get_tree().current_scene.get_node_or_null("../MatchSettings") if get_tree() else null
+	if not settings:
+		settings = get_node_or_null("/root/MatchSettings")
+	if settings and settings.get("tutorial_mode"):
+		set_process(false)
+		return
 	# Stagger first spawn pass so initial scene chaos is settled.
 	call_deferred("_initial_drop")
 	_schedule_next_spawn()

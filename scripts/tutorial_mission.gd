@@ -323,6 +323,12 @@ func _stage_ally_enter() -> void:
 	_spawn_ally_unit("res://resources/units/sable_harbinger.tres", ally_pos)
 	_spawn_ally_unit("res://resources/units/sable_switchblade.tres", ally_pos + Vector3(8.0, 0.0, 0.0))
 	_spawn_ally_unit("res://resources/units/sable_switchblade.tres", ally_pos + Vector3(-8.0, 0.0, 0.0))
+	# Switch the playlist to the Sable folder so the moment the
+	# ally arrives the score shifts character. MusicManager's
+	# start() rebuilds the playlist + advances to a new track.
+	var music_mgr: Node = get_tree().current_scene.get_node_or_null("MusicManager")
+	if music_mgr and music_mgr.has_method("start"):
+		music_mgr.call("start", 1)  # 1 = Sable
 
 
 func _stage_ally_done() -> bool:
