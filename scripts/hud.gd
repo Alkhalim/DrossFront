@@ -2094,10 +2094,16 @@ func _build_building_stat_sheet(building: Node3D, bstats: BuildingStatResource, 
 	# by the actual fire path.
 	var turret: Node = building.get_node_or_null("TurretComponent") if building else null
 	if turret:
-		var dps: float = float(TurretComponent.TURRET_DAMAGE) / TurretComponent.FIRE_INTERVAL
+		# Read the turret's actual current profile (Anvil emplacement
+		# damage already includes the +15% multiplier; basic / SAM
+		# variants don't).
+		var t_dmg: int = int(turret.call("get_damage")) if turret.has_method("get_damage") else TurretComponent.TURRET_DAMAGE
+		var t_fi: float = float(turret.call("get_fire_interval")) if turret.has_method("get_fire_interval") else TurretComponent.FIRE_INTERVAL
+		var t_rng: float = float(turret.call("get_range")) if turret.has_method("get_range") else TurretComponent.TURRET_RANGE
+		var dps: float = float(t_dmg) / maxf(t_fi, 0.01)
 		var combat_row: Array = [
 			_stat_chip("DPS", "%.0f" % dps, STAT_LABEL_COLOR_DAMAGE),
-			_stat_chip("Range", "%.0fu" % TurretComponent.TURRET_RANGE, STAT_LABEL_COLOR_RANGE),
+			_stat_chip("Range", "%.0fu" % t_rng, STAT_LABEL_COLOR_RANGE),
 		]
 		rows.append(combat_row)
 
@@ -2209,12 +2215,19 @@ func _add_cost_chip(parent: Container, amount: int, color: Color) -> Dictionary:
 
 
 func _rebuild_turret_profile_buttons(building: Building) -> void:
-	## Four upgrade buttons for a selected gun emplacement — each calls into
-	## TurretComponent.set_profile to swap weapon stats and visuals.
+	## Profile-swap buttons for a selected gun emplacement — each calls
+	## into TurretComponent.set_profile to swap weapon stats and visuals.
+	## Only Anvil's specialised emplacement exposes profile selection;
+	## Sable's basic emplacement and the SAM Site keep a fixed profile,
+	## so we render no buttons for them. anti_air isn't in the swap list
+	## either way -- the SAM Site is the AA structure now.
 	_clear_buttons()
 	var turret: Node = building.get_node_or_null("TurretComponent")
 	if not turret:
 		_action_label.text = ""
+		return
+	if turret.has_method("is_profile_swap_allowed") and not turret.call("is_profile_swap_allowed"):
+		_action_label.text = "Static Defense"
 		return
 
 	_action_label.text = "Turret Profile"
@@ -2222,7 +2235,6 @@ func _rebuild_turret_profile_buttons(building: Building) -> void:
 		{ "key": &"balanced",   "hotkey": "Q" },
 		{ "key": &"anti_light", "hotkey": "W" },
 		{ "key": &"anti_heavy", "hotkey": "E" },
-		{ "key": &"anti_air",   "hotkey": "R" },
 	]
 	for entry: Dictionary in profiles:
 		var key: StringName = entry["key"] as StringName
@@ -3389,7 +3401,8 @@ func _building_role_hint(stat: BuildingStatResource) -> String:
 		&"basic_armory": return "Tech Upgrades"
 		&"advanced_armory": return "Advanced Tech & Unit Unlocks"
 		&"salvage_yard": return "Static Salvage Harvester"
-		&"gun_emplacement": return "Defensive Turret"
+		&"gun_emplacement": return "Anvil Defensive Turret (mode-switchable, +15% HP / dmg)"
+		&"gun_emplacement_basic": return "Defensive Turret (ground only, fixed)"
 		&"aerodrome": return "Aircraft Production"
 		&"sam_site": return "Anti-Air Defense"
 	return "Structure"
@@ -3414,7 +3427,9 @@ func _building_description(id: StringName) -> String:
 		&"salvage_yard":
 			return "Stationary harvester with a fixed work radius. Crawlers go further but are slower; yards are best on dense scrap fields."
 		&"gun_emplacement":
-			return "Manned turret. Choose a profile (anti-light / anti-heavy / anti-air / balanced) after construction."
+			return "Anvil's specialised emplacement. Pick a profile (Balanced / Anti-Light / Anti-Heavy) after construction. +15% HP and +15% damage vs the baseline turret. Ground only — pair with a SAM Site for air."
+		&"gun_emplacement_basic":
+			return "Standard ground turret. Fixed balanced profile, ground targets only. No mode switching — pair with a SAM Site for air defense."
 		&"aerodrome":
 			return "Trains the baseline aircraft (Anvil: Phalanx, Sable: Switchblade). An Advanced Armory unlocks the heavier airframe (Hammerhead / Fang) from the same building."
 		&"sam_site":

@@ -76,6 +76,11 @@ var _building_offsets: Dictionary = {}
 ## scene directly from the editor).
 var _econ_mul: float = 1.0
 var _agg_mul: float = 1.0
+## Turret resource path picked at startup based on the AI's faction.
+## Anvil AI gets the specialised emplacement; Sable AI gets the basic
+## ground-only variant. Resolved here so every _try_place(turret_*)
+## call below can use the same path without re-querying MatchSettings.
+var _turret_path: String = "res://resources/buildings/gun_emplacement.tres"
 
 
 func _enter_tree() -> void:
@@ -90,6 +95,10 @@ func _enter_tree() -> void:
 		else:
 			_econ_mul = settings.get_ai_economy_multiplier()
 			_agg_mul = settings.get_ai_aggression_multiplier()
+		# Sable AI picks the basic ground turret; Anvil keeps the
+		# specialised one. Faction id 1 = Sable (per MatchSettings.FactionId).
+		if "enemy_faction" in settings and (settings.get("enemy_faction") as int) == 1:
+			_turret_path = "res://resources/buildings/gun_emplacement_basic.tres"
 
 
 func _econ_mul_for_difficulty(d: int) -> float:
@@ -341,32 +350,32 @@ func _process_economy() -> void:
 			# covers a different slice of the map and contests scattered
 			# salvage targets instead of triple-stacking on one spot.
 			# Group A — home cluster, tight 3-turret triangle in front of HQ.
-			_try_place("turret_a1", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret_a", Vector3(0, 0, -14)))
-			_try_place("turret_a2", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret_a", Vector3(0, 0, -14)) + Vector3(8, 0, -2))
-			_try_place("turret_a3", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret_a", Vector3(0, 0, -14)) + Vector3(-8, 0, -2))
+			_try_place("turret_a1", _turret_path, _offset_for("turret_a", Vector3(0, 0, -14)))
+			_try_place("turret_a2", _turret_path, _offset_for("turret_a", Vector3(0, 0, -14)) + Vector3(8, 0, -2))
+			_try_place("turret_a3", _turret_path, _offset_for("turret_a", Vector3(0, 0, -14)) + Vector3(-8, 0, -2))
 			_try_place("generator2", "res://resources/buildings/basic_generator.tres", _offset_for("generator2", Vector3(22, 0, 18)))
 			_try_place("sam_site", "res://resources/buildings/sam_site.tres", _offset_for("sam_site", Vector3(0, 0, -22)))
 			# Group B — forward right cluster. Far enough from Group A
 			# that the two range-circles don't kiss; protects the right-
 			# flank lane / scrap-pile cluster.
-			_try_place("turret_b1", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret_b", Vector3(35, 0, -45)))
-			_try_place("turret_b2", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret_b", Vector3(35, 0, -45)) + Vector3(7, 0, -3))
-			_try_place("turret_b3", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret_b", Vector3(35, 0, -45)) + Vector3(-3, 0, -7))
+			_try_place("turret_b1", _turret_path, _offset_for("turret_b", Vector3(35, 0, -45)))
+			_try_place("turret_b2", _turret_path, _offset_for("turret_b", Vector3(35, 0, -45)) + Vector3(7, 0, -3))
+			_try_place("turret_b3", _turret_path, _offset_for("turret_b", Vector3(35, 0, -45)) + Vector3(-3, 0, -7))
 			_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
 			_try_place("aerodrome", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome", Vector3(28, 0, -8)))
 			# Group C — forward left cluster, mirror of B. Holds the
 			# opposite flank so the AI's defensive footprint covers the
 			# whole front.
-			_try_place("turret_c1", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret_c", Vector3(-35, 0, -45)))
-			_try_place("turret_c2", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret_c", Vector3(-35, 0, -45)) + Vector3(-7, 0, -3))
-			_try_place("turret_c3", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret_c", Vector3(-35, 0, -45)) + Vector3(3, 0, -7))
+			_try_place("turret_c1", _turret_path, _offset_for("turret_c", Vector3(-35, 0, -45)))
+			_try_place("turret_c2", _turret_path, _offset_for("turret_c", Vector3(-35, 0, -45)) + Vector3(-7, 0, -3))
+			_try_place("turret_c3", _turret_path, _offset_for("turret_c", Vector3(-35, 0, -45)) + Vector3(3, 0, -7))
 		Strategy.ECONOMY_HEAVY:
 			# Eco opener: extra generator + advanced foundry early,
 			# then aerodrome (extra production), then defensive structures.
 			_try_place("generator2", "res://resources/buildings/basic_generator.tres", _offset_for("generator2", Vector3(22, 0, 18)))
 			_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
 			_try_place("aerodrome", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome", Vector3(28, 0, -8)))
-			_try_place("turret", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret", Vector3(0, 0, -14)))
+			_try_place("turret", _turret_path, _offset_for("turret", Vector3(0, 0, -14)))
 			_try_place("sam_site", "res://resources/buildings/sam_site.tres", _offset_for("sam_site", Vector3(0, 0, -22)))
 		Strategy.RUSH:
 			# Aggressive: extra production fast (gen + adv foundry +
@@ -379,7 +388,7 @@ func _process_economy() -> void:
 		_:
 			# BALANCED — covers everything in a stable order.
 			_try_place("generator2", "res://resources/buildings/basic_generator.tres", _offset_for("generator2", Vector3(22, 0, 18)))
-			_try_place("turret", "res://resources/buildings/gun_emplacement.tres", _offset_for("turret", Vector3(0, 0, -14)))
+			_try_place("turret", _turret_path, _offset_for("turret", Vector3(0, 0, -14)))
 			_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
 			_try_place("aerodrome", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome", Vector3(28, 0, -8)))
 			_try_place("sam_site", "res://resources/buildings/sam_site.tres", _offset_for("sam_site", Vector3(0, 0, -22)))

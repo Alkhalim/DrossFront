@@ -3575,6 +3575,7 @@ func _setup_buildable_buildings() -> void:
 			"res://resources/buildings/basic_armory.tres",
 			"res://resources/buildings/advanced_armory.tres",
 			"res://resources/buildings/gun_emplacement.tres",
+			"res://resources/buildings/gun_emplacement_basic.tres",
 			# V3 §"Pillar 3" — Aerodrome (produces aircraft) + SAM Site
 			# (anti-air defense). Both available to either faction.
 			"res://resources/buildings/aerodrome.tres",

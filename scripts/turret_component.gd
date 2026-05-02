@@ -20,12 +20,21 @@ const FIRE_INTERVAL: float = 0.8
 ## Profile presets. Keep keys stable — HUD code references them by name.
 ## Damage values are 3x the original tuning so static defenses can actually
 ## threaten an attacking squad rather than tickle it.
+##
+## anti_air stays in PROFILES because the SAM Site uses the same component
+## with profile preset to anti_air (no UI swap; it's a dedicated AA building).
+## The HUD's profile selector lists only the ground profiles below.
 const PROFILES: Dictionary = {
 	&"balanced":   { "damage": 45,  "fire": 0.8,  "range": 20.0, "role": &"Universal", "name": "Balanced" },
 	&"anti_light": { "damage": 24,  "fire": 0.4,  "range": 18.0, "role": &"AP",        "name": "Anti-Light" },
 	&"anti_heavy": { "damage": 135, "fire": 2.0,  "range": 22.0, "role": &"AP",        "name": "Anti-Heavy" },
 	&"anti_air":   { "damage": 36,  "fire": 0.25, "range": 24.0, "role": &"AAir",      "name": "Anti-Air" },
 }
+
+## Anvil's industrial-doctrine turret hits harder than the baseline
+## emplacement. +15% damage on every profile; HP bonus lives on the
+## building's stats (Anvil .tres has hp 932, baseline has 810).
+const ANVIL_DAMAGE_MULT: float = 1.15
 
 var profile: StringName = &"balanced"
 
@@ -41,8 +50,32 @@ func _ready() -> void:
 	_apply_visual_profile()
 
 
+func _building_id() -> StringName:
+	if not _building:
+		return &""
+	var s: Resource = _building.get("stats") as Resource
+	if not s:
+		return &""
+	return s.get("building_id") as StringName
+
+
+func _damage_multiplier() -> float:
+	## Anvil's specialised emplacement deals +15% damage on every
+	## profile. Sable's basic emplacement and the SAM Site use the
+	## raw profile damage.
+	return ANVIL_DAMAGE_MULT if _building_id() == &"gun_emplacement" else 1.0
+
+
+func is_profile_swap_allowed() -> bool:
+	## Only Anvil's specialised emplacement exposes profile selection
+	## in the HUD. Sable's basic turret is fixed at the baseline
+	## ground role; the SAM Site is fixed at anti_air.
+	return _building_id() == &"gun_emplacement"
+
+
 func get_damage() -> int:
-	return (PROFILES[profile] as Dictionary).get("damage", TURRET_DAMAGE) as int
+	var base: int = (PROFILES[profile] as Dictionary).get("damage", TURRET_DAMAGE) as int
+	return int(round(float(base) * _damage_multiplier()))
 
 
 func get_fire_interval() -> float:

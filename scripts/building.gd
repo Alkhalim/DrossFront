@@ -179,7 +179,7 @@ func _ready() -> void:
 			var yard: Node = script.new()
 			yard.name = "SalvageYardComponent"
 			add_child(yard)
-		elif stats.building_id == &"gun_emplacement":
+		elif stats.building_id == &"gun_emplacement" or stats.building_id == &"gun_emplacement_basic":
 			var turret_script: GDScript = load("res://scripts/turret_component.gd") as GDScript
 			var turret: Node = turret_script.new()
 			turret.name = "TurretComponent"
@@ -247,7 +247,7 @@ func _add_building_details() -> void:
 		&"basic_armory": _detail_armory()
 		&"advanced_armory": _detail_advanced_armory()
 		&"salvage_yard": _detail_salvage_yard()
-		&"gun_emplacement": _detail_gun_emplacement()
+		&"gun_emplacement", &"gun_emplacement_basic": _detail_gun_emplacement()
 		&"aerodrome": _detail_aerodrome()
 		&"sam_site": _detail_sam_site()
 		&"black_pylon": _detail_black_pylon()
@@ -300,7 +300,7 @@ func _detail_universal_extras() -> void:
 	# right where we'd draw it (foundry's loading door, gun emplacement's
 	# turret base) so we don't double-stack geometry.
 	var bid: StringName = stats.building_id
-	if bid != &"basic_foundry" and bid != &"advanced_foundry" and bid != &"gun_emplacement":
+	if bid != &"basic_foundry" and bid != &"advanced_foundry" and bid != &"gun_emplacement" and bid != &"gun_emplacement_basic":
 		var doorway := MeshInstance3D.new()
 		var dbox := BoxMesh.new()
 		dbox.size = Vector3(fs.x * 0.22, fs.y * 0.18, 0.05)
@@ -1911,7 +1911,7 @@ func _apply_placeholder_shape() -> void:
 	# raised plinth at the base, and a crenellated parapet on top.
 	# Reads as Soviet-monolith industrial vs Sable's clean tower
 	# proportions.
-	if _resolve_faction_id() == 0 and stats.building_id != &"basic_generator" and stats.building_id != &"gun_emplacement":
+	if _resolve_faction_id() == 0 and stats.building_id != &"basic_generator" and stats.building_id != &"gun_emplacement" and stats.building_id != &"gun_emplacement_basic":
 		_apply_anvil_brutalist_extras()
 
 
@@ -2001,7 +2001,7 @@ func _roof_color_for_category() -> Color:
 			return _ROOF_TECH
 		&"basic_generator":
 			return _ROOF_POWER
-		&"gun_emplacement":
+		&"gun_emplacement", &"gun_emplacement_basic":
 			return _ROOF_DEFENSE
 		_:
 			return _ROOF_PRODUCTION
@@ -2067,7 +2067,7 @@ func _apply_function_roof_cap() -> void:
 		_attach_visual(_roof_accent)
 	# Defense category — small red warning inlay so it reads as "shooting"
 	# rather than "industrial".
-	elif stats.building_id == &"gun_emplacement":
+	elif stats.building_id == &"gun_emplacement" or stats.building_id == &"gun_emplacement_basic":
 		_roof_accent = MeshInstance3D.new()
 		var inlay := BoxMesh.new()
 		inlay.size = Vector3(fp.x * 0.4, fp.y * 0.04, fp.z * 0.18)

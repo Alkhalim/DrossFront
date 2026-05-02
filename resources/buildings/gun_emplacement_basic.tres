@@ -4,13 +4,13 @@
 
 [resource]
 script = ExtResource("1")
-building_name = "Anvil Gun Emplacement"
-building_id = &"gun_emplacement"
-hp = 932
+building_name = "Gun Emplacement"
+building_id = &"gun_emplacement_basic"
+hp = 810
 cost_salvage = 150
 build_time = 14.0
 power_consumption = 3
 power_production = 0
 footprint_size = Vector3(2.4, 2.4, 2.4)
 placeholder_color = Color(0.3, 0.3, 0.3, 1)
-faction_lock = 1
+faction_lock = 2
