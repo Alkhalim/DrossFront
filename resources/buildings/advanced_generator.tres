@@ -14,5 +14,5 @@ power_consumption = 0
 power_production = 75
 footprint_size = Vector3(4, 6, 4)
 placeholder_color = Color(0.20, 0.28, 0.42, 1)
-is_advanced = false
+is_advanced = true
 prerequisites = [&"basic_foundry"]
