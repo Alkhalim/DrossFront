@@ -810,15 +810,15 @@ func _show_faction_tech_tree(faction_id: int) -> void:
 	# as belonging to the chosen faction.
 	var palette: Dictionary = _faction_palette(faction_id)
 
-	# Apply a tooltip theme override so the unit-chip hover tooltips
-	# render with opaque backgrounds instead of the engine default
-	# (which is semi-transparent and unreadable over the modal's
-	# dark card). Lives on the canvas root so every child Button
-	# inherits.
-	canvas.theme = _make_tech_tree_tooltip_theme(palette)
+	# Tooltip theme override applied below to the card PanelContainer
+	# (CanvasLayer extends Node, not Control, so it doesn't have a
+	# `theme` property -- assignment crashes). PanelContainer is the
+	# nearest Control ancestor that wraps every interactive child.
+	var tooltip_theme: Theme = _make_tech_tree_tooltip_theme(palette)
 
 	var card := PanelContainer.new()
 	card.custom_minimum_size = Vector2(1100, 640)
+	card.theme = tooltip_theme
 	# Faction-tinted card frame.
 	var card_style := StyleBoxFlat.new()
 	card_style.bg_color = palette["card_bg"] as Color
