@@ -600,25 +600,33 @@ func _tick_first_building_raid() -> void:
 
 
 func _spawn_first_building_raid() -> void:
-	# One Courier Tank squad spawns at the northern enclave edge
-	# (-Z) and starts moving south toward the player base. Owner
-	# 2 (NEUTRAL pseudo-player) so it reads as enemy — same
-	# slot the enclave defenders use. Single squad keeps the
-	# raid as a soft warning rather than a real fight.
+	# Two Sable Specter (light infantry) squads spawn at the
+	# northern enclave edge (-Z) and march south toward the
+	# player base. Owner 2 (NEUTRAL pseudo-player) so they read
+	# as enemy — same slot the enclave defenders use. Light
+	# infantry instead of Courier Tanks because the player is
+	# still building up early-economy and a tank squad was
+	# punching above the player's defensive weight.
 	var raid_z: float = -110.0
-	var u: Node3D = _spawn_tutorial_raid_unit(
-		"res://resources/units/sable_courier_tank.tres",
-		Vector3(0.0, 0.0, raid_z),
-	)
-	if u and u.has_method("command_move"):
-		u.call("command_move", Vector3(0.0, 0.0, 80.0))
+	var raid_units: Array[Node3D] = []
+	for i: int in 2:
+		var rx: float = -8.0 + float(i) * 16.0
+		var u: Node3D = _spawn_tutorial_raid_unit(
+			"res://resources/units/sable_specter.tres",
+			Vector3(rx, 0.0, raid_z),
+		)
+		if u:
+			raid_units.append(u)
+	for ru: Node3D in raid_units:
+		if ru.has_method("command_move"):
+			ru.call("command_move", Vector3(0.0, 0.0, 80.0))
 	# Surface a one-line alert so the player sees the raid coming
 	# without having to scrub the minimap.
 	var alerts: Node = get_tree().current_scene.get_node_or_null("AlertManager")
 	if alerts and alerts.has_method("emit_alert"):
 		alerts.call(
 			"emit_alert",
-			"Sable raid inbound from the north — one Courier Tank squad",
+			"Sable raid inbound from the north — two Specter squads",
 			1,
 			Vector3(0.0, 0.0, raid_z),
 		)
