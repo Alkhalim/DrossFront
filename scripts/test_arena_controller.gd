@@ -120,6 +120,15 @@ func _ready() -> void:
 	_setup_navigation()
 	_bake_navmesh_now()
 
+	# Fire up the in-match playlist. The MusicManager child node loads
+	# the universal pool plus the player's faction folder and cycles
+	# through them, gap-spaced. Fire after the player_faction has been
+	# resolved by _setup_player so the right folder is picked.
+	var music_mgr: Node = get_node_or_null("MusicManager")
+	if music_mgr and music_mgr.has_method("start"):
+		var player_faction: int = _faction_id_for_player(0)
+		music_mgr.call("start", player_faction)
+
 
 func _setup_map_signature_features() -> void:
 	# Per-map distinctive features that go beyond the shared

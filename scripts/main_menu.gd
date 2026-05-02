@@ -66,6 +66,11 @@ func _ready() -> void:
 	_apply_theme()
 	_build_layout()
 	_show_main()
+	# Universal music for the menus — the MusicManager child node
+	# loads the Universal/ folder and cycles through it indefinitely.
+	var mm: Node = get_node_or_null("MusicManager")
+	if mm and mm.has_method("start"):
+		mm.call("start", -1)
 
 
 func _apply_theme() -> void:
