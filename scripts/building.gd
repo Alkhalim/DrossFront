@@ -316,19 +316,19 @@ func _detail_universal_extras() -> void:
 		vent.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.2, 0.18)))
 		_attach_visual(vent)
 
-	# Front doorway glow — small emissive square low on the front face.
+	# Front doorway -- recessed lit interior visible through the
+	# opening rather than a flat emissive panel slapped on the wall.
 	# Skip on buildings whose main detail layer already puts a feature
 	# right where we'd draw it (foundry's loading door, gun emplacement's
 	# turret base) so we don't double-stack geometry.
 	var bid: StringName = stats.building_id
 	if bid != &"basic_foundry" and bid != &"advanced_foundry" and bid != &"gun_emplacement" and bid != &"gun_emplacement_basic":
-		var doorway := MeshInstance3D.new()
-		var dbox := BoxMesh.new()
-		dbox.size = Vector3(fs.x * 0.22, fs.y * 0.18, 0.05)
-		doorway.mesh = dbox
-		doorway.position = Vector3(0.0, fs.y * 0.16, -fs.z * 0.5 - 0.03)
-		doorway.set_surface_override_material(0, _detail_emissive_mat(Color(0.95, 0.55, 0.2), 0.9))
-		_attach_visual(doorway)
+		_build_lit_doorway(
+			Vector3(0.0, fs.y * 0.16, -fs.z * 0.5),
+			fs.x * 0.22,
+			fs.y * 0.30,
+			Color(0.95, 0.55, 0.2),
+		)
 
 	# Subtle external pipework — a single conduit running along one side
 	# of the hull. Adds the dieselpunk read.
@@ -512,6 +512,115 @@ func _add_production_door(width: float, height: float) -> void:
 	rail.position = Vector3(0, height + 0.30, fs.z * 0.5 + 0.16)
 	rail.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.42, 0.38, 0.30)))
 	_attach_visual(rail)
+
+
+func _build_lit_doorway(centre_world: Vector3, width: float, height: float, accent: Color) -> void:
+	## Recessed doorway with a visible interior. Replaces the old
+	## "flat emissive box on the wall" pattern -- those read as a
+	## glowing rectangle pasted on, not a real opening. This builds
+	## five layers parented to a single Node3D centred on the door:
+	##   * Frame: thin trim around the opening (slightly proud)
+	##   * Recess back wall: dark cavity pushed INTO the building
+	##     (negative-Z relative to the front face) so the camera
+	##     sees depth instead of a flat rectangle
+	##   * Header beam: thin horizontal slab along the top of the
+	##     opening for the industrial-doorway read
+	##   * Floor sill: thin flat slab at the bottom edge so the
+	##     door doesn't read as floating
+	##   * Interior lights: 2 small emissive squares deep inside
+	##     the recess at varying heights, suggesting machinery /
+	##     activity rather than a single flat lamp
+	##
+	## Accent colour drives the trim + interior lights so factional
+	## identity carries through (Anvil amber / Sable violet etc.).
+	## centre_world is the position on the building's FRONT face;
+	## the recess extends back into the wall.
+	var door_root := Node3D.new()
+	door_root.position = centre_world
+	_attach_visual(door_root)
+
+	# Recess back wall -- a dark box pushed into the building
+	# (positive Z = INTO the building since the front face is at -Z).
+	# Reads as the inside of the room when the camera looks at the
+	# opening at the typical RTS angle.
+	var recess_depth: float = 0.45
+	var back := MeshInstance3D.new()
+	var back_box := BoxMesh.new()
+	back_box.size = Vector3(width * 0.94, height * 0.94, 0.04)
+	back.mesh = back_box
+	back.position = Vector3(0.0, 0.0, recess_depth)
+	back.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.05, 0.04, 0.04)))
+	door_root.add_child(back)
+
+	# Side walls of the recess -- catch shading so the cavity reads
+	# as a real volume rather than a back panel floating in space.
+	for side: int in 2:
+		var sx: float = -width * 0.5 if side == 0 else width * 0.5
+		var wall := MeshInstance3D.new()
+		var wall_box := BoxMesh.new()
+		wall_box.size = Vector3(0.04, height * 0.94, recess_depth)
+		wall.mesh = wall_box
+		wall.position = Vector3(sx, 0.0, recess_depth * 0.5)
+		wall.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.07, 0.06, 0.05)))
+		door_root.add_child(wall)
+
+	# Outer trim -- thin frame slightly proud of the wall, accent-tinted.
+	var trim_mat: StandardMaterial3D = _detail_emissive_mat(accent, 0.6)
+	var trim_w: float = 0.04
+	# Top.
+	var trim_top := MeshInstance3D.new()
+	var trim_top_box := BoxMesh.new()
+	trim_top_box.size = Vector3(width + trim_w * 2.0, trim_w, 0.04)
+	trim_top.mesh = trim_top_box
+	trim_top.position = Vector3(0.0, height * 0.5, -0.02)
+	trim_top.set_surface_override_material(0, trim_mat)
+	door_root.add_child(trim_top)
+	# Bottom.
+	var trim_bot := MeshInstance3D.new()
+	var trim_bot_box := BoxMesh.new()
+	trim_bot_box.size = Vector3(width + trim_w * 2.0, trim_w, 0.04)
+	trim_bot.mesh = trim_bot_box
+	trim_bot.position = Vector3(0.0, -height * 0.5, -0.02)
+	trim_bot.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.16, 0.14)))
+	door_root.add_child(trim_bot)
+	# Side trims.
+	for side: int in 2:
+		var sx2: float = -width * 0.5 - trim_w * 0.5 if side == 0 else width * 0.5 + trim_w * 0.5
+		var trim_side := MeshInstance3D.new()
+		var trim_side_box := BoxMesh.new()
+		trim_side_box.size = Vector3(trim_w, height, 0.04)
+		trim_side.mesh = trim_side_box
+		trim_side.position = Vector3(sx2, 0.0, -0.02)
+		trim_side.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.16, 0.14)))
+		door_root.add_child(trim_side)
+
+	# Interior lights -- small emissive boxes deep in the recess
+	# at varying heights. Two of them so the interior reads as
+	# "active workspace" rather than "a single bulb on a wall".
+	var lamp_a := MeshInstance3D.new()
+	var lamp_a_box := BoxMesh.new()
+	lamp_a_box.size = Vector3(width * 0.32, height * 0.18, 0.04)
+	lamp_a.mesh = lamp_a_box
+	lamp_a.position = Vector3(-width * 0.18, height * 0.20, recess_depth - 0.03)
+	lamp_a.set_surface_override_material(0, _detail_emissive_mat(accent, 1.4))
+	door_root.add_child(lamp_a)
+	var lamp_b := MeshInstance3D.new()
+	var lamp_b_box := BoxMesh.new()
+	lamp_b_box.size = Vector3(width * 0.20, height * 0.10, 0.04)
+	lamp_b.mesh = lamp_b_box
+	lamp_b.position = Vector3(width * 0.22, -height * 0.10, recess_depth - 0.03)
+	lamp_b.set_surface_override_material(0, _detail_emissive_mat(accent, 1.0))
+	door_root.add_child(lamp_b)
+
+	# Floor sill -- thin flat slab so the door doesn't read as
+	# floating against the wall.
+	var sill := MeshInstance3D.new()
+	var sill_box := BoxMesh.new()
+	sill_box.size = Vector3(width, 0.04, recess_depth + 0.04)
+	sill.mesh = sill_box
+	sill.position = Vector3(0.0, -height * 0.5 + 0.02, recess_depth * 0.5)
+	sill.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.10, 0.09, 0.08)))
+	door_root.add_child(sill)
 
 
 func _team_collar(width: float, height: float, depth: float, pos: Vector3) -> void:
@@ -1211,22 +1320,13 @@ func _detail_armory() -> void:
 	strip.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.85, 0.3), 1.6))
 	_attach_visual(strip)
 
-	# Loading dock door on the front — recessed panel with a horizontal bar.
-	var dock := MeshInstance3D.new()
-	var dock_box := BoxMesh.new()
-	dock_box.size = Vector3(fs.x * 0.4, fs.y * 0.55, 0.08)
-	dock.mesh = dock_box
-	dock.position = Vector3(0, fs.y * 0.3, -fs.z * 0.5 - 0.04)
-	dock.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.14, 0.13, 0.12)))
-	_attach_visual(dock)
-
-	var dock_bar := MeshInstance3D.new()
-	var dock_bar_box := BoxMesh.new()
-	dock_bar_box.size = Vector3(fs.x * 0.42, 0.05, 0.02)
-	dock_bar.mesh = dock_bar_box
-	dock_bar.position = Vector3(0, fs.y * 0.4, -fs.z * 0.5 - 0.085)
-	dock_bar.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.3, 0.28, 0.25)))
-	_attach_visual(dock_bar)
+	# Loading dock -- recessed lit interior with a header beam.
+	_build_lit_doorway(
+		Vector3(0.0, fs.y * 0.30, -fs.z * 0.5),
+		fs.x * 0.40,
+		fs.y * 0.55,
+		Color(0.95, 0.65, 0.20),
+	)
 
 	# Stacked ammo crates against the right side wall.
 	for c: int in 2:
@@ -1313,25 +1413,15 @@ func _detail_advanced_armory() -> void:
 	dish.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.30, 0.28, 0.32)))
 	_attach_visual(dish)
 
-	# Loading dock door on the front — same layout as basic armory so
-	# the building still reads as an armory at a glance.
-	var dock := MeshInstance3D.new()
-	var dock_box := BoxMesh.new()
-	dock_box.size = Vector3(fs.x * 0.4, fs.y * 0.55, 0.08)
-	dock.mesh = dock_box
-	dock.position = Vector3(0, fs.y * 0.3, -fs.z * 0.5 - 0.04)
-	dock.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.14, 0.13, 0.14)))
-	_attach_visual(dock)
-
-	# Violet edge piping around the dock — the second giveaway that
-	# this is the upgraded armory.
-	var pipe_top := MeshInstance3D.new()
-	var pipe_top_box := BoxMesh.new()
-	pipe_top_box.size = Vector3(dock_box.size.x + 0.08, 0.04, 0.04)
-	pipe_top.mesh = pipe_top_box
-	pipe_top.position = Vector3(0, fs.y * 0.3 + dock_box.size.y * 0.5 + 0.04, -fs.z * 0.5 - 0.085)
-	pipe_top.set_surface_override_material(0, _detail_emissive_mat(Color(0.78, 0.45, 1.0), 1.4))
-	_attach_visual(pipe_top)
+	# Loading dock -- same recessed-with-interior treatment as the
+	# basic armory but with violet accent lights so the upgraded
+	# armory's tech-violet identity reads through the entrance too.
+	_build_lit_doorway(
+		Vector3(0.0, fs.y * 0.30, -fs.z * 0.5),
+		fs.x * 0.40,
+		fs.y * 0.55,
+		Color(0.78, 0.45, 1.0),
+	)
 
 
 func _detail_salvage_yard() -> void:
