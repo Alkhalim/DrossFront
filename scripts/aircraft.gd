@@ -22,6 +22,13 @@ var owner_id: int = 1
 var alive_count: int = 1
 var current_hp: int = 0
 var member_hp: PackedInt32Array = PackedInt32Array()
+
+## V3 stealth — same model as Unit. Wraith starts concealed; the
+## targeting code checks stealth_revealed before auto-acquiring.
+var stealth_revealed: bool = true
+var _stealth_damage_timer: float = 0.0
+var _stealth_check_throttle: float = 0.0
+const STEALTH_CHECK_INTERVAL: float = 0.4
 var has_move_order: bool = false
 var move_target: Vector3 = Vector3.INF
 var is_holding_position: bool = false
@@ -96,6 +103,13 @@ func _ready() -> void:
 	_build_visuals()
 	_build_shadow_blob()
 	_build_click_collider()
+
+	# Stealth-capable aircraft (Wraith) start concealed; the
+	# proximity check below will reveal them when an enemy detector
+	# closes the distance, OR when they take damage.
+	if stats and stats.is_stealth_capable:
+		stealth_revealed = false
+		_apply_stealth_visual(true)
 
 
 ## --- Shadow / selection visuals ---
@@ -259,6 +273,9 @@ func _process(delta: float) -> void:
 	if _anvil_tail_rotor and is_instance_valid(_anvil_tail_rotor):
 		_anvil_tail_rotor.rotate_z(delta * 42.0)
 
+	# V3 stealth tick (Wraith only — early-out for everything else).
+	_process_stealth(delta)
+
 	# Per-drone bob — gives swarm aircraft visual life. Each drone has
 	# its own phase (set when spawned) so they don't bob in unison.
 	_drone_anim_time += delta
@@ -334,6 +351,8 @@ func _build_visuals() -> void:
 			_build_hammerhead()
 		"Switchblade Interceptor":
 			_build_switchblade()
+		"Wraith Bomber":
+			_build_wraith()
 		_:
 			_build_default_aircraft()
 
@@ -1103,6 +1122,106 @@ func _build_switchblade() -> void:
 const SABLE_NEON_PALE := Color(0.78, 0.35, 1.0, 1.0)  # violet, paired with unit/building Sable accent
 
 
+func _build_wraith() -> void:
+	## Sable stealth bomber — flat blade silhouette with a deep
+	## central bomb bay glow + swept rear empennage. Reads as
+	## "stealth flying-wing", much wider and lower than the
+	## Switchblade. The Stealth system handles concealment fade
+	## via GeometryInstance3D.transparency.
+	var team: Color = _team_color()
+	var body_color := Color(0.06, 0.06, 0.10, 1.0)
+
+	# Wide flat flying-wing fuselage.
+	var fuselage := MeshInstance3D.new()
+	fuselage.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var fuse_box := BoxMesh.new()
+	fuse_box.size = Vector3(2.2, 0.30, 3.0)
+	fuselage.mesh = fuse_box
+	fuselage.set_surface_override_material(0, _aircraft_metal_mat(body_color))
+	add_child(fuselage)
+
+	# Forward delta wings — large swept slabs angled out from the
+	# nose, giving the unmistakable stealth-bomber silhouette.
+	for wing_side: int in 2:
+		var wsx: float = 1.0 if wing_side == 0 else -1.0
+		var wing := MeshInstance3D.new()
+		wing.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var wing_box := BoxMesh.new()
+		wing_box.size = Vector3(2.2, 0.10, 1.5)
+		wing.mesh = wing_box
+		wing.position = Vector3(wsx * 1.3, 0.0, 0.5)
+		wing.rotation.y = wsx * deg_to_rad(-32.0)
+		wing.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.10)))
+		add_child(wing)
+
+	# Bomb-bay glow on the underside — a violet emissive recess
+	# down the spine. Carries the Sable identity + signals "armed".
+	var bay_mat := StandardMaterial3D.new()
+	bay_mat.albedo_color = SABLE_NEON_PALE
+	bay_mat.emission_enabled = true
+	bay_mat.emission = SABLE_NEON_PALE
+	bay_mat.emission_energy_multiplier = 1.4
+	bay_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	var bay := MeshInstance3D.new()
+	bay.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var bay_box := BoxMesh.new()
+	bay_box.size = Vector3(0.55, 0.06, 1.6)
+	bay.mesh = bay_box
+	bay.position = Vector3(0, -0.18, 0.0)
+	bay.set_surface_override_material(0, bay_mat)
+	add_child(bay)
+
+	# Twin rear stabilizer fins — small swept verticals at the back.
+	for fin_side: int in 2:
+		var fsx: float = 1.0 if fin_side == 0 else -1.0
+		var fin := MeshInstance3D.new()
+		fin.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var fin_box := BoxMesh.new()
+		fin_box.size = Vector3(0.06, 0.40, 0.55)
+		fin.mesh = fin_box
+		fin.position = Vector3(fsx * 0.55, 0.20, -1.30)
+		fin.rotation.z = fsx * deg_to_rad(18.0)
+		fin.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.15)))
+		add_child(fin)
+
+	# Centred dorsal cockpit blister — slim violet-tinted dome.
+	var cockpit := MeshInstance3D.new()
+	cockpit.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var cockpit_sphere := SphereMesh.new()
+	cockpit_sphere.radius = 0.22
+	cockpit_sphere.height = 0.30
+	cockpit.mesh = cockpit_sphere
+	cockpit.position = Vector3(0, 0.18, 0.85)
+	var cockpit_mat := StandardMaterial3D.new()
+	cockpit_mat.albedo_color = Color(0.05, 0.06, 0.10, 1.0)
+	cockpit_mat.emission_enabled = true
+	cockpit_mat.emission = SABLE_NEON_PALE
+	cockpit_mat.emission_energy_multiplier = 0.65
+	cockpit_mat.metallic = 0.7
+	cockpit_mat.roughness = 0.18
+	cockpit.set_surface_override_material(0, cockpit_mat)
+	add_child(cockpit)
+
+	# Slim team-colour edge sliver along the front leading edge of
+	# each wing — minimal player-color paint for a stealth airframe.
+	var team_mat := StandardMaterial3D.new()
+	team_mat.albedo_color = team
+	team_mat.emission_enabled = true
+	team_mat.emission = team
+	team_mat.emission_energy_multiplier = 1.4
+	for ts: int in 2:
+		var tsx: float = 1.0 if ts == 0 else -1.0
+		var sliver := MeshInstance3D.new()
+		sliver.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var sb := BoxMesh.new()
+		sb.size = Vector3(0.06, 0.04, 1.10)
+		sliver.mesh = sb
+		sliver.position = Vector3(tsx * 1.30, 0.06, 0.95)
+		sliver.rotation.y = tsx * deg_to_rad(-32.0)
+		sliver.set_surface_override_material(0, team_mat)
+		add_child(sliver)
+
+
 func _build_default_aircraft() -> void:
 	# Fallback for any aircraft type without a dedicated builder.
 	var team: Color = _team_color()
@@ -1135,6 +1254,72 @@ func _build_default_aircraft() -> void:
 	add_child(stripe)
 
 
+## --- V3 stealth (Wraith) -------------------------------------------------
+
+func _process_stealth(delta: float) -> void:
+	## Mirrors Unit._tick_stealth: throttled proximity check + a damage
+	## timer, with the same reveal rules. Wraith uses this; other
+	## aircraft pass through (is_stealth_capable defaults to false).
+	if not stats or not stats.is_stealth_capable or alive_count <= 0:
+		return
+	if _stealth_damage_timer > 0.0:
+		_stealth_damage_timer -= delta
+	_stealth_check_throttle -= delta
+	if _stealth_check_throttle > 0.0:
+		return
+	_stealth_check_throttle = STEALTH_CHECK_INTERVAL
+	if _stealth_damage_timer > 0.0:
+		if not stealth_revealed:
+			_set_stealth_revealed(true)
+		return
+	var registry: PlayerRegistry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry if get_tree() else null
+	var detect_r2: float = stats.detection_radius * stats.detection_radius
+	var spotted: bool = false
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node) or node == self:
+			continue
+		if not ("alive_count" in node) or (node.get("alive_count") as int) <= 0:
+			continue
+		var other_owner: int = node.get("owner_id") as int
+		if registry:
+			if registry.are_allied(owner_id, other_owner):
+				continue
+		else:
+			if other_owner == owner_id:
+				continue
+		var their_r: float = 80.0
+		if "stats" in node:
+			var their_stats: UnitStatResource = node.get("stats") as UnitStatResource
+			if their_stats:
+				their_r = their_stats.detection_radius
+		var their_r2: float = their_r * their_r
+		var dx: float = (node as Node3D).global_position.x - global_position.x
+		var dz: float = (node as Node3D).global_position.z - global_position.z
+		var d2: float = dx * dx + dz * dz
+		if d2 <= their_r2 or d2 <= detect_r2:
+			spotted = true
+			break
+	if spotted != stealth_revealed:
+		_set_stealth_revealed(spotted)
+
+
+func _set_stealth_revealed(revealed: bool) -> void:
+	stealth_revealed = revealed
+	_apply_stealth_visual(not revealed)
+
+
+func _apply_stealth_visual(concealed: bool) -> void:
+	var t: float = 0.7 if concealed else 0.0
+	_apply_transparency_recursive(self, t)
+
+
+func _apply_transparency_recursive(node: Node, t: float) -> void:
+	if node is GeometryInstance3D:
+		(node as GeometryInstance3D).transparency = t
+	for child: Node in node.get_children():
+		_apply_transparency_recursive(child, t)
+
+
 ## --- Combat compatibility ---
 
 func take_damage(amount: int, _attacker: Node3D = null) -> void:
@@ -1146,6 +1331,10 @@ func take_damage(amount: int, _attacker: Node3D = null) -> void:
 	## way they did before.
 	if alive_count <= 0:
 		return
+	# Stealth break — Wraith reveals when hit; same rule as Unit.
+	if stats and stats.is_stealth_capable:
+		_stealth_damage_timer = stats.stealth_restore_time
+		_set_stealth_revealed(true)
 	var remaining: int = amount
 	for i: int in member_hp.size():
 		if remaining <= 0:

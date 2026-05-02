@@ -2383,6 +2383,11 @@ func get_producible_units() -> Array[UnitStatResource]:
 				"res://resources/units/sable_fang.tres",
 				"res://resources/units/sable_switchblade.tres",
 			]
+			# Wraith stealth bomber requires a constructed Black Pylon
+			# (V3 spec). Players who have one can train Wraith from the
+			# aerodrome too; otherwise the entry is hidden.
+			if _local_player_has_built(&"black_pylon"):
+				sable_paths.append("res://resources/units/sable_wraith.tres")
 		_:
 			# Building type without a Sable-specific roster — fall back
 			# to the default list (e.g., salvage_yard has no produced
@@ -2809,6 +2814,24 @@ func _add_mesh_aura_ring(radius: float) -> void:
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	ring.set_surface_override_material(0, mat)
 	add_child(ring)
+
+
+func _local_player_has_built(building_id: StringName) -> bool:
+	## True when ANY building owned by this Building's owner has the
+	## given building_id and is fully constructed. Used by the
+	## faction-aware production list to gate Wraith behind the
+	## Black Pylon.
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node) or node == self:
+			continue
+		if "owner_id" in node and (node.get("owner_id") as int) != owner_id:
+			continue
+		if not node.get("is_constructed"):
+			continue
+		var b: BuildingStatResource = node.get("stats") as BuildingStatResource
+		if b and b.building_id == building_id:
+			return true
+	return false
 
 
 func _resolve_faction_id() -> int:
