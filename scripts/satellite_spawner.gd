@@ -39,7 +39,37 @@ const SPAWN_Z_RANGE: float = 110.0
 ## of bases.
 const HQ_KEEPOUT: float = 40.0
 
+## Lead time between the player getting an early-warning ping and
+## the satellite actually impacting. 90s gives the player room to
+## re-route a Crawler / squad toward the marked spot before the
+## chip pile lands.
+const WARNING_LEAD_TIME_SEC: float = 90.0
+## Spacing between minimap re-pings during the warning window so
+## the marker keeps the player's eye anchored without spamming
+## audio. Aligned roughly with the alert-channel cooldown so the
+## "incoming" voiceline doesn't repeat every tick.
+const WARNING_PING_INTERVAL_SEC: float = 15.0
+
+## Impact damage radius + magnitude. Values mirror the ammo dump's
+## "this matters" pop so the player learns the cue: catching a
+## Bulwark squad under the impact is meaningful but not
+## squad-deleting.
+const IMPACT_DAMAGE: int = 200
+const IMPACT_RADIUS: float = 10.0
+
+## Crash-event LOS reveal at the impact point. Long enough for the
+## player to register the explosion + chip pile before the fog
+## takes the cell back.
+const IMPACT_REVEAL_RADIUS: float = 26.0
+const IMPACT_REVEAL_DURATION_SEC: float = 8.0
+
 var _next_spawn_in: float = 0.0
+
+## Pending crashes -- each entry { pos, fires_at_sec, last_ping_sec }.
+## _process steps through this list every frame; warnings re-ping
+## every WARNING_PING_INTERVAL_SEC and the impact triggers when
+## fires_at_sec elapses.
+var _pending_crashes: Array[Dictionary] = []
 
 
 func _ready() -> void:
@@ -60,11 +90,28 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	# Step pending crash warnings (re-ping minimap + trigger
+	# impact when their countdown lands).
+	if not _pending_crashes.is_empty():
+		var now_sec: float = float(Time.get_ticks_msec()) / 1000.0
+		var i: int = _pending_crashes.size() - 1
+		while i >= 0:
+			var entry: Dictionary = _pending_crashes[i]
+			if (entry["fires_at"] as float) <= now_sec:
+				_trigger_crash(entry["pos"] as Vector3)
+				_pending_crashes.remove_at(i)
+			elif now_sec - (entry["last_ping"] as float) >= WARNING_PING_INTERVAL_SEC:
+				_ping_warning(entry["pos"] as Vector3)
+				entry["last_ping"] = now_sec
+				_pending_crashes[i] = entry
+			i -= 1
+
+	# Schedule new crash warnings on the existing cadence.
 	if _next_spawn_in <= 0.0:
 		return
 	_next_spawn_in -= delta
 	if _next_spawn_in <= 0.0:
-		_spawn_one()
+		_schedule_crash()
 		_schedule_next_spawn()
 
 
@@ -75,11 +122,13 @@ func _schedule_next_spawn() -> void:
 func _initial_drop() -> void:
 	var count: int = randi_range(STARTING_PILES_MIN, STARTING_PILES_MAX)
 	for i: int in count:
-		_spawn_one(true)
+		_drop_static_pile(_pick_spawn_pos())
 
 
-func _spawn_one(is_initial: bool = false) -> void:
-	var pos: Vector3 = _pick_spawn_pos()
+func _drop_static_pile(pos: Vector3) -> void:
+	## Map-setup pile -- already on the ground when the match
+	## starts, no warning, no impact damage, no flare. Player
+	## scouts it normally.
 	if pos == Vector3.INF:
 		return
 	var pile := Wreck.new()
@@ -90,43 +139,173 @@ func _spawn_one(is_initial: bool = false) -> void:
 	pile.wreck_size = Vector3(2.6, 0.7, 2.6)
 	pile.position = pos
 	get_tree().current_scene.add_child.call_deferred(pile)
-	# Initial piles are part of the map setup, not a crash event --
-	# the player should have to discover them. Skip the alert /
-	# fog-reveal / minimap-ping / flare; they only fire for piles
-	# that spawn in via mid-match crash events.
-	if is_initial:
+
+
+func _schedule_crash() -> void:
+	## Picks an impact site, fires the early-warning alert + minimap
+	## ping, and queues the actual impact for WARNING_LEAD_TIME_SEC
+	## seconds out. The player has the lead time to redirect a
+	## Crawler / squad toward the marked spot.
+	var pos: Vector3 = _pick_spawn_pos()
+	if pos == Vector3.INF:
 		return
-	# Surface a one-line alert so the player learns the cue —
-	# AlertManager handles routing to the HUD ticker if present.
+	var now_sec: float = float(Time.get_ticks_msec()) / 1000.0
+	_pending_crashes.append({
+		"pos": pos,
+		"fires_at": now_sec + WARNING_LEAD_TIME_SEC,
+		"last_ping": now_sec,
+	})
+	# Initial alert + ping so the player knows immediately.
 	var alerts: Node = get_tree().current_scene.get_node_or_null("AlertManager")
 	if alerts and alerts.has_method("emit_alert"):
-		alerts.call("emit_alert", "Satellite crash detected — salvage and chips inbound", 0, pos)
-	# Briefly reveal the crash site through the fog so the player
-	# actually sees the new pile pop in (8s gives them time to
-	# notice + plan a recovery before LOS lapses).
-	var fow: Node = get_tree().current_scene.get_node_or_null("FogOfWar")
-	if fow and fow.has_method("reveal_area"):
-		fow.call("reveal_area", pos, 28.0, 8.0)
-	# Minimap ping in violet so the player's eye snaps to the
-	# crash site even off-screen — same colour as the chips
-	# resource readout so the cue is consistent.
+		alerts.call(
+			"emit_alert",
+			"Satellite tracked — impact in %ds" % int(WARNING_LEAD_TIME_SEC),
+			0,
+			pos,
+		)
+	_ping_warning(pos)
+
+
+func _ping_warning(pos: Vector3) -> void:
+	## Ping the minimap (violet, matches chip colour) at the future
+	## impact point. Called once on schedule + every
+	## WARNING_PING_INTERVAL_SEC during the lead window so the eye
+	## stays anchored to where the crash will land.
 	var hud: Node = get_tree().current_scene.get_node_or_null("HUD")
 	if not hud:
-		# HUD is a CanvasLayer scene attached to the test arena;
-		# the actual minimap node sits inside it.
 		var canvas: Node = get_tree().current_scene.get_node_or_null("HUDCanvas")
 		if canvas:
 			hud = canvas.get_node_or_null("HUD")
-	var minimap: Node = null
 	if hud:
-		minimap = hud.get_node_or_null("Minimap")
-	if minimap and minimap.has_method("ping"):
-		minimap.call("ping", pos, Color(0.78, 0.42, 1.0, 1.0))
-	# Vertical signal flare at the crash position — emissive violet
-	# beam tapering up so the player's camera sweep catches it.
-	# Free-standing scene child; tweens its own scale/alpha out and
-	# queue_frees after ~3.5s.
+		var minimap: Node = hud.get_node_or_null("Minimap")
+		if minimap and minimap.has_method("ping"):
+			minimap.call("ping", pos, Color(0.78, 0.42, 1.0, 1.0))
+
+
+func _trigger_crash(pos: Vector3) -> void:
+	## Impact event: spawns the chip pile, deals splash damage to
+	## anything inside IMPACT_RADIUS, plays a heavy explosion + VFX,
+	## and grants a brief LOS reveal so the player sees the crater.
+	# Spawn the pile.
+	_drop_static_pile(pos)
+
+	# Splash damage -- units / buildings / crawlers within the impact
+	# radius take a flat IMPACT_DAMAGE. Linear cap so the centre
+	# takes full and the edge takes ~30%.
+	var groups: Array[String] = ["units", "buildings", "crawlers"]
+	for g: String in groups:
+		for node: Node in get_tree().get_nodes_in_group(g):
+			if not is_instance_valid(node):
+				continue
+			if not node.has_method("take_damage"):
+				continue
+			var n3: Node3D = node as Node3D
+			if not n3:
+				continue
+			var d: float = pos.distance_to(n3.global_position)
+			if d > IMPACT_RADIUS:
+				continue
+			var falloff: float = clampf(1.0 - (d / IMPACT_RADIUS) * 0.7, 0.3, 1.0)
+			node.take_damage(int(IMPACT_DAMAGE * falloff), null)
+
+	# Audio -- huge explosion stinger so the crash reads as a real
+	# event, not a quiet pop.
+	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
+	if audio:
+		if audio.has_method("play_huge_explosion"):
+			audio.call("play_huge_explosion", pos)
+		elif audio.has_method("play_weapon_impact"):
+			audio.call("play_weapon_impact", pos)
+
+	# Brief FOW reveal at the impact site so the player can
+	# actually see the explosion + new pile.
+	var fow: Node = get_tree().current_scene.get_node_or_null("FogOfWar")
+	if fow and fow.has_method("reveal_area"):
+		fow.call("reveal_area", pos, IMPACT_REVEAL_RADIUS, IMPACT_REVEAL_DURATION_SEC)
+
+	# Visual punch -- fireball + ground shockwave (mirrors ammo dump's
+	# detonation language so the player learns the visual cue across
+	# both kinds of explosions).
+	_spawn_impact_vfx(pos)
 	_spawn_flare(pos)
+
+	# Confirmation alert at the actual impact.
+	var alerts: Node = get_tree().current_scene.get_node_or_null("AlertManager")
+	if alerts and alerts.has_method("emit_alert"):
+		alerts.call("emit_alert", "Satellite impact — chips down", 0, pos)
+
+
+func _spawn_impact_vfx(pos: Vector3) -> void:
+	## Fireball sphere expanding to ~70% IMPACT_RADIUS + ground-laid
+	## shockwave torus expanding out to IMPACT_RADIUS. Same recipe
+	## as ammo_dump._spawn_explosion_vfx, smaller because the impact
+	## radius is 10u vs 14u.
+	var scene: Node = get_tree().current_scene
+	if not scene:
+		return
+	# Brief omni light that throws onto nearby geometry.
+	var light := OmniLight3D.new()
+	light.light_color = Color(1.0, 0.55, 0.18, 1.0)
+	light.light_energy = 7.0
+	light.omni_range = IMPACT_RADIUS * 1.8
+	scene.add_child(light)
+	light.global_position = pos + Vector3(0.0, 1.5, 0.0)
+	var ltween := light.create_tween()
+	ltween.tween_property(light, "light_energy", 0.0, 0.7).set_ease(Tween.EASE_OUT)
+	ltween.tween_callback(light.queue_free)
+	# Fireball sphere.
+	var fireball := MeshInstance3D.new()
+	fireball.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var fb_mesh := SphereMesh.new()
+	fb_mesh.radius = 1.0
+	fb_mesh.height = 2.0
+	fb_mesh.radial_segments = 24
+	fb_mesh.rings = 12
+	fireball.mesh = fb_mesh
+	var fb_mat := StandardMaterial3D.new()
+	fb_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	fb_mat.albedo_color = Color(1.0, 0.55, 0.15, 0.85)
+	fb_mat.emission_enabled = true
+	fb_mat.emission = Color(1.0, 0.55, 0.15, 1.0)
+	fb_mat.emission_energy_multiplier = 2.0
+	fb_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	fireball.set_surface_override_material(0, fb_mat)
+	fireball.scale = Vector3.ONE * 0.6
+	scene.add_child(fireball)
+	fireball.global_position = pos + Vector3(0.0, 1.5, 0.0)
+	var fb_target_scale: float = IMPACT_RADIUS * 0.7
+	var fb_tween := fireball.create_tween()
+	fb_tween.set_parallel(true)
+	fb_tween.tween_property(fireball, "scale", Vector3.ONE * fb_target_scale, 0.45).set_ease(Tween.EASE_OUT)
+	fb_tween.tween_property(fb_mat, "albedo_color:a", 0.0, 0.55).set_ease(Tween.EASE_IN).set_delay(0.10)
+	fb_tween.chain().tween_callback(fireball.queue_free)
+	# Shockwave ring.
+	var ring := MeshInstance3D.new()
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var ring_mesh := TorusMesh.new()
+	ring_mesh.inner_radius = 0.85
+	ring_mesh.outer_radius = 1.0
+	ring_mesh.rings = 36
+	ring_mesh.ring_segments = 6
+	ring.mesh = ring_mesh
+	var ring_mat := StandardMaterial3D.new()
+	ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ring_mat.albedo_color = Color(1.0, 0.75, 0.25, 0.90)
+	ring_mat.emission_enabled = true
+	ring_mat.emission = Color(1.0, 0.75, 0.25, 1.0)
+	ring_mat.emission_energy_multiplier = 1.8
+	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ring_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	ring.set_surface_override_material(0, ring_mat)
+	ring.rotation.x = -PI * 0.5
+	scene.add_child(ring)
+	ring.global_position = pos + Vector3(0.0, 0.15, 0.0)
+	var ring_tween := ring.create_tween()
+	ring_tween.set_parallel(true)
+	ring_tween.tween_property(ring, "scale", Vector3(IMPACT_RADIUS, IMPACT_RADIUS, IMPACT_RADIUS), 0.55).set_ease(Tween.EASE_OUT)
+	ring_tween.tween_property(ring_mat, "albedo_color:a", 0.0, 0.55).set_ease(Tween.EASE_IN).set_delay(0.20)
+	ring_tween.chain().tween_callback(ring.queue_free)
 
 
 func _spawn_flare(pos: Vector3) -> void:
