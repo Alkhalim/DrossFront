@@ -11,10 +11,10 @@ const MAX_HP: int = 220
 ## Explosion is meant to be a CATASTROPHIC event when a player
 ## successfully shoots one — radius covers a meaningful chunk of map
 ## and damage one-shots most light/medium squads caught in the blast.
-## Was 6u / 90 dmg which read as a small pop; bumped to make ammo
-## dumps a real strategic objective.
+## Damage tripled per balance pass so ammo dumps actually delete a
+## squad caught at full radius rather than chip-damaging them.
 const EXPLOSION_RADIUS: float = 14.0
-const EXPLOSION_DAMAGE: int = 280
+const EXPLOSION_DAMAGE: int = 840
 ## Owner sentinel — dumps are never on a player's team. Treated as
 ## neutral so combat hostility checks already see them as targetable.
 const NEUTRAL_OWNER: int = 2
@@ -96,6 +96,66 @@ func _build_visuals() -> void:
 	band_mat.roughness = 0.4
 	band.set_surface_override_material(0, band_mat)
 	add_child(band)
+
+	# Explosive warning sign on top of the stack -- a stylized
+	# detonation symbol (yellow triangle around a red "burst" star)
+	# so the player reads at a glance that this pile is volatile.
+	# The sign sits above the brass band so it's the first thing
+	# the eye lands on when the camera passes over.
+	_build_warning_sign()
+
+
+func _build_warning_sign() -> void:
+	var sign_root := Node3D.new()
+	sign_root.position = Vector3(0.0, 1.85, 0.0)
+	add_child(sign_root)
+	# Hazard-yellow triangular plate -- three rotated boxes form a
+	# rough triangle outline. Using boxes (vs a custom triangle
+	# mesh) keeps this a couple of cheap meshes.
+	var tri_size: float = 0.55
+	var plate := MeshInstance3D.new()
+	var plate_mesh := PrismMesh.new()
+	plate_mesh.size = Vector3(tri_size * 2.0, tri_size * 1.7, 0.06)
+	plate.mesh = plate_mesh
+	# Billboard so the triangle stays readable from any camera angle.
+	var plate_mat := StandardMaterial3D.new()
+	plate_mat.albedo_color = Color(1.0, 0.85, 0.10, 1.0)
+	plate_mat.emission_enabled = true
+	plate_mat.emission = Color(1.0, 0.80, 0.10, 1.0)
+	plate_mat.emission_energy_multiplier = 0.9
+	plate_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	plate.set_surface_override_material(0, plate_mat)
+	sign_root.add_child(plate)
+	# Red detonation burst centre -- 6-spoke star drawn as overlapping
+	# thin boxes, rotated 60 degrees apart.
+	for i: int in 6:
+		var spoke := MeshInstance3D.new()
+		var sb := BoxMesh.new()
+		sb.size = Vector3(0.08, tri_size * 1.0, 0.02)
+		spoke.mesh = sb
+		spoke.rotation.z = float(i) / 6.0 * PI  # 6 spokes = 30deg apart
+		spoke.position.z = -0.04  # nudge in front of the plate
+		var spoke_mat := StandardMaterial3D.new()
+		spoke_mat.albedo_color = Color(0.9, 0.10, 0.10, 1.0)
+		spoke_mat.emission_enabled = true
+		spoke_mat.emission = Color(1.0, 0.20, 0.15, 1.0)
+		spoke_mat.emission_energy_multiplier = 1.6
+		spoke_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+		spoke.set_surface_override_material(0, spoke_mat)
+		sign_root.add_child(spoke)
+	# Black hazard-stripe outline at the perimeter -- faint, so the
+	# yellow + red still dominate but the silhouette reads as a
+	# proper warning placard.
+	var border := MeshInstance3D.new()
+	var border_mesh := PrismMesh.new()
+	border_mesh.size = Vector3(tri_size * 2.18, tri_size * 1.85, 0.05)
+	border.mesh = border_mesh
+	border.position.z = 0.02
+	var border_mat := StandardMaterial3D.new()
+	border_mat.albedo_color = Color(0.05, 0.05, 0.05, 1.0)
+	border_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	border.set_surface_override_material(0, border_mat)
+	sign_root.add_child(border)
 
 
 func _build_collision() -> void:
@@ -212,6 +272,72 @@ func _spawn_explosion_vfx(pos: Vector3) -> void:
 	var ltween := light.create_tween()
 	ltween.tween_property(light, "light_energy", 0.0, 0.7).set_ease(Tween.EASE_OUT)
 	ltween.tween_callback(light.queue_free)
+
+	# Fireball -- a large emissive sphere that scales out from a tight
+	# core to ~70% of the damage radius over 0.45s, then fades. Sells
+	# the "this is a CATASTROPHIC blast" beat better than the flash
+	# particles alone (which read as point sparks at distance).
+	var fireball := MeshInstance3D.new()
+	fireball.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var fb_mesh := SphereMesh.new()
+	fb_mesh.radius = 1.0
+	fb_mesh.height = 2.0
+	fb_mesh.radial_segments = 24
+	fb_mesh.rings = 12
+	fireball.mesh = fb_mesh
+	var fb_mat := StandardMaterial3D.new()
+	fb_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	fb_mat.albedo_color = Color(1.0, 0.55, 0.15, 0.85)
+	fb_mat.emission_enabled = true
+	fb_mat.emission = Color(1.0, 0.55, 0.15, 1.0)
+	fb_mat.emission_energy_multiplier = 2.0
+	fb_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	fireball.set_surface_override_material(0, fb_mat)
+	fireball.scale = Vector3.ONE * 0.6
+	scene.add_child(fireball)
+	fireball.global_position = pos + Vector3(0.0, 1.5, 0.0)
+	var fb_target_scale: float = EXPLOSION_RADIUS * 0.7
+	var fb_tween := fireball.create_tween()
+	fb_tween.set_parallel(true)
+	fb_tween.tween_property(fireball, "scale", Vector3.ONE * fb_target_scale, 0.45).set_ease(Tween.EASE_OUT)
+	fb_tween.tween_property(fb_mat, "albedo_color:a", 0.0, 0.55).set_ease(Tween.EASE_IN).set_delay(0.10)
+	fb_tween.chain().tween_callback(fireball.queue_free)
+
+	# Shockwave -- a flat ring expanding along the ground out to
+	# EXPLOSION_RADIUS over 0.55s. Gives the player a precise visual
+	# of the damage area: anything inside the ring at the moment of
+	# detonation took damage. Uses a TorusMesh that scales radially.
+	var ring := MeshInstance3D.new()
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var ring_mesh := TorusMesh.new()
+	ring_mesh.inner_radius = 0.85
+	ring_mesh.outer_radius = 1.0
+	ring_mesh.rings = 36
+	ring_mesh.ring_segments = 6
+	ring.mesh = ring_mesh
+	var ring_mat := StandardMaterial3D.new()
+	ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ring_mat.albedo_color = Color(1.0, 0.75, 0.25, 0.90)
+	ring_mat.emission_enabled = true
+	ring_mat.emission = Color(1.0, 0.75, 0.25, 1.0)
+	ring_mat.emission_energy_multiplier = 1.8
+	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ring_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	ring.set_surface_override_material(0, ring_mat)
+	# TorusMesh's natural orientation is YZ-axis; rotate to lay flat
+	# on XZ ground plane.
+	ring.rotation.x = -PI * 0.5
+	scene.add_child(ring)
+	ring.global_position = pos + Vector3(0.0, 0.15, 0.0)
+	# Scale the torus so its OUTER radius matches EXPLOSION_RADIUS at
+	# end; starts at 1u outer radius (so visually a tiny ring at the
+	# centre) and ramps out.
+	var ring_target_scale: float = EXPLOSION_RADIUS
+	var ring_tween := ring.create_tween()
+	ring_tween.set_parallel(true)
+	ring_tween.tween_property(ring, "scale", Vector3(ring_target_scale, ring_target_scale, ring_target_scale), 0.55).set_ease(Tween.EASE_OUT)
+	ring_tween.tween_property(ring_mat, "albedo_color:a", 0.0, 0.55).set_ease(Tween.EASE_IN).set_delay(0.20)
+	ring_tween.chain().tween_callback(ring.queue_free)
 
 
 ## Combat compatibility — the auto-target / forced-target logic checks
