@@ -49,6 +49,10 @@ const _MAP_INFO: Dictionary = {
 		"label": "Ashplains Crossing",
 		"blurb": "Volcanic ash flats with one elevated ridge.\nLong sightlines, sparse cover,\nfavours ranged combat.",
 	},
+	MatchSettingsClass.MapId.IRON_GATE_CROSSING: {
+		"label": "Iron Gate Crossing",
+		"blurb": "Semi-controlled district between corp cores.\nDense ruin clusters favour stealth flanks,\ncentral corridor favours heavy push.",
+	},
 }
 
 
@@ -265,6 +269,7 @@ func _build_map_section(parent: Container) -> void:
 	for map_id_v: int in [
 		MatchSettingsClass.MapId.FOUNDRY_BELT,
 		MatchSettingsClass.MapId.ASHPLAINS_CROSSING,
+		MatchSettingsClass.MapId.IRON_GATE_CROSSING,
 	]:
 		var info: Dictionary = _MAP_INFO[map_id_v] as Dictionary
 		_map_dropdown.add_item(info["label"] as String, map_id_v)

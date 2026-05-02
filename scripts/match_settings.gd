@@ -10,7 +10,9 @@ enum Mode { ONE_V_ONE, TWO_V_TWO }
 ## industrial map (the v1 test arena, kept and expanded). Ashplains
 ## Crossing is the new wide-open ash-flats map with a single ridgeline
 ## and minimal cover — tests heavy mech / ranged combat.
-enum MapId { FOUNDRY_BELT, ASHPLAINS_CROSSING }
+## V3 §"Pillar 6" — Iron Gate Crossing is the asymmetric-test map
+## with mixed terrain emphasising concealment and flanking.
+enum MapId { FOUNDRY_BELT, ASHPLAINS_CROSSING, IRON_GATE_CROSSING }
 ## V3 introduces Sable as the second playable faction. Two factions are
 ## enough to validate the asymmetric architecture (Pillar 1 of the V3
 ## scope); Synod / Inheritors come later.
@@ -85,6 +87,7 @@ func get_faction_label(f: FactionId) -> String:
 func get_map_label() -> String:
 	match map_id:
 		MapId.ASHPLAINS_CROSSING: return "Ashplains Crossing"
+		MapId.IRON_GATE_CROSSING: return "Iron Gate Crossing"
 		_: return "Foundry Belt"
 
 

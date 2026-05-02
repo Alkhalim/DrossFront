@@ -365,6 +365,26 @@ func _apply_map_visuals() -> void:
 			env.background_color = Color(0.32, 0.22, 0.16, 1.0)
 			env.ambient_light_color = Color(0.55, 0.40, 0.28, 1.0)
 			env.ambient_light_energy = 0.7
+	elif _is_iron_gate():
+		# Iron Gate Crossing — semi-controlled district, overcast
+		# storm light. Cool desaturated palette so the colour pops
+		# from Sable violet + Anvil brass over a flat grey-green
+		# atmospheric base.
+		if ground:
+			var gmat2: StandardMaterial3D = ground.get_surface_override_material(0) as StandardMaterial3D
+			if gmat2:
+				gmat2.albedo_color = Color(0.75, 0.78, 0.72, 1.0)
+		if dir_light:
+			dir_light.light_color = Color(0.78, 0.82, 0.85, 1.0)
+			dir_light.light_energy = 0.95
+		if fill_light:
+			fill_light.light_color = Color(0.60, 0.68, 0.78, 1.0)
+			fill_light.light_energy = 0.55
+		if world_env and world_env.environment:
+			var env3: Environment = world_env.environment
+			env3.background_color = Color(0.16, 0.18, 0.20, 1.0)
+			env3.ambient_light_color = Color(0.45, 0.50, 0.55, 1.0)
+			env3.ambient_light_energy = 0.65
 	else:
 		# Foundry Belt — cool grey industrial. Restore the .tscn
 		# defaults explicitly so switching back from Ashplains during
@@ -424,6 +444,12 @@ func _map_id() -> int:
 func _is_ashplains() -> bool:
 	# MapId.ASHPLAINS_CROSSING == 1 in the autoload's enum.
 	return _map_id() == 1
+
+
+func _is_iron_gate() -> bool:
+	# MapId.IRON_GATE_CROSSING == 2. V3 §Pillar 6 — asymmetric-test
+	# map emphasising concealment and flanking.
+	return _map_id() == 2
 
 
 func _current_roster() -> Array[Dictionary]:
@@ -1085,6 +1111,16 @@ func _setup_fuel_deposits() -> void:
 		# Ashplains has fewer deposits than Foundry Belt — sparser map,
 		# the central deposit is THE objective.
 		positions = _deposit_positions_ashplains_2v2() if _is_2v2() else _deposit_positions_ashplains_1v1()
+	elif _is_iron_gate():
+		# Iron Gate Crossing — 4 deposits scattered along the central
+		# corridor + the east/west flanks so the Sable flanker can
+		# reach two of them with covered approaches.
+		positions = [
+			Vector3(0.0, 0.0, 80.0),    # Player safe deposit
+			Vector3(0.0, 0.0, -80.0),   # Enemy safe deposit
+			Vector3(55.0, 0.0, 0.0),    # East flank contested
+			Vector3(-55.0, 0.0, 0.0),   # West flank contested
+		]
 	else:
 		positions = _deposit_positions_2v2() if _is_2v2() else _deposit_positions_1v1()
 
@@ -1195,6 +1231,9 @@ func _small_deposit_positions_2v2() -> Array[Vector3]:
 func _setup_terrain() -> void:
 	if _is_ashplains():
 		_setup_terrain_ashplains()
+		return
+	if _is_iron_gate():
+		_setup_terrain_iron_gate()
 		return
 	_setup_terrain_foundry_belt()
 
@@ -1307,6 +1346,81 @@ func _setup_terrain_foundry_belt() -> void:
 		_spawn_neutral_building(turret_stats, Vector3(0, 0, 0), 0.0)
 		_spawn_neutral_building(turret_stats, Vector3(70, 0, 8), 0.0)
 		_spawn_neutral_building(turret_stats, Vector3(-70, 0, -8), 0.0)
+
+
+func _setup_terrain_iron_gate() -> void:
+	## V3 §"Pillar 6" — Iron Gate Crossing. A semi-controlled
+	## district between corporate cores and the wild zones, with
+	## chokepoints designed to favour stealth flanking over heavy
+	## pushes. Terrain composition:
+	##   - Open central corridor along the z-axis (Anvil push lane)
+	##   - Dense ruin clusters on each east/west flank (Sable cover)
+	##   - Two large elevated overlooks at NW and SE corners
+	##   - Rocky chokepoints near the spawns to slow rushes
+	##   - 4 forward-deploy "Mesh anchor" pads near the centre that
+	##     read as flat structural footprints, suggesting Black Pylon
+	##     placement spots
+	# West-flank ruin cluster — dense covered approach for Sable
+	# flankers.
+	var pieces: Array[Dictionary] = [
+		# West dense ruin cluster
+		{"pos": Vector3(-72, 0, 36), "size": Vector3(5.0, 4.0, 4.5), "kind": "ruin"},
+		{"pos": Vector3(-78, 0, 22), "size": Vector3(4.0, 3.5, 5.0), "kind": "ruin"},
+		{"pos": Vector3(-66, 0, 8), "size": Vector3(4.5, 3.0, 4.0), "kind": "ruin"},
+		{"pos": Vector3(-78, 0, -8), "size": Vector3(4.0, 3.5, 5.0), "kind": "ruin"},
+		{"pos": Vector3(-72, 0, -22), "size": Vector3(5.0, 3.0, 4.0), "kind": "ruin"},
+		{"pos": Vector3(-66, 0, -38), "size": Vector3(4.0, 4.5, 4.0), "kind": "ruin"},
+		# East mirror cluster
+		{"pos": Vector3(72, 0, 36), "size": Vector3(5.0, 4.0, 4.5), "kind": "ruin"},
+		{"pos": Vector3(78, 0, 22), "size": Vector3(4.0, 3.5, 5.0), "kind": "ruin"},
+		{"pos": Vector3(66, 0, 8), "size": Vector3(4.5, 3.0, 4.0), "kind": "ruin"},
+		{"pos": Vector3(78, 0, -8), "size": Vector3(4.0, 3.5, 5.0), "kind": "ruin"},
+		{"pos": Vector3(72, 0, -22), "size": Vector3(5.0, 3.0, 4.0), "kind": "ruin"},
+		{"pos": Vector3(66, 0, -38), "size": Vector3(4.0, 4.5, 4.0), "kind": "ruin"},
+		# Spawn-area chokepoint cover (north/south).
+		{"pos": Vector3(20, 0, 90), "size": Vector3(4.5, 3.5, 4.0), "kind": "rock"},
+		{"pos": Vector3(-20, 0, 90), "size": Vector3(4.0, 3.5, 4.5), "kind": "rock"},
+		{"pos": Vector3(20, 0, -90), "size": Vector3(4.0, 3.5, 4.5), "kind": "rock"},
+		{"pos": Vector3(-20, 0, -90), "size": Vector3(4.5, 3.5, 4.0), "kind": "rock"},
+		# Mid-line cover — keep the central corridor mostly open but
+		# add a few rocks to break up sightlines.
+		{"pos": Vector3(0, 0, 18), "size": Vector3(3.0, 2.5, 3.0), "kind": "rock"},
+		{"pos": Vector3(0, 0, -18), "size": Vector3(3.0, 2.5, 3.0), "kind": "rock"},
+		# Scrap-pile salvage scattered across the contested zones.
+		{"pos": Vector3(40, 0, 30), "size": Vector3(4.0, 1.0, 4.0), "kind": "scrap_pile"},
+		{"pos": Vector3(-40, 0, 30), "size": Vector3(4.0, 1.0, 4.0), "kind": "scrap_pile"},
+		{"pos": Vector3(40, 0, -30), "size": Vector3(4.0, 1.0, 4.0), "kind": "scrap_pile"},
+		{"pos": Vector3(-40, 0, -30), "size": Vector3(4.0, 1.0, 4.0), "kind": "scrap_pile"},
+		{"pos": Vector3(0, 0, 50), "size": Vector3(5.0, 1.0, 4.5), "kind": "scrap_pile"},
+		{"pos": Vector3(0, 0, -50), "size": Vector3(5.0, 1.0, 4.5), "kind": "scrap_pile"},
+	]
+	for piece: Dictionary in pieces:
+		_spawn_terrain_piece(piece["pos"] as Vector3, piece["size"] as Vector3, piece["kind"] as String)
+
+	# Forward Mesh anchor pads — flat low platforms at four spots
+	# along the centre line. Visually they read as cleared concrete
+	# foundations; tactically they're natural Black Pylon homes.
+	# Built as terrain pieces (collision-blocking but very short)
+	# so a scout can read "this is a built spot" at a glance.
+	var pad_positions: Array[Vector3] = [
+		Vector3(0, 0, 28),
+		Vector3(0, 0, -28),
+		Vector3(36, 0, 0),
+		Vector3(-36, 0, 0),
+	]
+	for pad_pos: Vector3 in pad_positions:
+		_spawn_terrain_piece(pad_pos, Vector3(3.0, 0.3, 3.0), "scrap_pile")
+
+	# Multi-block ruin complexes (mid-flank) — bigger collapsed
+	# structures that read as the Iron Gate's namesake militarised
+	# infrastructure.
+	for complex_data: Dictionary in [
+		{"pos": Vector3(48, 0, 56), "rot": 0.6, "size": Vector2(11.0, 7.0)},
+		{"pos": Vector3(-48, 0, 56), "rot": -0.6, "size": Vector2(11.0, 7.0)},
+		{"pos": Vector3(48, 0, -56), "rot": 0.6, "size": Vector2(11.0, 7.0)},
+		{"pos": Vector3(-48, 0, -56), "rot": -0.6, "size": Vector2(11.0, 7.0)},
+	]:
+		_spawn_ruin_complex(complex_data["pos"] as Vector3, complex_data["size"] as Vector2, complex_data["rot"] as float)
 
 
 func _setup_terrain_ashplains() -> void:
