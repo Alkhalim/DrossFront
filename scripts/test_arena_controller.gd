@@ -174,6 +174,13 @@ func _setup_map_signature_features() -> void:
 ## --- Foundry Belt ammo dumps ------------------------------------------------
 
 func _setup_ammo_dumps() -> void:
+	# Tutorial mode skips the ammo-dump scatter entirely — the
+	# bait-the-enemy-past-it tactical play those dumps enable
+	# isn't part of the tutorial's beats and they only clutter
+	# the southward / northward push lanes the mission scripts.
+	var settings_for_dumps: Node = get_node_or_null("/root/MatchSettings")
+	if settings_for_dumps and settings_for_dumps.get("tutorial_mode"):
+		return
 	# 4 destructible ammo dumps placed around the contested mid lanes.
 	# Positioned so squads have to path NEAR them on the way to deposits
 	# / the Apex scar — creates the bait-the-enemy-past-it tactical play.

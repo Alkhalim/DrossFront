@@ -656,6 +656,19 @@ func _tick_ally_behaviour(delta: float) -> void:
 				u.call("command_move", target)
 
 
+func _combat_target_is_live(combat: Node, key: String) -> bool:
+	## Defensive read for combat target slots — pulls the value
+	## as Variant first so a freed Object reference doesn't
+	## crash the typed `as Node` cast (Godot 4 throws "Trying to
+	## cast a freed object" on the assignment).
+	var v: Variant = combat.get(key)
+	if not (v is Object):
+		return false
+	if not is_instance_valid(v):
+		return false
+	return true
+
+
 func _any_friendly_in_combat() -> bool:
 	## True when ANY friendly unit (player- or ally-owned) has a
 	## live target in its CombatComponent — i.e. shots are flying
@@ -672,11 +685,9 @@ func _any_friendly_in_combat() -> bool:
 		var combat: Node = n.get_node_or_null("CombatComponent")
 		if not combat:
 			continue
-		var tgt: Node = combat.get("_current_target") as Node
-		if tgt and is_instance_valid(tgt):
+		if _combat_target_is_live(combat, "_current_target"):
 			return true
-		var forced: Node = combat.get("forced_target") as Node
-		if forced and is_instance_valid(forced):
+		if _combat_target_is_live(combat, "forced_target"):
 			return true
 	return false
 
@@ -699,13 +710,11 @@ func _any_enclave_taking_fire() -> bool:
 		if "alive_count" in n and (n.get("alive_count") as int) <= 0:
 			continue
 		var combat: Node = n.get_node_or_null("CombatComponent")
-		if combat:
-			var tgt: Node = combat.get("_current_target") as Node
-			if tgt and is_instance_valid(tgt):
-				return true
+		if combat and _combat_target_is_live(combat, "_current_target"):
+			return true
 		var stats: UnitStatResource = n.get("stats") as UnitStatResource if "stats" in n else null
-		if stats and "hp_total" in stats:
-			var hp: int = (n.get("get_total_hp") as Callable).call() as int if n.has_method("get_total_hp") else 0
+		if stats and n.has_method("get_total_hp"):
+			var hp: int = n.call("get_total_hp") as int
 			if hp > 0 and hp < (stats.hp_total as int):
 				return true
 	for n: Node in get_tree().get_nodes_in_group("buildings"):
