@@ -169,6 +169,14 @@ func _on_building_destroyed(owner_id: int) -> void:
 		_enemy_buildings_lost += 1
 
 
+## Seconds between win-condition met and the victory overlay
+## actually appearing. Lets the player watch their final salvo
+## resolve. _match_ended flips to true the moment the condition
+## triggers (so the loss-detection branches stop firing inside the
+## delay window — the player can't lose during this grace period).
+const VICTORY_DECLARATION_DELAY_SEC: float = 4.5
+
+
 func _end_match(victory: bool) -> void:
 	_match_ended = true
 	match_over.emit(victory)
@@ -180,6 +188,17 @@ func _end_match(victory: bool) -> void:
 			audio.play_victory()
 		elif not victory and audio.has_method("play_defeat"):
 			audio.play_defeat()
+	# Defer the actual end-screen so the player gets to see their
+	# final salvo land. Loss path keeps the immediate overlay —
+	# delaying the defeat stinger reads as the game refusing to
+	# acknowledge the loss. _match_ended already flipped above so
+	# nothing in the delay window can flip the result back.
+	if victory:
+		var tree: SceneTree = get_tree()
+		if tree:
+			var timer: SceneTreeTimer = tree.create_timer(VICTORY_DECLARATION_DELAY_SEC)
+			timer.timeout.connect(_show_end_screen.bind(true))
+			return
 	_show_end_screen(victory)
 
 

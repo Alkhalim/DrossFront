@@ -74,6 +74,12 @@ const _REFRESH_INTERVAL: float = 1.0 / FOW_REFRESH_HZ
 ## know whether they need to re-upload the grid texture.
 var revision: int = 0
 
+## Temporary reveal entries — non-unit vision sources that stamp
+## visibility on the grid for a few seconds (satellite-crash flares,
+## scan pings, etc.). Each entry: { pos: Vector3, radius: float,
+## expires_at: float (engine seconds) }.
+var _temp_reveals: Array[Dictionary] = []
+
 
 func _ready() -> void:
 	add_to_group("fog_of_war")
@@ -148,6 +154,23 @@ func get_cells() -> PackedByteArray:
 	return _cells
 
 
+func reveal_area(pos: Vector3, radius: float, duration_sec: float) -> void:
+	## Briefly stamps cells around `pos` as VISIBLE for the given
+	## duration regardless of whether any unit is in range. Used
+	## by satellite crashes (visible long enough for the player to
+	## see the crash + plan a recovery), scan pings, etc.
+	var expires_at: float = float(Time.get_ticks_msec()) / 1000.0 + maxf(duration_sec, 0.0)
+	_temp_reveals.append({
+		"pos": pos,
+		"radius": radius,
+		"expires_at": expires_at,
+	})
+	# Stamp immediately so the next renderer tick sees the reveal
+	# instead of waiting up to 200ms for the next 5 Hz recompute.
+	_stamp_visibility(pos, radius)
+	revision += 1
+
+
 ## --- Visibility recompute -------------------------------------------------
 
 func _recompute_visibility() -> void:
@@ -177,6 +200,19 @@ func _recompute_visibility() -> void:
 		if not _is_friendly(node):
 			continue
 		_stamp_visibility((node as Node3D).global_position, BUILDING_SIGHT_RADIUS)
+
+	# Temporary reveals — satellite-crash flares, scan pings, etc.
+	# Drop expired entries first; the rest stamp visibility just
+	# like a unit would.
+	var now_sec: float = float(Time.get_ticks_msec()) / 1000.0
+	var i: int = _temp_reveals.size() - 1
+	while i >= 0:
+		var entry: Dictionary = _temp_reveals[i]
+		if (entry["expires_at"] as float) <= now_sec:
+			_temp_reveals.remove_at(i)
+		else:
+			_stamp_visibility(entry["pos"] as Vector3, entry["radius"] as float)
+		i -= 1
 
 	revision += 1
 	# Apply the new grid to every enemy unit + building so the

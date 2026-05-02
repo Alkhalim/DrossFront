@@ -334,6 +334,43 @@ func _build_satellite_landmark() -> void:
 	glow.position = Vector3(0, wreck_size.y * 1.0, 0)
 	add_child(glow)
 
+	# Microchip shards scattered around the wreck — small angular
+	# violet-emissive crystals on the ground so the player reads
+	# "this pile contains chips" at a glance, matching the chip
+	# resource's violet identity colour. Count scales with the
+	# pile's chip payload so a richer drop visibly carries more.
+	var shard_count: int = 5 + microchip_value * 2
+	var shard_mat := StandardMaterial3D.new()
+	shard_mat.albedo_color = Color(0.45, 0.20, 0.65, 1.0)
+	shard_mat.emission_enabled = true
+	shard_mat.emission = Color(0.78, 0.42, 1.0, 1.0)
+	shard_mat.emission_energy_multiplier = 1.8
+	shard_mat.metallic = 0.4
+	shard_mat.roughness = 0.25
+	for s_i: int in shard_count:
+		var shard := MeshInstance3D.new()
+		var shard_box := BoxMesh.new()
+		var sw: float = randf_range(0.16, 0.28)
+		var sh: float = randf_range(0.10, 0.22)
+		var sd: float = randf_range(0.16, 0.28)
+		shard_box.size = Vector3(sw, sh, sd)
+		shard.mesh = shard_box
+		var off_radius: float = max_extent * randf_range(0.55, 1.05)
+		var ang: float = randf_range(0.0, TAU)
+		shard.position = Vector3(
+			cos(ang) * off_radius,
+			sh * 0.5 + randf_range(0.0, 0.05),
+			sin(ang) * off_radius,
+		)
+		shard.rotation = Vector3(
+			randf_range(-0.4, 0.4),
+			randf_range(0.0, TAU),
+			randf_range(-0.4, 0.4),
+		)
+		shard.set_surface_override_material(0, shard_mat)
+		add_child(shard)
+	add_child(glow)
+
 
 ## Create a wreck from a destroyed unit's stats.
 static func create_from_unit(unit_stats: UnitStatResource, pos: Vector3) -> Wreck:

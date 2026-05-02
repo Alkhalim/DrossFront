@@ -79,6 +79,74 @@ func _spawn_one() -> void:
 	var alerts: Node = get_tree().current_scene.get_node_or_null("AlertManager")
 	if alerts and alerts.has_method("emit_alert"):
 		alerts.call("emit_alert", "Satellite crash detected — salvage and chips inbound", 0, pos)
+	# Briefly reveal the crash site through the fog so the player
+	# actually sees the new pile pop in (8s gives them time to
+	# notice + plan a recovery before LOS lapses).
+	var fow: Node = get_tree().current_scene.get_node_or_null("FogOfWar")
+	if fow and fow.has_method("reveal_area"):
+		fow.call("reveal_area", pos, 28.0, 8.0)
+	# Minimap ping in violet so the player's eye snaps to the
+	# crash site even off-screen — same colour as the chips
+	# resource readout so the cue is consistent.
+	var hud: Node = get_tree().current_scene.get_node_or_null("HUD")
+	if not hud:
+		# HUD is a CanvasLayer scene attached to the test arena;
+		# the actual minimap node sits inside it.
+		var canvas: Node = get_tree().current_scene.get_node_or_null("HUDCanvas")
+		if canvas:
+			hud = canvas.get_node_or_null("HUD")
+	var minimap: Node = null
+	if hud:
+		minimap = hud.get_node_or_null("Minimap")
+	if minimap and minimap.has_method("ping"):
+		minimap.call("ping", pos, Color(0.78, 0.42, 1.0, 1.0))
+	# Vertical signal flare at the crash position — emissive violet
+	# beam tapering up so the player's camera sweep catches it.
+	# Free-standing scene child; tweens its own scale/alpha out and
+	# queue_frees after ~3.5s.
+	_spawn_flare(pos)
+
+
+func _spawn_flare(pos: Vector3) -> void:
+	## Tall thin emissive cylinder at the crash site. Reads as a
+	## signal flare punching up through the air column. Tweened
+	## out over ~3.5s, then queue_freed.
+	var scene: Node = get_tree().current_scene
+	if not scene:
+		return
+	var beam := MeshInstance3D.new()
+	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var beam_cyl := CylinderMesh.new()
+	beam_cyl.top_radius = 0.06
+	beam_cyl.bottom_radius = 0.20
+	beam_cyl.height = 28.0
+	beam_cyl.radial_segments = 12
+	beam.mesh = beam_cyl
+	var beam_mat := StandardMaterial3D.new()
+	beam_mat.albedo_color = Color(0.78, 0.42, 1.0, 0.55)
+	beam_mat.emission_enabled = true
+	beam_mat.emission = Color(0.78, 0.42, 1.0, 1.0)
+	beam_mat.emission_energy_multiplier = 3.2
+	beam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	beam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	beam.set_surface_override_material(0, beam_mat)
+	scene.add_child(beam)
+	beam.global_position = pos + Vector3(0.0, 14.0, 0.0)
+
+	# Bright violet OmniLight at the base — drops a real ground
+	# splash that catches the eye even at low zoom on the minimap.
+	var glow := OmniLight3D.new()
+	glow.light_color = Color(0.78, 0.42, 1.0, 1.0)
+	glow.light_energy = 4.0
+	glow.omni_range = 18.0
+	glow.position = Vector3(0.0, 1.0, 0.0)
+	beam.add_child(glow)
+
+	var tween: Tween = beam.create_tween().set_parallel(true)
+	tween.tween_property(beam_mat, "albedo_color:a", 0.0, 3.5).set_ease(Tween.EASE_IN)
+	tween.tween_property(beam_mat, "emission_energy_multiplier", 0.0, 3.5).set_ease(Tween.EASE_IN)
+	tween.tween_property(glow, "light_energy", 0.0, 3.5).set_ease(Tween.EASE_IN)
+	tween.chain().tween_callback(beam.queue_free)
 
 
 func _pick_spawn_pos() -> Vector3:
