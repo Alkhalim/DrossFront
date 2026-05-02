@@ -341,6 +341,12 @@ func _find_nearest_enemy(max_range: float) -> Node3D:
 		# target bypasses this list entirely.
 		if "auto_targetable" in node and not node.get("auto_targetable"):
 			continue
+		# Pre-start foundations -- the placing engineer hasn't reached
+		# them yet, so they don't physically exist for opponents.
+		# Don't auto-acquire them.
+		if "construction_started" in node and not (node.get("construction_started") as bool):
+			if "is_constructed" in node and not (node.get("is_constructed") as bool):
+				continue
 		var node_owner: int = node.get("owner_id")
 		if not _is_hostile(my_owner, node_owner):
 			continue

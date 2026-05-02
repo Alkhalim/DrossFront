@@ -250,6 +250,14 @@ func _apply_entity_visibility() -> void:
 		if owner_id == local_player_id or _is_friendly(node):
 			b3d.visible = true
 			continue
+		# Foundations the placing engineer hasn't reached yet are
+		# placement intent only -- they don't physically exist for
+		# opponents until construction actually starts. Hide regardless
+		# of explored / visible state.
+		if "construction_started" in node and not (node.get("construction_started") as bool):
+			if "is_constructed" in node and not (node.get("is_constructed") as bool):
+				b3d.visible = false
+				continue
 		# Enemy buildings stick around once explored — Age-of-Empires
 		# behaviour: the player remembers seeing the structure even
 		# after losing live vision (terrain doesn't change, the

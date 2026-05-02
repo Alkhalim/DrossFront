@@ -17,6 +17,13 @@ var is_ghost_preview: bool = false
 
 ## Set during placement by the builder.
 var is_constructed: bool = false
+## True once an engineer has actually started building the foundation
+## (first advance_construction() call). Foundations sit in this
+## not-yet-started state from begin_construction() until the placing
+## engineer reaches them; during that window opponents shouldn't see
+## or be able to attack the foundation -- the structure isn't really
+## there yet, just a placement intent.
+var construction_started: bool = false
 var current_hp: int = 0
 var _construction_progress: float = 0.0
 
@@ -2153,6 +2160,7 @@ func _apply_anvil_brass_band() -> void:
 func begin_construction() -> void:
 	_construction_progress = 0.0
 	is_constructed = false
+	construction_started = false
 	_apply_placeholder_shape()
 	_create_progress_bar()
 	# Foundation is a "ghost" — units can walk into and out of it freely until
@@ -2172,6 +2180,10 @@ func advance_construction(amount: float) -> void:
 	# for the area to clear before progressing.
 	if not _is_foundation_clear():
 		return
+	# First tick of real progress flips construction_started so opponents'
+	# FOW visibility + auto-target acquisition start treating the foundation
+	# as a real structure. Pre-start foundations are placement intent only.
+	construction_started = true
 	_construction_progress += amount
 	_update_progress_bar()
 	_update_construction_rise()
