@@ -289,6 +289,19 @@ func _input(event: InputEvent) -> void:
 				_attack_move_mode = false
 				get_viewport().set_input_as_handled()
 				return
+			# D key = trigger active ability on every selected unit
+			# whose stats define one. Cooldown gating happens
+			# per-unit inside trigger_ability so a half-cooled
+			# squad partial-fires.
+			if key.keycode == KEY_D and not _selected_units.is_empty():
+				var fired_any: bool = false
+				for unit_node: Node3D in _selected_units:
+					if is_instance_valid(unit_node) and unit_node.has_method("trigger_ability"):
+						if unit_node.call("trigger_ability"):
+							fired_any = true
+				if fired_any:
+					get_viewport().set_input_as_handled()
+					return
 
 			# Control groups: Ctrl+0-9 = assign, 0-9 = recall
 			var group_index: int = _key_to_group_index(key.keycode)

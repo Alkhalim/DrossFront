@@ -1582,6 +1582,67 @@ func _rebuild_unit_command_buttons() -> void:
 	_button_grid.add_child(amove_btn)
 	_action_buttons.append({"button": amove_btn, "kind": "command", "key": "attack_move"})
 
+	# Active-ability button — added when EVERY unit in the current
+	# selection shares the same ability (so a mixed selection of
+	# Pulsefonts + Hounds doesn't show a button that only fires on
+	# half of them). The button label flips between the cast / cooldown
+	# states each frame via _refresh_ability_button.
+	var ability_units: Array[Node3D] = _selection_ability_units()
+	if not ability_units.is_empty():
+		var first: Node3D = ability_units[0]
+		var ability_stat: UnitStatResource = first.stats
+		var ability_btn := Button.new()
+		ability_btn.custom_minimum_size = Vector2(150, 42)
+		ability_btn.tooltip_text = "%s\n%s\nCooldown %ds" % [
+			ability_stat.ability_name,
+			ability_stat.ability_description,
+			int(ability_stat.ability_cooldown),
+		]
+		ability_btn.pressed.connect(_on_ability_button.bind(ability_units))
+		_button_grid.add_child(ability_btn)
+		_action_buttons.append({
+			"button": ability_btn,
+			"kind": "ability",
+			"units": ability_units,
+			"stat": ability_stat,
+		})
+
+
+func _selection_ability_units() -> Array[Node3D]:
+	## Returns the subset of the current selection that shares one
+	## active ability. Empty when no selected unit has an ability or
+	## when the selection mixes ability types.
+	var out: Array[Node3D] = []
+	if not _selection_manager:
+		return out
+	var selected: Array[Node3D] = _selection_manager.get_selected_units() as Array[Node3D]
+	if selected.is_empty():
+		return out
+	var ability_id: String = ""
+	for unit: Node3D in selected:
+		if not is_instance_valid(unit) or not "stats" in unit:
+			continue
+		var s: UnitStatResource = unit.get("stats") as UnitStatResource
+		if not s or s.ability_name == "":
+			continue
+		if ability_id == "":
+			ability_id = s.ability_name
+		elif ability_id != s.ability_name:
+			# Mixed ability types — no shared button.
+			return [] as Array[Node3D]
+		out.append(unit)
+	return out
+
+
+func _on_ability_button(units: Array[Node3D]) -> void:
+	## Fire the ability on every unit in the cohort that has one
+	## ready. Cooldown gating happens per-unit inside trigger_ability,
+	## so a half-on-cooldown squad will partial-fire — the units that
+	## are ready cast, the ones still cooling down skip.
+	for unit: Node3D in units:
+		if is_instance_valid(unit) and unit.has_method("trigger_ability"):
+			unit.call("trigger_ability")
+
 
 func _on_hold_button() -> void:
 	if _selection_manager and _selection_manager.has_method("command_hold_position_on_selection"):
@@ -2476,6 +2537,12 @@ func _update_button_affordability() -> void:
 		elif kind == "build_tab_row":
 			# Tab row container — never tinted as un-affordable.
 			continue
+		elif kind == "ability":
+			# Ability buttons aren't gated by resources; the cooldown
+			# and label refresh happen here so the player sees the
+			# countdown live.
+			_refresh_ability_button(entry)
+			continue
 		btn.disabled = not affordable
 		# Button itself uses the standard "disabled" style — same
 		# regardless of WHICH resource is missing, so the unclickable
@@ -2488,6 +2555,43 @@ func _update_button_affordability() -> void:
 		_paint_cost_chip(chips.get("salvage", {}) as Dictionary, lack_salvage)
 		_paint_cost_chip(chips.get("fuel", {}) as Dictionary, lack_fuel)
 		_paint_cost_chip(chips.get("pop", {}) as Dictionary, lack_pop)
+
+
+func _refresh_ability_button(entry: Dictionary) -> void:
+	## Updates the ability button label and disabled state based on
+	## the per-unit cooldowns of every cohort member. The label
+	## reads "[D] Ready" when at least one unit can fire, and
+	## "[D] %ds" when every cohort member is still cooling down
+	## (showing the SHORTEST remaining cooldown so the player
+	## knows when SOMEONE will be ready next).
+	var btn: Button = entry["button"] as Button
+	var stat: UnitStatResource = entry["stat"] as UnitStatResource
+	var units: Array = entry["units"] as Array
+	if not is_instance_valid(btn) or not stat:
+		return
+	var any_ready: bool = false
+	var min_cd: float = INF
+	for unit_node: Node in units:
+		if not is_instance_valid(unit_node):
+			continue
+		var u: Node = unit_node
+		if u.has_method("ability_ready") and u.call("ability_ready"):
+			any_ready = true
+			break
+		if u.has_method("ability_cooldown_remaining"):
+			var cd: float = u.call("ability_cooldown_remaining") as float
+			if cd < min_cd:
+				min_cd = cd
+	var hotkey: String = stat.ability_hotkey if stat.ability_hotkey != "" else "D"
+	if any_ready:
+		btn.disabled = false
+		btn.text = "[%s] %s" % [hotkey, stat.ability_name]
+		btn.modulate = Color.WHITE
+	else:
+		btn.disabled = true
+		var cd_label: String = "%ds" % int(ceilf(min_cd)) if min_cd < INF else "—"
+		btn.text = "[%s] %s\n%s" % [hotkey, stat.ability_name, cd_label]
+		btn.modulate = Color(0.78, 0.78, 0.78)
 
 
 func _paint_cost_chip(chip: Dictionary, lacking: bool) -> void:

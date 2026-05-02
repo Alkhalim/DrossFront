@@ -233,33 +233,106 @@ func _build_visuals() -> void:
 		idler.set_surface_override_material(0, _make_metal(Color(0.18, 0.16, 0.14)))
 		add_child(idler)
 
-	# Workshop / cargo box on top of the hull.
-	var workshop := MeshInstance3D.new()
-	var ws_box := BoxMesh.new()
-	ws_box.size = Vector3(2.8, 1.0, 3.4)
-	workshop.mesh = ws_box
-	workshop.position = Vector3(0, 1.55 + CHASSIS_LIFT, -0.4)
-	workshop.set_surface_override_material(0, _make_metal(Color(0.28, 0.26, 0.22)))
-	add_child(workshop)
+	# Workshop / cargo block on top of the hull. Per V3 silhouette
+	# pass: faction-distinct profile so a Crawler reads its allegiance
+	# from the dorsal turret alone.
+	#   Anvil  -> two stacked rectangles, the smaller / shorter one
+	#             at the front (industrial step-roof read).
+	#   Sable  -> trapezoidal block, full-height vertical back wall
+	#             tapering down to a low front face via a sloped roof
+	#             plate (clean corp wedge read).
+	# Both end up with the same front+back Z extent (-2.1 .. 1.3) and
+	# X width (2.8) as the original single-box workshop, so every
+	# downstream attachment (deck, ribs, mast, lamp housing, drums)
+	# still lines up.
+	var ws_x_w: float = 2.8
+	var ws_z_total: float = 3.4
+	var ws_centre_z: float = -0.4
+	var ws_back_z_start: float = ws_centre_z + ws_z_total * 0.5 - ws_z_total * 0.5  # = -2.1
+	# Back block: tall, sits on the rear half of the footprint. Used
+	# by both factions.
+	var back_h: float = 1.0
+	var back_z_len: float = ws_z_total * 0.5  # 1.7
+	var back_z_centre: float = ws_centre_z + back_z_len * 0.5
+	var back_y_centre: float = 1.55 + CHASSIS_LIFT
+	var back_block := MeshInstance3D.new()
+	var back_box := BoxMesh.new()
+	back_box.size = Vector3(ws_x_w, back_h, back_z_len)
+	back_block.mesh = back_box
+	back_block.position = Vector3(0, back_y_centre, back_z_centre)
+	back_block.set_surface_override_material(0, _make_metal(Color(0.28, 0.26, 0.22)))
+	add_child(back_block)
 
-	# Corrugated Wellblech ribs across the workshop roof — strong
-	# horizontal striping read for the top of the chassis. Anvil
+	# Front block — short height, shorter/lower than the back. Anvil
+	# stops here (the step is the silhouette); Sable adds a sloped
+	# roof piece below to fill the wedge in.
+	var front_h: float = 0.55
+	var front_z_len: float = ws_z_total * 0.5  # 1.7
+	var front_z_centre: float = ws_centre_z - front_z_len * 0.5
+	# Front-top sits BELOW back-top -> the step / wedge reads.
+	var front_y_centre: float = back_y_centre + back_h * 0.5 - front_h * 0.5
+	var sable_workshop: bool = _faction_id() == 1
+	# Anvil's front block is also slightly narrower in X so the step
+	# reads from above as well as from the side. Sable keeps the
+	# full width because its sloped roof ties everything together.
+	var front_x_w: float = ws_x_w if sable_workshop else ws_x_w * 0.86
+	var front_block := MeshInstance3D.new()
+	var front_box := BoxMesh.new()
+	front_box.size = Vector3(front_x_w, front_h, front_z_len)
+	front_block.mesh = front_box
+	front_block.position = Vector3(0, front_y_centre, front_z_centre)
+	front_block.set_surface_override_material(0, _make_metal(Color(0.28, 0.26, 0.22)))
+	add_child(front_block)
+
+	if sable_workshop:
+		# Sloped roof slab — fills the gap between the front block's
+		# top and the back block's top edge so the side silhouette is
+		# a clean trapezoid (vertical back, sloped roof, vertical
+		# front) rather than two stacked boxes.
+		var slope_front_y: float = front_y_centre + front_h * 0.5
+		var slope_back_y: float = back_y_centre + back_h * 0.5
+		var slope_front_z: float = front_z_centre - front_z_len * 0.5  # -2.1, the front nose
+		var slope_back_z: float = back_z_centre - back_z_len * 0.5     # -0.4, the step
+		var slope_dy: float = slope_back_y - slope_front_y
+		var slope_dz: float = slope_back_z - slope_front_z
+		var slope_len: float = sqrt(slope_dy * slope_dy + slope_dz * slope_dz)
+		var slope_angle: float = atan2(slope_dy, slope_dz)
+		var slope := MeshInstance3D.new()
+		var slope_box := BoxMesh.new()
+		slope_box.size = Vector3(ws_x_w, 0.06, slope_len)
+		slope.mesh = slope_box
+		slope.position = Vector3(
+			0,
+			(slope_front_y + slope_back_y) * 0.5,
+			(slope_front_z + slope_back_z) * 0.5,
+		)
+		# Tilt around X so +Z (the slab's length axis) follows the
+		# front->back climb. atan2(dy, dz) gives the angle directly.
+		slope.rotation.x = -slope_angle
+		slope.set_surface_override_material(0, _make_metal(Color(0.22, 0.20, 0.26)))
+		add_child(slope)
+
+	# Corrugated Wellblech ribs across the BACK block roof only —
+	# the new front/slope geometry would clip and hover oddly if we
+	# kept ribs across the full original workshop length. Strong
+	# horizontal striping read on the back-block top still gives
+	# the dorsal hull the v1 industrial / corp panel feel. Anvil
 	# uses thicker ribs (industrial sheet metal); Sable uses thin
 	# raised seams (corp clean panel).
-	var ws_top_y: float = workshop.position.y + ws_box.size.y * 0.5 + 0.04
-	var rib_count: int = 8
+	var ws_top_y: float = back_y_centre + back_h * 0.5 + 0.04
+	var rib_count: int = 4
 	var rib_color: Color = Color(0.18, 0.16, 0.14, 1.0)
 	if _faction_id() == 1:
 		rib_color = Color(0.10, 0.10, 0.16, 1.0)
-		rib_count = 12
+		rib_count = 6
 	for r_i: int in rib_count:
 		var rib := MeshInstance3D.new()
 		var rb := BoxMesh.new()
 		var rib_h: float = 0.07 if _faction_id() == 1 else 0.10
-		rb.size = Vector3(2.6, rib_h, 0.16)
+		rb.size = Vector3(ws_x_w * 0.92, rib_h, 0.16)
 		rib.mesh = rb
 		var t: float = (float(r_i) + 0.5) / float(rib_count)
-		var rz: float = -0.4 - 1.7 * 0.95 + t * (3.4 * 0.95)
+		var rz: float = back_z_centre - back_z_len * 0.5 * 0.92 + t * back_z_len * 0.92
 		rib.position = Vector3(0, ws_top_y + rib_h * 0.5, rz)
 		rib.set_surface_override_material(0, _make_metal(rib_color))
 		add_child(rib)
@@ -560,21 +633,26 @@ func _build_visuals() -> void:
 			rivet.set_surface_override_material(0, rivet_mat)
 			add_child(rivet)
 
-	# Two oil drums strapped to the rear deck — clearly read as
-	# salvaged fuel cargo and emphasise the "mobile factory" silhouette.
+	# Two tall fuel tanks strapped to the rear of the chassis — the
+	# bottoms come down to sit flush against the chassis hull (Y=1.25,
+	# the top of the main hull box at hull_y + half_hull_h) instead
+	# of perching on the small rear deck. Reads as proper bolted-on
+	# fuel cargo with weight, not as floating drums.
 	var drum_mat := _make_metal(Color(0.55, 0.30, 0.18))
+	var drum_top_y: float = 2.70 + CHASSIS_LIFT + 0.85 * 0.5  # original top
+	var drum_bottom_y: float = 0.55 + CHASSIS_LIFT + 0.5      # hull top
+	var drum_height: float = drum_top_y - drum_bottom_y
+	var drum_centre_y: float = (drum_top_y + drum_bottom_y) * 0.5
 	for drum_i: int in 2:
 		var drum := MeshInstance3D.new()
 		var dc := CylinderMesh.new()
 		dc.top_radius = 0.30
 		dc.bottom_radius = 0.30
-		dc.height = 0.85
+		dc.height = drum_height
 		dc.radial_segments = 16
 		drum.mesh = dc
 		var dx: float = -0.55 if drum_i == 0 else 0.55
-		# Drum bottom must rest on the rear cargo deck (top at
-		# ~2.47). Drum height 0.85 -> centre Y = deck top + 0.425.
-		drum.position = Vector3(dx, 2.70 + CHASSIS_LIFT, 1.95)
+		drum.position = Vector3(dx, drum_centre_y, 1.95)
 		drum.set_surface_override_material(0, drum_mat)
 		add_child(drum)
 

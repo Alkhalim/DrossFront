@@ -113,6 +113,11 @@ const ANIM_CULL_DIST_SQ: float = 80.0 * 80.0
 var is_building: bool = false
 var _build_spark_timer: float = 0.0
 
+## Active-ability state. _ability_cd_remaining counts down each frame
+## while > 0; the HUD shows the remaining seconds on the ability
+## button so the player knows when it's available again.
+var _ability_cd_remaining: float = 0.0
+
 ## SelectionManager flags this true while the mouse is hovering over the unit
 ## so we can pop up the HP bar even if the unit is at full health.
 var hp_bar_hovered: bool = false
@@ -1929,12 +1934,109 @@ func stop() -> void:
 	has_move_order = false
 
 
+## --- Active abilities ---
+
+func has_ability() -> bool:
+	## True when this unit's stats define an ability the HUD should
+	## surface as a button.
+	return stats != null and stats.ability_name != ""
+
+func ability_ready() -> bool:
+	return has_ability() and _ability_cd_remaining <= 0.0
+
+func ability_cooldown_remaining() -> float:
+	return _ability_cd_remaining
+
+func trigger_ability() -> bool:
+	## Called by the HUD ability button (or hotkey). Dispatches by
+	## stats.ability_name to the concrete effect implementation.
+	## Returns true on a successful cast so the HUD can play
+	## confirmation feedback.
+	if not has_ability() or alive_count == 0:
+		return false
+	if _ability_cd_remaining > 0.0:
+		return false
+	var fired: bool = false
+	match stats.ability_name:
+		"System Crash":
+			fired = _ability_system_crash()
+		_:
+			# Unknown ability name on stats — don't crash, just
+			# refuse to fire so the player notices.
+			push_warning("Unit '%s' has unknown ability '%s'" % [stats.unit_name, stats.ability_name])
+			return false
+	if fired:
+		_ability_cd_remaining = stats.ability_cooldown
+	return fired
+
+func _ability_system_crash() -> bool:
+	## Pulsefont's System Crash. Sweeps every enemy mech inside
+	## stats.ability_radius around the caster's current position
+	## and silences their CombatComponent for stats.ability_duration
+	## seconds (no firing during the silence). Skips structures and
+	## aircraft on purpose — the spec calls this an anti-mech EMP.
+	var origin: Vector3 = global_position
+	var radius_sq: float = stats.ability_radius * stats.ability_radius
+	var hits: int = 0
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node):
+			continue
+		var enemy: Unit = node as Unit
+		if not enemy or enemy == self:
+			continue
+		if enemy.owner_id == owner_id:
+			continue
+		if enemy.alive_count <= 0:
+			continue
+		if enemy.global_position.distance_squared_to(origin) > radius_sq:
+			continue
+		var combat: Node = enemy.get_node_or_null("CombatComponent")
+		if combat and combat.has_method("apply_silence"):
+			combat.apply_silence(stats.ability_duration)
+			hits += 1
+	# Spawn a quick blue pulse so the player sees the AOE land.
+	_spawn_system_crash_visual(stats.ability_radius)
+	return hits > 0 or true  # Always succeed even if zero hits — the
+	                        # cooldown still applies (cast committed).
+
+func _spawn_system_crash_visual(radius: float) -> void:
+	## A flat emissive disc that scales out from 0 -> radius over
+	## ~0.45s while fading. Cheap, reads at any zoom.
+	var ring := MeshInstance3D.new()
+	var disc := SphereMesh.new()
+	disc.radius = 1.0
+	disc.height = 0.2
+	disc.radial_segments = 24
+	disc.rings = 4
+	ring.mesh = disc
+	ring.scale = Vector3.ZERO
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.4, 0.8, 1.0, 0.55)
+	mat.emission_enabled = true
+	mat.emission = Color(0.5, 0.85, 1.0)
+	mat.emission_energy_multiplier = 2.6
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ring.set_surface_override_material(0, mat)
+	get_tree().current_scene.add_child(ring)
+	ring.global_position = global_position + Vector3(0, 0.4, 0)
+	var tween: Tween = ring.create_tween().set_parallel(true)
+	tween.tween_property(ring, "scale", Vector3(radius, radius, radius), 0.45)
+	tween.tween_property(mat, "albedo_color:a", 0.0, 0.45)
+	tween.tween_property(mat, "emission_energy_multiplier", 0.0, 0.45)
+	tween.chain().tween_callback(ring.queue_free)
+
+
 func _physics_process(delta: float) -> void:
 	# Damage flash countdown (cheap — runs every frame).
 	if _flash_timer > 0.0:
 		_flash_timer -= delta
 		if _flash_timer <= 0.0:
 			_restore_member_colors()
+
+	# Active-ability cooldown tick.
+	if _ability_cd_remaining > 0.0:
+		_ability_cd_remaining = maxf(0.0, _ability_cd_remaining - delta)
 
 	_physics_frame_counter += 1
 

@@ -8,6 +8,12 @@ var _current_target: Node3D = null
 var _fire_cooldown: float = 0.0
 var _secondary_cooldown: float = 0.0
 var _search_timer: float = 0.0
+## Silence timer set by Pulsefont's System Crash (and any other future
+## EMP-style ability). When > 0 the unit's weapons refuse to fire even
+## with a valid target in range. Targeting and movement still tick so
+## the silence is visible (unit visibly stops shooting) without
+## leaving the unit completely unresponsive.
+var _silence_remaining: float = 0.0
 ## Cached PlayerRegistry — used to ask "is my owner allied with this owner?"
 ## instead of comparing raw owner_ids. Falls back to the raw compare when
 ## the registry isn't present, so headless / test scenes keep working.
@@ -56,6 +62,18 @@ func _ready() -> void:
 	_phase = int(get_instance_id() & 1)
 
 
+func apply_silence(duration: float) -> void:
+	## Called by abilities that disable enemy weapons (Pulsefont's
+	## System Crash). Stacks by max — overlapping casts extend the
+	## silence to whichever runs longer rather than letting a fresh
+	## short cast clip a longer one.
+	_silence_remaining = maxf(_silence_remaining, duration)
+
+
+func is_silenced() -> bool:
+	return _silence_remaining > 0.0
+
+
 func _is_hostile(my_owner: int, target_owner: int) -> bool:
 	# Single shape used by the targeting and validation paths so a future
 	# alliance change (gifting / treason / 2v2 ally betrayal) only has to
@@ -93,6 +111,8 @@ func _physics_process(delta: float) -> void:
 	_fire_cooldown -= delta
 	_secondary_cooldown -= delta
 	_search_timer -= delta
+	if _silence_remaining > 0.0:
+		_silence_remaining = maxf(0.0, _silence_remaining - delta)
 
 	var unit_has_move_order: bool = _unit.get("has_move_order") as bool
 
@@ -169,10 +189,10 @@ func _physics_process(delta: float) -> void:
 
 		_face_target()
 
-		if primary and _fire_cooldown <= 0.0:
+		if primary and _fire_cooldown <= 0.0 and _silence_remaining <= 0.0:
 			_fire_weapon(primary, true)
 
-		if stats.secondary_weapon and _secondary_cooldown <= 0.0:
+		if stats.secondary_weapon and _secondary_cooldown <= 0.0 and _silence_remaining <= 0.0:
 			var sec_range: float = CombatTables.get_range(stats.secondary_weapon.range_tier)
 			if dist <= sec_range:
 				_fire_weapon(stats.secondary_weapon, false)

@@ -110,3 +110,24 @@ extends Resource
 ## Branch display names for the Armory UI.
 @export var branch_a_name: String = ""
 @export var branch_b_name: String = ""
+
+@export_group("Active Ability")
+## Empty when this unit has no active ability. When set, the HUD
+## adds an action button that calls into Unit.trigger_ability(),
+## which dispatches by ability_name to a specific effect.
+@export var ability_name: String = ""
+## Hotkey shown in the button label and bound for keyboard
+## activation while the unit is selected.
+@export var ability_hotkey: String = "D"
+## Cooldown in seconds between activations.
+@export var ability_cooldown: float = 30.0
+## Effect radius (units). Interpretation depends on the ability —
+## e.g. System Crash silences enemy mech weapons inside this
+## radius around the casting unit.
+@export var ability_radius: float = 0.0
+## Effect duration in seconds (e.g. how long System Crash holds
+## enemy weapons silenced).
+@export var ability_duration: float = 0.0
+## One-line description shown in the button tooltip so the player
+## can read what the ability does without leaving the HUD.
+@export var ability_description: String = ""
