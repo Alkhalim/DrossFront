@@ -99,25 +99,33 @@ func _build_multimesh() -> void:
 
 
 func _make_overlay_material() -> ShaderMaterial:
-	# Unshaded shader. INSTANCE_CUSTOM.rgb is the tint colour (black
-	# for unexplored, blue-grey for explored), INSTANCE_CUSTOM.a is
-	# the per-cell alpha multiplier. Visible cells push alpha to 0
-	# so the camera sees the world clearly; explored cells dim with
-	# a slightly desaturated cool grey so they read as MEMORY rather
-	# than just "dark"; unexplored cells go fully opaque black so
-	# the player has zero info on what's there.
+	# INSTANCE_CUSTOM is only readable in the VERTEX stage in
+	# Godot 4 spatial shaders, so we hand-pipe the colour value
+	# through a varying so the fragment stage can sample it. The
+	# previous version tried to read INSTANCE_CUSTOM directly in
+	# fragment, which fails to compile and the whole material
+	# falls back to invisible.
+	#
+	# .rgb is the tint colour (black for unexplored, blue-grey for
+	# explored), .a is the per-cell alpha multiplier. Visible cells
+	# push alpha to 0 so the camera sees the world clearly;
+	# explored cells dim with a slightly desaturated cool grey so
+	# they read as MEMORY rather than just "dark"; unexplored cells
+	# go fully opaque black so the player has zero info.
 	var sh := Shader.new()
 	sh.code = """
 shader_type spatial;
 render_mode unshaded, blend_mix, depth_draw_never, cull_disabled;
 
+varying vec4 v_fog_color;
+
 void vertex() {
-	// Position is already in instance space; nothing to do.
+	v_fog_color = INSTANCE_CUSTOM;
 }
 
 void fragment() {
-	ALBEDO = INSTANCE_CUSTOM.rgb;
-	ALPHA = INSTANCE_CUSTOM.a;
+	ALBEDO = v_fog_color.rgb;
+	ALPHA = v_fog_color.a;
 }
 """
 	var mat := ShaderMaterial.new()

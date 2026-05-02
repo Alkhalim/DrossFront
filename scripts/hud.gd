@@ -2894,10 +2894,16 @@ func _refresh_ability_button(entry: Dictionary) -> void:
 	## "[D] %ds" when every cohort member is still cooling down
 	## (showing the SHORTEST remaining cooldown so the player
 	## knows when SOMEONE will be ready next).
+	if not entry.has("button") or not entry.has("stat"):
+		return
 	var btn: Button = entry["button"] as Button
 	var stat: UnitStatResource = entry["stat"] as UnitStatResource
-	var units: Array = entry["units"] as Array
-	if not is_instance_valid(btn) or not stat:
+	var units: Array = entry.get("units", []) as Array
+	# Triple guard: button must exist, must be a live instance, AND
+	# must still be in the scene tree. The third check catches the
+	# brief window after queue_free where is_instance_valid still
+	# returns true but property access on the freed Object errors.
+	if not btn or not is_instance_valid(btn) or not btn.is_inside_tree() or not stat:
 		return
 	var any_ready: bool = false
 	var min_cd: float = INF
