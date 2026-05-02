@@ -68,6 +68,10 @@ var _shadow_blob: MeshInstance3D = null
 var is_selected: bool = false
 var _select_ring: MeshInstance3D = null
 
+## Active-ability cooldown. Mirrors the field on Unit so the same
+## HUD ability button + autocast hooks work for aircraft.
+var _ability_cd_remaining: float = 0.0
+
 
 func _ready() -> void:
 	add_to_group("units")
@@ -248,6 +252,11 @@ func _spawn_select_ring() -> void:
 func _process(delta: float) -> void:
 	if alive_count <= 0:
 		return
+	# Active-ability cooldown tick (mirrors Unit). The autocast
+	# trigger lives in CombatComponent so it fires at the right
+	# moment in the combat tick instead of here.
+	if _ability_cd_remaining > 0.0:
+		_ability_cd_remaining = maxf(0.0, _ability_cd_remaining - delta)
 	# Maintain altitude — drift toward the configured flight altitude
 	# even if something nudges us off it. The aircraft's whole body
 	# bobs around the target altitude on a sin curve so single-body
@@ -1487,6 +1496,96 @@ func get_squad_strength_ratio() -> float:
 
 func get_combat() -> Node:
 	return _combat
+
+
+## --- Active abilities (mirrors Unit) ----------------------------------
+## Same shape as Unit's API so HUD ability buttons + the autocast hook
+## in CombatComponent treat aircraft and ground units identically.
+
+func has_ability() -> bool:
+	return stats != null and stats.ability_name != ""
+
+
+func ability_ready() -> bool:
+	return has_ability() and _ability_cd_remaining <= 0.0
+
+
+func ability_cooldown_remaining() -> float:
+	return _ability_cd_remaining
+
+
+func trigger_ability() -> bool:
+	if not has_ability() or alive_count == 0:
+		return false
+	if _ability_cd_remaining > 0.0:
+		return false
+	var fired: bool = false
+	match stats.ability_name:
+		"Missile Barrage", "AA Missile Barrage":
+			fired = _ability_missile_barrage()
+		_:
+			push_warning("Aircraft '%s' has unknown ability '%s'" % [stats.unit_name, stats.ability_name])
+			return false
+	if fired:
+		_ability_cd_remaining = stats.ability_cooldown
+	return fired
+
+
+func _ability_missile_barrage() -> bool:
+	## Fires 6 underwing missiles at the CombatComponent's current
+	## target. Total damage 450 (= 6 × 75 per missile) for the base
+	## Hammerhead, 540 (= 6 × 90) for the Escort variant — derived
+	## from unit_name so the data lives next to the unit's stat
+	## resource and not inside this dispatch.
+	if not _combat:
+		return false
+	var target: Node3D = _combat.get("_current_target") as Node3D
+	if not target or not is_instance_valid(target):
+		return false
+	# Don't bother if the target has already been freed but the
+	# combat component hasn't ticked again yet.
+	if "alive_count" in target and (target.get("alive_count") as int) <= 0:
+		return false
+	var per_missile: int = 75
+	if stats.unit_name.findn("Escort") >= 0:
+		per_missile = 90
+	# Stagger the six missiles over a short window so the volley
+	# reads as a salvo instead of an instantaneous slap. Each
+	# missile spawns through the same projectile path the
+	# CombatComponent uses for normal fire — visual + audio is
+	# free that way.
+	const SALVO_COUNT: int = 6
+	const SALVO_STAGGER_SEC: float = 0.07
+	for i: int in SALVO_COUNT:
+		var delay: float = float(i) * SALVO_STAGGER_SEC
+		var timer: SceneTreeTimer = get_tree().create_timer(delay)
+		timer.timeout.connect(_fire_barrage_missile.bind(target, per_missile))
+	return true
+
+
+func _fire_barrage_missile(target: Node3D, damage: int) -> void:
+	## One missile in the barrage — applies damage if the target is
+	## still valid, spawns a missile-styled projectile so the visual
+	## + audio match the rest of combat. Skipped silently if the
+	## target died between the schedule and this tick.
+	if not is_instance_valid(target):
+		return
+	if "alive_count" in target and (target.get("alive_count") as int) <= 0:
+		return
+	if target.has_method("take_damage"):
+		target.call("take_damage", damage, self)
+	# Visual missile via Projectile.create — matches the same path
+	# the CombatComponent uses so trails / impact / audio behave.
+	var role_tag: StringName = &"AAir" if stats.unit_name.findn("Escort") >= 0 else &"AA"
+	var proj: Projectile = Projectile.create(
+		global_position + Vector3(0, -0.2, 0),
+		target.global_position,
+		role_tag,
+		&"slow",
+		&"missile",
+	)
+	if proj:
+		get_tree().current_scene.add_child(proj)
 
 
 func get_member_positions() -> Array[Vector3]:

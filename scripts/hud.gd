@@ -1608,6 +1608,13 @@ func _rebuild_unit_command_buttons() -> void:
 			int(ability_stat.ability_cooldown),
 		]
 		_paint_ability_button_style(ability_btn)
+		# Autocast indicator — small "AUTO" badge anchored to the
+		# top-right of the button so the player reads at a glance
+		# that this ability fires on its own when the unit's in
+		# combat. Manual press still works (and fast-forwards
+		# cooldown rolls if available).
+		if ability_stat.ability_autocast:
+			_attach_autocast_badge(ability_btn)
 		ability_btn.pressed.connect(_on_ability_button.bind(ability_units))
 		_button_grid.add_child(ability_btn)
 		_action_buttons.append({
@@ -1671,6 +1678,43 @@ func _paint_ability_button_style(btn: Button) -> void:
 	btn.add_theme_stylebox_override("pressed", bg_pressed)
 	btn.add_theme_stylebox_override("disabled", bg_disabled)
 	btn.add_theme_color_override("font_color", Color(0.92, 0.85, 1.0))
+
+
+func _attach_autocast_badge(btn: Button) -> void:
+	## Top-right "AUTO" pill on an ability button so the player
+	## reads the autocast cue without hovering for the tooltip.
+	## Pulses gently via a Tween so it doesn't blend with the
+	## static stylebox.
+	var pill := PanelContainer.new()
+	pill.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	pill.offset_left = -42
+	pill.offset_top = 2
+	pill.offset_right = -2
+	pill.offset_bottom = 18
+	pill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var pill_style := StyleBoxFlat.new()
+	pill_style.bg_color = Color(0.30, 0.92, 0.55, 0.85)
+	pill_style.set_corner_radius_all(6)
+	pill_style.content_margin_left = 4
+	pill_style.content_margin_right = 4
+	pill_style.content_margin_top = 0
+	pill_style.content_margin_bottom = 0
+	pill.add_theme_stylebox_override("panel", pill_style)
+	var lbl := Label.new()
+	lbl.text = "AUTO"
+	lbl.add_theme_font_size_override("font_size", 10)
+	lbl.add_theme_color_override("font_color", Color(0.05, 0.10, 0.05))
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pill.add_child(lbl)
+	btn.add_child(pill)
+	# Pulse the pill alpha so the autocast read stays visible
+	# even if the player isn't focused on the button. Loops
+	# indefinitely; cleared automatically when the button is
+	# freed (Tween is parented to the badge).
+	var tween: Tween = pill.create_tween().set_loops()
+	tween.tween_property(pill, "modulate:a", 0.55, 0.8)
+	tween.tween_property(pill, "modulate:a", 1.0, 0.8)
 
 
 func _on_ability_button(units: Array[Node3D]) -> void:

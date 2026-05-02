@@ -131,3 +131,9 @@ extends Resource
 ## One-line description shown in the button tooltip so the player
 ## can read what the ability does without leaving the HUD.
 @export var ability_description: String = ""
+## Auto-cast flag — when true, CombatComponent fires this ability
+## automatically every cooldown the unit has a valid target. The
+## HUD ability button stays clickable for manual triggers and
+## shows a circling dot so the player can read "this is on
+## autocast" at a glance.
+@export var ability_autocast: bool = false

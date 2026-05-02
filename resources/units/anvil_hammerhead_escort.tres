@@ -3,24 +3,14 @@
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
 
-[sub_resource type="Resource" id="weapon_escort_aa"]
+[sub_resource type="Resource" id="weapon_pintle"]
 script = ExtResource("2")
-weapon_name = "Tracking AA Missiles (6-tube)"
-role_tag = &"AAir"
-damage_tier = &"low"
-range_tier = &"long"
-rof_tier = &"moderate"
-base_accuracy = 0.92
-salvo_count = 6
-
-[sub_resource type="Resource" id="weapon_escort_chin_cannon"]
-script = ExtResource("2")
-weapon_name = "Suppression Chin Cannon"
+weapon_name = "Pintle Suppression Gun"
 role_tag = &"AP"
-damage_tier = &"moderate"
+damage_tier = &"very_low"
 range_tier = &"medium"
-rof_tier = &"fast"
-base_accuracy = 0.84
+rof_tier = &"rapid"
+base_accuracy = 0.78
 
 [resource]
 script = ExtResource("1")
@@ -37,9 +27,15 @@ cost_salvage = 365
 cost_fuel = 63
 build_time = 36.0
 built_at = &"aerodrome"
-primary_weapon = SubResource("weapon_escort_aa")
-secondary_weapon = SubResource("weapon_escort_chin_cannon")
+primary_weapon = SubResource("weapon_pintle")
+ability_name = "AA Missile Barrage"
+ability_hotkey = "D"
+ability_cooldown = 9.0
+ability_radius = 0.0
+ability_duration = 0.0
+ability_autocast = true
+ability_description = "Salvo of 6 AAir tracking missiles at the current target — 540 total damage vs aircraft. Autocasts in combat."
 is_aircraft = true
 flight_altitude = 8.0
 flight_speed = 18.0
-special_description = "Hammerhead Escort — anti-air gunship with a suppression chin cannon. AAir tracking missiles for enemy aircraft, AP chin cannon for ground harassment. The screening variant — flies with Bombers."
+special_description = "Hammerhead Escort — anti-air variant. Pintle suppression for ground harassment + a 9s-cooldown 6-missile AAir barrage that autocasts in combat. The screening variant — flies with Bombers."

@@ -215,6 +215,17 @@ func _physics_process(delta: float) -> void:
 		if primary and _fire_cooldown <= 0.0 and _silence_remaining <= 0.0:
 			_fire_weapon(primary, true)
 
+		# Autocast hook — units whose stats define an ability with
+		# ability_autocast = true (Hammerhead's Missile Barrage)
+		# fire it on the same tick they're firing the primary, as
+		# long as the cooldown has rolled over. trigger_ability
+		# itself enforces the cooldown + has-ability guards, so a
+		# manually-fired ability + cooldown still gates auto.
+		if stats.ability_autocast and stats.ability_name != "" and _silence_remaining <= 0.0:
+			if _unit.has_method("ability_ready") and _unit.call("ability_ready"):
+				if _unit.has_method("trigger_ability"):
+					_unit.call("trigger_ability")
+
 		if stats.secondary_weapon and _secondary_cooldown <= 0.0 and _silence_remaining <= 0.0:
 			var sec_range: float = CombatTables.get_range(stats.secondary_weapon.range_tier)
 			if dist <= sec_range:
