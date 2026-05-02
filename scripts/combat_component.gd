@@ -578,11 +578,15 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	# Shotgun-style weapons fire a cluster of small pellets per shot. Damage
 	# is applied once per shot (same as any other weapon), but the visual is
 	# a cone of pellets so a Ripper volley reads as buckshot, not a slug.
+	# Detection prefers the explicit `is_shotgun` flag on the resource;
+	# falls back to a name match for any pre-flag tres files.
 	var is_shotgun: bool = false
-	if weapon.weapon_name:
+	if "is_shotgun" in weapon and weapon.get("is_shotgun"):
+		is_shotgun = true
+	elif weapon.weapon_name:
 		is_shotgun = weapon.weapon_name.to_lower().find("shotgun") != -1
-	const SHOTGUN_PELLETS: int = 5
-	const SHOTGUN_SPREAD_RAD: float = 0.157  # ~9 degrees
+	const SHOTGUN_PELLETS: int = 9
+	const SHOTGUN_SPREAD_RAD: float = 0.26  # ~15 degrees
 	const SHOTGUN_PELLET_RANGE: float = 14.0
 
 	# V3 §Pillar 5 — per-shot hit roll. Squad-strength + Mesh + base

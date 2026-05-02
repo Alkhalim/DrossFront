@@ -19,6 +19,7 @@ role_tag = &"AP"
 damage_tier = &"high"
 range_tier = &"short"
 rof_tier = &"moderate"
+is_shotgun = true
 
 [resource]
 script = ExtResource("1")

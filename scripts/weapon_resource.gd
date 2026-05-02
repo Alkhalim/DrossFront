@@ -69,6 +69,15 @@ extends Resource
 ## missile / rocket secondaries stay air-skipping).
 @export var can_hit_air: bool = false
 
+## Buckshot / scatter-fire flag. When true, CombatComponent fires the
+## weapon as a cone of pellets per shot instead of a single
+## projectile. Damage is still applied once per shot (the visual is
+## the buckshot read; the role/mod math is unchanged). Was previously
+## inferred from "shotgun" appearing in weapon_name; the explicit
+## flag is more robust against branch renames + lets a "scattergun"
+## variant qualify without forcing the word into its name.
+@export var is_shotgun: bool = false
+
 
 func engages_air() -> bool:
 	## True when the weapon should fire at aircraft. Auto-true for
