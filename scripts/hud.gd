@@ -2086,27 +2086,39 @@ func _rebuild_armory_buttons(_building: Building) -> void:
 		return
 
 	_action_label.text = "%s Branch (irreversible)" % hound_stats.unit_name
+	# Branch upgrades cost the same across every base unit in v1 —
+	# pulled from BranchCommitManager constants. The cost suffix is
+	# baked into the tooltip so the player sees what they'll pay
+	# without leaving the panel.
+	var cost_suffix: String = "  •  %dM / %dF / %dS" % [
+		BranchCommitManager.COMMIT_COST_MICROCHIPS,
+		BranchCommitManager.COMMIT_COST_FUEL,
+		BranchCommitManager.COMMIT_COST_SALVAGE,
+	]
 
 	var btn_a := Button.new()
-	btn_a.custom_minimum_size = Vector2(120, 56)
+	btn_a.custom_minimum_size = Vector2(140, 56)
 	_set_label_button(btn_a, "[Q]", hound_stats.branch_a_name)
-	btn_a.tooltip_text = _unit_tooltip(hound_stats.branch_a_stats)
+	btn_a.tooltip_text = _unit_tooltip(hound_stats.branch_a_stats) + "\n\nUpgrade cost:" + cost_suffix
 	btn_a.pressed.connect(_on_branch_commit.bind(hound_stats, hound_stats.branch_a_stats, hound_stats.branch_a_name))
 	_button_grid.add_child(btn_a)
+	_attach_research_cost_widget(btn_a)
 
 	var btn_b := Button.new()
-	btn_b.custom_minimum_size = Vector2(120, 56)
+	btn_b.custom_minimum_size = Vector2(140, 56)
 	_set_label_button(btn_b, "[W]", hound_stats.branch_b_name)
-	btn_b.tooltip_text = _unit_tooltip(hound_stats.branch_b_stats)
+	btn_b.tooltip_text = _unit_tooltip(hound_stats.branch_b_stats) + "\n\nUpgrade cost:" + cost_suffix
 	btn_b.pressed.connect(_on_branch_commit.bind(hound_stats, hound_stats.branch_b_stats, hound_stats.branch_b_name))
 	_button_grid.add_child(btn_b)
+	_attach_research_cost_widget(btn_b)
 
 	# Anchor Mode research button (v3.3 §3.1) — researched here, applies to
-	# every present and future Crawler.
+	# every present and future Crawler. Costs same currency mix as a
+	# branch commit so the resource pressure is consistent.
 	var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
 	if rm:
 		var anchor_btn := Button.new()
-		anchor_btn.custom_minimum_size = Vector2(160, 44)
+		anchor_btn.custom_minimum_size = Vector2(160, 56)
 		if rm.is_researched(&"anchor_mode"):
 			anchor_btn.text = "Anchor Mode\nResearched"
 			anchor_btn.disabled = true
@@ -2114,14 +2126,34 @@ func _rebuild_armory_buttons(_building: Building) -> void:
 			anchor_btn.text = "Anchor Mode\n%d%%" % int(rm.get_progress() * 100.0)
 			anchor_btn.disabled = true
 		else:
-			anchor_btn.text = "[E] Anchor Mode\n300S / 35F  50s"
+			anchor_btn.text = "[E] Anchor Mode"
 			anchor_btn.tooltip_text = (
 				"Crawlers gain a stationary Anchor command.\n"
 				+ "Anchored: +50% armor, +25% workers, +25% range.\n"
-				+ "5s deploy / 5s undeploy (vulnerable during)."
+				+ "5s deploy / 5s undeploy (vulnerable during).\n\n"
+				+ "Upgrade cost:" + cost_suffix
 			)
 			anchor_btn.pressed.connect(_on_research_anchor)
+			_attach_research_cost_widget(anchor_btn)
 		_button_grid.add_child(anchor_btn)
+
+
+func _attach_research_cost_widget(btn: Button) -> void:
+	## Mirrors _attach_cost_widget but for research / branch commits —
+	## shows a microchips chip + a fuel chip + a salvage chip at the
+	## bottom of the button so the player sees the cost without
+	## hovering for the tooltip.
+	var hbox := HBoxContainer.new()
+	hbox.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	hbox.add_theme_constant_override("separation", 6)
+	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hbox.offset_top = -16
+	hbox.offset_bottom = -3
+	btn.add_child(hbox)
+	_add_cost_chip(hbox, BranchCommitManager.COMMIT_COST_MICROCHIPS, RES_COLOR_MICROCHIPS)
+	_add_cost_chip(hbox, BranchCommitManager.COMMIT_COST_FUEL, RES_COLOR_FUEL)
+	_add_cost_chip(hbox, BranchCommitManager.COMMIT_COST_SALVAGE, RES_COLOR_SALVAGE)
 
 
 func _on_research_anchor() -> void:
@@ -2130,12 +2162,15 @@ func _on_research_anchor() -> void:
 		return
 	if not _resource_manager:
 		return
-	if not _resource_manager.can_afford(300, 35):
+	if not _resource_manager.spend_full(
+		BranchCommitManager.COMMIT_COST_SALVAGE,
+		BranchCommitManager.COMMIT_COST_FUEL,
+		BranchCommitManager.COMMIT_COST_MICROCHIPS,
+	):
 		var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
 		if audio and audio.has_method("play_error"):
 			audio.play_error()
 		return
-	_resource_manager.spend(300, 35)
 	rm.start_research(&"anchor_mode", "Anchor Mode", 50.0)
 	# Force a panel rebuild so the button immediately reflects "in progress".
 	_last_building_id = -1
@@ -2143,9 +2178,26 @@ func _on_research_anchor() -> void:
 
 func _on_branch_commit(base_stats: UnitStatResource, branch_stats: UnitStatResource, branch_name: String) -> void:
 	var bcm: Node = get_tree().current_scene.get_node_or_null("BranchCommitManager")
-	if bcm and bcm.has_method("start_commit"):
-		bcm.start_commit(base_stats, branch_stats, branch_name)
-		_last_building_id = -1
+	if not bcm or not bcm.has_method("start_commit"):
+		return
+	if not _resource_manager:
+		return
+	# Pay first, commit second — start_commit refuses if a commit is
+	# already in progress, so spending up-front would leak resources.
+	# Validate, then spend, then start.
+	if bcm.is_committing() or bcm.has_committed(base_stats.unit_name):
+		return
+	if not _resource_manager.spend_full(
+		BranchCommitManager.COMMIT_COST_SALVAGE,
+		BranchCommitManager.COMMIT_COST_FUEL,
+		BranchCommitManager.COMMIT_COST_MICROCHIPS,
+	):
+		var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
+		if audio and audio.has_method("play_error"):
+			audio.play_error()
+		return
+	bcm.start_commit(base_stats, branch_stats, branch_name)
+	_last_building_id = -1
 
 
 ## --- Resource gifting (2v2 allies) ---

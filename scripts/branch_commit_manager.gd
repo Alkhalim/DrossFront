@@ -16,6 +16,18 @@ var _active_commit: Dictionary = {}
 
 const COMMIT_DURATION: float = 20.0
 
+## Resource cost of a branch commit. Microchips are the primary
+## currency (rare, satellite-crash drops); fuel is the secondary
+## (most upgrades cost more fuel than salvage); salvage is a small
+## token nudge so the player has paid into all three pools. These
+## are the SAME for every branch in v1 — the upgrade IS the
+## investment, regardless of unit class. Tier-specific scaling can
+## come later if the cheap-Rook / expensive-Bulwark branches feel
+## too uniform.
+const COMMIT_COST_MICROCHIPS: int = 2
+const COMMIT_COST_FUEL: int = 60
+const COMMIT_COST_SALVAGE: int = 30
+
 
 func _process(delta: float) -> void:
 	if _active_commit.is_empty():
