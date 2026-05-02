@@ -8,10 +8,12 @@
 [sub_resource type="Resource" id="weapon_pintle"]
 script = ExtResource("2")
 weapon_name = "Pintle Suppression Gun"
-role_tag = &"AP"
+role_tag = &"AB"
 damage_tier = &"very_low"
 range_tier = &"medium"
 rof_tier = &"rapid"
+damage_value = 50
+rof_seconds_value = 0.25
 base_accuracy = 0.78
 
 [resource]

@@ -107,6 +107,18 @@ const ROLE_VS_ARMOR: Dictionary = {
 		&"heavy": 0.10, &"structure": 0.15,
 		&"light_air": 1.0, &"heavy_air": 0.2,
 	},
+	&"AB": {
+		# Anti-Building / heavy bomber pintle. Punishes structures and
+		# ignores aircraft entirely; ground multipliers slope 0.1 / 0.2
+		# / 0.3 so the gun is *intentionally* poor against ground mechs
+		# (the player should see this number tank against light infantry
+		# and pop against a foundry). Used by the Hammerhead Gunship's
+		# pintle so the unit reads as a structure cracker rather than a
+		# generalist gunship.
+		&"unarmored": 0.10, &"light": 0.10, &"medium": 0.20,
+		&"heavy": 0.30, &"structure": 2.00,
+		&"light_air": 0.00, &"heavy_air": 0.00,
+	},
 	&"AS": {
 		# Anti-structure -- the dedicated building cracker (Wraith
 		# bombs, Hammerhead Bomber payload, Rook Sapper charges,
