@@ -471,6 +471,12 @@ func _build_squad_visuals() -> void:
 
 func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_color: Color) -> Dictionary:
 	## Builds one mech member and returns references to its animatable parts.
+	# Transport class doesn't have legs / torso / cockpit — bail out
+	# of the standard mech build and call the dedicated tracked-vehicle
+	# builder instead. Returns the same dictionary shape so the caller's
+	# squad-visuals bookkeeping keeps working.
+	if stats and stats.unit_class == &"transport":
+		return _build_courier_tank_member(index, offset, team_color)
 	var hip_y: float = shape["hip_y"] as float
 	var torso_size: Vector3 = shape["torso"] as Vector3
 	var head_size: Vector3 = shape["head"] as Vector3
@@ -1574,6 +1580,235 @@ func _apply_forgemaster_overlay(
 	coil.set_surface_override_material(0, coil_mat)
 	torso_pivot.add_child(coil)
 	mats.append(coil_mat)
+
+
+func _build_courier_tank_member(index: int, offset: Vector3, team_color: Color) -> Dictionary:
+	## Sable Courier Tank — tracked transport with a twin-MG turret.
+	## Replaces the standard mech build for the "transport" unit_class.
+	## Returns the same per-member dict shape so the squad-visuals
+	## bookkeeping in _build_squad_visuals stays compatible (legs +
+	## leg_phases come back empty so the walk-bob code skips this
+	## member without crashing).
+	var member := Node3D.new()
+	member.name = "Member_%d" % index
+	member.position = offset
+	add_child(member)
+
+	var mats: Array[StandardMaterial3D] = []
+	var sable_dark: Color = _faction_tint_chassis(Color(0.18, 0.18, 0.22))
+	var sable_mid: Color = _faction_tint_chassis(Color(0.28, 0.28, 0.32))
+	var sable_violet: Color = Color(0.78, 0.42, 1.0)
+
+	# --- Tracks (two side rails). Long flat boxes flanking the hull.
+	var track_len: float = 2.85
+	var track_h: float = 0.42
+	var track_w: float = 0.42
+	for side: int in 2:
+		var sx: float = -1.05 if side == 0 else 1.05
+		var track := MeshInstance3D.new()
+		var track_box := BoxMesh.new()
+		track_box.size = Vector3(track_w, track_h, track_len)
+		track.mesh = track_box
+		track.position = Vector3(sx, track_h * 0.5, 0.0)
+		var track_mat := _make_metal_mat(Color(0.10, 0.10, 0.12))
+		track.set_surface_override_material(0, track_mat)
+		member.add_child(track)
+		mats.append(track_mat)
+		# Six visible track ribs across the top of each tread —
+		# horizontal striping that reads as actual moving track at
+		# distance.
+		for r_i: int in 6:
+			var rib := MeshInstance3D.new()
+			var rib_box := BoxMesh.new()
+			rib_box.size = Vector3(track_w + 0.06, 0.06, 0.18)
+			rib.mesh = rib_box
+			var rt: float = (float(r_i) + 0.5) / 6.0
+			rib.position = Vector3(sx, track_h, -track_len * 0.5 + rt * track_len)
+			var rib_mat := _make_metal_mat(Color(0.06, 0.06, 0.06))
+			rib.set_surface_override_material(0, rib_mat)
+			member.add_child(rib)
+			mats.append(rib_mat)
+		# Drive sprocket up front, idler at rear — small low-radial
+		# cylinders so the polygon edges read as gear teeth.
+		for end_i: int in 2:
+			var ez: float = -track_len * 0.5 + 0.1 if end_i == 0 else track_len * 0.5 - 0.1
+			var wheel := MeshInstance3D.new()
+			var wheel_cyl := CylinderMesh.new()
+			wheel_cyl.top_radius = track_h * 0.55
+			wheel_cyl.bottom_radius = track_h * 0.55
+			wheel_cyl.height = track_w * 0.7
+			wheel_cyl.radial_segments = 10 if end_i == 0 else 14
+			wheel.mesh = wheel_cyl
+			wheel.rotate_object_local(Vector3.FORWARD, PI * 0.5)
+			wheel.position = Vector3(sx, track_h * 0.5, ez)
+			var wheel_mat := _make_metal_mat(Color(0.15, 0.15, 0.16))
+			wheel.set_surface_override_material(0, wheel_mat)
+			member.add_child(wheel)
+			mats.append(wheel_mat)
+
+	# --- Hull. Low rectangular chassis sitting between the tracks.
+	var hull_w: float = 1.8
+	var hull_h: float = 0.55
+	var hull_len: float = 2.4
+	var hull_y: float = track_h + hull_h * 0.5
+	var hull := MeshInstance3D.new()
+	var hull_box := BoxMesh.new()
+	hull_box.size = Vector3(hull_w, hull_h, hull_len)
+	hull.mesh = hull_box
+	hull.position = Vector3(0.0, hull_y, 0.0)
+	var hull_mat := _make_metal_mat(sable_mid)
+	hull.set_surface_override_material(0, hull_mat)
+	member.add_child(hull)
+	mats.append(hull_mat)
+
+	# Sloped front glacis — short angled plate on the nose.
+	var glacis := MeshInstance3D.new()
+	var glacis_box := BoxMesh.new()
+	glacis_box.size = Vector3(hull_w * 0.95, hull_h * 0.55, 0.5)
+	glacis.mesh = glacis_box
+	glacis.rotate_object_local(Vector3.RIGHT, deg_to_rad(-28.0))
+	glacis.position = Vector3(0.0, hull_y + hull_h * 0.1, -hull_len * 0.5 + 0.05)
+	var glacis_mat := _make_metal_mat(sable_dark)
+	glacis.set_surface_override_material(0, glacis_mat)
+	member.add_child(glacis)
+	mats.append(glacis_mat)
+
+	# Team-color stripe along the spine — small emissive band so
+	# allegiance reads from above.
+	var stripe := MeshInstance3D.new()
+	var stripe_box := BoxMesh.new()
+	stripe_box.size = Vector3(0.45, 0.06, hull_len * 0.7)
+	stripe.mesh = stripe_box
+	stripe.position = Vector3(0.0, hull_y + hull_h * 0.5 + 0.02, 0.18)
+	var stripe_mat := StandardMaterial3D.new()
+	stripe_mat.albedo_color = team_color
+	stripe_mat.emission_enabled = true
+	stripe_mat.emission = team_color
+	stripe_mat.emission_energy_multiplier = 1.4
+	stripe.set_surface_override_material(0, stripe_mat)
+	member.add_child(stripe)
+	mats.append(stripe_mat)
+
+	# Sable violet edge accent along the lower hull-track seam — the
+	# same identity strip that appears on Sable mechs.
+	for accent_side: int in 2:
+		var asx: float = -hull_w * 0.5 + 0.04 if accent_side == 0 else hull_w * 0.5 - 0.04
+		var accent := MeshInstance3D.new()
+		var accent_box := BoxMesh.new()
+		accent_box.size = Vector3(0.04, 0.05, hull_len * 0.85)
+		accent.mesh = accent_box
+		accent.position = Vector3(asx, hull_y - hull_h * 0.5 + 0.02, 0.0)
+		var accent_mat := StandardMaterial3D.new()
+		accent_mat.albedo_color = sable_violet
+		accent_mat.emission_enabled = true
+		accent_mat.emission = sable_violet
+		accent_mat.emission_energy_multiplier = 1.2
+		accent_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		accent.set_surface_override_material(0, accent_mat)
+		member.add_child(accent)
+		mats.append(accent_mat)
+
+	# --- Turret on top — short angled drum with a small ring base.
+	var turret_y: float = hull_y + hull_h * 0.5
+	var turret_ring := MeshInstance3D.new()
+	var ring_cyl := CylinderMesh.new()
+	ring_cyl.top_radius = 0.50
+	ring_cyl.bottom_radius = 0.55
+	ring_cyl.height = 0.10
+	ring_cyl.radial_segments = 16
+	turret_ring.mesh = ring_cyl
+	turret_ring.position = Vector3(0.0, turret_y + 0.05, -0.10)
+	var ring_mat := _make_metal_mat(sable_dark)
+	turret_ring.set_surface_override_material(0, ring_mat)
+	member.add_child(turret_ring)
+	mats.append(ring_mat)
+
+	# Turret body — wedge-shaped block on the ring.
+	var turret_pivot := Node3D.new()
+	turret_pivot.name = "TurretPivot"
+	turret_pivot.position = Vector3(0.0, turret_y + 0.10, -0.10)
+	member.add_child(turret_pivot)
+	var turret := MeshInstance3D.new()
+	var turret_box := BoxMesh.new()
+	turret_box.size = Vector3(0.85, 0.40, 0.95)
+	turret.mesh = turret_box
+	turret.position = Vector3(0.0, 0.20, 0.05)
+	var turret_mat := _make_metal_mat(sable_mid)
+	turret.set_surface_override_material(0, turret_mat)
+	turret_pivot.add_child(turret)
+	mats.append(turret_mat)
+
+	# Cupola hatch — small box on top of the turret.
+	var cupola := MeshInstance3D.new()
+	var cup_box := BoxMesh.new()
+	cup_box.size = Vector3(0.30, 0.14, 0.34)
+	cupola.mesh = cup_box
+	cupola.position = Vector3(-0.18, 0.47, 0.18)
+	var cup_mat := _make_metal_mat(sable_dark)
+	cupola.set_surface_override_material(0, cup_mat)
+	turret_pivot.add_child(cupola)
+	mats.append(cup_mat)
+
+	# --- Twin MG barrels — two slim cylinders flanking a short
+	# mantlet on the front face of the turret. The MGs share the
+	# same cannon_pivot for recoil so a fire tick recoils both at
+	# once.
+	var mantlet := MeshInstance3D.new()
+	var mantlet_box := BoxMesh.new()
+	mantlet_box.size = Vector3(0.55, 0.28, 0.18)
+	mantlet.mesh = mantlet_box
+	mantlet.position = Vector3(0.0, 0.20, -0.42)
+	var mantlet_mat := _make_metal_mat(sable_dark)
+	mantlet.set_surface_override_material(0, mantlet_mat)
+	turret_pivot.add_child(mantlet)
+	mats.append(mantlet_mat)
+
+	var cannon_pivot := Node3D.new()
+	cannon_pivot.name = "CannonPivot_top"
+	cannon_pivot.position = Vector3(0.0, 0.20, -0.50)
+	turret_pivot.add_child(cannon_pivot)
+
+	var mg_len: float = 0.85
+	for mg_i: int in 2:
+		var mx: float = -0.14 if mg_i == 0 else 0.14
+		var mg := MeshInstance3D.new()
+		var mg_cyl := CylinderMesh.new()
+		mg_cyl.top_radius = 0.05
+		mg_cyl.bottom_radius = 0.05
+		mg_cyl.height = mg_len
+		mg_cyl.radial_segments = 10
+		mg.mesh = mg_cyl
+		mg.rotate_object_local(Vector3.RIGHT, -PI * 0.5)
+		mg.position = Vector3(mx, 0.0, -mg_len * 0.5)
+		var mg_mat := _make_metal_mat(Color(0.08, 0.08, 0.08))
+		mg.set_surface_override_material(0, mg_mat)
+		cannon_pivot.add_child(mg)
+		mats.append(mg_mat)
+
+	# --- Bookkeeping dict. Returns the same shape Unit's per-member
+	# logic expects. Empty `legs` + `leg_phases` mean the walk-bob
+	# pass skips this member entirely (tracks don't need it). The
+	# tank still gets idle / stride floats so any code reading them
+	# without a length check stays happy.
+	return {
+		"root": member,
+		"legs": [] as Array,
+		"leg_phases": [] as Array,
+		"shoulders": [mantlet] as Array,
+		"cannons": [cannon_pivot] as Array,
+		"cannon_rest_z": [cannon_pivot.position.z] as Array,
+		"cannon_muzzle_z": [mg_len + 0.05] as Array,
+		"torso": hull,
+		"head": turret,
+		"mats": mats,
+		"recoil": [0.0, 0.0],
+		"stride_phase": randf_range(0.0, TAU),
+		"stride_speed": randf_range(0.95, 1.05),
+		"stride_swing": 0.0,
+		"bob_amount": 0.02,
+		"idle_phase": randf_range(0.0, TAU),
+		"idle_speed": randf_range(0.4, 0.7),
+	}
 
 
 func _build_legs(member: Node3D, shape: Dictionary, mats: Array[StandardMaterial3D], kind: String) -> Dictionary:
