@@ -766,7 +766,7 @@ func _show_faction_tech_tree(faction_id: int) -> void:
 	bg.add_child(center)
 
 	var card := PanelContainer.new()
-	card.custom_minimum_size = Vector2(620, 560)
+	card.custom_minimum_size = Vector2(1100, 640)
 	center.add_child(card)
 
 	var vbox := VBoxContainer.new()
@@ -780,83 +780,264 @@ func _show_faction_tech_tree(faction_id: int) -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(title)
 
-	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(580, 440)
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	vbox.add_child(scroll)
-
-	var rows := VBoxContainer.new()
-	rows.add_theme_constant_override("separation", 6)
-	scroll.add_child(rows)
-
-	# Faction summary — civ-bonus-style overview of doctrine, role
-	# emphasis, and the headline mechanical differentiators. Reads
-	# above the build chain so the player gets the "why pick this
-	# faction" pitch before they scan the unit list.
+	# Faction summary — civ-bonus-style overview, sits above the
+	# graph so the player gets the doctrine pitch before scanning.
 	var summary_lbl := Label.new()
 	summary_lbl.text = _faction_summary(faction_id)
 	summary_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	summary_lbl.custom_minimum_size = Vector2(560, 0)
+	summary_lbl.custom_minimum_size = Vector2(1060, 0)
 	summary_lbl.add_theme_font_size_override("font_size", 13)
 	summary_lbl.add_theme_color_override("font_color", Color(0.78, 0.85, 0.95, 1.0))
-	rows.add_child(summary_lbl)
-	var summary_spacer := Control.new()
-	summary_spacer.custom_minimum_size = Vector2(0, 8)
-	rows.add_child(summary_spacer)
+	vbox.add_child(summary_lbl)
 
-	# Build chain — each entry shows the building gate + the units
-	# unlocked at that gate. Reads top-down as the actual progression
-	# the player follows in match. Slots a roster doesn't fill (e.g.
-	# Anvil has no transport_adv, Sable has no pylon_air for Anvil)
-	# are silently skipped by the per-tier role iteration below.
-	var chain: Array[Dictionary] = [
-		{"gate": "Headquarters (start)", "roles": ["engineer", "crawler"]},
-		{"gate": "Basic Foundry (190 S, requires Headquarters)", "roles": ["light_a", "light_b"]},
-		{"gate": "Advanced Foundry (265 S, requires Basic Foundry)", "roles": ["heavy_base"]},
-		{"gate": "Aerodrome (160 S / 65 F, requires Advanced Foundry)", "roles": ["air_base"]},
-		{"gate": "Advanced Armory (200 S / 90 F, requires Basic Armory) — unlocks the second slot at Adv Foundry & Aerodrome and houses their branch upgrades", "roles": ["heavy_adv", "transport_adv", "air_adv"]},
-		{"gate": "Black Pylon (200 S / 90 F, Sable only, requires Basic Armory) — Mesh anchor; unlocks the Wraith bomber", "roles": ["pylon_air"]},
-	]
-	for tier: Dictionary in chain:
-		var tier_lbl := Label.new()
-		tier_lbl.text = tier["gate"] as String
-		tier_lbl.add_theme_font_size_override("font_size", 16)
-		tier_lbl.add_theme_color_override("font_color", COLOR_HEADING)
-		rows.add_child(tier_lbl)
-		for role: String in tier["roles"]:
-			var path: String = roster.get(role, "") as String
-			if path.is_empty():
-				continue
-			var unit_stat: UnitStatResource = load(path) as UnitStatResource
-			if not unit_stat:
-				continue
-			var unit_lbl := Label.new()
-			unit_lbl.text = "    • %s — %s   (%dS / %dF, Pop %d)" % [
-				unit_stat.unit_name,
-				str(unit_stat.unit_class).capitalize(),
-				unit_stat.cost_salvage,
-				unit_stat.cost_fuel,
-				unit_stat.population,
-			]
-			unit_lbl.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85, 1.0))
-			rows.add_child(unit_lbl)
-			if unit_stat.special_description != "":
-				var blurb := Label.new()
-				blurb.text = "        " + unit_stat.special_description
-				blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-				blurb.custom_minimum_size = Vector2(540, 0)
-				blurb.add_theme_font_size_override("font_size", 12)
-				blurb.add_theme_color_override("font_color", Color(0.65, 0.70, 0.78, 1.0))
-				rows.add_child(blurb)
-		var spacer := Control.new()
-		spacer.custom_minimum_size = Vector2(0, 6)
-		rows.add_child(spacer)
+	# Layered tech-tree graph -- columns by build-tier (depth from
+	# HQ in the prereq chain), arrows drawn as a Control overlay
+	# between connected building cards.
+	var graph_scroll := ScrollContainer.new()
+	graph_scroll.custom_minimum_size = Vector2(1060, 480)
+	graph_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vbox.add_child(graph_scroll)
+	graph_scroll.add_child(_build_tech_tree_graph(faction_id, roster))
 
 	var close_btn := Button.new()
 	close_btn.text = "Close"
 	close_btn.custom_minimum_size = Vector2(160, 36)
 	close_btn.pressed.connect(canvas.queue_free)
 	vbox.add_child(close_btn)
+
+
+## Tech-tree building list (faction-agnostic). Each entry has:
+##   id          building_id (StringName)
+##   name        display name
+##   cost        cost string ("190 S" or "200 S / 90 F")
+##   prereqs     Array[StringName] of building_ids this depends on
+##   roles       Array[String] of roster keys this building unlocks
+##                 (matches _FACTION_ROSTER keys -- empty if the
+##                  building is purely economic / utility / defensive)
+##   sable_only  bool -- skip on Anvil
+##   anvil_only  bool -- skip on Sable
+const _TECH_GRAPH_NODES: Array[Dictionary] = [
+	{"id": &"headquarters",        "name": "Headquarters",      "cost": "(start)",       "prereqs": [],                "roles": ["engineer", "crawler"]},
+	{"id": &"basic_foundry",       "name": "Basic Foundry",     "cost": "190 S",         "prereqs": [&"headquarters"], "roles": ["light_a", "light_b"]},
+	{"id": &"salvage_yard",        "name": "Salvage Yard",      "cost": "75 S",          "prereqs": [&"headquarters"], "roles": []},
+	{"id": &"basic_generator",     "name": "Generator",         "cost": "180 S",         "prereqs": [&"headquarters"], "roles": []},
+	{"id": &"advanced_foundry",    "name": "Adv. Foundry",      "cost": "265 S",         "prereqs": [&"basic_foundry"],"roles": ["heavy_base"]},
+	{"id": &"basic_armory",        "name": "Basic Armory",      "cost": "150 S / 65 F",  "prereqs": [&"basic_foundry"],"roles": []},
+	{"id": &"aerodrome",           "name": "Aerodrome",         "cost": "160 S / 65 F",  "prereqs": [&"advanced_foundry"], "roles": ["air_base"]},
+	{"id": &"advanced_armory",     "name": "Adv. Armory",       "cost": "200 S / 90 F",  "prereqs": [&"basic_armory"], "roles": ["heavy_adv", "transport_adv", "air_adv"]},
+	{"id": &"sam_site",            "name": "SAM Site",          "cost": "125 S / 55 F",  "prereqs": [&"basic_armory"], "roles": []},
+	{"id": &"gun_emplacement",     "name": "Gun Emplacement",   "cost": "150 S",         "prereqs": [],                "roles": [], "anvil_only": true},
+	{"id": &"gun_emplacement_basic","name": "Gun Emplacement",  "cost": "150 S",         "prereqs": [],                "roles": [], "sable_only": true},
+	{"id": &"black_pylon",         "name": "Black Pylon",       "cost": "200 S / 90 F",  "prereqs": [&"basic_armory"], "roles": ["pylon_air"], "sable_only": true},
+]
+
+
+func _build_tech_tree_graph(faction_id: int, roster: Dictionary) -> Control:
+	## Returns a Control containing per-tier building cards laid out
+	## in columns + an arrow overlay drawing prereq links. The whole
+	## thing sits inside a ScrollContainer so wide trees scroll
+	## horizontally rather than getting clipped.
+
+	# Filter graph nodes by faction.
+	var nodes: Array[Dictionary] = []
+	for n: Dictionary in _TECH_GRAPH_NODES:
+		var anvil_only: bool = n.get("anvil_only", false) as bool
+		var sable_only: bool = n.get("sable_only", false) as bool
+		if anvil_only and faction_id != 0:
+			continue
+		if sable_only and faction_id != 1:
+			continue
+		nodes.append(n)
+
+	# Compute tier (depth) per node from prereqs. HQ = 0.
+	var tier_of: Dictionary = {}  # building_id -> tier int
+	# Iterate to fixed point (small graph; 10 iterations is plenty).
+	for _pass: int in 8:
+		for n: Dictionary in nodes:
+			var prereqs: Array = n.get("prereqs", []) as Array
+			if prereqs.is_empty():
+				tier_of[n["id"]] = 0
+				continue
+			var max_pre_tier: int = -1
+			var all_known: bool = true
+			for pid_v: Variant in prereqs:
+				var pid: StringName = pid_v
+				if not tier_of.has(pid):
+					all_known = false
+					break
+				max_pre_tier = maxi(max_pre_tier, tier_of[pid] as int)
+			if all_known:
+				tier_of[n["id"]] = max_pre_tier + 1
+
+	# Bucket nodes by tier.
+	var by_tier: Dictionary = {}
+	var max_tier: int = 0
+	for n: Dictionary in nodes:
+		var t: int = tier_of.get(n["id"], 0) as int
+		max_tier = maxi(max_tier, t)
+		if not by_tier.has(t):
+			by_tier[t] = []
+		(by_tier[t] as Array).append(n)
+
+	# Layout constants. Card width fixed; column spacing leaves room
+	# for the arrow overlay between cards.
+	var col_w: int = 220
+	var col_gap: int = 50
+	var row_h: int = 150
+	var row_gap: int = 16
+	var pad: int = 16
+
+	# Compute total area.
+	var max_per_col: int = 0
+	for t_v: Variant in by_tier:
+		max_per_col = maxi(max_per_col, (by_tier[t_v] as Array).size())
+	var total_w: int = pad * 2 + (max_tier + 1) * col_w + max_tier * col_gap
+	var total_h: int = pad * 2 + max_per_col * (row_h + row_gap)
+
+	# Root container -- a Control we size manually so the arrow
+	# overlay can use the same coordinate space.
+	var root := Control.new()
+	root.custom_minimum_size = Vector2(total_w, total_h)
+	root.size = Vector2(total_w, total_h)
+
+	# Arrow overlay drawn first so cards render on top.
+	var arrows := _TechTreeArrowOverlay.new()
+	arrows.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	arrows.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	arrows.card_rects = {}  # building_id -> Rect2 (filled below)
+	arrows.edges = []       # array of [from_id, to_id]
+	root.add_child(arrows)
+
+	# Place each tier's cards.
+	for t_int: int in range(max_tier + 1):
+		var col_x: int = pad + t_int * (col_w + col_gap)
+		var col_nodes: Array = by_tier.get(t_int, []) as Array
+		for j: int in col_nodes.size():
+			var n_data: Dictionary = col_nodes[j] as Dictionary
+			var card_pos: Vector2 = Vector2(col_x, pad + j * (row_h + row_gap))
+			var card_rect: Rect2 = Rect2(card_pos, Vector2(col_w, row_h))
+			arrows.card_rects[n_data["id"]] = card_rect
+			var card_panel: Control = _build_tech_tree_card(n_data, roster)
+			card_panel.position = card_pos
+			card_panel.size = card_rect.size
+			root.add_child(card_panel)
+			# Edges from each prereq to this node.
+			for pid_v: Variant in (n_data.get("prereqs", []) as Array):
+				var pid: StringName = pid_v
+				arrows.edges.append([pid, n_data["id"]])
+	# Force overlay to sit above the same coordinate space as the
+	# cards (size matches root).
+	arrows.custom_minimum_size = root.custom_minimum_size
+	arrows.size = root.size
+	arrows.queue_redraw()
+	return root
+
+
+func _build_tech_tree_card(n: Dictionary, roster: Dictionary) -> PanelContainer:
+	## Single building card -- name, cost, and a list of unit chips
+	## for the units this gate unlocks. Compact enough to fit a
+	## 220x150 cell.
+	var panel := PanelContainer.new()
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.10, 0.12, 0.16, 0.95)
+	style.border_color = Color(0.55, 0.62, 0.78, 0.85)
+	style.border_width_top = 1
+	style.border_width_bottom = 1
+	style.border_width_left = 1
+	style.border_width_right = 1
+	style.corner_radius_top_left = 4
+	style.corner_radius_top_right = 4
+	style.corner_radius_bottom_left = 4
+	style.corner_radius_bottom_right = 4
+	style.content_margin_left = 8
+	style.content_margin_right = 8
+	style.content_margin_top = 6
+	style.content_margin_bottom = 6
+	panel.add_theme_stylebox_override("panel", style)
+
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 2)
+	panel.add_child(col)
+
+	var name_lbl := Label.new()
+	name_lbl.text = n["name"] as String
+	name_lbl.add_theme_font_size_override("font_size", 15)
+	name_lbl.add_theme_color_override("font_color", Color(0.92, 0.92, 0.78, 1.0))
+	col.add_child(name_lbl)
+
+	var cost_lbl := Label.new()
+	cost_lbl.text = n["cost"] as String
+	cost_lbl.add_theme_font_size_override("font_size", 11)
+	cost_lbl.add_theme_color_override("font_color", Color(0.78, 0.85, 0.95, 1.0))
+	col.add_child(cost_lbl)
+
+	var sep := HSeparator.new()
+	col.add_child(sep)
+
+	var roles: Array = n.get("roles", []) as Array
+	if roles.is_empty():
+		var note := Label.new()
+		note.text = "(no units)"
+		note.add_theme_font_size_override("font_size", 11)
+		note.add_theme_color_override("font_color", Color(0.55, 0.6, 0.7, 1.0))
+		col.add_child(note)
+	else:
+		for role_v: Variant in roles:
+			var role: String = role_v as String
+			var path: String = roster.get(role, "") as String
+			if path.is_empty():
+				continue
+			var unit_stat: UnitStatResource = load(path) as UnitStatResource
+			if not unit_stat:
+				continue
+			var u_lbl := Label.new()
+			u_lbl.text = "• %s  (%dS%s)" % [
+				unit_stat.unit_name,
+				unit_stat.cost_salvage,
+				"" if unit_stat.cost_fuel == 0 else " / %dF" % unit_stat.cost_fuel,
+			]
+			u_lbl.add_theme_font_size_override("font_size", 12)
+			u_lbl.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85, 1.0))
+			col.add_child(u_lbl)
+
+	return panel
+
+
+class _TechTreeArrowOverlay extends Control:
+	## Custom-drawn arrows between tech-tree cards. Reads card_rects
+	## (filled by the parent _build_tech_tree_graph) and edges as
+	## [from_id, to_id] pairs. Routes lines from the right edge of
+	## the source card to the left edge of the target card with a
+	## small horizontal-then-vertical-then-horizontal stagger so
+	## multi-prereq fans don't collapse onto each other.
+	var card_rects: Dictionary = {}
+	var edges: Array = []
+
+	func _draw() -> void:
+		var color := Color(0.55, 0.78, 1.0, 0.85)
+		var arrow_color := Color(0.78, 0.92, 1.0, 0.95)
+		for edge_v: Variant in edges:
+			var edge: Array = edge_v as Array
+			if edge.size() < 2:
+				continue
+			var from_rect: Rect2 = card_rects.get(edge[0], Rect2()) as Rect2
+			var to_rect: Rect2 = card_rects.get(edge[1], Rect2()) as Rect2
+			if from_rect.size == Vector2.ZERO or to_rect.size == Vector2.ZERO:
+				continue
+			var from_pt: Vector2 = Vector2(from_rect.position.x + from_rect.size.x, from_rect.position.y + from_rect.size.y * 0.5)
+			var to_pt: Vector2 = Vector2(to_rect.position.x, to_rect.position.y + to_rect.size.y * 0.5)
+			var mid_x: float = (from_pt.x + to_pt.x) * 0.5
+			# Three-segment route: horiz out of source, vert to
+			# target row, horiz into target. Reads as a clean
+			# orthogonal arrow.
+			draw_line(from_pt, Vector2(mid_x, from_pt.y), color, 2.0, true)
+			draw_line(Vector2(mid_x, from_pt.y), Vector2(mid_x, to_pt.y), color, 2.0, true)
+			draw_line(Vector2(mid_x, to_pt.y), to_pt, color, 2.0, true)
+			# Arrowhead at the target end.
+			var head_size: float = 6.0
+			var head_a: Vector2 = to_pt + Vector2(-head_size, -head_size * 0.6)
+			var head_b: Vector2 = to_pt + Vector2(-head_size, head_size * 0.6)
+			draw_polygon(PackedVector2Array([to_pt, head_a, head_b]), PackedColorArray([arrow_color]))
 
 
 func _faction_summary(faction_id: int) -> String:
