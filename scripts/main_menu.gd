@@ -329,6 +329,15 @@ func _build_faction_section(parent: Container) -> void:
 		btn.pressed.connect(_on_faction_toggle.bind(entry["value"] as int))
 		_faction_buttons.append(btn)
 		col.add_child(btn)
+
+		# Tech-tree button under each faction — opens a modal listing
+		# the faction's full unit roster + production prerequisites.
+		# Lets the player vet a faction before committing to play it.
+		var tech_btn := Button.new()
+		tech_btn.text = "View Tech Tree"
+		tech_btn.custom_minimum_size = Vector2(220, 28)
+		tech_btn.pressed.connect(_show_faction_tech_tree.bind(entry["value"] as int))
+		col.add_child(tech_btn)
 	_apply_faction_toggle_state()
 
 
@@ -681,6 +690,129 @@ func _on_bus_volume_changed(db: float, bus_name: String) -> void:
 
 func _start_match() -> void:
 	get_tree().change_scene_to_file(ARENA_SCENE)
+
+
+const _FACTION_ROSTER: Dictionary = {
+	# Anvil — same role-keyed table the test arena uses.
+	0: {
+		"label": "Anvil Directive",
+		"engineer": "res://resources/units/anvil_ratchet.tres",
+		"light":    "res://resources/units/anvil_hound.tres",
+		"medium":   "res://resources/units/anvil_rook.tres",
+		"heavy":    "res://resources/units/anvil_bulwark.tres",
+		"crawler":  "res://resources/units/anvil_crawler.tres",
+		"air_drone":"res://resources/units/anvil_phalanx.tres",
+		"air_heavy":"res://resources/units/anvil_hammerhead.tres",
+	},
+	1: {
+		"label": "Sable Concord",
+		"engineer": "res://resources/units/sable_rigger.tres",
+		"light":    "res://resources/units/sable_specter.tres",
+		"medium":   "res://resources/units/sable_jackal.tres",
+		"heavy":    "res://resources/units/sable_harbinger.tres",
+		"crawler":  "res://resources/units/anvil_crawler.tres",  # shared chassis (faction overlay handles look)
+		"air_drone":"res://resources/units/sable_fang.tres",
+		"air_heavy":"res://resources/units/sable_switchblade.tres",
+	},
+}
+
+
+func _show_faction_tech_tree(faction_id: int) -> void:
+	## Modal overlay — lists the chosen faction's full unit roster
+	## with role hints, costs, and the building prerequisite chain
+	## the player needs to follow to unlock each unit. Lets the
+	## player evaluate the faction before committing to play it.
+	var roster: Dictionary = _FACTION_ROSTER.get(faction_id, {}) as Dictionary
+	if roster.is_empty():
+		return
+
+	var canvas := CanvasLayer.new()
+	canvas.layer = 200
+	add_child(canvas)
+
+	var bg := ColorRect.new()
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bg.color = Color(0.0, 0.0, 0.0, 0.78)
+	bg.mouse_filter = Control.MOUSE_FILTER_STOP
+	canvas.add_child(bg)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bg.add_child(center)
+
+	var card := PanelContainer.new()
+	card.custom_minimum_size = Vector2(620, 560)
+	center.add_child(card)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 8)
+	card.add_child(vbox)
+
+	var title := Label.new()
+	title.text = "%s — Tech Tree" % (roster["label"] as String)
+	title.add_theme_font_size_override("font_size", 28)
+	title.add_theme_color_override("font_color", COLOR_TITLE)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(title)
+
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(580, 440)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vbox.add_child(scroll)
+
+	var rows := VBoxContainer.new()
+	rows.add_theme_constant_override("separation", 6)
+	scroll.add_child(rows)
+
+	# Build chain — each entry shows the building gate + the units
+	# unlocked at that gate. Reads top-down as the actual progression
+	# the player follows in match.
+	var chain: Array[Dictionary] = [
+		{"gate": "Headquarters (start)", "roles": ["engineer", "crawler"]},
+		{"gate": "Basic Foundry (250 S)", "roles": ["light", "medium"]},
+		{"gate": "Advanced Foundry (350 S, requires Basic Foundry)", "roles": ["heavy"]},
+		{"gate": "Aerodrome (300 S, requires Advanced Foundry)", "roles": ["air_drone", "air_heavy"]},
+	]
+	for tier: Dictionary in chain:
+		var tier_lbl := Label.new()
+		tier_lbl.text = tier["gate"] as String
+		tier_lbl.add_theme_font_size_override("font_size", 16)
+		tier_lbl.add_theme_color_override("font_color", COLOR_HEADING)
+		rows.add_child(tier_lbl)
+		for role: String in tier["roles"]:
+			var path: String = roster.get(role, "") as String
+			if path.is_empty():
+				continue
+			var unit_stat: UnitStatResource = load(path) as UnitStatResource
+			if not unit_stat:
+				continue
+			var unit_lbl := Label.new()
+			unit_lbl.text = "    • %s — %s   (%dS / %dF, Pop %d)" % [
+				unit_stat.unit_name,
+				str(unit_stat.unit_class).capitalize(),
+				unit_stat.cost_salvage,
+				unit_stat.cost_fuel,
+				unit_stat.population,
+			]
+			unit_lbl.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85, 1.0))
+			rows.add_child(unit_lbl)
+			if unit_stat.special_description != "":
+				var blurb := Label.new()
+				blurb.text = "        " + unit_stat.special_description
+				blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+				blurb.custom_minimum_size = Vector2(540, 0)
+				blurb.add_theme_font_size_override("font_size", 12)
+				blurb.add_theme_color_override("font_color", Color(0.65, 0.70, 0.78, 1.0))
+				rows.add_child(blurb)
+		var spacer := Control.new()
+		spacer.custom_minimum_size = Vector2(0, 6)
+		rows.add_child(spacer)
+
+	var close_btn := Button.new()
+	close_btn.text = "Close"
+	close_btn.custom_minimum_size = Vector2(160, 36)
+	close_btn.pressed.connect(canvas.queue_free)
+	vbox.add_child(close_btn)
 
 
 func _build_tactical_background() -> Control:

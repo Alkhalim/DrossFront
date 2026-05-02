@@ -36,6 +36,19 @@ var _action_buttons: Array[Dictionary] = []
 ## Optional progress bar shown inside the bottom panel for construction / queue / worker spawn.
 var _progress_bar: ProgressBar = null
 
+## Selection roster strip — vertical column of unit-class chips
+## anchored to the LEFT edge of the bottom panel. Shown when more
+## than one squad is selected; each chip is a coloured class swatch
+## with count + average HP sliver. Click a chip to deselect that
+## class from the current selection.
+var _roster_strip: VBoxContainer = null
+var _roster_last_signature: String = ""
+
+## Hotkey palette overlay — translucent panel listing every active
+## hotkey for the current selection. Shown while Tab is held down.
+var _hotkey_palette: PanelContainer = null
+var _hotkey_palette_label: RichTextLabel = null
+
 ## Full-screen overlay shown while the tree is paused.
 var _pause_overlay: Control = null
 
@@ -92,6 +105,8 @@ func _ready() -> void:
 	_build_fps_counter()
 	_build_faction_watermark()
 	_apply_top_bar_faction_theme()
+	_build_selection_roster()
+	_build_hotkey_palette()
 	# Faster tooltip popups — Godot's default ~500ms is too slow for
 	# in-battle decisions where the player needs to verify costs /
 	# weapon roles in a couple of seconds. 0.18s feels responsive
@@ -326,13 +341,23 @@ func _unhandled_input(event: InputEvent) -> void:
 		if key.pressed and not key.echo and key.keycode == KEY_ESCAPE:
 			_toggle_pause()
 			get_viewport().set_input_as_handled()
-		elif key.pressed and not key.echo and key.keycode == KEY_TAB:
-			# TAB toggles / dismisses the tutorial overlay.
-			if has_meta("tutorial_overlay"):
+		elif key.keycode == KEY_TAB:
+			# TAB on first press: dismiss the tutorial overlay if it's
+			# up. Otherwise, hold-Tab shows the hotkey palette overlay
+			# listing every active shortcut for the current selection;
+			# release hides it again.
+			if key.pressed and not key.echo and has_meta("tutorial_overlay"):
 				var overlay: Node = get_meta("tutorial_overlay")
 				if is_instance_valid(overlay):
 					overlay.queue_free()
 				remove_meta("tutorial_overlay")
+				get_viewport().set_input_as_handled()
+			elif key.pressed and _hotkey_palette and not _hotkey_palette.visible:
+				_refresh_hotkey_palette()
+				_hotkey_palette.visible = true
+				get_viewport().set_input_as_handled()
+			elif not key.pressed and _hotkey_palette and _hotkey_palette.visible:
+				_hotkey_palette.visible = false
 				get_viewport().set_input_as_handled()
 
 
@@ -461,6 +486,7 @@ func _process(delta: float) -> void:
 	_hud_throttle = 0.0
 	_update_selection_display()
 	_update_button_affordability()
+	_update_selection_roster()
 	_check_tutorial_progress()
 	_refresh_gift_panel()
 	_refresh_global_queue()
@@ -1010,6 +1036,190 @@ func _build_fps_counter() -> void:
 	_fps_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_fps_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_fps_label)
+
+
+func _update_selection_roster() -> void:
+	## Rebuild the roster strip when the selection changes. Shows
+	## a chip per unique unit_class in the current selection with a
+	## live count + average HP fill. Hidden when no units are
+	## selected or only one class is in play (the regular bottom-
+	## panel readout already covers that case).
+	if not _roster_strip or not _selection_manager:
+		return
+	var units: Array[Node3D] = _selection_manager.get_selected_units()
+	if units.size() <= 1:
+		_roster_strip.visible = false
+		return
+	# Bucket per unit_name + accumulate HP fill.
+	var buckets: Dictionary = {}
+	for unit: Node3D in units:
+		if not is_instance_valid(unit) or not ("stats" in unit) or not unit.stats:
+			continue
+		var key: String = unit.stats.unit_name
+		if not buckets.has(key):
+			buckets[key] = {
+				"count": 0,
+				"hp_now": 0,
+				"hp_max": 0,
+				"class": str(unit.stats.unit_class),
+			}
+		var b: Dictionary = buckets[key]
+		b["count"] = (b["count"] as int) + 1
+		var hp_now: int = 0
+		if unit.has_method("get_total_hp"):
+			hp_now = unit.call("get_total_hp") as int
+		b["hp_now"] = (b["hp_now"] as int) + hp_now
+		b["hp_max"] = (b["hp_max"] as int) + (unit.stats.hp_total as int)
+	if buckets.size() < 2:
+		_roster_strip.visible = false
+		return
+	# Cheap signature so we only rebuild when classes/counts change.
+	var sig: String = ""
+	for k: String in buckets.keys():
+		sig += "%s:%d|" % [k, (buckets[k] as Dictionary)["count"] as int]
+	if sig != _roster_last_signature:
+		_roster_last_signature = sig
+		for child: Node in _roster_strip.get_children():
+			child.queue_free()
+		for class_name_str: String in buckets.keys():
+			var data: Dictionary = buckets[class_name_str] as Dictionary
+			_roster_strip.add_child(_make_roster_chip(class_name_str, data))
+	_roster_strip.visible = true
+
+
+func _make_roster_chip(class_name_str: String, data: Dictionary) -> Control:
+	var hp_now: int = data["hp_now"] as int
+	var hp_max: int = maxi(data["hp_max"] as int, 1)
+	var fill: float = clampf(float(hp_now) / float(hp_max), 0.0, 1.0)
+	var fill_color: Color = Color(0.40, 0.95, 0.40, 0.95)
+	if fill < 0.5: fill_color = Color(0.95, 0.78, 0.32, 0.95)
+	if fill < 0.25: fill_color = Color(1.0, 0.40, 0.35, 0.95)
+	# Class swatch (left) + label + HP sliver as a vertical chip.
+	var chip := PanelContainer.new()
+	chip.custom_minimum_size = Vector2(0, 28)
+	var inner := HBoxContainer.new()
+	inner.add_theme_constant_override("separation", 6)
+	chip.add_child(inner)
+	var swatch := ColorRect.new()
+	swatch.custom_minimum_size = Vector2(6, 22)
+	swatch.color = _class_swatch_color(data["class"] as String)
+	inner.add_child(swatch)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 1)
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	inner.add_child(col)
+	var name_lbl := Label.new()
+	name_lbl.text = "%dx %s" % [data["count"] as int, class_name_str]
+	name_lbl.add_theme_font_size_override("font_size", 12)
+	col.add_child(name_lbl)
+	var bar := ProgressBar.new()
+	bar.show_percentage = false
+	bar.custom_minimum_size = Vector2(0, 4)
+	bar.value = fill * 100.0
+	var fill_sb := StyleBoxFlat.new()
+	fill_sb.bg_color = fill_color
+	bar.add_theme_stylebox_override("fill", fill_sb)
+	col.add_child(bar)
+	return chip
+
+
+func _class_swatch_color(unit_class: String) -> Color:
+	match unit_class.to_lower():
+		"engineer": return Color(0.60, 0.85, 0.40, 1.0)
+		"light":    return Color(0.40, 0.85, 1.00, 1.0)
+		"medium":   return Color(0.95, 0.80, 0.35, 1.0)
+		"heavy":    return Color(1.00, 0.50, 0.35, 1.0)
+		"aircraft": return Color(0.78, 0.55, 1.00, 1.0)
+		"apex":     return Color(0.95, 0.40, 0.95, 1.0)
+	return Color(0.85, 0.85, 0.85, 1.0)
+
+
+func _build_selection_roster() -> void:
+	## Vertical chip column on the LEFT edge of the bottom panel.
+	## Each chip = one unit class in the current selection, with a
+	## count + a thin HP sliver. Click to deselect that class.
+	if not _bottom_panel:
+		return
+	_roster_strip = VBoxContainer.new()
+	_roster_strip.name = "SelectionRoster"
+	_roster_strip.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+	_roster_strip.add_theme_constant_override("separation", 4)
+	_roster_strip.offset_left = -150
+	_roster_strip.offset_right = -8
+	_roster_strip.offset_top = 4
+	_roster_strip.offset_bottom = -4
+	_roster_strip.mouse_filter = Control.MOUSE_FILTER_PASS
+	_roster_strip.visible = false
+	_bottom_panel.add_child(_roster_strip)
+
+
+func _refresh_hotkey_palette() -> void:
+	## Repopulates the palette with hotkeys relevant to the current
+	## selection: camera + global shortcuts, plus production /
+	## build / unit-command hotkeys when applicable.
+	if not _hotkey_palette_label:
+		return
+	var lines: PackedStringArray = PackedStringArray()
+	lines.append("[b]Hotkeys[/b]   (hold Tab to view)")
+	lines.append("")
+	lines.append("[color=#9fd0ff]Global[/color]")
+	lines.append("  Esc — pause / settings")
+	lines.append("  Tab — show this overlay")
+	lines.append("  WASD / arrow keys — pan camera")
+	lines.append("  QE / mouse wheel — zoom")
+	lines.append("  Ctrl + 1-9 — assign control group")
+	lines.append("  1-9 — recall control group")
+	lines.append("  Double-press group — center camera on group")
+	# Show selection-context hotkeys when something is selected.
+	var units: Array[Node3D] = []
+	if _selection_manager:
+		units = _selection_manager.get_selected_units()
+	if not units.is_empty():
+		lines.append("")
+		lines.append("[color=#9fd0ff]Unit Commands[/color]")
+		lines.append("  Right-click — move / attack-move")
+		lines.append("  S — stop")
+		lines.append("  H — hold ground")
+		lines.append("  P — patrol")
+		lines.append("  A — attack-move (then click)")
+	# Production / build buttons always have hotkeys assigned per
+	# the action panel; mirror them here.
+	if not _action_buttons.is_empty():
+		var first_kind: String = (_action_buttons[0] as Dictionary).get("kind", "") as String
+		if first_kind == "produce":
+			lines.append("")
+			lines.append("[color=#9fd0ff]Production[/color]")
+			lines.append("  Q W E R T — train queued slot")
+		elif first_kind == "build":
+			lines.append("")
+			lines.append("[color=#9fd0ff]Build Menu[/color]")
+			lines.append("  1-6 — start building placement")
+			lines.append("  Esc — cancel placement")
+	_hotkey_palette_label.text = "\n".join(lines)
+
+
+func _build_hotkey_palette() -> void:
+	## Translucent overlay anchored bottom-centre, populated on demand
+	## when Tab is held. Lists every hotkey that maps to a real action
+	## right now (selection commands, production hotkeys, build menu).
+	_hotkey_palette = PanelContainer.new()
+	_hotkey_palette.name = "HotkeyPalette"
+	_hotkey_palette.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	_hotkey_palette.offset_left = -260
+	_hotkey_palette.offset_right = 260
+	_hotkey_palette.offset_top = -300
+	_hotkey_palette.offset_bottom = -60
+	_hotkey_palette.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hotkey_palette.modulate = Color(1.0, 1.0, 1.0, 0.92)
+	_hotkey_palette.visible = false
+	add_child(_hotkey_palette)
+	_hotkey_palette_label = RichTextLabel.new()
+	_hotkey_palette_label.bbcode_enabled = true
+	_hotkey_palette_label.fit_content = true
+	_hotkey_palette_label.scroll_active = false
+	_hotkey_palette_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hotkey_palette_label.add_theme_font_size_override("normal_font_size", 14)
+	_hotkey_palette.add_child(_hotkey_palette_label)
 
 
 func _apply_top_bar_faction_theme() -> void:
