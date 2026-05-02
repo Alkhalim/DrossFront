@@ -390,6 +390,10 @@ func _create_visuals() -> void:
 	range_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_range_indicator.set_surface_override_material(0, range_mat)
 	_range_indicator.position.y = 0.05
+	# UI-style ring -- exclude it from the FOW dim overlay so the
+	# already-translucent material doesn't flicker as visibility
+	# toggles near the edge of LOS.
+	_range_indicator.set_meta("_fow_skip_dim", true)
 	add_child(_range_indicator)
 
 	# Owner flag indicator (small pillar on top)

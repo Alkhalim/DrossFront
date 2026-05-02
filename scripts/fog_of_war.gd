@@ -115,8 +115,14 @@ func _apply_fog_dim(node: Node3D, dim: bool) -> void:
 
 
 func _apply_fog_dim_recursive(node: Node, overlay: Material) -> void:
+	# UI-style indicator meshes (capture-area rings, capture bars,
+	# floating labels) opt out of the fog dim by carrying the
+	# `_fow_skip_dim` meta. The dim overlay composited over their
+	# already-translucent material was producing visible flicker as
+	# the FOW visibility state toggled near vision boundaries.
 	if node is GeometryInstance3D:
-		(node as GeometryInstance3D).material_overlay = overlay
+		if not node.get_meta("_fow_skip_dim", false):
+			(node as GeometryInstance3D).material_overlay = overlay
 	for child: Node in node.get_children():
 		_apply_fog_dim_recursive(child, overlay)
 
