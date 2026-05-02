@@ -2153,10 +2153,12 @@ func _update_unit_panel(units: Array[Node3D]) -> void:
 				dps_air,
 			]
 			var range_u: float = _max_weapon_range(unit.stats)
-			var line2: String = "%s   Range %.0fu   %s   Pop %d   %dS / %dF" % [
+			var acc_pct: int = int(_effective_accuracy(unit) * 100.0)
+			var line2: String = "%s   Range %.0fu   %s   Acc %d%%   Pop %d   %dS / %dF" % [
 				_speed_label(unit.stats.speed_tier),
 				range_u,
 				_weapon_summary(unit.stats),
+				acc_pct,
 				unit.stats.population,
 				unit.stats.cost_salvage,
 				unit.stats.cost_fuel,
@@ -2468,6 +2470,39 @@ func _compute_dps_vs(stat: UnitStatResource, armor_class: StringName) -> float:
 	return dps
 
 
+func _effective_accuracy(unit: Node3D) -> float:
+	## Mirrors CombatComponent._fire_weapon's hit-chance assembly so
+	## the inspect panel shows the player what the weapon will
+	## ACTUALLY do right now: base + squad-strength + Mesh + a
+	## movement penalty if the squad is moving. Range penalty
+	## requires an aim target so we don't include it; the inspect
+	## reading assumes a medium-range, in-bound shot.
+	if not unit or not ("stats" in unit) or not unit.stats:
+		return 0.0
+	var stats: UnitStatResource = unit.stats as UnitStatResource
+	if not stats.primary_weapon:
+		return 0.0
+	var base: float = stats.primary_weapon.base_accuracy
+	var bonus: float = 0.0
+	# Squad-strength full-strength bonus.
+	if stats.squad_strength_bonus > 0.0 and unit.has_method("get_squad_strength_ratio"):
+		var ratio: float = unit.call("get_squad_strength_ratio") as float
+		bonus += stats.squad_strength_bonus * ratio
+	# Mesh bonus from the scene-level singleton.
+	var mesh_sys: Node = get_tree().current_scene.get_node_or_null("MeshSystem") if get_tree() else null
+	if mesh_sys and mesh_sys.has_method("strength_for") and mesh_sys.has_method("accuracy_bonus"):
+		var owner_id: int = unit.get("owner_id") as int
+		var strength: int = mesh_sys.call("strength_for", unit.global_position, owner_id) as int
+		bonus += mesh_sys.call("accuracy_bonus", strength) as float
+	# Movement penalty if currently moving.
+	var is_moving: bool = false
+	if "velocity" in unit:
+		var v: Vector3 = unit.get("velocity") as Vector3
+		is_moving = Vector2(v.x, v.z).length() > 0.5
+	var penalty: float = -0.15 if is_moving else 0.0
+	return clampf(base + bonus + penalty, 0.30, 0.99)
+
+
 func _max_weapon_range(stat: UnitStatResource) -> float:
 	## Returns the longer of the unit's primary / secondary weapon
 	## ranges. Lets the player tell at a glance whether this is a
@@ -2572,16 +2607,18 @@ func _unit_tooltip(stat: UnitStatResource) -> String:
 		_compute_dps_vs(stat, &"light_air"),
 	])
 	if stat.primary_weapon:
-		lines.append("Primary: %s — %s, %s, %s" % [
+		lines.append("Primary: %s — %s, %s, %s, Acc %d%%" % [
 			stat.primary_weapon.weapon_name if stat.primary_weapon.weapon_name else "Cannon",
 			str(stat.primary_weapon.role_tag),
 			str(stat.primary_weapon.range_tier),
 			str(stat.primary_weapon.damage_tier),
+			int(stat.primary_weapon.base_accuracy * 100.0),
 		])
 	if stat.secondary_weapon:
-		lines.append("Secondary: %s — %s" % [
+		lines.append("Secondary: %s — %s, Acc %d%%" % [
 			stat.secondary_weapon.weapon_name if stat.secondary_weapon.weapon_name else "Backup",
 			str(stat.secondary_weapon.role_tag),
+			int(stat.secondary_weapon.base_accuracy * 100.0),
 		])
 	if stat.squad_strength_bonus > 0.0:
 		lines.append("Full-strength accuracy bonus: +%d%%" % int(stat.squad_strength_bonus * 100.0))

@@ -511,6 +511,17 @@ func play_alert(severity: int = 0) -> void:
 	if severity >= 2:
 		_play_thump(randf_range(85.0, 110.0), 0.18, -9.0)
 
+func play_miss(at: Vector3 = Vector3.INF) -> void:
+	## Synthesised "ricochet zip" — short bright tone at high pitch
+	## with a steep decay. Plays at the miss location so the player
+	## hears spatial audio for shots that fly past their squads.
+	if at != Vector3.INF:
+		_spatial_pos = at
+	_play_tone(randf_range(880.0, 1200.0), 0.06, randf_range(-22.0, -16.0))
+	_play_tone(randf_range(560.0, 720.0), 0.08, randf_range(-28.0, -22.0), randf_range(-15.0, 15.0))
+	_spatial_pos = Vector3.INF
+
+
 func play_weapon_fire(weapon: WeaponResource = null, at: Vector3 = Vector3.INF) -> void:
 	## Pick a recorded sample matching the weapon's character. Falls back
 	## to the original procedural recipe (`_play_weapon_fire_inner`) if

@@ -11,6 +11,7 @@ damage_tier = &"very_low"
 range_tier = &"short"
 rof_tier = &"slow"
 projectile_style = &"beam"
+base_accuracy = 0.85
 
 [resource]
 script = ExtResource("1")

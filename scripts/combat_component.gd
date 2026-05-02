@@ -455,14 +455,56 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	const SHOTGUN_SPREAD_RAD: float = 0.157  # ~9 degrees
 	const SHOTGUN_PELLET_RANGE: float = 14.0
 
+	# V3 §Pillar 5 — per-shot hit roll. Squad-strength + Mesh + base
+	# weapon accuracy combine into a final hit chance, modified by
+	# range-band (long shots are less accurate) and movement (firing
+	# while moving is less accurate). Clamped to [0.30, 0.99] so no
+	# shot is impossible AND no shot is guaranteed for non-elite
+	# weapons. Misses spawn dust + ricochet sound, no damage.
+	var weapon_range: float = CombatTables.get_range(weapon.range_tier)
+	var dist_to_target: float = _unit.global_position.distance_to(_current_target.global_position)
+	var range_t: float = clampf(dist_to_target / maxf(weapon_range, 0.01), 0.0, 1.0)
+	var range_penalty: float = 0.0
+	if range_t >= 0.80:
+		range_penalty = -0.10
+	var movement_penalty: float = 0.0
+	if Vector2(_unit.velocity.x, _unit.velocity.z).length() > 0.5:
+		movement_penalty = -0.15
+	var base_hit: float = weapon.base_accuracy
+	# `accuracy` already has squad-strength + Mesh additions baked in,
+	# but it's a damage MULTIPLIER (1.0 = baseline). Subtract 1.0 to
+	# get just the bonus and add it onto the per-weapon base hit.
+	var hit_chance: float = clampf(
+		base_hit + (accuracy - 1.0) + range_penalty + movement_penalty,
+		0.30, 0.99
+	)
+
 	for i: int in shots:
-		_current_target.take_damage(per_member_dmg, _unit)
+		var hit: bool = randf() < hit_chance
+		if hit:
+			_current_target.take_damage(per_member_dmg, _unit)
 
 		# Pick a per-shot aim point: distribute shots across the live members
 		# of the target squad so projectiles arrive at different bodies.
 		var aim_pos: Vector3 = _current_target.global_position
 		if not target_positions.is_empty():
 			aim_pos = target_positions[i % target_positions.size()]
+		# Misses jitter the impact point slightly off-target so the
+		# projectile visibly grazes past instead of vanishing into the
+		# target. Distance scales with how close the hit chance was to
+		# missing — bigger sprays for low-accuracy shots. A short
+		# spatial ricochet zip plays at the miss location so the
+		# player can hear shots flying past their squad.
+		if not hit:
+			var miss_offset: float = lerp(0.6, 2.4, 1.0 - hit_chance)
+			aim_pos += Vector3(
+				randf_range(-miss_offset, miss_offset),
+				0.0,
+				randf_range(-miss_offset, miss_offset),
+			)
+			var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager") if get_tree() else null
+			if audio and audio.has_method("play_miss"):
+				audio.call("play_miss", aim_pos)
 
 		if proj_script:
 			var fire_pos: Vector3 = _unit.global_position

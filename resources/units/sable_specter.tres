@@ -10,6 +10,7 @@ role_tag = &"AP"
 damage_tier = &"low"
 range_tier = &"medium"
 rof_tier = &"rapid"
+base_accuracy = 0.88
 
 [resource]
 script = ExtResource("1")
