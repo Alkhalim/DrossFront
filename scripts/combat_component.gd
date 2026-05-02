@@ -638,8 +638,11 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 			# height -- reads as "shot kicked up dirt over there" rather
 			# than "shot evaporated".
 			aim_pos.y = 0.0
-			# Stray-hit check.
-			var stray: Node3D = _find_stray_target(aim_pos, _current_target, my_owner)
+			# Stray-hit check. Owner pulled fresh here -- this loop
+			# doesn't capture an outer my_owner the way some other
+			# combat passes do.
+			var shooter_owner: int = (_unit.get("owner_id") as int) if _unit and "owner_id" in _unit else 0
+			var stray: Node3D = _find_stray_target(aim_pos, _current_target, shooter_owner)
 			if stray and stray.has_method("take_damage"):
 				var stray_dmg: int = maxi(int(round(float(per_member_dmg) * 0.5)), 1)
 				stray.take_damage(stray_dmg, _unit)
