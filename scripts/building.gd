@@ -2111,7 +2111,13 @@ func _apply_placeholder_shape() -> void:
 	# treatment — same hull shape as Anvil but desaturated and pulled
 	# darker + cooler. Player team color still appears via the team
 	# ring band, so faction identity reads alongside the team identity.
-	mat.albedo_color = _faction_tint_building_chassis(stats.placeholder_color)
+	# After the faction tint, blend a subtle role wash (Production
+	# orange / Tech violet / Defense red / Power yellow / Economy
+	# green / Command cool-white) into the chassis so the player can
+	# tell category at a glance from the hull tint -- not just the
+	# silhouette.
+	var base_chassis: Color = _faction_tint_building_chassis(stats.placeholder_color)
+	mat.albedo_color = _blend_role_tint(base_chassis, _building_role_color())
 	# Same grime overlay as the detail metal so the main hull doesn't
 	# read as flat colour while every doorway / vent / ladder around it
 	# does. uv1_scale tuned to the larger surface area — bigger hull
@@ -3226,6 +3232,51 @@ func _resolve_faction_id() -> int:
 	if owner_id == 0:
 		return settings.get("player_faction") as int
 	return settings.get("enemy_faction") as int
+
+
+## Per-role hull tint -- shared with the HUD's role colour palette
+## so a Production-orange tooltip header matches the warm wash on
+## the building's chassis.
+const _BUILDING_ROLE_TINT_PRODUCTION: Color = Color(1.00, 0.55, 0.18, 1.0)
+const _BUILDING_ROLE_TINT_TECH: Color       = Color(0.78, 0.45, 1.00, 1.0)
+const _BUILDING_ROLE_TINT_DEFENSE: Color    = Color(0.95, 0.30, 0.25, 1.0)
+const _BUILDING_ROLE_TINT_POWER: Color      = Color(1.00, 0.95, 0.20, 1.0)
+const _BUILDING_ROLE_TINT_ECONOMY: Color    = Color(0.50, 0.92, 0.55, 1.0)
+const _BUILDING_ROLE_TINT_COMMAND: Color    = Color(0.85, 0.85, 0.95, 1.0)
+## Blend amount for the role tint over the base chassis colour.
+## Keep light -- the chassis still needs to read as its faction
+## (Anvil tan, Sable black) under the wash; the role tint is a hint,
+## not a repaint.
+const _ROLE_TINT_BLEND: float = 0.18
+
+
+func _building_role_color() -> Color:
+	if not stats:
+		return _BUILDING_ROLE_TINT_COMMAND
+	match stats.building_id:
+		&"basic_foundry", &"advanced_foundry", &"aerodrome":
+			return _BUILDING_ROLE_TINT_PRODUCTION
+		&"basic_armory", &"advanced_armory", &"black_pylon":
+			return _BUILDING_ROLE_TINT_TECH
+		&"gun_emplacement", &"gun_emplacement_basic", &"sam_site":
+			return _BUILDING_ROLE_TINT_DEFENSE
+		&"basic_generator":
+			return _BUILDING_ROLE_TINT_POWER
+		&"salvage_yard":
+			return _BUILDING_ROLE_TINT_ECONOMY
+		&"headquarters":
+			return _BUILDING_ROLE_TINT_COMMAND
+	return _BUILDING_ROLE_TINT_COMMAND
+
+
+func _blend_role_tint(base: Color, role: Color) -> Color:
+	## Linear blend of role colour over the chassis at _ROLE_TINT_BLEND
+	## strength. Preserves alpha from base so transparency-driven
+	## construction ghosting still works.
+	var b: float = clampf(_ROLE_TINT_BLEND, 0.0, 1.0)
+	var out: Color = base.lerp(role, b)
+	out.a = base.a
+	return out
 
 
 func _faction_tint_building_chassis(c: Color) -> Color:
