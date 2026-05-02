@@ -704,9 +704,16 @@ func _setup_navigation() -> void:
 
 	# Generous edge-connection margin for any T-junctions the bake
 	# leaves at boundary cell edges.
+	#
+	# Also align the map's cell_height with the navmesh's cell_height
+	# (we set the mesh to 0.1 above; the NavigationServer's default
+	# is 0.25). A mismatch spams "navmesh cell_size mismatch" warnings
+	# every rebake -- harmless for pathing but floods the debugger.
 	var nav_map: RID = nav_region.get_navigation_map()
 	if nav_map.is_valid():
 		NavigationServer3D.map_set_edge_connection_margin(nav_map, 1.0)
+		NavigationServer3D.map_set_cell_height(nav_map, 0.1)
+		NavigationServer3D.map_set_cell_size(nav_map, 0.5)
 
 
 func _overlaps_plateau_footprint(pos: Vector3, piece_size: Vector3, margin: float) -> bool:
@@ -881,10 +888,15 @@ func _perform_navmesh_rebake() -> void:
 		return
 	_navmesh_rebake_last_time = float(Time.get_ticks_msec()) / 1000.0
 	_nav_region.bake_navigation_mesh(false)
-	# Refresh the edge-connection margin since some bakes reset it.
+	# Refresh the edge-connection margin + cell sizes since some
+	# bakes reset them. Without the cell-size sync the navmesh
+	# (0.5 cell, 0.1 height) mismatches the NavigationServer's
+	# default (0.25/0.25), spamming a warning per rebake.
 	var nav_map: RID = _nav_region.get_navigation_map()
 	if nav_map.is_valid():
 		NavigationServer3D.map_set_edge_connection_margin(nav_map, 1.0)
+		NavigationServer3D.map_set_cell_height(nav_map, 0.1)
+		NavigationServer3D.map_set_cell_size(nav_map, 0.5)
 
 
 ## HQ placement — both modes use opposite corners around the map center

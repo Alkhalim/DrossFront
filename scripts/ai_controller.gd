@@ -992,12 +992,15 @@ func _find_free_engineer() -> Node:
 		var builder: Node = node.get_builder() if node.has_method("get_builder") else null
 		if not builder:
 			continue
-		# Read the target through Variant + is_instance_valid so a freed
-		# Building reference (queue_free'd but still cached on the builder)
-		# can't crash the cast. If it's freed, the engineer is treated as
-		# free-to-build.
+		# Read the target through Variant + typeof so a freed Building
+		# reference (queue_free'd but still cached on the builder) can't
+		# crash the cast. `target_var is Object` raised
+		# 'Left operand of "is" is a previously freed instance' on stale
+		# Variant slots; typeof() operates on the Variant container
+		# without dereferencing, then is_instance_valid is documented
+		# safe on freed references. Treat freed targets as free-to-build.
 		var target_var: Variant = builder.get("_target_building")
-		if target_var is Object and is_instance_valid(target_var):
+		if typeof(target_var) == TYPE_OBJECT and is_instance_valid(target_var):
 			var target_node: Node = target_var as Node
 			if target_node and not target_node.get("is_constructed"):
 				continue  # Builder is genuinely busy on a live, unfinished site.
