@@ -2157,16 +2157,41 @@ func _build_unit_stat_sheet(unit: Node3D, include_cost: bool) -> String:
 		_stat_chip("Acc", "%d%%" % acc_pct, STAT_LABEL_COLOR_RANGE),
 	]
 
-	# Row 3 — mobility + (player units only) cost / pop.
+	# Row 3 — mobility + (player units only) cost / pop. Speed and
+	# sight read as star bars (bronze->silver->gold across 30 half-
+	# steps) so the relative quality lands at a glance, with the raw
+	# value in parentheses for the balance reader.
 	var row_mobility: Array = [
-		_stat_chip("Speed", _speed_label(stats.speed_tier), STAT_LABEL_COLOR_MOBILITY),
+		_stat_chip("Speed", "%s  (%.0f)" % [_stars_for_speed(stats.resolved_speed()), stats.resolved_speed()], STAT_LABEL_COLOR_MOBILITY),
+		_stat_chip("Sight", "%s  (%.0f)" % [_stars_for_sight(stats.resolved_sight_radius()), stats.resolved_sight_radius()], STAT_LABEL_COLOR_RANGE),
 		_stat_chip("Squad", "%d / %d" % [alive, stats.squad_size], STAT_LABEL_COLOR_SQUAD),
 	]
 	if include_cost:
 		row_mobility.append(_stat_chip("Pop", str(stats.population), STAT_LABEL_COLOR_SQUAD))
 		row_mobility.append(_stat_chip("Cost", "%dS / %dF" % [stats.cost_salvage, stats.cost_fuel], STAT_LABEL_COLOR_COST_S))
 
-	# Optional row 4 — weapon character. One short summary so the player
+	# Row 4 — weapon stars. Damage / range / fire rate as a 30-half-
+	# step quality readout. Pulls from resolved_*() so per-unit
+	# numeric overrides flow through.
+	var row_weapon_stars: Array = []
+	if stats.primary_weapon:
+		var w: WeaponResource = stats.primary_weapon
+		row_weapon_stars.append(_stat_chip("Dmg", _stars_for_damage(float(w.resolved_damage())), STAT_LABEL_COLOR_DAMAGE))
+		row_weapon_stars.append(_stat_chip("Rng", _stars_for_range(w.resolved_range()), STAT_LABEL_COLOR_RANGE))
+		row_weapon_stars.append(_stat_chip("RoF", _stars_for_rof(w.resolved_rof_seconds()), STAT_LABEL_COLOR_DAMAGE))
+
+	# Row 5 — attack bonus matrix. The role-vs-armor multipliers
+	# explain why a Switchblade's raw DPS reads low or high against a
+	# specific class -- the multipliers are doing most of the work.
+	var row_attack_bonus: Array = _attack_bonus_chips(stats)
+
+	# Row 6 — defense (own armor reduction).
+	var row_defense_bonus: Array = []
+	var armor_red: float = stats.resolved_armor_reduction()
+	if armor_red > 0.0 or stats.armor_class != &"unarmored":
+		row_defense_bonus.append(_stat_chip("Armor", "%s  (-%d%%)" % [_stars_for_armor(armor_red), int(round(armor_red * 100.0))], STAT_LABEL_COLOR_DEFENSE))
+
+	# Optional row 7 — weapon character. One short summary so the player
 	# knows whether the DPS comes from a slow cannon, a continuous beam,
 	# a missile salvo, etc. Pulled into its own row so the combat
 	# numbers row stays clean.
@@ -2175,7 +2200,27 @@ func _build_unit_stat_sheet(unit: Node3D, include_cost: bool) -> String:
 	if weapon_summary != "":
 		row_weapons.append(_stat_chip("Weapons", weapon_summary, STAT_LABEL_COLOR_RANGE))
 
-	return _build_stat_sheet([row_defense, row_combat, row_mobility, row_weapons])
+	return _build_stat_sheet([row_defense, row_combat, row_mobility, row_weapon_stars, row_attack_bonus, row_defense_bonus, row_weapons])
+
+
+func _attack_bonus_chips(stats: UnitStatResource) -> Array:
+	## Builds a chip row showing the primary weapon's role-vs-armor
+	## multipliers. Reads as "vs Light 1.0x | vs Heavy 0.3x | ..."
+	## so the player can see why a unit's raw DPS reads low or high
+	## against a specific class. Empty array when the unit has no
+	## primary weapon (engineers etc).
+	var out: Array = []
+	if not stats or not stats.primary_weapon:
+		return out
+	var role_tag: StringName = stats.primary_weapon.role_tag
+	# Subset of armor classes the player actually faces. AS / Universal
+	# get rolled into the same row -- the role tag IS the column header.
+	var classes: Array[StringName] = [&"light", &"medium", &"heavy", &"light_air", &"heavy_air", &"structure"]
+	var labels: Array[String] = ["Lt", "Md", "Hv", "LtAir", "HvAir", "Struct"]
+	for i: int in classes.size():
+		var mult: float = CombatTables.get_role_modifier(role_tag, classes[i])
+		out.append(_stat_chip("vs " + labels[i], "%.1fx" % mult, STAT_LABEL_COLOR_DAMAGE))
+	return out
 
 
 func _build_building_stat_sheet(building: Node3D, bstats: BuildingStatResource, hp_now: int) -> String:
@@ -3353,13 +3398,93 @@ func _max_weapon_range(stat: UnitStatResource) -> float:
 	return r
 
 
-func _speed_label(tier: StringName) -> String:
-	## Maps the speed-tier StringName to a human-readable label so the
-	## inspect panel reads "Fast" / "Slow" instead of "&\"slow\"".
-	var s: String = String(tier).replace("_", " ")
-	if s.is_empty():
-		return "Speed —"
-	return "Speed " + s.capitalize()
+## Star-rating renderer. Maps a numeric stat value across a 30-half-step
+## scale stretched over three colour-coded tiers: bronze (steps 1..10) /
+## silver (11..20) / gold (21..30). Worse-than-the-low-anchor reads as
+## empty stars; better-than-the-high-anchor caps at 5 gold. Inverted
+## stats (rate-of-fire seconds where lower = faster) flip the mapping.
+##
+## Returned BBCode is meant to drop into the existing _stat_chip
+## row layout; the chip-side label (e.g. "Speed") still comes from
+## _stat_chip's first arg.
+const STAR_TIER_BRONZE_HEX: String = "c0703a"
+const STAR_TIER_SILVER_HEX: String = "d8dadf"
+const STAR_TIER_GOLD_HEX: String = "ffc850"
+
+
+func _render_stars(value: float, low: float, high: float, inverted: bool = false) -> String:
+	if high == low:
+		return ""
+	var ratio: float
+	if inverted:
+		ratio = clampf((high - value) / (high - low), 0.0, 1.0)
+	else:
+		ratio = clampf((value - low) / (high - low), 0.0, 1.0)
+	var total_half: int = roundi(ratio * 30.0)
+	if total_half <= 0:
+		# Below the low anchor -- nothing to brag about, render 5
+		# empty bronze slots so the row width stays consistent.
+		return "[color=#%s]%s[/color]" % [STAR_TIER_BRONZE_HEX, "☆☆☆☆☆"]
+	var color_hex: String
+	var tier_half: int
+	if total_half <= 10:
+		color_hex = STAR_TIER_BRONZE_HEX
+		tier_half = total_half
+	elif total_half <= 20:
+		color_hex = STAR_TIER_SILVER_HEX
+		tier_half = total_half - 10
+	else:
+		color_hex = STAR_TIER_GOLD_HEX
+		tier_half = total_half - 20
+	var full: int = tier_half / 2
+	var has_half: bool = (tier_half % 2) == 1
+	var stars: String = "★".repeat(full)
+	if has_half:
+		stars += "½"
+	var empties: int = 5 - full - (1 if has_half else 0)
+	if empties > 0:
+		stars += "☆".repeat(empties)
+	return "[color=#%s]%s[/color]" % [color_hex, stars]
+
+
+## Per-stat anchor table for _render_stars. The low / high pair
+## defines what "0 stars (bronze empty)" and "5 gold" map to. The
+## anchors are deliberately wider than the tier table's min/max so
+## a "moderate" weapon doesn't bottom out at 1 star -- it should
+## land roughly mid-silver, with very_low as the bronze region and
+## extreme as the gold region.
+const STAR_ANCHOR_DAMAGE: Vector2 = Vector2(5.0, 150.0)
+const STAR_ANCHOR_RANGE: Vector2 = Vector2(2.0, 60.0)
+## ROF is seconds-between-shots; lower = better. Anchored to the
+## slowest (single = 4.0s) and fastest (continuous = 0.15s) tiers.
+const STAR_ANCHOR_ROF: Vector2 = Vector2(4.0, 0.15)
+const STAR_ANCHOR_SPEED: Vector2 = Vector2(0.0, 16.0)
+const STAR_ANCHOR_SIGHT: Vector2 = Vector2(8.0, 50.0)
+const STAR_ANCHOR_ARMOR: Vector2 = Vector2(0.0, 0.5)
+
+
+func _stars_for_speed(value: float) -> String:
+	return _render_stars(value, STAR_ANCHOR_SPEED.x, STAR_ANCHOR_SPEED.y)
+
+
+func _stars_for_sight(value: float) -> String:
+	return _render_stars(value, STAR_ANCHOR_SIGHT.x, STAR_ANCHOR_SIGHT.y)
+
+
+func _stars_for_damage(value: float) -> String:
+	return _render_stars(value, STAR_ANCHOR_DAMAGE.x, STAR_ANCHOR_DAMAGE.y)
+
+
+func _stars_for_range(value: float) -> String:
+	return _render_stars(value, STAR_ANCHOR_RANGE.x, STAR_ANCHOR_RANGE.y)
+
+
+func _stars_for_rof(seconds_between_shots: float) -> String:
+	return _render_stars(seconds_between_shots, STAR_ANCHOR_ROF.x, STAR_ANCHOR_ROF.y, true)
+
+
+func _stars_for_armor(reduction_0_to_1: float) -> String:
+	return _render_stars(reduction_0_to_1, STAR_ANCHOR_ARMOR.x, STAR_ANCHOR_ARMOR.y)
 
 
 func _weapon_summary(stat: UnitStatResource) -> String:
@@ -3431,10 +3556,11 @@ func _unit_tooltip(stat: UnitStatResource) -> String:
 	# Header: name + tactical role hint so the player can read what
 	# this unit is FOR before parsing the numbers.
 	lines.append("%s — %s" % [stat.unit_name, _role_hint_for(stat)])
-	lines.append("Class: %s    Armor: %s    %s" % [
+	lines.append("Class: %s    Armor: %s    Speed %.0f u/s    Sight %.0fu" % [
 		str(stat.unit_class).capitalize(),
 		str(stat.armor_class).capitalize(),
-		_speed_label(stat.speed_tier),
+		stat.resolved_speed(),
+		stat.resolved_sight_radius(),
 	])
 	lines.append("HP %d   Squad %d   Pop %d   Range %.0fu" % [
 		stat.hp_total, stat.squad_size, stat.population,
@@ -3448,12 +3574,14 @@ func _unit_tooltip(stat: UnitStatResource) -> String:
 		_compute_dps_vs(stat, &"light_air"),
 	])
 	if stat.primary_weapon:
-		lines.append("Primary: %s — %s, %s, %s, Acc %d%%" % [
-			stat.primary_weapon.weapon_name if stat.primary_weapon.weapon_name else "Cannon",
-			str(stat.primary_weapon.role_tag),
-			str(stat.primary_weapon.range_tier),
-			str(stat.primary_weapon.damage_tier),
-			int(stat.primary_weapon.base_accuracy * 100.0),
+		var pw: WeaponResource = stat.primary_weapon
+		lines.append("Primary: %s — %s, %d dmg, %.0fu, %.2fs cd, Acc %d%%" % [
+			pw.weapon_name if pw.weapon_name else "Cannon",
+			str(pw.role_tag),
+			pw.resolved_damage(),
+			pw.resolved_range(),
+			pw.resolved_rof_seconds(),
+			int(pw.base_accuracy * 100.0),
 		])
 	if stat.secondary_weapon:
 		lines.append("Secondary: %s — %s, Acc %d%%" % [
