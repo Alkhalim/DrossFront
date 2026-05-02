@@ -29,7 +29,8 @@
       "Bash(mv scripts/unit.gd.tmp scripts/unit.gd)",
       "Bash(awk 'NR>=1086 && NR<=1089 {print \"\\\\t\" $0; next} {print}' scripts/unit.gd)",
       "Bash(sed -n '1083,1092p' scripts/unit.gd)",
-      "Bash(awk 'NR>=1086 && NR<=1089 {sub\\(/^\\\\t/, \"\"\\); print; next} {print}' scripts/unit.gd)"
+      "Bash(awk 'NR>=1086 && NR<=1089 {sub\\(/^\\\\t/, \"\"\\); print; next} {print}' scripts/unit.gd)",
+      "Bash(xargs -I {} basename {})"
     ]
   }
 }
