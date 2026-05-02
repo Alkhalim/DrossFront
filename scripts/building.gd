@@ -24,6 +24,16 @@ var is_constructed: bool = false
 ## or be able to attack the foundation -- the structure isn't really
 ## there yet, just a placement intent.
 var construction_started: bool = false
+## Per-instance max HP override. -1 = use stats.hp. Bumped above
+## stats.hp when the Anvil HQ Plating upgrade is bought (the buff
+## raises both current_hp and the max ceiling so the auto-repair
+## tops back up to the upgraded total).
+var hp_max_override: int = -1
+## Anvil-only HQ upgrades. One-time per HQ; payment + flag flip
+## happen in the HUD. hq_plating raises max HP +25%; hq_battery
+## bumps the built-in HQ defensive turret's damage and range.
+var hq_plating_active: bool = false
+var hq_battery_active: bool = false
 var current_hp: int = 0
 var _construction_progress: float = 0.0
 
@@ -3347,14 +3357,26 @@ func heal(amount: float) -> void:
 	## to int when applying.
 	if not is_constructed or not stats:
 		return
-	if current_hp >= stats.hp:
+	var max_hp: int = effective_max_hp()
+	if current_hp >= max_hp:
 		return
-	current_hp = mini(stats.hp, current_hp + int(ceil(amount)))
+	current_hp = mini(max_hp, current_hp + int(ceil(amount)))
 	_update_damage_state()
 
 
+func effective_max_hp() -> int:
+	## Per-instance max HP. Returns hp_max_override when set
+	## (Anvil HQ Plating upgrade bumps it +25%); otherwise the
+	## shared stats.hp. Repair / damaged-state checks read this.
+	if hp_max_override > 0:
+		return hp_max_override
+	if stats:
+		return stats.hp
+	return 0
+
+
 func is_damaged() -> bool:
-	return is_constructed and stats != null and current_hp < stats.hp
+	return is_constructed and stats != null and current_hp < effective_max_hp()
 
 
 func take_damage(amount: int, _attacker: Node3D = null) -> void:
@@ -3456,7 +3478,7 @@ func _update_damage_state() -> void:
 func _compute_damage_stage() -> int:
 	if not stats or current_hp <= 0:
 		return 0
-	var ratio: float = float(current_hp) / float(maxi(stats.hp, 1))
+	var ratio: float = float(current_hp) / float(maxi(effective_max_hp(), 1))
 	if ratio < 0.25:
 		return 3
 	if ratio < 0.5:

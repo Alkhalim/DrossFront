@@ -983,7 +983,11 @@ func _update_enemy_inspect_panel(target: Node3D) -> void:
 	var bstats: BuildingStatResource = raw_stats as BuildingStatResource
 	if bstats:
 		var bhp_now: int = (target.get("current_hp") as int) if "current_hp" in target else 0
+		# Prefer the building's effective_max_hp() when available so the
+		# bar tracks per-instance HP buffs (Anvil HQ Plating, etc).
 		var bhp_max: int = bstats.hp
+		if target.has_method("effective_max_hp"):
+			bhp_max = target.call("effective_max_hp") as int
 		_name_label.text = "%s (%s)" % [bstats.building_name, owner_label]
 		_stats_label.text = _build_building_stat_sheet(target, bstats, bhp_now)
 		var bhp_pct: float = float(bhp_now) / float(maxi(bhp_max, 1))
@@ -1960,6 +1964,106 @@ func _rebuild_production_buttons(building: Building) -> void:
 		var chip_refs: Dictionary = _attach_cost_widget(btn, unit_stat.cost_salvage, unit_stat.cost_fuel, unit_stat.population)
 		_action_buttons.append({ "button": btn, "kind": "produce", "stat": unit_stat, "chips": chip_refs })
 
+	# Anvil HQ defensive upgrades — appended after the standard
+	# production buttons so the train + upgrade actions all live on
+	# one panel. Visible only on Anvil-player headquarters; each
+	# upgrade is one-time per HQ (button hides after purchase).
+	_maybe_append_hq_upgrade_buttons(building)
+
+
+## Anvil HQ defensive upgrade definitions. Each one-time upgrade
+## directly applies its effect on the selected HQ when bought
+## (no research timer): hq_plating raises max HP +25%, hq_battery
+## bumps the built-in defensive turret damage / range. Costs sit
+## in the same salvage + fuel idiom the tech buildings use.
+const HQ_PLATING_COST_SALVAGE: int = 150
+const HQ_PLATING_COST_FUEL: int = 50
+const HQ_BATTERY_COST_SALVAGE: int = 200
+const HQ_BATTERY_COST_FUEL: int = 80
+const HQ_PLATING_HP_MULT: float = 1.25
+
+
+func _maybe_append_hq_upgrade_buttons(building: Building) -> void:
+	if not building or not building.stats:
+		return
+	if building.stats.building_id != &"headquarters":
+		return
+	# Player faction has to be Anvil (id 0). Sable HQs don't get
+	# this upgrade line for now -- the user spec calls them out as
+	# Anvil-specific industrial-doctrine extras.
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	var player_faction: int = 0
+	if settings and "player_faction" in settings:
+		player_faction = settings.get("player_faction") as int
+	if player_faction != 0:
+		return
+	# Only the local player's own HQ gets the buttons.
+	if building.owner_id != 0:
+		return
+	if not building.is_constructed:
+		return
+
+	if not bool(building.get("hq_plating_active")):
+		_button_grid.add_child(_make_hq_upgrade_button(
+			building,
+			"HQ Plating",
+			"+%d%% HP — heavier ablative plating on the command building." % int((HQ_PLATING_HP_MULT - 1.0) * 100.0),
+			HQ_PLATING_COST_SALVAGE,
+			HQ_PLATING_COST_FUEL,
+			Callable(self, "_apply_hq_plating"),
+		))
+	if not bool(building.get("hq_battery_active")):
+		_button_grid.add_child(_make_hq_upgrade_button(
+			building,
+			"HQ Battery",
+			"+50%% damage / +4u range on the HQ defensive turret.",
+			HQ_BATTERY_COST_SALVAGE,
+			HQ_BATTERY_COST_FUEL,
+			Callable(self, "_apply_hq_battery"),
+		))
+
+
+func _make_hq_upgrade_button(building: Building, title: String, blurb: String, cost_s: int, cost_f: int, apply_cb: Callable) -> Button:
+	var btn := Button.new()
+	btn.custom_minimum_size = Vector2(108, 70)
+	btn.size_flags_horizontal = Control.SIZE_FILL
+	btn.size_flags_vertical = Control.SIZE_FILL
+	_set_label_button(btn, "", title)
+	btn.tooltip_text = "%s\n\n%s\n\nCost: %d S / %d F" % [title, blurb, cost_s, cost_f]
+	btn.pressed.connect(_on_hq_upgrade_pressed.bind(building, cost_s, cost_f, apply_cb))
+	var chip_refs: Dictionary = _attach_cost_widget(btn, cost_s, cost_f, 0)
+	_action_buttons.append({ "button": btn, "kind": "hq_upgrade", "cost_s": cost_s, "cost_f": cost_f, "chips": chip_refs })
+	return btn
+
+
+func _on_hq_upgrade_pressed(building: Building, cost_s: int, cost_f: int, apply_cb: Callable) -> void:
+	if not is_instance_valid(building) or not _resource_manager:
+		return
+	if not _resource_manager.can_afford(cost_s, cost_f):
+		return
+	if not _resource_manager.spend(cost_s, cost_f):
+		return
+	apply_cb.call(building)
+	_last_building_id = -1  # force panel rebuild so the bought button hides
+
+
+func _apply_hq_plating(building: Building) -> void:
+	if not is_instance_valid(building) or not building.stats:
+		return
+	building.hq_plating_active = true
+	var new_max: int = int(round(float(building.stats.hp) * HQ_PLATING_HP_MULT))
+	building.hp_max_override = new_max
+	# Pour the fresh HP delta into current_hp too so the upgrade
+	# reads as a real bulwark immediately (vs leaving the HQ at its
+	# old current_hp under a higher ceiling).
+	building.current_hp = mini(new_max, int(round(float(building.current_hp) * HQ_PLATING_HP_MULT)))
+
+
+func _apply_hq_battery(building: Building) -> void:
+	if not is_instance_valid(building):
+		return
+	building.hq_battery_active = true
+
 
 func _on_production_button(index: int) -> void:
 	if _selection_manager:
@@ -2079,8 +2183,11 @@ func _build_building_stat_sheet(building: Node3D, bstats: BuildingStatResource, 
 	## and (when applicable) turret DPS so the player can compare a
 	## gun-emplacement profile to a mech weapon at a glance.
 	var rows: Array = []
+	var hp_max: int = bstats.hp
+	if building and building.has_method("effective_max_hp"):
+		hp_max = building.call("effective_max_hp") as int
 	var defense_row: Array = [
-		_stat_chip("HP", "%d / %d" % [hp_now, bstats.hp], STAT_LABEL_COLOR_HP),
+		_stat_chip("HP", "%d / %d" % [hp_now, hp_max], STAT_LABEL_COLOR_HP),
 		_stat_chip("Class", "Structure", STAT_LABEL_COLOR_DEFENSE),
 	]
 	if bstats.power_production > 0:

@@ -78,9 +78,24 @@ func is_profile_swap_allowed() -> bool:
 	return _building_id() == &"gun_emplacement"
 
 
+## Anvil HQ Battery upgrade -- when the parent HQ has hq_battery_active
+## true, the built-in defensive turret hits ~50% harder and reaches
+## ~25% further. Only the hq_defense profile honors it; standard
+## emplacements ignore the flag because the upgrade is HQ-bound.
+const HQ_BATTERY_DAMAGE_MULT: float = 1.5
+const HQ_BATTERY_RANGE_BONUS: float = 4.0
+
+
+func _hq_battery_active() -> bool:
+	return profile == &"hq_defense" and _building != null and bool(_building.get("hq_battery_active"))
+
+
 func get_damage() -> int:
 	var base: int = (PROFILES[profile] as Dictionary).get("damage", TURRET_DAMAGE) as int
-	return int(round(float(base) * _damage_multiplier()))
+	var dmg: float = float(base) * _damage_multiplier()
+	if _hq_battery_active():
+		dmg *= HQ_BATTERY_DAMAGE_MULT
+	return int(round(dmg))
 
 
 func get_fire_interval() -> float:
@@ -88,7 +103,10 @@ func get_fire_interval() -> float:
 
 
 func get_range() -> float:
-	return (PROFILES[profile] as Dictionary).get("range", TURRET_RANGE) as float
+	var base: float = (PROFILES[profile] as Dictionary).get("range", TURRET_RANGE) as float
+	if _hq_battery_active():
+		base += HQ_BATTERY_RANGE_BONUS
+	return base
 
 
 func get_role() -> StringName:
