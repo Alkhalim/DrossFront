@@ -510,6 +510,33 @@ func _build_squad_visuals() -> void:
 		col_node.shape = col_shape
 		col_node.position.y = total_h / 2.0
 
+	# Per-member click area -- the body's collision shape only covers
+	# the leader (intentional for movement so heavies thread narrow
+	# corridors). Without an extra hitbox at every member position the
+	# player's right-click ray would miss the off-formation members
+	# and the click silently failed. Area3D on UNIT_LAYER makes every
+	# member individually pickable; both _raycast_unit and the click
+	# resolver walk up to recover the parent Unit.
+	var prev_area: Node = get_node_or_null("ClickArea")
+	if prev_area:
+		prev_area.queue_free()
+	var click_area := Area3D.new()
+	click_area.name = "ClickArea"
+	click_area.collision_layer = 2
+	click_area.collision_mask = 0
+	click_area.monitoring = false
+	click_area.monitorable = false
+	var member_radius: float = maxf(torso_size.x, torso_size.z) * 0.6 + 0.25
+	for i: int in stats.squad_size:
+		var u: Vector2 = unit_offsets[i] as Vector2
+		var member_col := CollisionShape3D.new()
+		var member_sphere := SphereShape3D.new()
+		member_sphere.radius = member_radius
+		member_col.shape = member_sphere
+		member_col.position = Vector3(u.x * spacing, total_h * 0.5, u.y * spacing)
+		click_area.add_child(member_col)
+	add_child(click_area)
+
 
 func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_color: Color) -> Dictionary:
 	## Builds one mech member and returns references to its animatable parts.
