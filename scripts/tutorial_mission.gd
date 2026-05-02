@@ -44,6 +44,45 @@ func _ready() -> void:
 	# etc).
 	call_deferred("_install_stages")
 	call_deferred("_advance_to_stage", 0)
+	call_deferred("_spawn_bonus_wrecks")
+
+
+func _spawn_bonus_wrecks() -> void:
+	## Extra small wrecks scattered along the northward push route
+	## from the player base (z=+100) toward the Sable enclave
+	## (z=-130), so the player's Crawler doesn't run dry as they
+	## advance. Each wreck is small (~25-45 salvage) and spread
+	## off-axis to stay clear of the discovery walk.
+	## Layout: 4 clusters between the base and the enclave, one
+	## per major lateral lane.
+	var cluster_centres: Array[Vector3] = [
+		Vector3(18.0, 0.0, 70.0),
+		Vector3(-18.0, 0.0, 70.0),
+		Vector3(20.0, 0.0, 30.0),
+		Vector3(-20.0, 0.0, 30.0),
+		Vector3(15.0, 0.0, -10.0),
+		Vector3(-15.0, 0.0, -10.0),
+		Vector3(22.0, 0.0, -50.0),
+		Vector3(-22.0, 0.0, -50.0),
+	]
+	for centre: Vector3 in cluster_centres:
+		var per_cluster: int = 3
+		for i: int in per_cluster:
+			var jitter: Vector3 = Vector3(
+				randf_range(-3.0, 3.0),
+				0.0,
+				randf_range(-3.0, 3.0),
+			)
+			var wreck := Wreck.new()
+			wreck.salvage_value = randi_range(25, 45)
+			wreck.salvage_remaining = wreck.salvage_value
+			wreck.wreck_size = Vector3(
+				randf_range(0.7, 1.1),
+				randf_range(0.3, 0.5),
+				randf_range(0.7, 1.1),
+			)
+			wreck.position = centre + jitter
+			get_tree().current_scene.add_child.call_deferred(wreck)
 
 
 func current_stage_dialogue() -> String:
@@ -206,7 +245,15 @@ func _install_stages() -> void:
 		"on_enter": Callable(self, "_stage_reactors_enter"),
 		"trigger": Callable(self, "_stage_reactors_done"),
 	})
-	# Stage 5 — assemble strike force.
+	# Stage 5 — optional oil-field capture.
+	_stages.append({
+		"id": &"oil",
+		"dialogue": "Steelmaster Kress: \"Side objective — there's a fuel deposit just east of your base. Capture it and you can train Hounds; skip it and you'll be fielding Rooks only.\"",
+		"objective": "Optional: capture a fuel deposit (unlocks Hounds). Auto-skips after 90s.",
+		"on_enter": Callable(self, "_stage_oil_enter"),
+		"trigger": Callable(self, "_stage_oil_done"),
+	})
+	# Stage 6 — assemble strike force.
 	_stages.append({
 		"id": &"force",
 		"dialogue": "Steelmaster Kress: \"Build your forces up to six combat units, commander — Rooks for speed, Hounds for the punch. The Sable enclave is dug in to the north and we are going to dislodge them.\"",
@@ -440,6 +487,33 @@ func _stage_reactors_done() -> bool:
 		if b.stats.building_id == &"basic_generator":
 			generators += 1
 	return generators >= 3
+
+
+## Timestamp at which the OIL stage entered, so the trigger
+## can auto-skip after a fixed window if the player chooses
+## not to bother capturing.
+var _oil_stage_entry_sec: float = 0.0
+const OIL_STAGE_AUTO_SKIP_SEC: float = 90.0
+
+
+func _stage_oil_enter() -> void:
+	_oil_stage_entry_sec = float(Time.get_ticks_msec()) / 1000.0
+
+
+func _stage_oil_done() -> bool:
+	# Advance as soon as the player owns ANY captured fuel
+	# deposit (owner_id 0). Otherwise auto-skip after the
+	# OIL_STAGE_AUTO_SKIP_SEC timer expires so the player can
+	# choose to skip the side objective and field Rooks-only.
+	for n: Node in get_tree().get_nodes_in_group("fuel_deposits"):
+		if not is_instance_valid(n):
+			continue
+		if not ("owner_id" in n):
+			continue
+		if (n.get("owner_id") as int) == 0:
+			return true
+	var now_sec: float = float(Time.get_ticks_msec()) / 1000.0
+	return (now_sec - _oil_stage_entry_sec) >= OIL_STAGE_AUTO_SKIP_SEC
 
 
 func _stage_ally_enter() -> void:
