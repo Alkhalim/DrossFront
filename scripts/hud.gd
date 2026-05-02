@@ -2374,7 +2374,16 @@ func _build_building_stat_sheet(building: Node3D, bstats: BuildingStatResource, 
 		var t_dmg: int = int(turret.call("get_damage")) if turret.has_method("get_damage") else TurretComponent.TURRET_DAMAGE
 		var t_fi: float = float(turret.call("get_fire_interval")) if turret.has_method("get_fire_interval") else TurretComponent.FIRE_INTERVAL
 		var t_rng: float = float(turret.call("get_range")) if turret.has_method("get_range") else TurretComponent.TURRET_RANGE
-		var dps: float = float(t_dmg) / maxf(t_fi, 0.01)
+		# Burst-fire profiles (HQ MG nests fire 3-shot salvos per
+		# cooldown) need to multiply per-shot damage by burst_count
+		# to get the displayed DPS to match what the turret actually
+		# outputs over time.
+		var t_burst: int = 1
+		var profile_key: StringName = (turret.get("profile") as StringName) if "profile" in turret else &""
+		if profile_key != &"" and TurretComponent.PROFILES.has(profile_key):
+			var p_dict: Dictionary = TurretComponent.PROFILES[profile_key] as Dictionary
+			t_burst = int(p_dict.get("burst_count", 1))
+		var dps: float = (float(t_dmg) * float(t_burst)) / maxf(t_fi, 0.01)
 		var combat_row: Array = [
 			_stat_chip("DPS", "%.0f" % dps, STAT_LABEL_COLOR_DAMAGE),
 			_stat_chip("Range", "%.0fu" % t_rng, STAT_LABEL_COLOR_RANGE),
