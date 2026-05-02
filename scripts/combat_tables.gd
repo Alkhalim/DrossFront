@@ -40,7 +40,18 @@ const ARMOR_MAP: Dictionary = {
 	&"light": 0.15,
 	&"medium": 0.30,
 	&"heavy": 0.45,
-	&"structure": 0.30,
+	# Structures bumped 0.30 -> 0.45 so a packed early-rush of light
+	# AP fire (Rooks / Specters / Hounds) takes appreciably longer to
+	# eat through a Foundry or HQ. Structure-class buildings already
+	# have role-tag protection vs AP (0.4 ROLE_VS_ARMOR multiplier);
+	# the armor-reduction bump compounds it so the early-game
+	# bumrush has to actually invest something heavier than chaingun
+	# infantry. AS (anti-structure) tagged weapons -- bombs, siege
+	# guns, the dedicated structure crackers -- aren't slowed
+	# meaningfully because their ROLE_VS_ARMOR multiplier is high
+	# enough that the extra 15% reduction hardly registers on the
+	# total.
+	&"structure": 0.45,
 	# V3 §"Pillar 3" — aircraft armor classes. Light Air = drones,
 	# interceptors. Heavy Air = bombers, gunships, Wraith.
 	&"light_air": 0.10,

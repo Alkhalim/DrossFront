@@ -201,6 +201,17 @@ func _ready() -> void:
 			turret.name = "TurretComponent"
 			turret.set("profile", &"anti_air")
 			add_child(turret)
+		elif stats.building_id == &"headquarters":
+			# Built-in HQ self-defense. Light Universal autocannon
+			# (PROFILES["hq_defense"]) so an early bumrush has at
+			# least one tower of fire to chew through; not strong
+			# enough to replace dedicated emplacements. Anvil players
+			# can later upgrade this via the HQ defense research.
+			var turret_script: GDScript = load("res://scripts/turret_component.gd") as GDScript
+			var turret: Node = turret_script.new()
+			turret.name = "TurretComponent"
+			turret.set("profile", &"hq_defense")
+			add_child(turret)
 
 
 func _ensure_visual_root() -> void:
@@ -520,7 +531,58 @@ func _team_collar(width: float, height: float, depth: float, pos: Vector3) -> vo
 	_attach_visual(collar)
 
 
+func _detail_hq_defense_turret() -> void:
+	## Small visible defensive turret cap on a roof corner of the HQ
+	## so the built-in HQ self-defense reads as "the HQ has a gun"
+	## rather than firing invisible shots from its centre. The
+	## pivoting + tracking is wired through the same turret_pivot
+	## convention the gun emplacement uses, so TurretComponent's
+	## _aim_at_target rotates it. Scaled down so it doesn't compete
+	## with the central command spire silhouette.
+	var fs: Vector3 = stats.footprint_size
+	var corner: Vector3 = Vector3(fs.x * 0.36, fs.y, fs.z * 0.36)
+	# Mounting plate so the turret doesn't look like it's floating.
+	var plate := MeshInstance3D.new()
+	var plate_cyl := CylinderMesh.new()
+	plate_cyl.top_radius = 0.30
+	plate_cyl.bottom_radius = 0.34
+	plate_cyl.height = 0.08
+	plate.mesh = plate_cyl
+	plate.position = corner + Vector3(0.0, 0.04, 0.0)
+	plate.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.20, 0.18, 0.16)))
+	_attach_visual(plate)
+	# Pivot — TurretComponent rotates this around Y to track targets.
+	var pivot := Node3D.new()
+	pivot.name = "TurretPivot"
+	pivot.position = corner + Vector3(0.0, 0.10, 0.0)
+	_attach_visual(pivot)
+	turret_pivot = pivot
+	# Compact dome + single short barrel. Hand-built rather than
+	# reusing rebuild_turret_visual because the gun-emplacement
+	# barrel scales off fs.x (=7 for the HQ), which would produce a
+	# 6u-long cannon dwarfing the rooftop spire.
+	var dome := MeshInstance3D.new()
+	var dome_sphere := SphereMesh.new()
+	dome_sphere.radius = 0.32
+	dome_sphere.height = 0.34
+	dome.mesh = dome_sphere
+	dome.position.y = 0.08
+	dome.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.28, 0.26, 0.24)))
+	pivot.add_child(dome)
+	var barrel := MeshInstance3D.new()
+	var bc := CylinderMesh.new()
+	bc.top_radius = 0.06
+	bc.bottom_radius = 0.07
+	bc.height = 0.85
+	barrel.mesh = bc
+	barrel.rotation.x = -PI / 2
+	barrel.position = Vector3(0.0, 0.18, -bc.height * 0.5 - 0.03)
+	barrel.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.16, 0.14, 0.14)))
+	pivot.add_child(barrel)
+
+
 func _detail_headquarters() -> void:
+	_detail_hq_defense_turret()
 	var fs: Vector3 = stats.footprint_size
 	# Roof base Y — Anvil's command tower sits on the placeholder hull
 	# (y ≈ fs.y); Sable adds a stepped tower overlay whose top spine

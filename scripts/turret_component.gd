@@ -29,6 +29,11 @@ const PROFILES: Dictionary = {
 	&"anti_light": { "damage": 24,  "fire": 0.4,  "range": 18.0, "role": &"AP",        "name": "Anti-Light" },
 	&"anti_heavy": { "damage": 135, "fire": 2.0,  "range": 22.0, "role": &"AP",        "name": "Anti-Heavy" },
 	&"anti_air":   { "damage": 36,  "fire": 0.25, "range": 24.0, "role": &"AAir",      "name": "Anti-Air" },
+	# Built-in HQ self-defense -- light Universal autocannon meant
+	# to discourage early bumrushes, not to replace a real turret
+	# line. Lower per-shot damage and shorter range than Balanced;
+	# Anvil players can ramp it up via the HQ defense upgrade.
+	&"hq_defense": { "damage": 28,  "fire": 0.7,  "range": 16.0, "role": &"Universal", "name": "HQ Defense" },
 }
 
 ## Anvil's industrial-doctrine turret hits harder than the baseline
