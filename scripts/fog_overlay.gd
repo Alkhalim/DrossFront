@@ -55,23 +55,33 @@ func _process(_delta: float) -> void:
 		_refresh_colors()
 
 
+## Fog volume height -- the fog "column" extends from CELL_LIFT_Y
+## up to CELL_LIFT_Y + FOG_HEIGHT so buildings + tall decorations
+## standing inside an explored-not-visible cell get dimmed too,
+## not just the ground beneath them. Has to clear the tallest in-
+## game thing the player still wants fogged (skyline towers ~8u,
+## aircraft ~9u).
+const FOG_HEIGHT: float = 14.0
+
+
 func _build_multimesh() -> void:
-	# Single flat quad mesh used for every cell.
-	var quad := QuadMesh.new()
-	quad.size = Vector2(_cell_size, _cell_size)
-	# QuadMesh sits in the XY plane facing +Z by default. Lay it
-	# flat by rotating about X so its surface is horizontal.
-	# We rotate the per-instance transform instead of building a
-	# pre-rotated mesh so the shader-side normal stays sane.
+	# Box mesh per cell -- a vertical column tall enough to cover
+	# buildings + aircraft + skyline pieces in a fogged cell. The
+	# per-fragment alpha from custom data still drives "visible vs
+	# explored" the same way the old flat quad did; the only change
+	# is that the volume now darkens everything inside the column,
+	# not just the ground plane.
+	var box := BoxMesh.new()
+	box.size = Vector3(_cell_size, FOG_HEIGHT, _cell_size)
 
 	_mm = MultiMesh.new()
 	_mm.transform_format = MultiMesh.TRANSFORM_3D
 	_mm.use_colors = false
 	_mm.use_custom_data = true
-	_mm.mesh = quad
+	_mm.mesh = box
 	_mm.instance_count = _grid_size * _grid_size
 
-	# Pre-place every quad transform once. Per-frame work only
+	# Pre-place every box transform once. Per-frame work only
 	# touches the custom data buffer (alpha multiplier per cell),
 	# not the position transforms. Cell N centre at world
 	# (N*cell - half_extent) — matches FogOfWar._world_to_cell's
@@ -83,8 +93,8 @@ func _build_multimesh() -> void:
 			var x: float = float(cx) * _cell_size - _half_extent
 			var z: float = float(cz) * _cell_size - _half_extent
 			var t := Transform3D()
-			t = t.rotated(Vector3.RIGHT, -PI * 0.5)
-			t.origin = Vector3(x, CELL_LIFT_Y, z)
+			# Box centre on Y so it spans CELL_LIFT_Y .. CELL_LIFT_Y + FOG_HEIGHT.
+			t.origin = Vector3(x, CELL_LIFT_Y + FOG_HEIGHT * 0.5, z)
 			_mm.set_instance_transform(i, t)
 			_mm.set_instance_custom_data(i, Color(1, 1, 1, 1))
 
@@ -138,13 +148,13 @@ void fragment() {
 
 
 ## Per-state overlay colours. Unexplored is opaque black so the
-## player sees nothing of what's there. Explored cells use a
-## very-light cool grey at low alpha so the underlying terrain +
-## buildings + wrecks read clearly — the previous 0.65 alpha was
-## reading as a "block of grey colour" that swamped detail.
+## player sees nothing of what's there. Explored cells overlay
+## with a near-black tint -- pure low-saturation darken rather
+## than a cool grey wash, so the result reads as "lights off in
+## that cell" instead of a desaturated daytime overlay.
 ## Currently visible cells stay fully clear.
 const FOG_COLOR_UNEXPLORED: Color = Color(0.0, 0.0, 0.0, 1.0)
-const FOG_COLOR_EXPLORED: Color = Color(0.05, 0.06, 0.08, 0.32)
+const FOG_COLOR_EXPLORED: Color = Color(0.0, 0.0, 0.01, 0.55)
 
 
 func _refresh_colors() -> void:
