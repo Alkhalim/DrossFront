@@ -2136,12 +2136,18 @@ func _append_hq_upgrade_buttons(building: Building) -> void:
 
 
 func _make_hq_upgrade_button(building: Building, title: String, blurb: String, cost_s: int, cost_f: int, apply_cb: Callable) -> Button:
-	var btn := Button.new()
+	var btn := _StyledTooltipButton.new()
 	btn.custom_minimum_size = Vector2(108, 70)
 	btn.size_flags_horizontal = Control.SIZE_FILL
 	btn.size_flags_vertical = Control.SIZE_FILL
 	_set_label_button(btn, "", title)
-	btn.tooltip_text = "%s\n\n%s\n\nCost: %d S / %d F" % [title, blurb, cost_s, cost_f]
+	# Plain tooltip_text triggers Godot's tooltip; the styled
+	# popup is built by _make_custom_tooltip on the subclass.
+	btn.tooltip_text = title
+	# Defense red accent matches the role colour the building
+	# tooltip uses for emplacements.
+	btn.tooltip_builder = func() -> Control:
+		return make_styled_upgrade_tooltip(title, blurb, cost_s, cost_f, _ROLE_COLOR_DEFENSE)
 	btn.pressed.connect(_on_hq_upgrade_pressed.bind(building, cost_s, cost_f, apply_cb))
 	var chip_refs: Dictionary = _attach_cost_widget(btn, cost_s, cost_f, 0)
 	_action_buttons.append({ "button": btn, "kind": "hq_upgrade", "cost_s": cost_s, "cost_f": cost_f, "chips": chip_refs })
@@ -2685,14 +2691,116 @@ func _make_branch_button(
 	cost_suffix: String,
 	disabled: bool,
 ) -> Button:
-	var btn := Button.new()
+	var btn := _StyledTooltipButton.new()
 	btn.custom_minimum_size = Vector2(120, 50)
 	_set_label_button(btn, "", branch_name)
-	btn.tooltip_text = _unit_tooltip(branch_stats) + "\n\nUpgrade cost:" + cost_suffix
+	btn.tooltip_text = branch_name
+	# Captured by-reference so tooltip rebuilds reflect any
+	# stat-source mutation (none today, but keeps it stable).
+	var captured_branch: UnitStatResource = branch_stats
+	var captured_base: UnitStatResource = base_stats
+	var captured_suffix: String = cost_suffix
+	btn.tooltip_builder = func() -> Control:
+		return _make_branch_styled_tooltip(captured_base, captured_branch, branch_name, captured_suffix)
 	btn.pressed.connect(_on_branch_commit.bind(base_stats, branch_stats, branch_name))
 	btn.disabled = disabled
 	_attach_research_cost_widget(btn)
 	return btn
+
+
+func _make_branch_styled_tooltip(base_stats: UnitStatResource, branch_stats: UnitStatResource, branch_name: String, cost_suffix: String) -> Control:
+	## Branch-commit tooltip. Reads as "BaseUnit -> Branch", body =
+	## a short delta summary of what improves and what gets worse vs
+	## the base, footer = standard upgrade-cost suffix. Tech violet
+	## accent matches the armory panel role.
+	var title: String = "%s — %s" % [
+		base_stats.unit_name if base_stats else "Unit",
+		branch_name,
+	]
+	var body: String = _branch_delta_summary(base_stats, branch_stats)
+	var lines_extra: PackedStringArray = PackedStringArray()
+	if cost_suffix and cost_suffix != "":
+		lines_extra.append("")
+		lines_extra.append("Upgrade cost:%s" % cost_suffix)
+	return make_styled_upgrade_tooltip(title, body, 0, 0, _ROLE_COLOR_TECH, lines_extra)
+
+
+func _branch_delta_summary(base_stats: UnitStatResource, branch_stats: UnitStatResource) -> String:
+	## Builds a compact pros/cons readout for a branch upgrade:
+	## "+ HP +120 (+12%)" / "- Speed -2 u/s" lines, plus the branch's
+	## special_description on the bottom if it diverges from the base.
+	## Returns plain text with [color] BBCode tags so the parent
+	## RichTextLabel renders the +/- in green / red.
+	if not base_stats or not branch_stats:
+		return ""
+	var pros: PackedStringArray = PackedStringArray()
+	var cons: PackedStringArray = PackedStringArray()
+
+	# HP
+	_emit_branch_delta(pros, cons, "HP", float(branch_stats.hp_total - base_stats.hp_total), float(base_stats.hp_total), 0)
+	# Squad size
+	if branch_stats.squad_size != base_stats.squad_size:
+		var sd: int = branch_stats.squad_size - base_stats.squad_size
+		var s_line: String = "Squad %+d" % sd
+		if sd > 0:
+			pros.append(s_line)
+		else:
+			cons.append(s_line)
+	# Speed
+	_emit_branch_delta(pros, cons, "Speed", branch_stats.resolved_speed() - base_stats.resolved_speed(), base_stats.resolved_speed(), 1)
+	# Sight
+	_emit_branch_delta(pros, cons, "Sight", branch_stats.resolved_sight_radius() - base_stats.resolved_sight_radius(), base_stats.resolved_sight_radius(), 1)
+	# Armor reduction (% scale)
+	var arm_d: float = branch_stats.resolved_armor_reduction() - base_stats.resolved_armor_reduction()
+	if absf(arm_d) > 0.005:
+		var arm_line: String = "Armor %+d%%" % int(round(arm_d * 100.0))
+		if arm_d > 0.0:
+			pros.append(arm_line)
+		else:
+			cons.append(arm_line)
+	# Weapon -- damage, range, RoF (lower = faster).
+	if base_stats.primary_weapon and branch_stats.primary_weapon:
+		_emit_branch_delta(pros, cons, "Damage", float(branch_stats.primary_weapon.resolved_damage() - base_stats.primary_weapon.resolved_damage()), float(base_stats.primary_weapon.resolved_damage()), 0)
+		_emit_branch_delta(pros, cons, "Range", branch_stats.primary_weapon.resolved_range() - base_stats.primary_weapon.resolved_range(), base_stats.primary_weapon.resolved_range(), 1)
+		# RoF: lower seconds-between-shots = better.
+		var rof_d: float = branch_stats.primary_weapon.resolved_rof_seconds() - base_stats.primary_weapon.resolved_rof_seconds()
+		if absf(rof_d) > 0.01:
+			var rof_line: String = "Fire rate %+.2fs cd" % (-rof_d)
+			if rof_d < 0.0:
+				pros.append(rof_line)
+			else:
+				cons.append(rof_line)
+
+	var lines: PackedStringArray = PackedStringArray()
+	for p: String in pros:
+		lines.append("[color=#7be37b]+ %s[/color]" % p)
+	for c: String in cons:
+		lines.append("[color=#ff6e6e]- %s[/color]" % c)
+	if lines.is_empty():
+		lines.append("[color=#aaaaaa]No stat differences.[/color]")
+	# Tail: branch-specific blurb only when it deviates from base.
+	if branch_stats.special_description != "" and branch_stats.special_description != base_stats.special_description:
+		lines.append("")
+		lines.append(branch_stats.special_description)
+	return "\n".join(lines)
+
+
+func _emit_branch_delta(pros: PackedStringArray, cons: PackedStringArray, label: String, delta: float, base_val: float, decimals: int) -> void:
+	## Append a +/- line to the pros / cons arrays based on `delta`.
+	## Skipped when |delta| is below noise threshold so identical
+	## stats don't clutter the readout. Includes a percentage when
+	## the base is non-zero.
+	if absf(delta) < 0.05:
+		return
+	var pct: String = ""
+	if base_val > 0.001:
+		pct = " (%+d%%)" % int(round((delta / base_val) * 100.0))
+	var fmt: String = "%s %+." + str(decimals) + "f%s"
+	var line: String = fmt % [label, delta, pct]
+	if delta > 0.0:
+		pros.append(line)
+	else:
+		cons.append(line)
 
 
 func _make_anchor_research_row(rm: Node, cost_suffix: String) -> Control:
@@ -2707,7 +2815,7 @@ func _make_anchor_research_row(rm: Node, cost_suffix: String) -> Control:
 	lbl.add_theme_color_override("font_color", Color(0.85, 0.82, 0.70, 1.0))
 	row.add_child(lbl)
 
-	var anchor_btn := Button.new()
+	var anchor_btn := _StyledTooltipButton.new()
 	anchor_btn.custom_minimum_size = Vector2(160, 50)
 	if rm.is_researched(&"anchor_mode"):
 		anchor_btn.text = "Anchor Mode\nResearched"
@@ -2717,12 +2825,19 @@ func _make_anchor_research_row(rm: Node, cost_suffix: String) -> Control:
 		anchor_btn.disabled = true
 	else:
 		anchor_btn.text = "[E] Anchor Mode"
-		anchor_btn.tooltip_text = (
-			"Crawlers gain a stationary Anchor command.\n"
-			+ "Anchored: +50% armor, +25% workers, +25% range.\n"
-			+ "5s deploy / 5s undeploy (vulnerable during).\n\n"
-			+ "Upgrade cost:" + cost_suffix
-		)
+		anchor_btn.tooltip_text = "Anchor Mode"
+		var captured_suffix: String = cost_suffix
+		anchor_btn.tooltip_builder = func() -> Control:
+			var blurb: String = (
+				"Crawlers gain a stationary Anchor command.\n"
+				+ "Anchored: +50% armor, +25% workers, +25% range.\n"
+				+ "5s deploy / 5s undeploy (vulnerable during)."
+			)
+			var extra: PackedStringArray = PackedStringArray()
+			if captured_suffix != "":
+				extra.append("")
+				extra.append("Upgrade cost:%s" % captured_suffix)
+			return make_styled_upgrade_tooltip("Anchor Mode", blurb, 0, 0, _ROLE_COLOR_TECH, extra)
 		anchor_btn.pressed.connect(_on_research_anchor)
 		_attach_research_cost_widget(anchor_btn)
 	row.add_child(anchor_btn)
@@ -3916,3 +4031,78 @@ class _BuildingTooltipButton extends Button:
 		if hud and hud.has_method("make_styled_building_tooltip"):
 			return hud.call("make_styled_building_tooltip", bstat, prereqs_ok) as Control
 		return null
+
+
+class _StyledTooltipButton extends Button:
+	## Generic Button subclass that delegates _make_custom_tooltip to a
+	## Callable. Used by every non-build-menu button that wants the same
+	## opaque, BBCode-rich tooltip treatment (HQ upgrades, branch
+	## upgrades, etc.) without each one needing its own subclass.
+	## Builder receives no args -- bake context into the Callable.
+	var tooltip_builder: Callable = Callable()
+
+	func _make_custom_tooltip(_for_text: String) -> Control:
+		if tooltip_builder.is_valid():
+			return tooltip_builder.call() as Control
+		return null
+
+
+func make_styled_upgrade_tooltip(title: String, blurb: String, cost_s: int, cost_f: int, accent: Color, lines_extra: PackedStringArray = PackedStringArray()) -> Control:
+	## Mirror of make_styled_building_tooltip but for upgrade-style
+	## buttons (HQ Plating / Battery, branch commits, anchor-mode
+	## research, etc.). Same opaque PanelContainer + BBCode body, but
+	## no role hint -- callers pass an accent colour to tint the
+	## border + title underline.
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(280, 0)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.06, 0.06, 0.08, 0.97)
+	style.border_color = accent
+	style.border_color.a = 0.95
+	style.border_width_top = 1
+	style.border_width_bottom = 1
+	style.border_width_left = 1
+	style.border_width_right = 1
+	style.corner_radius_top_left = 4
+	style.corner_radius_top_right = 4
+	style.corner_radius_bottom_left = 4
+	style.corner_radius_bottom_right = 4
+	style.content_margin_left = 10
+	style.content_margin_right = 10
+	style.content_margin_top = 8
+	style.content_margin_bottom = 8
+	panel.add_theme_stylebox_override("panel", style)
+
+	var label := RichTextLabel.new()
+	label.bbcode_enabled = true
+	label.fit_content = true
+	label.scroll_active = false
+	label.custom_minimum_size = Vector2(260, 0)
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.add_theme_color_override("default_color", Color(0.92, 0.92, 0.95, 1.0))
+
+	var accent_hex: String = "%02x%02x%02x" % [
+		int(accent.r * 255.0), int(accent.g * 255.0), int(accent.b * 255.0),
+	]
+	var lines: PackedStringArray = PackedStringArray()
+	lines.append("[b][color=#%s]%s[/color][/b]" % [accent_hex, title])
+	# Cost line if any.
+	var cost_str: String = ""
+	if cost_s > 0:
+		cost_str = "[color=#ff8c2e]%dS[/color]" % cost_s
+	if cost_f > 0:
+		if cost_str != "":
+			cost_str += " / [color=#4cd0ff]%dF[/color]" % cost_f
+		else:
+			cost_str = "[color=#4cd0ff]%dF[/color]" % cost_f
+	if cost_str != "":
+		lines.append("Cost: " + cost_str)
+	if not blurb.is_empty():
+		lines.append("")
+		lines.append(blurb)
+	for extra: String in lines_extra:
+		lines.append(extra)
+
+	label.text = "\n".join(lines)
+	panel.add_child(label)
+	return panel
