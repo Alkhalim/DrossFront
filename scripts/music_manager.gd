@@ -14,10 +14,11 @@ const MUSIC_DIR_UNIVERSAL: String = "res://assets/audio/Music/Universal"
 const MUSIC_DIR_ANVIL: String = "res://assets/audio/Music/Anvil"
 const MUSIC_DIR_SABLE: String = "res://assets/audio/Music/Sable"
 
-## Playback volume on the music bus. -14 dB sits the score well
-## under SFX (~50% perceived loudness vs the previous -8 dB) so
-## the score stays present without competing with combat audio.
-const MUSIC_VOLUME_DB: float = -14.0
+## Playback volume on the music bus. -16 dB drops another ~20%
+## from the previous -14 default so the score sits well behind
+## SFX without disappearing — the slider in the pause menu lets
+## players push it back up.
+const MUSIC_VOLUME_DB: float = -16.0
 
 ## Gap between tracks so the next one doesn't slam in immediately.
 const TRACK_GAP_SEC: float = 1.4
