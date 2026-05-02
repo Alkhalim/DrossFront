@@ -460,11 +460,11 @@ func _apply_map_visuals() -> void:
 ## them). Player IDs 0/1 are team A, 3/4 are team B; 2 is reserved for the
 ## neutral pseudo-player so existing patrol code keeps working unchanged.
 const ROSTER_1V1: Array[Dictionary] = [
-	{"id": 0, "team": 0, "color": Color(0.10, 0.32, 1.0, 1.0), "human": true, "name": "Player"},
+	{"id": 0, "team": 0, "color": Color(0.08, 0.25, 0.85, 1.0), "human": true, "name": "Player"},
 	{"id": 1, "team": 1, "color": Color(0.85, 0.2, 0.15, 1.0), "human": false, "name": "AI Bravo"},
 ]
 const ROSTER_2V2: Array[Dictionary] = [
-	{"id": 0, "team": 0, "color": Color(0.10, 0.32, 1.0, 1.0), "human": true, "name": "Player"},
+	{"id": 0, "team": 0, "color": Color(0.08, 0.25, 0.85, 1.0), "human": true, "name": "Player"},
 	{"id": 1, "team": 0, "color": Color(0.2, 0.85, 0.5, 1.0), "human": false, "name": "AI Charlie"},
 	{"id": 3, "team": 1, "color": Color(0.85, 0.2, 0.15, 1.0), "human": false, "name": "AI Bravo"},
 	{"id": 4, "team": 1, "color": Color(0.95, 0.55, 0.2, 1.0), "human": false, "name": "AI Delta"},
