@@ -3152,13 +3152,20 @@ func _rebuild_build_buttons() -> void:
 		if not tab_match:
 			continue
 		var prereqs_ok: bool = _prerequisites_met(bstat, built_ids)
-		var btn := Button.new()
+		var btn := _BuildingTooltipButton.new()
+		btn.bstat = bstat
+		btn.prereqs_ok = prereqs_ok
+		btn.hud = self
 		btn.custom_minimum_size = Vector2(108, 70)
 		btn.size_flags_horizontal = Control.SIZE_FILL
 		btn.size_flags_vertical = Control.SIZE_FILL
 		var prefix: String = "[%d]" % (visible_index + 1) if prereqs_ok else "[Locked]"
 		_set_label_button(btn, prefix, bstat.building_name)
-		btn.tooltip_text = _building_tooltip_with_prereq(bstat, prereqs_ok)
+		# tooltip_text stays plain so Godot still triggers the tooltip;
+		# _make_custom_tooltip on the subclass below renders the actual
+		# styled popup using BBCode + an opaque PanelContainer so the
+		# build-menu hover info is readable + role-coloured.
+		btn.tooltip_text = bstat.building_name
 		btn.disabled = not prereqs_ok
 		# Bind by stat reference, not visible index — visible_index only
 		# matches `buildable[i]` while filters are stable, and we don't
@@ -3734,44 +3741,178 @@ func _building_role_hint(stat: BuildingStatResource) -> String:
 	## One-line role summary so the player can identify what the
 	## building does at a glance. Maps building_id to a short label.
 	match stat.building_id:
-		&"headquarters": return "Command Center"
-		&"basic_foundry": return "Mech Production"
-		&"advanced_foundry": return "Heavy Mech Production"
-		&"basic_generator": return "Power Source"
-		&"basic_armory": return "Tech Upgrades"
-		&"advanced_armory": return "Advanced Tech & Unit Unlocks"
-		&"salvage_yard": return "Static Salvage Harvester"
-		&"gun_emplacement": return "Anvil Defensive Turret (mode-switchable, +15% HP / dmg)"
-		&"gun_emplacement_basic": return "Defensive Turret (ground only, fixed)"
-		&"aerodrome": return "Aircraft Production"
-		&"sam_site": return "Anti-Air Defense"
+		&"headquarters": return "Command"
+		&"basic_foundry": return "Production"
+		&"advanced_foundry": return "Production"
+		&"basic_generator": return "Power"
+		&"basic_armory": return "Tech"
+		&"advanced_armory": return "Tech"
+		&"salvage_yard": return "Economy"
+		&"gun_emplacement": return "Defense"
+		&"gun_emplacement_basic": return "Defense"
+		&"aerodrome": return "Production"
+		&"sam_site": return "Defense"
+		&"black_pylon": return "Tech"
 	return "Structure"
 
 
+## Per-role colours used by both the small role-hint header and
+## the build-button tooltip border. Keep distinct enough that the
+## category reads at a glance without mousing over.
+const _ROLE_COLOR_PRODUCTION: Color = Color(1.00, 0.55, 0.18, 1.0) # salvage orange
+const _ROLE_COLOR_TECH: Color       = Color(0.78, 0.45, 1.00, 1.0) # violet
+const _ROLE_COLOR_DEFENSE: Color    = Color(0.95, 0.30, 0.25, 1.0) # warm red
+const _ROLE_COLOR_POWER: Color      = Color(1.00, 0.95, 0.20, 1.0) # bright yellow
+const _ROLE_COLOR_ECONOMY: Color    = Color(0.50, 0.92, 0.55, 1.0) # bright green
+const _ROLE_COLOR_COMMAND: Color    = Color(0.85, 0.85, 0.95, 1.0) # cool white
+
+
+func _building_role_color(stat: BuildingStatResource) -> Color:
+	if not stat:
+		return _ROLE_COLOR_COMMAND
+	match _building_role_hint(stat):
+		"Production": return _ROLE_COLOR_PRODUCTION
+		"Tech":       return _ROLE_COLOR_TECH
+		"Defense":    return _ROLE_COLOR_DEFENSE
+		"Power":      return _ROLE_COLOR_POWER
+		"Economy":    return _ROLE_COLOR_ECONOMY
+		"Command":    return _ROLE_COLOR_COMMAND
+	return _ROLE_COLOR_COMMAND
+
+
+func _local_player_faction() -> int:
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if settings and "player_faction" in settings:
+		return settings.get("player_faction") as int
+	return 0
+
+
 func _building_description(id: StringName) -> String:
-	## Strategic blurb for each building. Tells the player when to
-	## build it, what it competes against, and any caveats.
+	## Short, building-focused blurb. Strips strategy advice and
+	## cross-faction unit name-drops so the tooltip reads as "what
+	## is this thing" rather than "how should I play this game".
+	## Faction-specific lines pull from _local_player_faction so the
+	## blurb only mentions units the local player can actually train
+	## here.
 	match id:
 		&"headquarters":
-			return "Your command center. Trains engineers, holds rally point. Losing it is a loss condition."
+			return "Command building. Trains Engineers and Salvage Crawlers. Anvil HQs can buy defensive upgrades."
 		&"basic_foundry":
-			return "Trains your two baseline ground mechs (Anvil: Rook + Hound, Sable: Specter + Jackal). You'll want at least one early; multiple foundries let you produce in parallel."
+			if _local_player_faction() == 1:
+				return "Light-mech assembly line. Trains Specters and Jackals."
+			return "Light-mech assembly line. Trains Rooks and Hounds."
 		&"advanced_foundry":
-			return "Trains the heavy mech baseline (Anvil: Bulwark, Sable: Harbinger). An Advanced Armory unlocks the rest of the heavy-tier roster from this same building."
+			if _local_player_faction() == 1:
+				return "Heavy-mech foundry. Trains Harbingers; Adv Armory unlocks Pulsefont and Courier Tank."
+			return "Heavy-mech foundry. Trains Bulwarks; Adv Armory unlocks Forgemaster."
 		&"basic_generator":
-			return "Provides power. Power-starved buildings produce more slowly, so build a generator before stacking foundries."
+			return "Power source. Adds capacity so additional production buildings stay at full output."
 		&"basic_armory":
-			return "Hosts branch upgrades for the units your production buildings unlock on their own. Branch commits are irreversible."
+			return "Branch-upgrade workshop for baseline units. Commits are irreversible."
 		&"advanced_armory":
-			return "Unlocks the second unit slot at the Advanced Foundry and the Aerodrome (and a third at the Sable Adv Foundry). Hosts branch upgrades for the units it unlocks. Branch commits are irreversible."
+			return "Unlocks the gated unit slots at Advanced Foundry and Aerodrome, and hosts their branch upgrades."
 		&"salvage_yard":
-			return "Stationary harvester with a fixed work radius. Crawlers go further but are slower; yards are best on dense scrap fields."
+			return "Stationary harvester. Pulls salvage from wrecks inside its work radius."
 		&"gun_emplacement":
-			return "Anvil's specialised emplacement. Pick a profile (Balanced / Anti-Light / Anti-Heavy) after construction. +15% HP and +15% damage vs the baseline turret. Ground only — pair with a SAM Site for air."
+			return "Anvil mode-switchable emplacement: Balanced / Anti-Light / Anti-Heavy. Ground only. +15% HP / damage vs the baseline turret."
 		&"gun_emplacement_basic":
-			return "Standard ground turret. Fixed balanced profile, ground targets only. No mode switching — pair with a SAM Site for air defense."
+			return "Fixed-mode ground turret. No profile swap, no air targeting."
 		&"aerodrome":
-			return "Trains the baseline aircraft (Anvil: Phalanx, Sable: Switchblade). An Advanced Armory unlocks the heavier airframe (Hammerhead / Fang) from the same building."
+			if _local_player_faction() == 1:
+				return "Aircraft hangar. Trains Switchblade; Adv Armory unlocks Fang, Black Pylon unlocks Wraith."
+			return "Aircraft hangar. Trains Phalanx; Adv Armory unlocks Hammerhead."
 		&"sam_site":
-			return "Anti-air missile rack. Heavy damage vs aircraft, near-zero vs ground. Pair with turrets to cover both axes."
+			return "Anti-air missile rack. Strong against aircraft, near-zero against ground."
+		&"black_pylon":
+			return "Sable Mesh anchor. Boosts nearby Sable units' accuracy/reload and unlocks the Wraith bomber."
 	return ""
+
+
+func make_styled_building_tooltip(bstat: BuildingStatResource, prereqs_ok: bool) -> Control:
+	## Custom build-button tooltip popup. Returns a PanelContainer with
+	## opaque dark bg + role-coloured border, holding a RichTextLabel
+	## that renders BBCode-tagged content (role hint coloured by
+	## category, cost figures coloured by resource). Replaces the
+	## engine default tooltip which is semi-transparent + plain text.
+	if not bstat:
+		return null
+	var role_color: Color = _building_role_color(bstat)
+	var role: String = _building_role_hint(bstat)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(280, 0)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.06, 0.06, 0.08, 0.97)
+	style.border_color = role_color
+	style.border_color.a = 0.95
+	style.border_width_top = 1
+	style.border_width_bottom = 1
+	style.border_width_left = 1
+	style.border_width_right = 1
+	style.corner_radius_top_left = 4
+	style.corner_radius_top_right = 4
+	style.corner_radius_bottom_left = 4
+	style.corner_radius_bottom_right = 4
+	style.content_margin_left = 10
+	style.content_margin_right = 10
+	style.content_margin_top = 8
+	style.content_margin_bottom = 8
+	panel.add_theme_stylebox_override("panel", style)
+
+	var label := RichTextLabel.new()
+	label.bbcode_enabled = true
+	label.fit_content = true
+	label.scroll_active = false
+	label.custom_minimum_size = Vector2(260, 0)
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.add_theme_color_override("default_color", Color(0.92, 0.92, 0.95, 1.0))
+
+	var role_hex: String = "%02x%02x%02x" % [
+		int(role_color.r * 255.0), int(role_color.g * 255.0), int(role_color.b * 255.0),
+	]
+	var lines: PackedStringArray = PackedStringArray()
+	lines.append("[b]%s[/b]    [color=#%s]%s[/color]" % [bstat.building_name, role_hex, role])
+
+	# Stat line — costs colour-tagged so salvage / fuel chips read
+	# without a legend.
+	var cost_str: String = "[color=#ff8c2e]%dS[/color]" % bstat.cost_salvage
+	if bstat.cost_fuel > 0:
+		cost_str += " / [color=#4cd0ff]%dF[/color]" % bstat.cost_fuel
+	var stat_line: String = "HP %d   %s   Build %.1fs" % [bstat.hp, cost_str, bstat.build_time]
+	if bstat.power_production > 0:
+		stat_line += "   [color=#fff033]+%d Power[/color]" % bstat.power_production
+	elif bstat.power_consumption > 0:
+		stat_line += "   [color=#fff033]-%d Power[/color]" % bstat.power_consumption
+	lines.append(stat_line)
+
+	var blurb: String = _building_description(bstat.building_id)
+	if not blurb.is_empty():
+		lines.append("")
+		lines.append(blurb)
+
+	if not prereqs_ok and not bstat.prerequisites.is_empty():
+		var pretty: PackedStringArray = PackedStringArray()
+		for req_v: Variant in bstat.prerequisites:
+			pretty.append(_pretty_id(StringName(req_v)))
+		lines.append("")
+		lines.append("[color=#ff6e6e]Requires: %s[/color]" % ", ".join(pretty))
+
+	label.text = "\n".join(lines)
+	panel.add_child(label)
+	return panel
+
+
+class _BuildingTooltipButton extends Button:
+	## Build-menu button subclass with a custom tooltip popup. Plain
+	## tooltip_text would render as a semi-transparent grey label;
+	## we want an opaque, role-coloured, BBCode-rich popup instead.
+	## Holds back-references the parent HUD reads in its tooltip
+	## builder.
+	var bstat: BuildingStatResource = null
+	var prereqs_ok: bool = true
+	var hud: Node = null
+
+	func _make_custom_tooltip(_for_text: String) -> Control:
+		if hud and hud.has_method("make_styled_building_tooltip"):
+			return hud.call("make_styled_building_tooltip", bstat, prereqs_ok) as Control
+		return null
