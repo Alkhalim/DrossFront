@@ -33,8 +33,7 @@ var _mode_buttons: Array[Button] = []
 var _map_dropdown: OptionButton = null
 var _map_preview: Control = null
 var _map_info_label: Label = null
-var _faction_buttons: Array[Button] = []
-var _faction_icons: Array[Control] = []
+var _faction_summary_panel: PanelContainer = null
 var _ai_rows_container: VBoxContainer = null
 var _ai_faction_dropdowns: Dictionary = {}    # player_id → OptionButton
 var _ai_difficulty_dropdowns: Dictionary = {}  # player_id → OptionButton
@@ -299,6 +298,21 @@ func _build_map_section(parent: Container) -> void:
 	_apply_map_dropdown_state()
 
 
+## Faction roster for the dropdown picker. Adding a new faction
+## drops a new entry here and the rest of the UI (dropdown +
+## summary panel + tech-tree route) picks it up automatically.
+const _PLAYABLE_FACTIONS: Array[Dictionary] = [
+	{ "value": MatchSettingsClass.FactionId.ANVIL,
+	  "icon_id": 0,  # FactionIconScript.Faction.ANVIL
+	  "label": "Anvil Directive",
+	  "tagline": "Heavy industrial — armored, deliberate, anchors a position." },
+	{ "value": MatchSettingsClass.FactionId.SABLE,
+	  "icon_id": 1,  # FactionIconScript.Faction.SABLE
+	  "label": "Sable Concord",
+	  "tagline": "Information warfare — fast, fragile, plays the whole map." },
+]
+
+
 func _build_faction_section(parent: Container) -> void:
 	var heading := Label.new()
 	heading.text = "Your Faction:"
@@ -306,49 +320,89 @@ func _build_faction_section(parent: Container) -> void:
 	heading.add_theme_color_override("font_color", COLOR_HEADING)
 	parent.add_child(heading)
 
+	# Dropdown picker -- using OptionButton so adding a new faction
+	# is just an entry in _PLAYABLE_FACTIONS and the picker grows
+	# without the layout changing.
+	var picker := OptionButton.new()
+	picker.custom_minimum_size = Vector2(280, 32)
+	for i: int in _PLAYABLE_FACTIONS.size():
+		var entry: Dictionary = _PLAYABLE_FACTIONS[i]
+		picker.add_item(entry["label"] as String, entry["value"] as int)
+	# Pre-select the currently-stored faction.
+	for i: int in picker.item_count:
+		if picker.get_item_id(i) == _selected_faction:
+			picker.select(i)
+			break
+	picker.item_selected.connect(_on_faction_dropdown_changed.bind(picker))
+	parent.add_child(picker)
+
+	# Summary panel below the dropdown -- icon + tagline + View
+	# Tech Tree button. Refreshed via _refresh_faction_summary
+	# whenever the dropdown changes.
+	_faction_summary_panel = PanelContainer.new()
+	_faction_summary_panel.custom_minimum_size = Vector2(280, 140)
+	parent.add_child(_faction_summary_panel)
+	_refresh_faction_summary()
+
+
+func _on_faction_dropdown_changed(index: int, picker: OptionButton) -> void:
+	var faction_id: int = picker.get_item_id(index)
+	_selected_faction = faction_id as MatchSettingsClass.FactionId
+	_refresh_faction_summary()
+
+
+func _refresh_faction_summary() -> void:
+	if not _faction_summary_panel:
+		return
+	for child: Node in _faction_summary_panel.get_children():
+		child.queue_free()
+	# Resolve the entry for the currently-selected faction.
+	var entry: Dictionary = {}
+	for e: Dictionary in _PLAYABLE_FACTIONS:
+		if (e["value"] as int) == int(_selected_faction):
+			entry = e
+			break
+	if entry.is_empty():
+		return
+
 	var hbox := HBoxContainer.new()
 	hbox.add_theme_constant_override("separation", 12)
-	parent.add_child(hbox)
+	_faction_summary_panel.add_child(hbox)
 
-	for entry: Dictionary in [
-		{ "value": MatchSettingsClass.FactionId.ANVIL,
-		  "icon_id": FactionIconScript.Faction.ANVIL,
-		  "label": "Anvil Directive",
-		  "blurb": "Heavy industrial. Slow, armored." },
-		{ "value": MatchSettingsClass.FactionId.SABLE,
-		  "icon_id": FactionIconScript.Faction.SABLE,
-		  "label": "Sable Concord",
-		  "blurb": "Information warfare. Fast, fragile." },
-	]:
-		var col := VBoxContainer.new()
-		col.add_theme_constant_override("separation", 4)
-		col.alignment = BoxContainer.ALIGNMENT_CENTER
-		hbox.add_child(col)
+	# Icon column.
+	var icon_col := VBoxContainer.new()
+	icon_col.alignment = BoxContainer.ALIGNMENT_CENTER
+	hbox.add_child(icon_col)
+	var icon: Control = FactionIconScript.new()
+	icon.faction = entry["icon_id"] as int
+	icon.custom_minimum_size = Vector2(72, 72)
+	icon_col.add_child(icon)
 
-		var icon: Control = FactionIconScript.new()
-		icon.faction = entry["icon_id"]
-		icon.custom_minimum_size = Vector2(72, 72)
-		icon.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		_faction_icons.append(icon)
-		col.add_child(icon)
+	# Text + button column.
+	var text_col := VBoxContainer.new()
+	text_col.add_theme_constant_override("separation", 6)
+	text_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hbox.add_child(text_col)
 
-		var btn := Button.new()
-		btn.text = "%s\n%s" % [entry["label"], entry["blurb"]]
-		btn.toggle_mode = true
-		btn.custom_minimum_size = Vector2(220, 50)
-		btn.pressed.connect(_on_faction_toggle.bind(entry["value"] as int))
-		_faction_buttons.append(btn)
-		col.add_child(btn)
+	var name_lbl := Label.new()
+	name_lbl.text = entry["label"] as String
+	name_lbl.add_theme_font_size_override("font_size", 16)
+	name_lbl.add_theme_color_override("font_color", COLOR_HEADING)
+	text_col.add_child(name_lbl)
 
-		# Tech-tree button under each faction — opens a modal listing
-		# the faction's full unit roster + production prerequisites.
-		# Lets the player vet a faction before committing to play it.
-		var tech_btn := Button.new()
-		tech_btn.text = "View Tech Tree"
-		tech_btn.custom_minimum_size = Vector2(220, 28)
-		tech_btn.pressed.connect(_show_faction_tech_tree.bind(entry["value"] as int))
-		col.add_child(tech_btn)
-	_apply_faction_toggle_state()
+	var tag := Label.new()
+	tag.text = entry["tagline"] as String
+	tag.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tag.custom_minimum_size = Vector2(180, 0)
+	tag.add_theme_font_size_override("font_size", 12)
+	tag.add_theme_color_override("font_color", Color(0.78, 0.85, 0.95, 1.0))
+	text_col.add_child(tag)
+
+	var tech_btn := Button.new()
+	tech_btn.text = "View Tech Tree"
+	tech_btn.custom_minimum_size = Vector2(180, 28)
+	tech_btn.pressed.connect(_show_faction_tech_tree.bind(int(_selected_faction)))
+	text_col.add_child(tech_btn)
 
 
 func _build_ai_section(parent: Container) -> void:
@@ -586,21 +640,6 @@ func _apply_map_dropdown_state() -> void:
 	if _map_info_label:
 		var info: Dictionary = _MAP_INFO.get(_selected_map, {}) as Dictionary
 		_map_info_label.text = info.get("blurb", "") as String
-
-
-func _on_faction_toggle(value: int) -> void:
-	_selected_faction = value
-	_apply_faction_toggle_state()
-
-
-func _apply_faction_toggle_state() -> void:
-	if _faction_buttons.size() < 2:
-		return
-	_faction_buttons[0].button_pressed = (_selected_faction == MatchSettingsClass.FactionId.ANVIL)
-	_faction_buttons[1].button_pressed = (_selected_faction == MatchSettingsClass.FactionId.SABLE)
-	if _faction_icons.size() >= 2:
-		_faction_icons[0].selected = _faction_buttons[0].button_pressed
-		_faction_icons[1].selected = _faction_buttons[1].button_pressed
 
 
 ## --- Button handlers ---
