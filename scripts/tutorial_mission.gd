@@ -232,39 +232,39 @@ func _install_stages() -> void:
 	# Stage 3 — base reclaimed. Player gets HQ + economy unlock.
 	_stages.append({
 		"id": &"base",
-		"dialogue": "Steelmaster Kress: \"Welcome to your forward base, commander. Build a Basic Foundry and a Salvage Yard — get production rolling.\"",
-		"objective": "Build a Basic Foundry and a Salvage Yard.",
+		"dialogue": "Steelmaster Kress: \"Welcome to your forward base, commander. Get those Ratchet engineers working — we need a Basic Foundry and a Salvage Yard standing before we can talk about a real army.\"",
+		"objective": "Use your engineers to build a Basic Foundry and a Salvage Yard.",
 		"on_enter": Callable(self, "_stage_base_enter"),
 		"trigger": Callable(self, "_stage_base_done"),
 	})
 	# Stage 4 — power the base.
 	_stages.append({
 		"id": &"reactors",
-		"dialogue": "Steelmaster Kress: \"Brownouts on every line. Drop three Reactors next to your foundry — full power or your queue stalls.\"",
-		"objective": "Build 3 Generators (Reactors) to fully power your base.",
+		"dialogue": "Steelmaster Kress: \"Brownouts on every line. Get your engineers to drop three Reactors next to the foundry — full power or your queue stalls.\"",
+		"objective": "Have your engineers build 3 Reactors to fully power your base.",
 		"on_enter": Callable(self, "_stage_reactors_enter"),
 		"trigger": Callable(self, "_stage_reactors_done"),
 	})
 	# Stage 5 — optional oil-field capture.
 	_stages.append({
 		"id": &"oil",
-		"dialogue": "Steelmaster Kress: \"Side objective — there's a fuel deposit just east of your base. Capture it and you can train Hounds; skip it and you'll be fielding Rooks only.\"",
-		"objective": "Optional: capture a fuel deposit (unlocks Hounds). Auto-skips after 90s.",
+		"dialogue": "Steelmaster Kress: \"There's a fuel deposit just east of your base — claim it and you'll have the fuel to roll Hounds out of that foundry. Or save the time and stick to Rooks; your call.\"",
+		"objective": "Capture a fuel deposit east of your base to unlock Hounds (optional).",
 		"on_enter": Callable(self, "_stage_oil_enter"),
 		"trigger": Callable(self, "_stage_oil_done"),
 	})
 	# Stage 6 — assemble strike force.
 	_stages.append({
 		"id": &"force",
-		"dialogue": "Steelmaster Kress: \"Build your forces up to six combat units, commander — Rooks for speed, Hounds for the punch. The Sable enclave is dug in to the north and we are going to dislodge them.\"",
+		"dialogue": "Steelmaster Kress: \"Build your line up to six combat squads, commander — Rooks for speed, Hounds for the punch. The Sable enclave to the north isn't going to dislodge itself.\"",
 		"objective": "Build your forces up to 6 combat units (Rooks or Hounds).",
 		"on_enter": Callable(self, "_stage_force_enter"),
 		"trigger": Callable(self, "_stage_force_done"),
 	})
-	# Stage 6 — Sable ally arrives.
+	# Stage 7 — Sable ally arrives.
 	_stages.append({
 		"id": &"ally",
-		"dialogue": "Riven Yul: \"Easy, commander — drop the targeting solution. Yes, Sable colours, no, not the same outfit you used to chase. Reformed, retrained, and bringing four heavy bombers, two Courier Tank squads, and three Jackal squadrons. Let's go crack that camp to the north together.\"",
+		"dialogue": "Riven Yul: \"Easy, commander — drop the targeting solution. Yes, Sable colours, no, not the outfit you used to chase. Reformed, retrained, and I brought enough firepower to crack that camp with you. Let's move.\"",
 		"objective": "Destroy the Sable enclave to the north alongside your ally.",
 		"on_enter": Callable(self, "_stage_ally_enter"),
 		"trigger": Callable(self, "_stage_ally_done"),
