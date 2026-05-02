@@ -217,6 +217,15 @@ func _physics_process(delta: float) -> void:
 	var primary: WeaponResource = stats.primary_weapon
 	var primary_range: float = primary.resolved_range() if primary else 10.0
 
+	# Per-unit LOS gate -- a unit can only engage what it personally
+	# sees, not what an ally is spotting through shared FOW. If the
+	# target sits outside the firing unit's own sight_radius, push
+	# forward to close the gap before reopening fire.
+	var sight_r: float = stats.resolved_sight_radius() if stats else primary_range
+	if dist > sight_r:
+		_unit.command_move(_current_target.global_position, false)
+		return
+
 	if dist <= primary_range:
 		# In range: stop and engage. We always stop here because the only way
 		# we reach this branch is when we have a target (forced or auto-acquired
