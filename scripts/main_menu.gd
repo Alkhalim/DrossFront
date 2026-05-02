@@ -771,6 +771,13 @@ func _show_faction_tech_tree(faction_id: int) -> void:
 	# as belonging to the chosen faction.
 	var palette: Dictionary = _faction_palette(faction_id)
 
+	# Apply a tooltip theme override so the unit-chip hover tooltips
+	# render with opaque backgrounds instead of the engine default
+	# (which is semi-transparent and unreadable over the modal's
+	# dark card). Lives on the canvas root so every child Button
+	# inherits.
+	canvas.theme = _make_tech_tree_tooltip_theme(palette)
+
 	var card := PanelContainer.new()
 	card.custom_minimum_size = Vector2(1100, 640)
 	# Faction-tinted card frame.
@@ -853,6 +860,32 @@ const _TECH_GRAPH_NODES: Array[Dictionary] = [
 	{"id": &"gun_emplacement_basic","name": "Gun Emplacement",  "cost": "150 S",         "prereqs": [],                "roles": [], "sable_only": true},
 	{"id": &"black_pylon",         "name": "Black Pylon",       "cost": "200 S / 90 F",  "prereqs": [&"basic_armory"], "roles": ["pylon_air"], "sable_only": true},
 ]
+
+
+func _make_tech_tree_tooltip_theme(palette: Dictionary) -> Theme:
+	## Theme override making the engine tooltip popup readable
+	## over the modal's dark card. Default tooltip is ~50% alpha
+	## which disappears against the dark bg.
+	var theme := Theme.new()
+	var box := StyleBoxFlat.new()
+	box.bg_color = Color(0.05, 0.05, 0.07, 0.96)
+	box.border_color = (palette.get("node_border", Color(0.55, 0.62, 0.78, 0.95))) as Color
+	box.border_width_top = 1
+	box.border_width_bottom = 1
+	box.border_width_left = 1
+	box.border_width_right = 1
+	box.corner_radius_top_left = 4
+	box.corner_radius_top_right = 4
+	box.corner_radius_bottom_left = 4
+	box.corner_radius_bottom_right = 4
+	box.content_margin_left = 8
+	box.content_margin_right = 8
+	box.content_margin_top = 6
+	box.content_margin_bottom = 6
+	theme.set_stylebox("panel", "TooltipPanel", box)
+	theme.set_color("font_color", "TooltipLabel", Color(0.95, 0.95, 0.95, 1.0))
+	theme.set_color("font_shadow_color", "TooltipLabel", Color(0.0, 0.0, 0.0, 0.0))
+	return theme
 
 
 func _faction_palette(faction_id: int) -> Dictionary:
