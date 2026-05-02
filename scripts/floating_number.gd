@@ -27,10 +27,10 @@ static func spawn(scene: Node, world_pos: Vector3, text: String, color: Color, l
 	# regardless of camera zoom. With fixed_size on, the actual
 	# on-screen size depends on font_size * pixel_size combination
 	# (Label3D's fixed_size still respects pixel_size as the world
-	# scale). Pulled the multiplier down so "+12 S" pickups read
-	# as a small spec floating up the unit, not a banner.
-	label.font_size = 18
-	label.pixel_size = 0.003
+	# scale). Tuned small -- previous 18 / 0.003 still read as a
+	# banner over standard zoom.
+	label.font_size = 14
+	label.pixel_size = 0.0009
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.fixed_size = true
 	label.no_depth_test = true
