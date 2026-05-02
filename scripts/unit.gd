@@ -732,6 +732,12 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 	# point in get_muzzle_positions).
 	var cannon_muzzle_z: Array = []
 
+	# Forgemaster reuses the heavy chassis silhouette but its actual
+	# weapon is a light Riveter Autocannon — NOT the Bulwark-class
+	# main gun. The platform branch checks this flag and routes to
+	# a much smaller compact-cannon build for Forgemaster instead
+	# of the full mantlet + barrel + sleeve + muzzle assembly.
+	var is_forgemaster: bool = stats != null and stats.unit_name.findn("Forgemaster") >= 0
 	if cannon_kind == "platform":
 		# Bulwark — tank-destroyer hull. Cannon is mounted in the center of
 		# the chassis (no turret), emerging from a casemate mantlet at the
@@ -821,206 +827,262 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		var gun_y: float = torso_size.y * 0.55
 		var front_z: float = -torso_size.z * 0.5
 
-		# Faction-driven cross-section. Anvil's Bulwark uses round
-		# barrels + a domed mantlet (period-correct industrial cannon).
-		# Sable's Harbinger takes the same chassis but with a square
-		# (4-sided) barrel and a chamfered tapered mantlet — sharp,
-		# edged, faceted geometry so the gun reads as a Sable
-		# precision weapon rather than just a recolour of the Anvil
-		# cannon.
-		var is_sable_heavy: bool = _faction_id() == 1
+		# Forgemaster intercept — uses the heavy chassis silhouette
+		# but its weapon is a small Riveter Autocannon, not the
+		# big Bulwark / Harbinger main gun. Build a compact mount
+		# (small mantlet + slim twin barrels) sized for the unit's
+		# actual damage role and bail out before the giant-cannon
+		# build runs.
+		if is_forgemaster:
+			var fm_mantlet_radius: float = cannon_size.x * 1.2
+			var fm_mantlet := MeshInstance3D.new()
+			var fm_mant_box := BoxMesh.new()
+			fm_mant_box.size = Vector3(fm_mantlet_radius * 1.6, fm_mantlet_radius * 1.4, fm_mantlet_radius * 1.0)
+			fm_mantlet.mesh = fm_mant_box
+			fm_mantlet.position = Vector3(0, gun_y, front_z + 0.05)
+			var fm_mant_mat := _make_metal_mat(base_color)
+			fm_mantlet.set_surface_override_material(0, fm_mant_mat)
+			torso_pivot.add_child(fm_mantlet)
+			mats.append(fm_mant_mat)
+			# Cannon pivot for recoil + muzzle lookup.
+			var fm_cannon_pivot := Node3D.new()
+			fm_cannon_pivot.name = "CannonPivot_top"
+			fm_cannon_pivot.position = Vector3(0, gun_y, front_z - 0.10)
+			torso_pivot.add_child(fm_cannon_pivot)
+			# Twin slim Riveter barrels — short cylinders side-by-
+			# side, scaled down well below the Bulwark's barrel.
+			var fm_barrel_len: float = cannon_size.z * 0.45
+			for fm_side: int in 2:
+				var fm_sx: float = -0.10 if fm_side == 0 else 0.10
+				var fm_barrel := MeshInstance3D.new()
+				var fm_barrel_cyl := CylinderMesh.new()
+				fm_barrel_cyl.top_radius = cannon_size.x * 0.35
+				fm_barrel_cyl.bottom_radius = cannon_size.x * 0.40
+				fm_barrel_cyl.height = fm_barrel_len
+				fm_barrel_cyl.radial_segments = 16
+				fm_barrel.mesh = fm_barrel_cyl
+				fm_barrel.rotate_object_local(Vector3.RIGHT, -PI / 2)
+				fm_barrel.position = Vector3(fm_sx, 0.0, -fm_barrel_len * 0.5)
+				var fm_barrel_mat := _make_metal_mat(trim_dark)
+				fm_barrel.set_surface_override_material(0, fm_barrel_mat)
+				fm_cannon_pivot.add_child(fm_barrel)
+				mats.append(fm_barrel_mat)
+			shoulders.append(fm_mantlet)
+			cannons.append(fm_cannon_pivot)
+			cannon_rest_z.append(fm_cannon_pivot.position.z)
+			cannon_muzzle_z.append(fm_barrel_len + 0.05)
+			# Don't drop into the giant-cannon build below — the
+			# rest of the platform branch (mantlet sphere, big
+			# barrel, sleeve, muzzle brake) all assume Bulwark or
+			# Harbinger geometry. Skip past it via the
+			# is_forgemaster guard wrapping the giant-gun block.
+			pass
 
-		# Mantlet — armored housing where barrel meets the chassis front.
-		var mantlet_radius: float = cannon_size.x * 2.4
-		var mantlet := MeshInstance3D.new()
-		if is_sable_heavy:
-			# Tapered square block — narrower at the muzzle end, wider
-			# at the chassis end. 4 radial segments → a wedge-prism
-			# silhouette with crisp corners. The 45° spin needs to
-			# rotate around the cylinder's OWN length axis after the
-			# forward tilt, otherwise (with rotation.z and Godot's
-			# YXZ Euler order) the prism ends up tilted in world space
-			# and the barrel attaches at an odd angle. Use
-			# rotate_object_local so each rotation is applied in the
-			# node's local frame, in the order written.
-			var mant_facet := CylinderMesh.new()
-			mant_facet.top_radius = mantlet_radius * 0.7
-			mant_facet.bottom_radius = mantlet_radius * 1.15
-			mant_facet.height = mantlet_radius * 1.7
-			mant_facet.radial_segments = 4
-			mantlet.mesh = mant_facet
-			mantlet.rotate_object_local(Vector3.RIGHT, -PI / 2)
-			mantlet.rotate_object_local(Vector3.UP, deg_to_rad(45.0))
-		else:
-			var mantlet_mesh := SphereMesh.new()
-			mantlet_mesh.radius = mantlet_radius
-			mantlet_mesh.height = mantlet_radius * 1.9
-			mantlet.mesh = mantlet_mesh
-		mantlet.position = Vector3(0, gun_y, front_z + 0.05)
-		var mantlet_mat := _make_metal_mat(base_color)
-		mantlet.set_surface_override_material(0, mantlet_mat)
-		torso_pivot.add_child(mantlet)
-		mats.append(mantlet_mat)
+		# Giant-cannon build (Bulwark / Harbinger). Wrapped in a
+		# not-is_forgemaster guard so Forgemaster keeps just its
+		# compact twin-Riveter mount above and doesn't get a
+		# duplicate full-size cannon stacked on top.
+		if not is_forgemaster:
+			# Faction-driven cross-section. Anvil's Bulwark uses round
+			# barrels + a domed mantlet (period-correct industrial
+			# cannon). Sable's Harbinger takes the same chassis but
+			# with a square (4-sided) barrel and a chamfered tapered
+			# mantlet — sharp, edged, faceted geometry so the gun
+			# reads as a Sable precision weapon rather than just a
+			# recolour of the Anvil cannon.
+			var is_sable_heavy: bool = _faction_id() == 1
 
-		# Cannon pivot — recoil animates this back along +Z.
-		var cannon_pivot := Node3D.new()
-		cannon_pivot.name = "CannonPivot_top"
-		cannon_pivot.position = Vector3(0, gun_y, front_z - 0.05)
-		torso_pivot.add_child(cannon_pivot)
-
-		var barrel_len: float = cannon_size.z
-		if is_sable_heavy:
-			# Sable Harbinger fires a Spinal Railgun + drone-bay
-			# releases — neither reads as a kinetic cannon. Replace
-			# the barrel + sleeve + muzzle with a missile-launcher
-			# block: an angled rectangular housing with four
-			# vertically-stacked tubes facing forward, missile noses
-			# protruding from the openings, and a chamfered top
-			# breech. cannon_pivot still receives the launcher so
-			# recoil + muzzle-position lookups continue to work.
-			var housing_len: float = barrel_len * 0.75
-			var housing_w: float = cannon_size.x * 3.6
-			var housing_h: float = cannon_size.x * 4.2
-			var housing := MeshInstance3D.new()
-			var housing_box := BoxMesh.new()
-			housing_box.size = Vector3(housing_w, housing_h, housing_len)
-			housing.mesh = housing_box
-			# Tip the launcher up slightly so the tubes read as
-			# pointed forward-and-up, not straight ahead.
-			housing.rotate_object_local(Vector3.RIGHT, deg_to_rad(-12.0))
-			housing.position.z = -housing_len * 0.5
-			housing.position.y = housing_h * 0.05
-			var housing_mat := _make_metal_mat(darker)
-			housing.set_surface_override_material(0, housing_mat)
-			cannon_pivot.add_child(housing)
-			mats.append(housing_mat)
-
-			# Top breech cap — slimmer angled plate covering the rear
-			# upper edge of the housing. Reads as the launcher's
-			# closed-bolt mechanism.
-			var cap := MeshInstance3D.new()
-			var cap_box := BoxMesh.new()
-			cap_box.size = Vector3(housing_w * 0.95, housing_h * 0.18, housing_len * 0.45)
-			cap.mesh = cap_box
-			cap.rotate_object_local(Vector3.RIGHT, deg_to_rad(-12.0))
-			cap.position.z = housing.position.z + housing_len * 0.35
-			cap.position.y = housing.position.y + housing_h * 0.55
-			var cap_mat := _make_metal_mat(Color(0.10, 0.10, 0.14))
-			cap.set_surface_override_material(0, cap_mat)
-			cannon_pivot.add_child(cap)
-			mats.append(cap_mat)
-
-			# Four launch tubes — 2x2 grid on the front face. Each
-			# tube is a short cylinder protruding forward, with a
-			# small cone-tip missile poking out of the mouth.
-			var tube_radius: float = cannon_size.x * 0.55
-			var tube_len: float = housing_len * 0.30
-			var tube_x_off: float = housing_w * 0.22
-			var tube_y_off: float = housing_h * 0.20
-			for tx_i: int in 2:
-				for ty_i: int in 2:
-					var tx: float = (-tube_x_off) if tx_i == 0 else tube_x_off
-					var ty: float = (-tube_y_off) if ty_i == 0 else tube_y_off
-					var tube := MeshInstance3D.new()
-					var tube_cyl := CylinderMesh.new()
-					tube_cyl.top_radius = tube_radius
-					tube_cyl.bottom_radius = tube_radius
-					tube_cyl.height = tube_len
-					tube_cyl.radial_segments = 8
-					tube.mesh = tube_cyl
-					tube.rotate_object_local(Vector3.RIGHT, deg_to_rad(-12.0) - PI / 2)
-					tube.position = Vector3(
-						tx,
-						housing.position.y + ty,
-						housing.position.z - housing_len * 0.45,
-					)
-					var tube_mat := _make_metal_mat(Color(0.06, 0.06, 0.08))
-					tube.set_surface_override_material(0, tube_mat)
-					cannon_pivot.add_child(tube)
-					mats.append(tube_mat)
-
-					# Missile tip — small cone poking out of the
-					# tube. Tinted Sable violet emissive so the
-					# loaded-and-armed read carries at any zoom.
-					var tip := MeshInstance3D.new()
-					var tip_cyl := CylinderMesh.new()
-					tip_cyl.top_radius = 0.0
-					tip_cyl.bottom_radius = tube_radius * 0.75
-					tip_cyl.height = tube_len * 0.55
-					tip_cyl.radial_segments = 8
-					tip.mesh = tip_cyl
-					tip.rotate_object_local(Vector3.RIGHT, deg_to_rad(-12.0) - PI / 2)
-					tip.position = Vector3(
-						tx,
-						housing.position.y + ty + 0.02,
-						housing.position.z - housing_len * 0.62,
-					)
-					var tip_mat := StandardMaterial3D.new()
-					tip_mat.albedo_color = Color(0.78, 0.42, 1.0, 1.0)
-					tip_mat.emission_enabled = true
-					tip_mat.emission = Color(0.78, 0.42, 1.0, 1.0)
-					tip_mat.emission_energy_multiplier = 1.6
-					tip_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-					tip.set_surface_override_material(0, tip_mat)
-					cannon_pivot.add_child(tip)
-					mats.append(tip_mat)
-
-			shoulders.append(mantlet)
-			cannons.append(cannon_pivot)
-			cannon_rest_z.append(cannon_pivot.position.z)
-			# Muzzle position = front face of the housing where the
-			# missile tubes are. Used by combat code for projectile
-			# spawn.
-			cannon_muzzle_z.append(housing_len + 0.18)
-		else:
-			# Anvil Bulwark — keep the original round-barrel cannon
-			# (period industrial AP gun). Round barrel, recoil sleeve,
-			# muzzle brake.
-			var barrel := MeshInstance3D.new()
-			var barrel_cyl := CylinderMesh.new()
-			barrel_cyl.top_radius = cannon_size.x
-			barrel_cyl.bottom_radius = cannon_size.x * 1.05
-			barrel_cyl.height = barrel_len
-			barrel_cyl.radial_segments = 64
-			barrel.mesh = barrel_cyl
-			barrel.rotate_object_local(Vector3.RIGHT, -PI / 2)
-			barrel.position.z = -barrel_len * 0.5
-			var barrel_mat := _make_metal_mat(trim_dark)
-			barrel.set_surface_override_material(0, barrel_mat)
-			cannon_pivot.add_child(barrel)
-			mats.append(barrel_mat)
-
-			# Recoil sleeve — wider section near the breech.
-			var sleeve_len: float = barrel_len * 0.22
-			var sleeve := MeshInstance3D.new()
-			var sleeve_cyl := CylinderMesh.new()
-			sleeve_cyl.top_radius = cannon_size.x * 1.3
-			sleeve_cyl.bottom_radius = cannon_size.x * 1.3
-			sleeve_cyl.height = sleeve_len
-			sleeve_cyl.radial_segments = 64
-			sleeve.mesh = sleeve_cyl
-			sleeve.rotate_object_local(Vector3.RIGHT, -PI / 2)
-			sleeve.position.z = -barrel_len * 0.55
-			var sleeve_mat := _make_metal_mat(darker)
-			sleeve.set_surface_override_material(0, sleeve_mat)
-			cannon_pivot.add_child(sleeve)
-			mats.append(sleeve_mat)
-
-			# Muzzle brake — wider cap at the tip.
-			var muzzle := MeshInstance3D.new()
-			var muzzle_cyl := CylinderMesh.new()
-			muzzle_cyl.top_radius = cannon_size.x * 1.4
-			muzzle_cyl.bottom_radius = cannon_size.x * 1.2
-			muzzle_cyl.height = 0.15
-			muzzle_cyl.radial_segments = 64
-			muzzle.mesh = muzzle_cyl
-			muzzle.rotate_object_local(Vector3.RIGHT, -PI / 2)
-			muzzle.position.z = -barrel_len - 0.07
-			var muzzle_mat := _make_metal_mat(Color(0.1, 0.1, 0.1))
-			muzzle.set_surface_override_material(0, muzzle_mat)
-			cannon_pivot.add_child(muzzle)
-			mats.append(muzzle_mat)
-
+			# Mantlet — armored housing where barrel meets the chassis front.
+			var mantlet_radius: float = cannon_size.x * 2.4
+			var mantlet := MeshInstance3D.new()
+			if is_sable_heavy:
+				# Tapered square block — narrower at the muzzle end, wider
+				# at the chassis end. 4 radial segments → a wedge-prism
+				# silhouette with crisp corners. The 45° spin needs to
+				# rotate around the cylinder's OWN length axis after the
+				# forward tilt, otherwise (with rotation.z and Godot's
+				# YXZ Euler order) the prism ends up tilted in world space
+				# and the barrel attaches at an odd angle. Use
+				# rotate_object_local so each rotation is applied in the
+				# node's local frame, in the order written.
+				var mant_facet := CylinderMesh.new()
+				mant_facet.top_radius = mantlet_radius * 0.7
+				mant_facet.bottom_radius = mantlet_radius * 1.15
+				mant_facet.height = mantlet_radius * 1.7
+				mant_facet.radial_segments = 4
+				mantlet.mesh = mant_facet
+				mantlet.rotate_object_local(Vector3.RIGHT, -PI / 2)
+				mantlet.rotate_object_local(Vector3.UP, deg_to_rad(45.0))
+			else:
+				var mantlet_mesh := SphereMesh.new()
+				mantlet_mesh.radius = mantlet_radius
+				mantlet_mesh.height = mantlet_radius * 1.9
+				mantlet.mesh = mantlet_mesh
+			mantlet.position = Vector3(0, gun_y, front_z + 0.05)
+			var mantlet_mat := _make_metal_mat(base_color)
+			mantlet.set_surface_override_material(0, mantlet_mat)
+			torso_pivot.add_child(mantlet)
+			mats.append(mantlet_mat)
+	
+			# Cannon pivot — recoil animates this back along +Z.
+			var cannon_pivot := Node3D.new()
+			cannon_pivot.name = "CannonPivot_top"
+			cannon_pivot.position = Vector3(0, gun_y, front_z - 0.05)
+			torso_pivot.add_child(cannon_pivot)
+	
+			var barrel_len: float = cannon_size.z
+			if is_sable_heavy:
+				# Sable Harbinger fires a Spinal Railgun + drone-bay
+				# releases — neither reads as a kinetic cannon. Replace
+				# the barrel + sleeve + muzzle with a missile-launcher
+				# block: an angled rectangular housing with four
+				# vertically-stacked tubes facing forward, missile noses
+				# protruding from the openings, and a chamfered top
+				# breech. cannon_pivot still receives the launcher so
+				# recoil + muzzle-position lookups continue to work.
+				var housing_len: float = barrel_len * 0.75
+				var housing_w: float = cannon_size.x * 3.6
+				var housing_h: float = cannon_size.x * 4.2
+				var housing := MeshInstance3D.new()
+				var housing_box := BoxMesh.new()
+				housing_box.size = Vector3(housing_w, housing_h, housing_len)
+				housing.mesh = housing_box
+				# Tip the launcher up slightly so the tubes read as
+				# pointed forward-and-up, not straight ahead.
+				housing.rotate_object_local(Vector3.RIGHT, deg_to_rad(-12.0))
+				housing.position.z = -housing_len * 0.5
+				housing.position.y = housing_h * 0.05
+				var housing_mat := _make_metal_mat(darker)
+				housing.set_surface_override_material(0, housing_mat)
+				cannon_pivot.add_child(housing)
+				mats.append(housing_mat)
+	
+				# Top breech cap — slimmer angled plate covering the rear
+				# upper edge of the housing. Reads as the launcher's
+				# closed-bolt mechanism.
+				var cap := MeshInstance3D.new()
+				var cap_box := BoxMesh.new()
+				cap_box.size = Vector3(housing_w * 0.95, housing_h * 0.18, housing_len * 0.45)
+				cap.mesh = cap_box
+				cap.rotate_object_local(Vector3.RIGHT, deg_to_rad(-12.0))
+				cap.position.z = housing.position.z + housing_len * 0.35
+				cap.position.y = housing.position.y + housing_h * 0.55
+				var cap_mat := _make_metal_mat(Color(0.10, 0.10, 0.14))
+				cap.set_surface_override_material(0, cap_mat)
+				cannon_pivot.add_child(cap)
+				mats.append(cap_mat)
+	
+				# Four launch tubes — 2x2 grid on the front face. Each
+				# tube is a short cylinder protruding forward, with a
+				# small cone-tip missile poking out of the mouth.
+				var tube_radius: float = cannon_size.x * 0.55
+				var tube_len: float = housing_len * 0.30
+				var tube_x_off: float = housing_w * 0.22
+				var tube_y_off: float = housing_h * 0.20
+				for tx_i: int in 2:
+					for ty_i: int in 2:
+						var tx: float = (-tube_x_off) if tx_i == 0 else tube_x_off
+						var ty: float = (-tube_y_off) if ty_i == 0 else tube_y_off
+						var tube := MeshInstance3D.new()
+						var tube_cyl := CylinderMesh.new()
+						tube_cyl.top_radius = tube_radius
+						tube_cyl.bottom_radius = tube_radius
+						tube_cyl.height = tube_len
+						tube_cyl.radial_segments = 8
+						tube.mesh = tube_cyl
+						tube.rotate_object_local(Vector3.RIGHT, deg_to_rad(-12.0) - PI / 2)
+						tube.position = Vector3(
+							tx,
+							housing.position.y + ty,
+							housing.position.z - housing_len * 0.45,
+						)
+						var tube_mat := _make_metal_mat(Color(0.06, 0.06, 0.08))
+						tube.set_surface_override_material(0, tube_mat)
+						cannon_pivot.add_child(tube)
+						mats.append(tube_mat)
+	
+						# Missile tip — small cone poking out of the
+						# tube. Tinted Sable violet emissive so the
+						# loaded-and-armed read carries at any zoom.
+						var tip := MeshInstance3D.new()
+						var tip_cyl := CylinderMesh.new()
+						tip_cyl.top_radius = 0.0
+						tip_cyl.bottom_radius = tube_radius * 0.75
+						tip_cyl.height = tube_len * 0.55
+						tip_cyl.radial_segments = 8
+						tip.mesh = tip_cyl
+						tip.rotate_object_local(Vector3.RIGHT, deg_to_rad(-12.0) - PI / 2)
+						tip.position = Vector3(
+							tx,
+							housing.position.y + ty + 0.02,
+							housing.position.z - housing_len * 0.62,
+						)
+						var tip_mat := StandardMaterial3D.new()
+						tip_mat.albedo_color = Color(0.78, 0.42, 1.0, 1.0)
+						tip_mat.emission_enabled = true
+						tip_mat.emission = Color(0.78, 0.42, 1.0, 1.0)
+						tip_mat.emission_energy_multiplier = 1.6
+						tip_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+						tip.set_surface_override_material(0, tip_mat)
+						cannon_pivot.add_child(tip)
+						mats.append(tip_mat)
+	
+				shoulders.append(mantlet)
+				cannons.append(cannon_pivot)
+				cannon_rest_z.append(cannon_pivot.position.z)
+				# Muzzle position = front face of the housing where the
+				# missile tubes are. Used by combat code for projectile
+				# spawn.
+				cannon_muzzle_z.append(housing_len + 0.18)
+			else:
+				# Anvil Bulwark — keep the original round-barrel cannon
+				# (period industrial AP gun). Round barrel, recoil sleeve,
+				# muzzle brake.
+				var barrel := MeshInstance3D.new()
+				var barrel_cyl := CylinderMesh.new()
+				barrel_cyl.top_radius = cannon_size.x
+				barrel_cyl.bottom_radius = cannon_size.x * 1.05
+				barrel_cyl.height = barrel_len
+				barrel_cyl.radial_segments = 64
+				barrel.mesh = barrel_cyl
+				barrel.rotate_object_local(Vector3.RIGHT, -PI / 2)
+				barrel.position.z = -barrel_len * 0.5
+				var barrel_mat := _make_metal_mat(trim_dark)
+				barrel.set_surface_override_material(0, barrel_mat)
+				cannon_pivot.add_child(barrel)
+				mats.append(barrel_mat)
+	
+				# Recoil sleeve — wider section near the breech.
+				var sleeve_len: float = barrel_len * 0.22
+				var sleeve := MeshInstance3D.new()
+				var sleeve_cyl := CylinderMesh.new()
+				sleeve_cyl.top_radius = cannon_size.x * 1.3
+				sleeve_cyl.bottom_radius = cannon_size.x * 1.3
+				sleeve_cyl.height = sleeve_len
+				sleeve_cyl.radial_segments = 64
+				sleeve.mesh = sleeve_cyl
+				sleeve.rotate_object_local(Vector3.RIGHT, -PI / 2)
+				sleeve.position.z = -barrel_len * 0.55
+				var sleeve_mat := _make_metal_mat(darker)
+				sleeve.set_surface_override_material(0, sleeve_mat)
+				cannon_pivot.add_child(sleeve)
+				mats.append(sleeve_mat)
+	
+				# Muzzle brake — wider cap at the tip.
+				var muzzle := MeshInstance3D.new()
+				var muzzle_cyl := CylinderMesh.new()
+				muzzle_cyl.top_radius = cannon_size.x * 1.4
+				muzzle_cyl.bottom_radius = cannon_size.x * 1.2
+				muzzle_cyl.height = 0.15
+				muzzle_cyl.radial_segments = 64
+				muzzle.mesh = muzzle_cyl
+				muzzle.rotate_object_local(Vector3.RIGHT, -PI / 2)
+				muzzle.position.z = -barrel_len - 0.07
+				var muzzle_mat := _make_metal_mat(Color(0.1, 0.1, 0.1))
+				muzzle.set_surface_override_material(0, muzzle_mat)
+				cannon_pivot.add_child(muzzle)
+				mats.append(muzzle_mat)
+	
 			shoulders.append(mantlet)
 			cannons.append(cannon_pivot)
 			cannon_rest_z.append(cannon_pivot.position.z)
@@ -2740,8 +2802,10 @@ func apply_heal(amount: int) -> void:
 
 func _spawn_pulse_visual(radius: float, tint: Color) -> void:
 	## Friendly-target ring used by Factory Pulse + Reactor Surge.
-	## Same shape as System Crash's visual but a colour the player
-	## reads as a buff (warm gold / amber) rather than a debuff.
+	## Tuned more transparent than the System Crash debuff so a
+	## sustained heal (Factory Pulse fires once per second over 5s)
+	## doesn't smother the units it's healing under a solid block
+	## of warm colour. Alpha 0.20, emission 1.4, lighter tint.
 	var ring := MeshInstance3D.new()
 	var disc := SphereMesh.new()
 	disc.radius = 1.0
@@ -2751,19 +2815,19 @@ func _spawn_pulse_visual(radius: float, tint: Color) -> void:
 	ring.mesh = disc
 	ring.scale = Vector3.ZERO
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(tint.r, tint.g, tint.b, 0.55)
+	mat.albedo_color = Color(tint.r, tint.g, tint.b, 0.20)
 	mat.emission_enabled = true
 	mat.emission = tint
-	mat.emission_energy_multiplier = 2.6
+	mat.emission_energy_multiplier = 1.4
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	ring.set_surface_override_material(0, mat)
 	get_tree().current_scene.add_child(ring)
 	ring.global_position = global_position + Vector3(0, 0.4, 0)
 	var tween: Tween = ring.create_tween().set_parallel(true)
-	tween.tween_property(ring, "scale", Vector3(radius, radius, radius), 0.45)
-	tween.tween_property(mat, "albedo_color:a", 0.0, 0.45)
-	tween.tween_property(mat, "emission_energy_multiplier", 0.0, 0.45)
+	tween.tween_property(ring, "scale", Vector3(radius, radius, radius), 0.55)
+	tween.tween_property(mat, "albedo_color:a", 0.0, 0.55)
+	tween.tween_property(mat, "emission_energy_multiplier", 0.0, 0.55)
 	tween.chain().tween_callback(ring.queue_free)
 
 

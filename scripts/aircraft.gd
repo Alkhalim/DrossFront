@@ -824,32 +824,102 @@ func _build_hammerhead() -> void:
 		exhaust.set_surface_override_material(0, exh_mat)
 		add_child(exhaust)
 
-	# Underwing weapon pods (missile racks). Now with visible missile
-	# tubes on the front face for fine detail at zoom.
+	# Underwing weapon pods (missile racks). Beefier than before — a
+	# wider 5-tube cluster with a tapered nose cap, a top-mounted
+	# avionics bulge, and visible per-tube end caps so the
+	# silhouette telegraphs "this is the thing that fires the
+	# 10-missile barrage." Each tube also gets a small emissive
+	# ready-light tip so the salvo character reads at zoom.
 	for side: int in 2:
 		var sx: float = 1.0 if side == 0 else -1.0
+		var pod_root := Node3D.new()
+		pod_root.position = Vector3(sx * 0.78, -0.36, 0.40)
+		add_child(pod_root)
+		# Main pod body — wider + longer than before.
 		var pod := MeshInstance3D.new()
 		pod.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var pod_box := BoxMesh.new()
-		pod_box.size = Vector3(0.36, 0.28, 1.20)
+		pod_box.size = Vector3(0.46, 0.34, 1.40)
 		pod.mesh = pod_box
-		pod.position = Vector3(sx * 0.78, -0.36, 0.40)
 		pod.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.15)))
-		add_child(pod)
-		# Three missile tube ends visible on the front face of each pod.
-		for tube_i: int in 3:
+		pod_root.add_child(pod)
+		# Tapered nose cap on the front of the pod — chamfered box
+		# tilted down so the tubes "point" forward instead of
+		# meeting a flat brick face.
+		var pod_nose := MeshInstance3D.new()
+		pod_nose.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var pn_box := BoxMesh.new()
+		pn_box.size = Vector3(0.46, 0.20, 0.34)
+		pod_nose.mesh = pn_box
+		pod_nose.position = Vector3(0.0, -0.06, 0.85)
+		pod_nose.rotation.x = deg_to_rad(-18.0)
+		pod_nose.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.22)))
+		pod_root.add_child(pod_nose)
+		# Top avionics bulge — small box on top of the pod that
+		# reads as the targeting sensor.
+		var avionics := MeshInstance3D.new()
+		avionics.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var av_box := BoxMesh.new()
+		av_box.size = Vector3(0.30, 0.10, 0.55)
+		avionics.mesh = av_box
+		avionics.position = Vector3(0.0, 0.22, 0.10)
+		avionics.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.25)))
+		pod_root.add_child(avionics)
+		# Five missile tube end-caps in a cross pattern on the
+		# nose face — three on top row, two on bottom.
+		var tube_layout: Array[Vector2] = [
+			Vector2(-0.16, 0.04),
+			Vector2(0.0, 0.04),
+			Vector2(0.16, 0.04),
+			Vector2(-0.08, -0.10),
+			Vector2(0.08, -0.10),
+		]
+		for tube_pos: Vector2 in tube_layout:
 			var tube := MeshInstance3D.new()
 			tube.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			var tube_cyl := CylinderMesh.new()
 			tube_cyl.top_radius = 0.06
 			tube_cyl.bottom_radius = 0.06
-			tube_cyl.height = 0.08
+			tube_cyl.height = 0.10
+			tube_cyl.radial_segments = 8
 			tube.mesh = tube_cyl
 			tube.rotation.x = PI * 0.5
-			var tx: float = sx * 0.78 + (float(tube_i) - 1.0) * 0.10
-			tube.position = Vector3(tx, -0.36, 1.04)
-			tube.set_surface_override_material(0, _aircraft_metal_mat(Color(0.10, 0.10, 0.10, 1.0)))
-			add_child(tube)
+			tube.position = Vector3(tube_pos.x, tube_pos.y, 1.06)
+			tube.set_surface_override_material(0, _aircraft_metal_mat(Color(0.08, 0.08, 0.08, 1.0)))
+			pod_root.add_child(tube)
+			# Ready-light tip on each tube — small emissive cone
+			# poking out so the salvo character reads at any zoom.
+			var ready_tip := MeshInstance3D.new()
+			ready_tip.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var rt_cyl := CylinderMesh.new()
+			rt_cyl.top_radius = 0.0
+			rt_cyl.bottom_radius = 0.045
+			rt_cyl.height = 0.06
+			rt_cyl.radial_segments = 8
+			ready_tip.mesh = rt_cyl
+			ready_tip.rotation.x = PI * 0.5
+			ready_tip.position = Vector3(tube_pos.x, tube_pos.y, 1.13)
+			var rt_mat := StandardMaterial3D.new()
+			rt_mat.albedo_color = Color(1.0, 0.45, 0.15, 1.0)
+			rt_mat.emission_enabled = true
+			rt_mat.emission = Color(1.0, 0.55, 0.18, 1.0)
+			rt_mat.emission_energy_multiplier = 1.4
+			rt_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			ready_tip.set_surface_override_material(0, rt_mat)
+			pod_root.add_child(ready_tip)
+		# Two side-mounted attachment lugs holding the pod to the
+		# fuselage — small struts that break the "pod floating
+		# under the wing" read.
+		for lug_z: int in 2:
+			var lug := MeshInstance3D.new()
+			lug.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var lg_box := BoxMesh.new()
+			lg_box.size = Vector3(0.10, 0.16, 0.12)
+			lug.mesh = lg_box
+			var lz: float = -0.30 if lug_z == 0 else 0.30
+			lug.position = Vector3(-sx * 0.20, 0.18, lz)
+			lug.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.30)))
+			pod_root.add_child(lug)
 
 	# Chin cannon — single stub barrel under the nose.
 	var cannon := MeshInstance3D.new()
@@ -935,44 +1005,107 @@ func _build_hammerhead() -> void:
 	hub.position = Vector3(0, 1.05, 0.20)
 	hub.set_surface_override_material(0, _aircraft_metal_mat(Color(0.08, 0.08, 0.08, 1.0)))
 	add_child(hub)
-	# Three rotor blades — long thin slabs radiating from the hub.
-	# Built under a Node3D pivot so future _process spinning logic
-	# can rotate them in place without restructuring.
+	# Four-blade main rotor — bigger than the previous 3-blade /
+	# 2.6u version (now 3.6u long, 4 blades) so the rotor disc reads
+	# as a real heavy-lift gunship's sweep at any zoom. Each blade
+	# has a slight droop at rest (rotation.z) to suggest weight; a
+	# small rectangular blade-tip cap breaks up the slim slab.
 	var rotor_pivot := Node3D.new()
 	rotor_pivot.name = "RotorPivot"
 	rotor_pivot.position = Vector3(0, 1.10, 0.20)
 	add_child(rotor_pivot)
-	for blade_i: int in 3:
+	for blade_i: int in 4:
 		var blade := MeshInstance3D.new()
 		blade.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var bb := BoxMesh.new()
-		bb.size = Vector3(2.6, 0.04, 0.18)
+		bb.size = Vector3(3.6, 0.05, 0.20)
 		blade.mesh = bb
-		blade.rotation.y = float(blade_i) * (TAU / 3.0)
+		blade.rotation.y = float(blade_i) * (TAU / 4.0)
 		blade.set_surface_override_material(0, _aircraft_metal_mat(Color(0.10, 0.10, 0.12, 0.9)))
 		rotor_pivot.add_child(blade)
+		# Blade-tip endcap so the silhouette doesn't end in a hard
+		# rectangle — small box at the outer edge.
+		var tip_cap := MeshInstance3D.new()
+		tip_cap.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var tc_box := BoxMesh.new()
+		tc_box.size = Vector3(0.18, 0.05, 0.12)
+		tip_cap.mesh = tc_box
+		tip_cap.rotation.y = float(blade_i) * (TAU / 4.0)
+		tip_cap.position = Vector3(
+			cos(float(blade_i) * (TAU / 4.0)) * 1.74,
+			0.0,
+			-sin(float(blade_i) * (TAU / 4.0)) * 1.74,
+		)
+		tip_cap.set_surface_override_material(0, _aircraft_metal_mat(Color(0.55, 0.45, 0.18, 1.0)))
+		rotor_pivot.add_child(tip_cap)
 	_anvil_rotor = rotor_pivot
-	# Tail boom — slim extension behind the hull supporting the
-	# tail rotor. Gives the gunship an unmistakable chopper read.
-	var tail_boom := MeshInstance3D.new()
-	tail_boom.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var tb_box := BoxMesh.new()
-	tb_box.size = Vector3(0.30, 0.30, 1.20)
-	tail_boom.mesh = tb_box
-	tail_boom.position = Vector3(0, 0.20, -2.30)
-	tail_boom.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.10)))
-	add_child(tail_boom)
-	# Tail rotor — small vertical disc at the end of the boom with
-	# 2 short blades. Same rotor-pivot trick.
+
+	# Tail boom — restructured: thicker conical taper (was a flat
+	# 0.30 box) running back from the hull, with three vertical
+	# stiffener fins on top reading as load-bearing structural
+	# bracing. Reads as a load-rated boom instead of a glued-on
+	# stick.
+	for boom_i: int in 3:
+		var boom_seg := MeshInstance3D.new()
+		boom_seg.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var bs_box := BoxMesh.new()
+		# Each segment tapers thinner as it goes back.
+		var seg_w: float = 0.42 - float(boom_i) * 0.06
+		var seg_h: float = 0.40 - float(boom_i) * 0.05
+		var seg_z_len: float = 0.46
+		bs_box.size = Vector3(seg_w, seg_h, seg_z_len)
+		boom_seg.mesh = bs_box
+		boom_seg.position = Vector3(0, 0.20, -1.86 - float(boom_i) * (seg_z_len - 0.04))
+		boom_seg.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.10 + float(boom_i) * 0.04)))
+		add_child(boom_seg)
+		# Stiffener fin — a slim vertical slab on top of each
+		# boom segment (panel-line read at distance).
+		var stiffener := MeshInstance3D.new()
+		stiffener.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var sf_box := BoxMesh.new()
+		sf_box.size = Vector3(0.05, 0.10, seg_z_len * 0.85)
+		stiffener.mesh = sf_box
+		stiffener.position = Vector3(0, 0.20 + seg_h * 0.5 + 0.04, -1.86 - float(boom_i) * (seg_z_len - 0.04))
+		stiffener.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.30)))
+		add_child(stiffener)
+
+	# Tail-rotor housing — a proper pyloned pod at the end of the
+	# boom: a vertical stub-pylon, a circular hub disc, and a 4-blade
+	# rotor on a pivot so it actually reads as a real anti-torque
+	# rotor and not "two sticks taped to a strut."
+	var tail_pylon := MeshInstance3D.new()
+	tail_pylon.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var tp_box := BoxMesh.new()
+	tp_box.size = Vector3(0.22, 0.50, 0.30)
+	tail_pylon.mesh = tp_box
+	tail_pylon.position = Vector3(0, 0.34, -3.00)
+	tail_pylon.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.15)))
+	add_child(tail_pylon)
+	# Hub at the side of the pylon — small cylinder facing
+	# sideways, reads as the rotor mounting.
+	var tail_hub := MeshInstance3D.new()
+	tail_hub.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var th_cyl := CylinderMesh.new()
+	th_cyl.top_radius = 0.10
+	th_cyl.bottom_radius = 0.10
+	th_cyl.height = 0.12
+	th_cyl.radial_segments = 12
+	tail_hub.mesh = th_cyl
+	tail_hub.rotation.z = PI * 0.5
+	tail_hub.position = Vector3(0.18, 0.34, -3.00)
+	tail_hub.set_surface_override_material(0, _aircraft_metal_mat(Color(0.08, 0.08, 0.10, 1.0)))
+	add_child(tail_hub)
+	# Tail rotor — 4 blades on a pivot at the end of the hub,
+	# spinning in the YZ plane (rotation.x driven in _process).
 	var tail_pivot := Node3D.new()
 	tail_pivot.name = "TailRotorPivot"
-	tail_pivot.position = Vector3(0.20, 0.20, -2.95)
+	tail_pivot.position = Vector3(0.28, 0.34, -3.00)
 	add_child(tail_pivot)
-	for tail_blade_i: int in 2:
+	for tail_blade_i: int in 4:
 		var tblade := MeshInstance3D.new()
 		tblade.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var tbb := BoxMesh.new()
-		tbb.size = Vector3(0.04, 0.55, 0.10)
+		tbb.size = Vector3(0.04, 0.65, 0.08)
 		tblade.mesh = tbb
 		tblade.rotation.x = float(tail_blade_i) * (PI * 0.5)
 		tblade.set_surface_override_material(0, _aircraft_metal_mat(Color(0.10, 0.10, 0.12, 0.9)))
@@ -1532,11 +1665,16 @@ func trigger_ability() -> bool:
 
 
 func _ability_missile_barrage() -> bool:
-	## Fires 6 underwing missiles at the CombatComponent's current
-	## target. Total damage 450 (= 6 × 75 per missile) for the base
-	## Hammerhead, 540 (= 6 × 90) for the Escort variant — derived
-	## from unit_name so the data lives next to the unit's stat
-	## resource and not inside this dispatch.
+	## Fires 10 underwing missiles in rapid succession at the
+	## CombatComponent's current target — a real salvo. Per-missile
+	## damage tuned so the total stays in the same ballpark as the
+	## previous 6-missile pop:
+	##   Base Hammerhead   -> 10 x 45 = 450 dmg
+	##   Hammerhead Escort -> 10 x 54 = 540 dmg
+	## Missiles alternate between the LEFT and RIGHT underwing pods
+	## (offset 0.78u from the body) and the target point gets a
+	## small per-missile XZ spread so the impacts splash around the
+	## target rather than all converging on the same pixel.
 	if not _combat:
 		return false
 	var target: Node3D = _combat.get("_current_target") as Node3D
@@ -1546,40 +1684,51 @@ func _ability_missile_barrage() -> bool:
 	# combat component hasn't ticked again yet.
 	if "alive_count" in target and (target.get("alive_count") as int) <= 0:
 		return false
-	var per_missile: int = 75
+	var per_missile: int = 45
 	if stats.unit_name.findn("Escort") >= 0:
-		per_missile = 90
-	# Stagger the six missiles over a short window so the volley
-	# reads as a salvo instead of an instantaneous slap. Each
-	# missile spawns through the same projectile path the
-	# CombatComponent uses for normal fire — visual + audio is
-	# free that way.
-	const SALVO_COUNT: int = 6
-	const SALVO_STAGGER_SEC: float = 0.07
+		per_missile = 54
+	const SALVO_COUNT: int = 10
+	const SALVO_STAGGER_SEC: float = 0.09  # ~0.9s total - reads as a real burst
+	const POD_X_OFFSET: float = 0.78        # matches the underwing pod placement
+	const TARGET_SPREAD: float = 1.6        # XZ jitter on each missile's aim point
 	for i: int in SALVO_COUNT:
 		var delay: float = float(i) * SALVO_STAGGER_SEC
+		# Alternate left / right pod so the salvo visibly comes
+		# from BOTH sides instead of stacking on one wing.
+		var side_x: float = -POD_X_OFFSET if (i % 2) == 0 else POD_X_OFFSET
+		var spread_offset: Vector3 = Vector3(
+			randf_range(-TARGET_SPREAD, TARGET_SPREAD),
+			0.0,
+			randf_range(-TARGET_SPREAD, TARGET_SPREAD),
+		)
 		var timer: SceneTreeTimer = get_tree().create_timer(delay)
-		timer.timeout.connect(_fire_barrage_missile.bind(target, per_missile))
+		timer.timeout.connect(_fire_barrage_missile.bind(target, per_missile, side_x, spread_offset))
 	return true
 
 
-func _fire_barrage_missile(target: Node3D, damage: int) -> void:
-	## One missile in the barrage — applies damage if the target is
-	## still valid, spawns a missile-styled projectile so the visual
-	## + audio match the rest of combat. Skipped silently if the
-	## target died between the schedule and this tick.
+func _fire_barrage_missile(target: Node3D, damage: int, side_x: float, spread_offset: Vector3) -> void:
+	## One missile in the barrage. side_x is the local X offset of
+	## the launching pod (negative = port, positive = starboard);
+	## spread_offset is the per-missile XZ jitter applied to the
+	## target aim point so the salvo splashes around the target.
+	## Skipped silently if the target died mid-volley.
 	if not is_instance_valid(target):
 		return
 	if "alive_count" in target and (target.get("alive_count") as int) <= 0:
 		return
 	if target.has_method("take_damage"):
 		target.call("take_damage", damage, self)
-	# Visual missile via Projectile.create — matches the same path
-	# the CombatComponent uses so trails / impact / audio behave.
 	var role_tag: StringName = &"AAir" if stats.unit_name.findn("Escort") >= 0 else &"AA"
+	# Convert the local-X pod offset into a world-space spawn
+	# position by sampling the aircraft's transform basis. Falls
+	# back to a plain X-axis offset if the basis isn't available
+	# (it always is on a parented Node3D, but defensive).
+	var pod_world_offset: Vector3 = transform.basis.x * side_x
+	var spawn_pos: Vector3 = global_position + pod_world_offset + Vector3(0, -0.25, 0)
+	var aim_pos: Vector3 = target.global_position + spread_offset
 	var proj: Projectile = Projectile.create(
-		global_position + Vector3(0, -0.2, 0),
-		target.global_position,
+		spawn_pos,
+		aim_pos,
 		role_tag,
 		&"slow",
 		&"missile",
