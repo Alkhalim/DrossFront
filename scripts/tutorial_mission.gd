@@ -209,8 +209,8 @@ func _install_stages() -> void:
 	# Stage 5 — assemble strike force.
 	_stages.append({
 		"id": &"force",
-		"dialogue": "Steelmaster Kress: \"Train at least three additional units — Rooks for speed, Hounds for the punch. The Sable enclave is dug in to the north and we are going to dislodge them.\"",
-		"objective": "Train at least 3 additional combat units (Rooks or Hounds).",
+		"dialogue": "Steelmaster Kress: \"Build your forces up to six combat units, commander — Rooks for speed, Hounds for the punch. The Sable enclave is dug in to the north and we are going to dislodge them.\"",
+		"objective": "Build your forces up to 6 combat units (Rooks or Hounds).",
 		"on_enter": Callable(self, "_stage_force_enter"),
 		"trigger": Callable(self, "_stage_force_done"),
 	})
@@ -340,10 +340,11 @@ func _stage_base_done() -> bool:
 	return has_foundry and has_yard
 
 
-## Snapshot of combat unit count at the moment the FORCE stage
-## fires, so the trigger can require "3 ADDITIONAL units trained"
-## rather than counting the Rooks the player already has.
-var _force_baseline_count: int = 0
+## Reworded from "3 additional" to "6 total" per playtest — the
+## delta target was confusing relative to the visible roster
+## count, and a flat 6-unit target reads cleaner. _force_target
+## kept as a const for tuning parity.
+const FORCE_TARGET_COUNT: int = 6
 
 ## Sable ally tracking. _ally_units holds every unit spawned for
 ## the player's strike-force ally; _ally_state walks them through
@@ -364,27 +365,35 @@ var _ally_follow_accum: float = 0.0
 ## the "enemy is in the north" concept before the climax push.
 var _raid_fired: bool = false
 ## Player walks SOUTH (+Z) through the discovery beats and ends
-## up with their base at +100. Ally rally point sits just south
-## of the base; spawn point at the southern edge so the strike
-## force marches up visibly. Enemy enclave is at -Z (north on
-## screen), so the climax pivots direction from the discovery
-## walk.
-const ALLY_RALLY_POINT: Vector3 = Vector3(0.0, 0.0, 108.0)
+## up with their base at +100. Ally rally point sits to the
+## LEFT (-X) of the base, NOT directly south of it — heavy
+## Harbinger walkers were getting stuck pathing between the
+## player's foundry / generators / yard if they marched
+## straight up the centre line. The west-side approach gives
+## them a clean lane around the base.
+## Spawn point is also pulled west so the whole strike force
+## arrives offset rather than crossing through the base mid-
+## march. Enemy enclave at -Z = north on screen.
+const ALLY_RALLY_POINT: Vector3 = Vector3(-50.0, 0.0, 108.0)
 const ALLY_RALLY_ARRIVE_SQ: float = 18.0 * 18.0
 const ALLY_FOLLOW_INTERVAL_SEC: float = 3.0
 const ALLY_TRAIL_OFFSET: float = 6.0  # ally rallies this far behind player centroid
 const ENEMY_ENCLAVE_CENTRE: Vector3 = Vector3(0.0, 0.0, -130.0)
+const ALLY_SPAWN_X: float = -50.0
 const ALLY_SPAWN_Z: float = 150.0
 
 
 func _stage_force_enter() -> void:
-	_force_baseline_count = _count_player_combat_units()
+	pass
 
 
 func _stage_force_done() -> bool:
-	# Three more combat units (Rooks / Hounds / Phalanx) than what
-	# the player had at the start of this stage.
-	return _count_player_combat_units() >= _force_baseline_count + 3
+	# Total of FORCE_TARGET_COUNT combat units (Rooks / Hounds /
+	# Phalanx). Counts the entire current roster — the player
+	# starts the stage with whatever Rooks survived the south
+	# walk + their reinforce squads, and only has to top up to
+	# the target.
+	return _count_player_combat_units() >= FORCE_TARGET_COUNT
 
 
 func _count_player_combat_units() -> int:
@@ -433,14 +442,18 @@ func _stage_ally_enter() -> void:
 	# the ally arrives pre-formed so the prereq is moot.
 	_ally_units.clear()
 	var spawn_z: float = ALLY_SPAWN_Z
-	var heavy_offsets: Array = [-18.0, -10.0, -2.0]   # Harbingers + air spread
+	# Strike force arrives at the western edge of the south end
+	# (X = ALLY_SPAWN_X) so the march to the rally point is a
+	# clean north-westward lane around the base, not straight
+	# through the foundry / yard / generators.
+	var heavy_offsets: Array = [-8.0, 0.0, 8.0]   # X spread around the spawn lane
 	for i: int in 3:
-		var p: Vector3 = Vector3(heavy_offsets[i], 0.0, spawn_z)
+		var p: Vector3 = Vector3(ALLY_SPAWN_X + heavy_offsets[i], 0.0, spawn_z)
 		var u: Node3D = _spawn_ally_unit("res://resources/units/sable_wraith.tres", p)
 		if u:
 			_ally_units.append(u)
 	for i: int in 2:
-		var p2: Vector3 = Vector3(6.0 + float(i) * 10.0, 0.0, spawn_z + 4.0)
+		var p2: Vector3 = Vector3(ALLY_SPAWN_X - 4.0 + float(i) * 8.0, 0.0, spawn_z + 8.0)
 		var u2: Node3D = _spawn_ally_unit("res://resources/units/sable_harbinger.tres", p2)
 		if u2:
 			_ally_units.append(u2)
