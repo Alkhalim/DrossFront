@@ -63,6 +63,19 @@ func _process(delta: float) -> void:
 		_complete_current()
 
 
+func cancel_current() -> bool:
+	## Aborts the in-flight project. Returns true if something was
+	## actually cancelled. Caller refunds the cost via its own resource
+	## manager (this class stays resource-agnostic).
+	if not is_in_progress():
+		return false
+	current_id = &""
+	current_label = ""
+	current_total_time = 0.0
+	_current_elapsed = 0.0
+	return true
+
+
 func _complete_current() -> void:
 	var finished_id: StringName = current_id
 	_completed[finished_id] = true

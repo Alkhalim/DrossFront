@@ -2694,10 +2694,51 @@ func _make_armory_row(base_stats: UnitStatResource, bcm: Node, cost_suffix: Stri
 		row.add_child(done_lbl)
 		return row
 
+	# When THIS row's commit is in progress, swap the two branch
+	# buttons for a single cancel button showing live progress + the
+	# branch being committed. Other rows still render their normal
+	# (disabled) branch buttons so the player can see what's locked.
+	var owning_base: UnitStatResource = bcm.get_commit_base_stats() if bcm.has_method("get_commit_base_stats") else null
+	if bcm.is_committing() and owning_base and owning_base == base_stats:
+		row.add_child(_make_commit_cancel_button(bcm))
+		return row
+
 	var committing_now: bool = bcm.is_committing()
 	row.add_child(_make_branch_button(base_stats, base_stats.branch_a_stats, base_stats.branch_a_name, cost_suffix, committing_now))
 	row.add_child(_make_branch_button(base_stats, base_stats.branch_b_stats, base_stats.branch_b_name, cost_suffix, committing_now))
 	return row
+
+
+func _make_commit_cancel_button(bcm: Node) -> Button:
+	var btn := Button.new()
+	btn.custom_minimum_size = Vector2(248, 50)
+	var pct: int = int(bcm.get_commit_progress() * 100.0) if bcm.has_method("get_commit_progress") else 0
+	var bname: String = bcm.get_commit_branch_name() if bcm.has_method("get_commit_branch_name") else "Commit"
+	btn.text = "Cancel %s  (%d%%) — refund" % [bname, pct]
+	btn.add_theme_color_override("font_color", Color(1.0, 0.78, 0.32, 1.0))
+	btn.tooltip_text = "Cancel the in-progress branch commit. Microchips, fuel, and salvage spent are refunded."
+	btn.pressed.connect(_on_cancel_branch_commit)
+	return btn
+
+
+func _on_cancel_branch_commit() -> void:
+	var bcm: Node = get_tree().current_scene.get_node_or_null("BranchCommitManager")
+	if not bcm or not bcm.has_method("cancel_commit"):
+		return
+	if not bcm.cancel_commit():
+		return
+	# Refund — same trio of resources start_commit charged.
+	if _resource_manager:
+		if _resource_manager.has_method("add_salvage"):
+			_resource_manager.add_salvage(BranchCommitManager.COMMIT_COST_SALVAGE)
+		if _resource_manager.has_method("add_fuel"):
+			_resource_manager.add_fuel(BranchCommitManager.COMMIT_COST_FUEL)
+		if _resource_manager.has_method("add_microchips"):
+			_resource_manager.add_microchips(BranchCommitManager.COMMIT_COST_MICROCHIPS)
+	if _selection_manager and _selection_manager._audio:
+		_selection_manager._audio.play_command()
+	# Force panel rebuild so the row immediately reflects "open".
+	_last_building_id = -1
 
 
 func _make_branch_button(
@@ -2837,8 +2878,10 @@ func _make_anchor_research_row(rm: Node, cost_suffix: String) -> Control:
 		anchor_btn.text = "Anchor Mode\nResearched"
 		anchor_btn.disabled = true
 	elif rm.is_in_progress() and rm.current_id == &"anchor_mode":
-		anchor_btn.text = "Anchor Mode\n%d%%" % int(rm.get_progress() * 100.0)
-		anchor_btn.disabled = true
+		anchor_btn.text = "Cancel Anchor Mode (%d%%) — refund" % int(rm.get_progress() * 100.0)
+		anchor_btn.add_theme_color_override("font_color", Color(1.0, 0.78, 0.32, 1.0))
+		anchor_btn.tooltip_text = "Cancel the in-progress research. Microchips, fuel, and salvage spent are refunded."
+		anchor_btn.pressed.connect(_on_cancel_anchor_research)
 	else:
 		anchor_btn.text = "[E] Anchor Mode"
 		anchor_btn.tooltip_text = "Anchor Mode"
@@ -2876,6 +2919,24 @@ func _attach_research_cost_widget(btn: Button) -> void:
 	_add_cost_chip(hbox, BranchCommitManager.COMMIT_COST_MICROCHIPS, RES_COLOR_MICROCHIPS)
 	_add_cost_chip(hbox, BranchCommitManager.COMMIT_COST_FUEL, RES_COLOR_FUEL)
 	_add_cost_chip(hbox, BranchCommitManager.COMMIT_COST_SALVAGE, RES_COLOR_SALVAGE)
+
+
+func _on_cancel_anchor_research() -> void:
+	var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
+	if not rm or not rm.has_method("cancel_current"):
+		return
+	if not rm.cancel_current():
+		return
+	if _resource_manager:
+		if _resource_manager.has_method("add_salvage"):
+			_resource_manager.add_salvage(BranchCommitManager.COMMIT_COST_SALVAGE)
+		if _resource_manager.has_method("add_fuel"):
+			_resource_manager.add_fuel(BranchCommitManager.COMMIT_COST_FUEL)
+		if _resource_manager.has_method("add_microchips"):
+			_resource_manager.add_microchips(BranchCommitManager.COMMIT_COST_MICROCHIPS)
+	if _selection_manager and _selection_manager._audio:
+		_selection_manager._audio.play_command()
+	_last_building_id = -1
 
 
 func _on_research_anchor() -> void:

@@ -59,6 +59,15 @@ func get_commit_branch_name() -> String:
 	return _active_commit["branch_name"] as String
 
 
+func get_commit_base_stats() -> UnitStatResource:
+	## Active commit's BASE unit stats — the row owner. Lets the HUD
+	## show a cancel button on the matching armory row instead of all
+	## of them.
+	if _active_commit.is_empty():
+		return null
+	return _active_commit["base_stats"] as UnitStatResource
+
+
 func has_committed(base_unit_name: String) -> bool:
 	return _committed_branches.has(base_unit_name)
 
@@ -87,6 +96,17 @@ func start_commit(base_stats: UnitStatResource, branch_stats: UnitStatResource, 
 	if audio and audio.has_method("play_production_started"):
 		audio.play_production_started()
 
+	return true
+
+
+func cancel_commit() -> bool:
+	## Aborts the in-flight branch commit. Returns true if a commit was
+	## actually cancelled. The caller (HUD) is responsible for refunding
+	## the cost via the player ResourceManager so the manager stays
+	## resource-agnostic.
+	if _active_commit.is_empty():
+		return false
+	_active_commit.clear()
 	return true
 
 
