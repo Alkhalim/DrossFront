@@ -802,29 +802,20 @@ func _spawn_first_building_raid() -> void:
 	# still building up early-economy and a tank squad was
 	# punching above the player's defensive weight.
 	var raid_z: float = -110.0
-	var raid_units: Array[Node3D] = []
-	# Tightened from +-8 to +-5 X spread so the two squads arrive
-	# in a noticeably tighter formation (per playtest). Still
-	# enough horizontal space to read as two distinct units, not
-	# squad members of one squad.
-	for i: int in 2:
-		var rx: float = -5.0 + float(i) * 10.0
-		var u: Node3D = _spawn_tutorial_raid_unit(
-			"res://resources/units/sable_specter.tres",
-			Vector3(rx, 0.0, raid_z),
-		)
-		if u:
-			raid_units.append(u)
-	for ru: Node3D in raid_units:
-		if ru.has_method("command_move"):
-			ru.call("command_move", Vector3(0.0, 0.0, 80.0))
-	# Surface a one-line alert so the player sees the raid coming
-	# without having to scrub the minimap.
+	# A single Specter squad — small enough to read as a probe /
+	# scout contact rather than a real attack, just enough to
+	# telegraph "the enemy is in the north" before the climax.
+	var u: Node3D = _spawn_tutorial_raid_unit(
+		"res://resources/units/sable_specter.tres",
+		Vector3(0.0, 0.0, raid_z),
+	)
+	if u and u.has_method("command_move"):
+		u.call("command_move", Vector3(0.0, 0.0, 80.0))
 	var alerts: Node = get_tree().current_scene.get_node_or_null("AlertManager")
 	if alerts and alerts.has_method("emit_alert"):
 		alerts.call(
 			"emit_alert",
-			"Sable raid inbound from the north — two Specter squads",
+			"Sable scout contact inbound from the north",
 			1,
 			Vector3(0.0, 0.0, raid_z),
 		)
