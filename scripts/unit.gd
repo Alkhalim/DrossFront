@@ -1037,6 +1037,14 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 	if stats and stats.unit_name == "Pulsefont":
 		_apply_pulsefont_overlay(torso_pivot, torso_size, head_size, mats)
 
+	# Anvil Forgemaster overlay — unique support-mech read so it
+	# doesn't read as a recoloured Bulwark. Adds a tall furnace
+	# stack on the back (visible orange glow), a roof-mounted AA
+	# launcher rack (the Skyspike battery), and a chest-front
+	# repair-coil ring tinted Anvil amber.
+	if stats and stats.unit_name.findn("Forgemaster") >= 0:
+		_apply_forgemaster_overlay(torso_pivot, torso_size, head_size, mats)
+
 	# Per-member gait variation so a squad doesn't goose-step in lockstep.
 	# Each mech has its own phase, slightly different stride speed, swing
 	# amplitude, and torso bob amount — same skeleton, individual feel.
@@ -1312,6 +1320,155 @@ func _apply_pulsefont_overlay(
 		pulse_node.set_surface_override_material(0, pulse_mat)
 		torso_pivot.add_child(pulse_node)
 		mats.append(pulse_mat)
+
+
+func _apply_forgemaster_overlay(
+	torso_pivot: Node3D,
+	torso_size: Vector3,
+	head_size: Vector3,
+	mats: Array[StandardMaterial3D],
+) -> void:
+	## Overlay geometry that turns a generic Anvil heavy chassis into
+	## a Forgemaster — distinct support-mech silhouette so it doesn't
+	## just read as a recoloured Bulwark. Stacks: a tall furnace
+	## stack on the rear deck with a glowing forge mouth (the heal
+	## visual cue), a roof-mounted Skyspike AA launcher rack
+	## (communicates the strong AA secondary), and a chest-front
+	## repair-coil ring tinted Anvil amber (telegraphs Factory
+	## Pulse's heal aura). The original Bulwark cannons + chassis
+	## stay where they are so combat code (muzzle pivots, recoil)
+	## is unaffected.
+	var anvil_amber: Color = Color(1.0, 0.55, 0.18)
+	var forge_red: Color = Color(1.0, 0.35, 0.10)
+
+	# --- Furnace stack on the rear deck. Communicates "industrial
+	# repair shop" — a tall vertical chimney with a glowing mouth
+	# at its base.
+	var stack_root := Node3D.new()
+	stack_root.position = Vector3(0.0, torso_size.y, torso_size.z * 0.35)
+	torso_pivot.add_child(stack_root)
+	# Wide base block — the actual furnace housing.
+	var furnace := MeshInstance3D.new()
+	var furnace_box := BoxMesh.new()
+	furnace_box.size = Vector3(0.65, 0.45, 0.50)
+	furnace.mesh = furnace_box
+	furnace.position.y = 0.20
+	var furnace_mat := _make_metal_mat(Color(0.18, 0.16, 0.14))
+	furnace.set_surface_override_material(0, furnace_mat)
+	stack_root.add_child(furnace)
+	mats.append(furnace_mat)
+	# Glowing forge mouth — emissive recess on the front face.
+	var mouth := MeshInstance3D.new()
+	var mouth_box := BoxMesh.new()
+	mouth_box.size = Vector3(0.45, 0.22, 0.05)
+	mouth.mesh = mouth_box
+	mouth.position = Vector3(0.0, 0.18, -0.26)
+	var mouth_mat := StandardMaterial3D.new()
+	mouth_mat.albedo_color = forge_red
+	mouth_mat.emission_enabled = true
+	mouth_mat.emission = forge_red
+	mouth_mat.emission_energy_multiplier = 3.4
+	mouth_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mouth.set_surface_override_material(0, mouth_mat)
+	stack_root.add_child(mouth)
+	mats.append(mouth_mat)
+	# Tall chimney rising from the furnace top — three stacked
+	# segments tapering inward so the silhouette reads vertical.
+	var chimney_y: float = 0.45
+	for seg_i: int in 3:
+		var seg := MeshInstance3D.new()
+		var seg_box := BoxMesh.new()
+		var w: float = 0.34 - float(seg_i) * 0.05
+		var h: float = 0.32
+		seg_box.size = Vector3(w, h, w)
+		seg.mesh = seg_box
+		seg.position.y = chimney_y + h * 0.5
+		seg.set_surface_override_material(0, _make_metal_mat(Color(0.12, 0.11, 0.10)))
+		stack_root.add_child(seg)
+		chimney_y += h - 0.02
+	# Cap with a faint amber glow at the top — heat haze read.
+	var stack_cap := MeshInstance3D.new()
+	var cap_box := BoxMesh.new()
+	cap_box.size = Vector3(0.20, 0.06, 0.20)
+	stack_cap.mesh = cap_box
+	stack_cap.position.y = chimney_y + 0.03
+	var cap_mat := StandardMaterial3D.new()
+	cap_mat.albedo_color = anvil_amber
+	cap_mat.emission_enabled = true
+	cap_mat.emission = anvil_amber
+	cap_mat.emission_energy_multiplier = 2.2
+	cap_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	stack_cap.set_surface_override_material(0, cap_mat)
+	stack_root.add_child(stack_cap)
+	mats.append(cap_mat)
+
+	# --- Roof-mounted Skyspike AA rack. Quad missile tubes angled
+	# upward so the player reads "anti-air" without needing the
+	# tooltip. Sits between the chimney and the front of the chassis.
+	var rack_root := Node3D.new()
+	rack_root.position = Vector3(0.0, torso_size.y + 0.05, -torso_size.z * 0.05)
+	torso_pivot.add_child(rack_root)
+	# Mount block.
+	var mount := MeshInstance3D.new()
+	var mount_box := BoxMesh.new()
+	mount_box.size = Vector3(0.55, 0.10, 0.45)
+	mount.mesh = mount_box
+	mount.set_surface_override_material(0, _make_metal_mat(Color(0.20, 0.18, 0.16)))
+	rack_root.add_child(mount)
+	# Four upward-angled launch tubes.
+	for tube_i: int in 4:
+		var tube := MeshInstance3D.new()
+		var tube_cyl := CylinderMesh.new()
+		tube_cyl.top_radius = 0.06
+		tube_cyl.bottom_radius = 0.06
+		tube_cyl.height = 0.32
+		tube_cyl.radial_segments = 6
+		tube.mesh = tube_cyl
+		var tx: float = (float(tube_i % 2) - 0.5) * 0.34
+		var tz: float = (float(tube_i / 2) - 0.5) * 0.30
+		tube.position = Vector3(tx, 0.20, tz)
+		tube.rotation.x = deg_to_rad(-15.0)
+		tube.set_surface_override_material(0, _make_metal_mat(Color(0.10, 0.10, 0.10)))
+		rack_root.add_child(tube)
+		# Glowing missile tip showing in the tube mouth.
+		var tip := MeshInstance3D.new()
+		var tip_cyl := CylinderMesh.new()
+		tip_cyl.top_radius = 0.05
+		tip_cyl.bottom_radius = 0.05
+		tip_cyl.height = 0.06
+		tip.mesh = tip_cyl
+		tip.position = Vector3(tx, 0.36, tz)
+		tip.rotation.x = deg_to_rad(-15.0)
+		var tip_mat := StandardMaterial3D.new()
+		tip_mat.albedo_color = anvil_amber
+		tip_mat.emission_enabled = true
+		tip_mat.emission = anvil_amber
+		tip_mat.emission_energy_multiplier = 2.0
+		tip_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		tip.set_surface_override_material(0, tip_mat)
+		rack_root.add_child(tip)
+		mats.append(tip_mat)
+
+	# --- Repair-coil torus ringing the chest. Tinted Anvil amber so
+	# it reads as a heal aura emitter (parallel to the Pulsefont's
+	# blue Mesh halo).
+	var coil := MeshInstance3D.new()
+	var coil_torus := TorusMesh.new()
+	coil_torus.inner_radius = torso_size.x * 0.55
+	coil_torus.outer_radius = torso_size.x * 0.66
+	coil_torus.ring_segments = 6
+	coil_torus.rings = 24
+	coil.mesh = coil_torus
+	coil.position = Vector3(0.0, torso_size.y * 0.55, 0.0)
+	var coil_mat := StandardMaterial3D.new()
+	coil_mat.albedo_color = anvil_amber
+	coil_mat.emission_enabled = true
+	coil_mat.emission = anvil_amber
+	coil_mat.emission_energy_multiplier = 2.4
+	coil_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	coil.set_surface_override_material(0, coil_mat)
+	torso_pivot.add_child(coil)
+	mats.append(coil_mat)
 
 
 func _build_legs(member: Node3D, shape: Dictionary, mats: Array[StandardMaterial3D], kind: String) -> Dictionary:
@@ -2020,17 +2177,36 @@ func _ability_system_crash() -> bool:
 
 
 func _ability_factory_pulse() -> bool:
-	## Forgemaster's Factory Pulse — heals every friendly mech
-	## inside stats.ability_radius for a fixed-amount pop. Heal
-	## amount scales with the variant: base 180, Foreman branch
-	## 220 (derived from unit_name to avoid threading another stat
-	## field for one variant difference).
-	var heal_amount: int = 180
+	## Forgemaster's Factory Pulse — instead of a single instant
+	## heal pop, the ability now ticks over stats.ability_duration
+	## seconds, healing per_tick HP every second to every friendly
+	## mech in radius. Total heal is meaningfully larger (5 ticks ×
+	## 80 = 400 HP base; Foreman branch 5 × 100 = 500 HP) but the
+	## payoff is metered out so the ally has to STAY in the aura
+	## to get the full benefit. Ticker registered as a Timer-driven
+	## callback chain anchored on the Forgemaster itself; if the
+	## caster dies mid-pulse the timer dies with it.
+	var per_tick: int = 80
 	if stats.unit_name.findn("Foreman") >= 0:
-		heal_amount = 220
+		per_tick = 100
+	var ticks_left: int = 5
+	var radius: float = stats.ability_radius
+	# Every second: heal allies in radius for per_tick + spawn a
+	# small pulse visual. Recursing via call_deferred + a Timer
+	# child keeps the chain GC-safe — the timer is parented to the
+	# caster, so freeing the Forgemaster cancels the chain.
+	_factory_pulse_tick(per_tick, ticks_left, radius)
+	return true
+
+
+func _factory_pulse_tick(per_tick: int, ticks_left: int, radius: float) -> void:
+	## One pulse tick — heals allies in radius, spawns a visual,
+	## and schedules the next tick. Called recursively via a
+	## one-shot Timer until ticks_left runs out.
+	if alive_count <= 0:
+		return
 	var origin: Vector3 = global_position
-	var radius_sq: float = stats.ability_radius * stats.ability_radius
-	var hits: int = 0
+	var radius_sq: float = radius * radius
 	for node: Node in get_tree().get_nodes_in_group("units"):
 		if not is_instance_valid(node):
 			continue
@@ -2043,10 +2219,11 @@ func _ability_factory_pulse() -> bool:
 			continue
 		if ally.global_position.distance_squared_to(origin) > radius_sq:
 			continue
-		ally.apply_heal(heal_amount)
-		hits += 1
-	_spawn_pulse_visual(stats.ability_radius, Color(1.0, 0.65, 0.25))
-	return hits > 0 or true
+		ally.apply_heal(per_tick)
+	_spawn_pulse_visual(radius, Color(1.0, 0.65, 0.25))
+	if ticks_left > 1:
+		var timer: SceneTreeTimer = get_tree().create_timer(1.0)
+		timer.timeout.connect(_factory_pulse_tick.bind(per_tick, ticks_left - 1, radius))
 
 
 func _ability_reactor_surge() -> bool:

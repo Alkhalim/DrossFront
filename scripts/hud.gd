@@ -1597,7 +1597,10 @@ func _rebuild_unit_command_buttons() -> void:
 	# selection shares the same ability (so a mixed selection of
 	# Pulsefonts + Hounds doesn't show a button that only fires on
 	# half of them). The button label flips between the cast / cooldown
-	# states each frame via _refresh_ability_button.
+	# states each frame via _refresh_ability_button. Tinted distinct
+	# from the standard command buttons (violet vs grey) so the
+	# player sees at a glance that this slot is a special action,
+	# not another move command.
 	var ability_units: Array[Node3D] = _selection_ability_units()
 	if not ability_units.is_empty():
 		var first: Node3D = ability_units[0]
@@ -1609,6 +1612,7 @@ func _rebuild_unit_command_buttons() -> void:
 			ability_stat.ability_description,
 			int(ability_stat.ability_cooldown),
 		]
+		_paint_ability_button_style(ability_btn)
 		ability_btn.pressed.connect(_on_ability_button.bind(ability_units))
 		_button_grid.add_child(ability_btn)
 		_action_buttons.append({
@@ -1643,6 +1647,35 @@ func _selection_ability_units() -> Array[Node3D]:
 			return [] as Array[Node3D]
 		out.append(unit)
 	return out
+
+
+func _paint_ability_button_style(btn: Button) -> void:
+	## Distinct stylebox + label colour for active-ability buttons so
+	## they stand out from the grey Hold / Patrol / Attack-Move slots.
+	## Violet matches the COLOR_MICROCHIPS / overall "special action"
+	## tinting in the rest of the HUD.
+	var ability_color: Color = Color(0.62, 0.32, 0.92, 1.0)
+	var bg_normal := StyleBoxFlat.new()
+	bg_normal.bg_color = Color(0.20, 0.10, 0.30, 1.0)
+	bg_normal.border_color = ability_color
+	bg_normal.set_border_width_all(2)
+	bg_normal.set_corner_radius_all(3)
+	bg_normal.content_margin_left = 6
+	bg_normal.content_margin_right = 6
+	bg_normal.content_margin_top = 4
+	bg_normal.content_margin_bottom = 4
+	var bg_hover := bg_normal.duplicate()
+	bg_hover.bg_color = Color(0.28, 0.14, 0.40, 1.0)
+	var bg_pressed := bg_normal.duplicate()
+	bg_pressed.bg_color = Color(0.36, 0.20, 0.48, 1.0)
+	var bg_disabled := bg_normal.duplicate()
+	bg_disabled.bg_color = Color(0.14, 0.10, 0.18, 1.0)
+	bg_disabled.border_color = Color(0.40, 0.30, 0.55, 1.0)
+	btn.add_theme_stylebox_override("normal", bg_normal)
+	btn.add_theme_stylebox_override("hover", bg_hover)
+	btn.add_theme_stylebox_override("pressed", bg_pressed)
+	btn.add_theme_stylebox_override("disabled", bg_disabled)
+	btn.add_theme_color_override("font_color", Color(0.92, 0.85, 1.0))
 
 
 func _on_ability_button(units: Array[Node3D]) -> void:

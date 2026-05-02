@@ -7,10 +7,19 @@
 script = ExtResource("2")
 weapon_name = "Riveter Autocannon"
 role_tag = &"AP"
-damage_tier = &"high"
+damage_tier = &"moderate"
 range_tier = &"medium"
 rof_tier = &"fast"
 base_accuracy = 0.88
+
+[sub_resource type="Resource" id="weapon_skyspike"]
+script = ExtResource("2")
+weapon_name = "Skyspike AA Battery"
+role_tag = &"AAir"
+damage_tier = &"high"
+range_tier = &"long"
+rof_tier = &"moderate"
+base_accuracy = 0.90
 
 [resource]
 script = ExtResource("1")
@@ -28,10 +37,11 @@ cost_fuel = 45
 build_time = 32.0
 built_at = &"advanced_foundry"
 primary_weapon = SubResource("weapon_riveter")
+secondary_weapon = SubResource("weapon_skyspike")
 ability_name = "Reactor Surge"
 ability_hotkey = "D"
 ability_cooldown = 28.0
 ability_radius = 18.0
 ability_duration = 6.0
 ability_description = "Friendly mechs within 18u gain +30% damage for 6s."
-special_description = "Forgemaster Reactor branch — pulls the heal ring offline and overdrives nearby mechs' weapons instead. Damage-boost aura, slightly tougher autocannon. The frontline-DPS build."
+special_description = "Forgemaster Reactor branch — pulls the heal ring offline and overdrives nearby mechs' weapons instead. Riveter steps up to moderate damage; Skyspike AA stays. The frontline-DPS build."
