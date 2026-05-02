@@ -1653,8 +1653,13 @@ const BUILD_PLACEMENT_GAP: float = 2.6
 
 func _is_valid_build_position(pos: Vector3) -> bool:
 	## True when the build footprint at `pos` would not overlap any existing
-	## building, unit, or terrain feature (fuel deposit, wreck).
+	## building, unit, or terrain feature (fuel deposit, wreck), AND the
+	## footprint sits in cells the player has at least scouted at some
+	## point. Placing in unexplored fog reveals enemy intel and lets you
+	## drop foundations on terrain you've never seen, so block it.
 	if not _build_stats:
+		return false
+	if not _is_build_position_explored(pos):
 		return false
 	var half_x: float = _build_stats.footprint_size.x * 0.5
 	var half_z: float = _build_stats.footprint_size.z * 0.5
@@ -1702,6 +1707,32 @@ func _is_valid_build_position(pos: Vector3) -> bool:
 			if dx < (half_x + BUILD_OBSTACLE_MARGIN) and dz < (half_z + BUILD_OBSTACLE_MARGIN):
 				return false
 
+	return true
+
+
+func _is_build_position_explored(pos: Vector3) -> bool:
+	## Returns true when the cell at `pos` AND the four corner cells of
+	## the building's footprint have been scouted by the local player
+	## (FogOfWar.is_explored_world). Black / never-seen cells reject
+	## the placement; greyed-out / explored-but-not-currently-visible
+	## cells pass. Tutorial / non-FOW scenes pass through.
+	var fow: Node = get_tree().current_scene.get_node_or_null("FogOfWar") if get_tree() else null
+	if not fow or not fow.has_method("is_explored_world"):
+		return true
+	if not _build_stats:
+		return false
+	var half_x: float = _build_stats.footprint_size.x * 0.5
+	var half_z: float = _build_stats.footprint_size.z * 0.5
+	var checks: Array[Vector3] = [
+		pos,
+		pos + Vector3(half_x, 0.0, half_z),
+		pos + Vector3(-half_x, 0.0, half_z),
+		pos + Vector3(half_x, 0.0, -half_z),
+		pos + Vector3(-half_x, 0.0, -half_z),
+	]
+	for c: Vector3 in checks:
+		if not (fow.call("is_explored_world", c) as bool):
+			return false
 	return true
 
 

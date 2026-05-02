@@ -199,6 +199,12 @@ func _recompute_visibility() -> void:
 			continue
 		if not _is_friendly(node):
 			continue
+		# Under-construction buildings don't project vision -- the
+		# foundation is intent only / not a fully-staffed structure
+		# yet. The reveal kicks in the moment construction completes
+		# (is_constructed flips true).
+		if "is_constructed" in node and not (node.get("is_constructed") as bool):
+			continue
 		_stamp_visibility((node as Node3D).global_position, BUILDING_SIGHT_RADIUS)
 
 	# Temporary reveals — satellite-crash flares, scan pings, etc.

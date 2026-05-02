@@ -9,8 +9,13 @@ extends Node
 const STARTING_PILES_MIN: int = 2
 const STARTING_PILES_MAX: int = 4
 
-const RESPAWN_INTERVAL_MIN: float = 120.0
-const RESPAWN_INTERVAL_MAX: float = 180.0
+## Cadence for crash-event satellite drops. Tightened from
+## 120-180s to 180-240s -- "every 3-4 minutes" puts a fresh
+## chip pile on the map regularly enough that microchips stay
+## a present resource consideration without the satellite
+## ticker turning into background noise.
+const RESPAWN_INTERVAL_MIN: float = 180.0
+const RESPAWN_INTERVAL_MAX: float = 240.0
 
 ## Salvage in each satellite pile — meaningfully fatter than a
 ## standard wreck so it's worth racing for, but not so fat that
