@@ -103,12 +103,31 @@ func _build_visuals() -> void:
 	# The sign sits above the brass band so it's the first thing
 	# the eye lands on when the camera passes over.
 	_build_warning_sign()
+	# Scatter a handful of dynamite sticks around the base -- helps
+	# the dump read as 'pile of unsecured ordnance' from a distance,
+	# not just a generic crate stack.
+	_build_dynamite_scatter()
 
 
 func _build_warning_sign() -> void:
+	# Lift the placard well clear of the tallest possible crate stack.
+	# 4 crates at the upper-end heights stack to ~2.4u; 2.9u keeps the
+	# triangle floating above instead of clipping into the top crate.
 	var sign_root := Node3D.new()
-	sign_root.position = Vector3(0.0, 1.85, 0.0)
+	sign_root.position = Vector3(0.0, 2.9, 0.0)
 	add_child(sign_root)
+	# Slim mounting pole so the placard reads as held aloft on a
+	# stake instead of drifting in mid-air.
+	var pole := MeshInstance3D.new()
+	var pole_box := BoxMesh.new()
+	pole_box.size = Vector3(0.06, 1.6, 0.06)
+	pole.mesh = pole_box
+	pole.position = Vector3(0.0, -0.8, 0.0)
+	var pole_mat := StandardMaterial3D.new()
+	pole_mat.albedo_color = Color(0.16, 0.14, 0.12, 1.0)
+	pole_mat.roughness = 0.7
+	pole.set_surface_override_material(0, pole_mat)
+	sign_root.add_child(pole)
 	# Hazard-yellow triangular plate -- three rotated boxes form a
 	# rough triangle outline. Using boxes (vs a custom triangle
 	# mesh) keeps this a couple of cheap meshes.
@@ -158,6 +177,51 @@ func _build_warning_sign() -> void:
 	sign_root.add_child(border)
 
 
+func _build_dynamite_scatter() -> void:
+	## A handful of red dynamite sticks (with little tan fuses) lying
+	## around the base of the crate cluster. Tilts + positions are
+	## randomized so each dump's scatter looks unique.
+	var stick_count: int = randi_range(5, 8)
+	for i: int in stick_count:
+		var stick := MeshInstance3D.new()
+		var stick_cyl := CylinderMesh.new()
+		stick_cyl.top_radius = 0.07
+		stick_cyl.bottom_radius = 0.07
+		stick_cyl.height = randf_range(0.32, 0.46)
+		stick_cyl.radial_segments = 8
+		stick.mesh = stick_cyl
+		var stick_mat := StandardMaterial3D.new()
+		stick_mat.albedo_color = Color(0.78, 0.16, 0.10, 1.0)
+		stick_mat.roughness = 0.7
+		stick.set_surface_override_material(0, stick_mat)
+		# Lay the stick on its side (cylinder default points +Y, rotate
+		# 90 about Z so it lays flat).
+		stick.rotation = Vector3(
+			randf_range(-0.10, 0.10),
+			randf_range(0.0, TAU),
+			deg_to_rad(90.0) + randf_range(-0.20, 0.20),
+		)
+		var radius: float = randf_range(1.30, 1.65)
+		var ang: float = randf_range(0.0, TAU)
+		stick.position = Vector3(cos(ang) * radius, stick_cyl.top_radius + 0.01, sin(ang) * radius)
+		add_child(stick)
+		# Tan fuse poking out of one end -- short slim cylinder.
+		var fuse := MeshInstance3D.new()
+		var fuse_cyl := CylinderMesh.new()
+		fuse_cyl.top_radius = 0.018
+		fuse_cyl.bottom_radius = 0.018
+		fuse_cyl.height = 0.16
+		fuse_cyl.radial_segments = 6
+		fuse.mesh = fuse_cyl
+		var fuse_mat := StandardMaterial3D.new()
+		fuse_mat.albedo_color = Color(0.78, 0.62, 0.32, 1.0)
+		fuse.set_surface_override_material(0, fuse_mat)
+		# Sit the fuse at one end of the stick, angled up a little.
+		fuse.position.y = stick_cyl.height * 0.5 + 0.05
+		fuse.rotation.x = randf_range(-0.40, 0.40)
+		stick.add_child(fuse)
+
+
 func _build_collision() -> void:
 	var col := CollisionShape3D.new()
 	var shape := BoxShape3D.new()
@@ -197,6 +261,10 @@ func _explode() -> void:
 	# Splash damage to any unit / building / Crawler within
 	# EXPLOSION_RADIUS. Linear falloff with distance so units right next
 	# to the dump take full damage and units at the edge take ~30%.
+	# Buildings take an additional 3x multiplier -- the dump's shrapnel
+	# tears through structural plating, so a contested-mid dump going up
+	# next to a Foundry should genuinely threaten the building.
+	const BUILDING_DAMAGE_MULT: float = 3.0
 	var groups: Array[String] = ["units", "buildings", "crawlers"]
 	for g: String in groups:
 		for node: Node in get_tree().get_nodes_in_group(g):
@@ -211,7 +279,10 @@ func _explode() -> void:
 			if d > EXPLOSION_RADIUS:
 				continue
 			var falloff: float = clampf(1.0 - (d / EXPLOSION_RADIUS) * 0.7, 0.3, 1.0)
-			node.take_damage(int(EXPLOSION_DAMAGE * falloff), self)
+			var dmg: float = float(EXPLOSION_DAMAGE) * falloff
+			if g == "buildings" and not (node is AmmoDump):
+				dmg *= BUILDING_DAMAGE_MULT
+			node.take_damage(int(dmg), self)
 
 	# Visual + audio explosion. Reuses unit.gd's _spawn_flash_at by
 	# spawning a generic flash node directly — keeps this script
