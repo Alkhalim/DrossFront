@@ -217,7 +217,7 @@ func _install_stages() -> void:
 	# Stage 6 — Sable ally arrives.
 	_stages.append({
 		"id": &"ally",
-		"dialogue": "Riven Yul: \"Easy, commander — drop the targeting solution. Yes, Sable colours, no, not the same outfit you used to chase. Reformed, retrained, and bringing three heavy bombers and two Harbinger squadrons. Let's go crack that camp to the north together.\"",
+		"dialogue": "Riven Yul: \"Easy, commander — drop the targeting solution. Yes, Sable colours, no, not the same outfit you used to chase. Reformed, retrained, and bringing four heavy bombers, two Courier Tank squads, and three Jackal squadrons. Let's go crack that camp to the north together.\"",
 		"objective": "Destroy the Sable enclave to the north alongside your ally.",
 		"on_enter": Callable(self, "_stage_ally_enter"),
 		"trigger": Callable(self, "_stage_ally_done"),
@@ -459,18 +459,39 @@ func _stage_ally_enter() -> void:
 	# Strike force arrives at the western edge of the south end
 	# (X = ALLY_SPAWN_X) so the march to the rally point is a
 	# clean north-westward lane around the base, not straight
-	# through the foundry / yard / generators.
-	var heavy_offsets: Array = [-8.0, 0.0, 8.0]   # X spread around the spawn lane
-	for i: int in 3:
-		var p: Vector3 = Vector3(ALLY_SPAWN_X + heavy_offsets[i], 0.0, spawn_z)
-		var u: Node3D = _spawn_ally_unit("res://resources/units/sable_wraith.tres", p)
+	# through the foundry / yard / generators. Composition swap
+	# from the previous Wraith+Harbinger mix to a faster strike
+	# package per playtest — Harbingers are slow heavy artillery
+	# walkers and lagged the air group too much.
+	#
+	# Layout (rows of staggered units, from south to north):
+	#   Row 1 (z = spawn_z)        : 4 Wraith bombers, X spread
+	#   Row 2 (z = spawn_z + 10)   : 2 Courier Tank squads
+	#   Row 3 (z = spawn_z + 20)   : 3 Jackal squads
+	for i: int in 4:
+		var px: float = ALLY_SPAWN_X + (float(i) - 1.5) * 8.0
+		var u: Node3D = _spawn_ally_unit(
+			"res://resources/units/sable_wraith.tres",
+			Vector3(px, 0.0, spawn_z),
+		)
 		if u:
 			_ally_units.append(u)
 	for i: int in 2:
-		var p2: Vector3 = Vector3(ALLY_SPAWN_X - 4.0 + float(i) * 8.0, 0.0, spawn_z + 8.0)
-		var u2: Node3D = _spawn_ally_unit("res://resources/units/sable_harbinger.tres", p2)
+		var px2: float = ALLY_SPAWN_X + (float(i) - 0.5) * 12.0
+		var u2: Node3D = _spawn_ally_unit(
+			"res://resources/units/sable_courier_tank.tres",
+			Vector3(px2, 0.0, spawn_z + 10.0),
+		)
 		if u2:
 			_ally_units.append(u2)
+	for i: int in 3:
+		var px3: float = ALLY_SPAWN_X + (float(i) - 1.0) * 9.0
+		var u3: Node3D = _spawn_ally_unit(
+			"res://resources/units/sable_jackal.tres",
+			Vector3(px3, 0.0, spawn_z + 20.0),
+		)
+		if u3:
+			_ally_units.append(u3)
 
 	# Issue the initial "march to player base" command. Allies
 	# move north toward ALLY_RALLY_POINT; the _process tick below
