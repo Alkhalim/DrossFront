@@ -5,31 +5,38 @@
 [ext_resource type="Resource" path="res://resources/units/sable_courier_infiltrator.tres" id="3"]
 [ext_resource type="Resource" path="res://resources/units/sable_courier_sensor_carrier.tres" id="4"]
 
-[sub_resource type="Resource" id="weapon_courier_chaingun"]
+[sub_resource type="Resource" id="weapon_courier_twinmg"]
 script = ExtResource("2")
-weapon_name = "Light Chaingun"
+weapon_name = "Twin Heavy MG Turret"
 role_tag = &"AP"
 damage_tier = &"low"
-range_tier = &"short"
+range_tier = &"medium"
 rof_tier = &"rapid"
+base_accuracy = 0.78
 
 [resource]
 script = ExtResource("1")
 unit_name = "Courier Tank"
-unit_class = &"medium"
-hp_total = 1240
-hp_per_unit = 1240
+unit_class = &"transport"
+hp_total = 720
+hp_per_unit = 720
 armor_class = &"medium"
 speed_tier = &"fast"
 sight_tier = &"long"
-squad_size = 1
-population = 10
+squad_size = 3
+population = 12
 cost_salvage = 170
 cost_fuel = 18
 build_time = 20.0
 built_at = &"basic_foundry"
-primary_weapon = SubResource("weapon_courier_chaingun")
-special_description = "Sable transport medium. Light chaingun for self-defence; primary role is hauling allied infantry / engineers across the map."
+primary_weapon = SubResource("weapon_courier_twinmg")
+ability_name = "Garrison"
+ability_hotkey = "D"
+ability_cooldown = 4.0
+ability_radius = 20.0
+ability_duration = 0.0
+ability_description = "Board the nearest 3 friendly engineers / light mechs within 20u. Garrisoned tanks gain +50% damage and +20% fire rate. Re-press to disembark."
+special_description = "Sable transport medium — squad of 3 tracked tanks with twin-MG turrets. Press Garrison to board nearby engineers / light mechs; passengers buff the tank's damage and reload, and disembark on a second press. Branches: Infiltrator (vehicle stealth), Sensor Carrier (Mesh provider + sensor dome)."
 branch_a_name = "Infiltrator"
 branch_b_name = "Sensor Carrier"
 branch_a_stats = ExtResource("3")

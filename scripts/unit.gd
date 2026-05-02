@@ -339,6 +339,13 @@ func _ready() -> void:
 		# _ready / _build_squad_visuals re-init path.
 		if _faction_id() == 0:
 			_move_speed *= 0.95
+			# Anvil light mechs and engineers slow another 10% on top
+			# of the faction modifier — they're the units the Courier
+			# Tank's Garrison ability transports, so the speed gap on
+			# foot makes the embark / disembark loop actually save
+			# time. Stacks multiplicatively (0.95 * 0.90 = 0.855).
+			if stats.unit_class == &"light" or stats.unit_class == &"engineer":
+				_move_speed *= 0.90
 		var shape: Dictionary = CLASS_SHAPES.get(stats.unit_class, CLASS_SHAPES[&"medium"])
 		_turn_speed = shape.get("turn_speed", 6.0) as float
 		# Avoidance radius — covers the LEADER's collision capsule with
@@ -2136,6 +2143,12 @@ func trigger_ability() -> bool:
 			fired = _ability_factory_pulse()
 		"Reactor Surge":
 			fired = _ability_reactor_surge()
+		"Garrison":
+			# Courier Tank embark / disembark toggle — full
+			# implementation arrives in a follow-up. Stub returns
+			# true so the cooldown still rolls and the player gets
+			# button feedback, but no passenger logic yet.
+			fired = true
 		_:
 			# Unknown ability name on stats — don't crash, just
 			# refuse to fire so the player notices.
