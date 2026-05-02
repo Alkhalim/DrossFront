@@ -3119,6 +3119,20 @@ func get_producible_units() -> Array[UnitStatResource]:
 	return out
 
 
+func get_all_producible_units() -> Array[UnitStatResource]:
+	## Faction-resolved producible roster ignoring tech-gate
+	## prerequisites. Used by the HUD to render locked units as
+	## greyed-out buttons that show what to build to unlock them,
+	## instead of hiding the option entirely.
+	if not stats:
+		return []
+	return _faction_producible_list()
+
+
+func is_unit_unlocked(u: UnitStatResource) -> bool:
+	return _unit_unlock_prerequisite_met(u)
+
+
 func _faction_producible_list() -> Array[UnitStatResource]:
 	var faction_id: int = _resolve_faction_id()
 	# 0 = Anvil (default), 1 = Sable per MatchSettingsClass.FactionId.

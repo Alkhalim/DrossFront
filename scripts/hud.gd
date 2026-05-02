@@ -1989,7 +1989,11 @@ func _on_attack_move_button() -> void:
 func _rebuild_production_buttons(building: Building) -> void:
 	_clear_buttons()
 
-	# Faction-aware producible list — Sable HQ shows Sable units, etc.
+	# Faction-aware producible list. Pull the FULL roster (including
+	# tech-gated entries) so locked units still render as greyed-out
+	# buttons; the unlocked subset is computed alongside for the
+	# disabled-state check.
+	var producible_all: Array[UnitStatResource] = building.get_all_producible_units() if building.has_method("get_all_producible_units") else building.get_producible_units()
 	var producible: Array[UnitStatResource] = building.get_producible_units()
 	# HQ + Anvil player + own HQ + constructed -> show the Train /
 	# Defense tab row. Defense tab holds the HQ-only upgrade buttons
@@ -2015,29 +2019,53 @@ func _rebuild_production_buttons(building: Building) -> void:
 		_append_hq_upgrade_buttons(building)
 		return
 
-	if producible.is_empty():
+	if producible_all.is_empty():
 		_action_label.text = "No production"
 		return
 
 	_action_label.text = "Train Units"
 	var hotkeys: Array[String] = ["Q", "W", "E", "R", "T"]
 
-	for i: int in producible.size():
-		var unit_stat: UnitStatResource = producible[i]
-		var hotkey: String = hotkeys[i] if i < hotkeys.size() else str(i + 1)
+	# Render the FULL roster. Unlocked entries get the standard
+	# clickable button + a hotkey index that tracks their position
+	# in the unlocked sublist (so hotkey N still triggers the Nth
+	# unlocked unit). Locked entries render as a disabled greyed
+	# button with a 'Locked: needs <building>' annotation in the
+	# label and tooltip.
+	var unlocked_idx: int = 0
+	for unit_stat: UnitStatResource in producible_all:
+		var unlocked: bool = building.is_unit_unlocked(unit_stat) if building.has_method("is_unit_unlocked") else true
 
 		var btn := Button.new()
-		# Bumped to 70px height so a wrapped two-line name + the
-		# bottom cost-chip strip both fit cleanly without overlap.
 		btn.custom_minimum_size = Vector2(108, 70)
 		btn.size_flags_horizontal = Control.SIZE_FILL
 		btn.size_flags_vertical = Control.SIZE_FILL
-		_set_label_button(btn, "[%s]" % hotkey, unit_stat.unit_name)
-		btn.tooltip_text = _unit_tooltip(unit_stat)
-		btn.pressed.connect(_on_production_button.bind(i))
+
+		if unlocked:
+			var hotkey: String = hotkeys[unlocked_idx] if unlocked_idx < hotkeys.size() else str(unlocked_idx + 1)
+			_set_label_button(btn, "[%s]" % hotkey, unit_stat.unit_name)
+			btn.tooltip_text = _unit_tooltip(unit_stat)
+			var capture_idx: int = unlocked_idx
+			btn.pressed.connect(_on_production_button.bind(capture_idx))
+			var chip_refs: Dictionary = _attach_cost_widget(btn, unit_stat.cost_salvage, unit_stat.cost_fuel, unit_stat.population)
+			_action_buttons.append({ "button": btn, "kind": "produce", "stat": unit_stat, "chips": chip_refs })
+			unlocked_idx += 1
+		else:
+			var prereq: StringName = unit_stat.unlock_prerequisite
+			var prereq_label: String = _building_display_name(String(prereq))
+			_set_label_button(btn, "Locked", "%s\nneeds %s" % [unit_stat.unit_name, prereq_label])
+			btn.disabled = true
+			btn.tooltip_text = "%s — locked.\nBuild a %s to unlock." % [unit_stat.unit_name, prereq_label]
+			btn.modulate = Color(0.7, 0.7, 0.7, 0.85)
 		_button_grid.add_child(btn)
-		var chip_refs: Dictionary = _attach_cost_widget(btn, unit_stat.cost_salvage, unit_stat.cost_fuel, unit_stat.population)
-		_action_buttons.append({ "button": btn, "kind": "produce", "stat": unit_stat, "chips": chip_refs })
+
+
+func _building_display_name(building_id: String) -> String:
+	## Pretty-print a building_id (snake-case StringName) for inline
+	## prereq messaging on locked unit buttons.
+	if building_id == "":
+		return "?"
+	return building_id.replace("_", " ").capitalize()
 
 
 func _hq_defense_tab_eligible(building: Building) -> bool:
