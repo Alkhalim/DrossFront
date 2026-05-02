@@ -123,6 +123,12 @@ var _ability_cd_remaining: float = 0.0
 ## is the passenger Unit. Empty when the tank isn't carrying anyone
 ## or when this unit isn't a transport at all.
 var _garrison_passengers: Array[Unit] = []
+
+## Courier Tank track ribs — flat list of MeshInstance3D nodes
+## across all squad members. Each entry is { node, length } where
+## length is the track segment they wrap around. Scrolled per
+## frame in _process when the tank is moving.
+var _courier_track_ribs: Array[Dictionary] = []
 ## Reverse pointer for passengers: the carrier unit they're riding
 ## inside. While set, the passenger's _physics_process skips
 ## movement / combat and the passenger is hidden + non-targetable.
@@ -301,6 +307,25 @@ const CLASS_SHAPES: Dictionary = {
 		"formation_spacing": 2.4,
 		"turn_speed": 1.7,
 		"leg_kind": "biped",
+		"torso_lean": 0.0,
+	},
+	&"transport": {
+		# Courier Tank — tracked transport, custom mesh built via
+		# _build_courier_tank_member. Most of these fields are
+		# unused (the dedicated builder ignores leg / torso / cannon
+		# placeholders), but formation_spacing IS read by
+		# _build_squad_visuals and turn_speed by the chassis turn
+		# code, so they need real values. Tracks are ~3u long and
+		# each tank is ~2.5u wide, so 3.5u between centres keeps
+		# the trio visibly separated rather than touching tracks.
+		"leg": Vector3(0.0, 0.0, 0.0), "hip_y": 0.0, "leg_x": 0.0,
+		"torso": Vector3(2.4, 0.5, 2.85), "head": Vector3(0.0, 0.0, 0.0), "head_shape": "box",
+		"cannon": Vector3(0.0, 0.0, 0.0), "cannon_x": 0.0, "cannon_kind": "none",
+		"antenna": 0.0,
+		"color": Color(0.18, 0.18, 0.22),
+		"formation_spacing": 3.5,
+		"turn_speed": 2.5,
+		"leg_kind": "tracked",
 		"torso_lean": 0.0,
 	},
 }
@@ -1626,7 +1651,10 @@ func _build_courier_tank_member(index: int, offset: Vector3, team_color: Color) 
 		mats.append(track_mat)
 		# Six visible track ribs across the top of each tread —
 		# horizontal striping that reads as actual moving track at
-		# distance.
+		# distance. Each rib is registered with the unit's
+		# _courier_track_ribs list so _process can scroll it
+		# proportionally to ground speed (wraps around at the
+		# track ends).
 		for r_i: int in 6:
 			var rib := MeshInstance3D.new()
 			var rib_box := BoxMesh.new()
@@ -1638,6 +1666,7 @@ func _build_courier_tank_member(index: int, offset: Vector3, team_color: Color) 
 			rib.set_surface_override_material(0, rib_mat)
 			member.add_child(rib)
 			mats.append(rib_mat)
+			_courier_track_ribs.append({"node": rib, "length": track_len})
 		# Drive sprocket up front, idler at rear — small low-radial
 		# cylinders so the polygon edges read as gear teeth.
 		for end_i: int in 2:
@@ -2793,6 +2822,24 @@ func _physics_process(delta: float) -> void:
 	# Active-ability cooldown tick.
 	if _ability_cd_remaining > 0.0:
 		_ability_cd_remaining = maxf(0.0, _ability_cd_remaining - delta)
+
+	# Courier Tank track-rib scrolling — slide the per-tread plate
+	# strip along its segment when the tank's actually moving, so
+	# the tracks read as turning over rather than painted-on
+	# stripes. Multiplier ~1.4 on top of ground speed sells the
+	# "tread runs faster than chassis" feel.
+	if not _courier_track_ribs.is_empty():
+		var speed_xz: float = Vector2(velocity.x, velocity.z).length()
+		if speed_xz > 0.05:
+			var scroll: float = speed_xz * delta * 1.4
+			for rib_data: Dictionary in _courier_track_ribs:
+				var node: Node3D = rib_data["node"] as Node3D
+				if not is_instance_valid(node):
+					continue
+				var seg_len: float = rib_data["length"] as float
+				node.position.z -= scroll
+				if node.position.z < -seg_len * 0.5:
+					node.position.z += seg_len
 
 	_physics_frame_counter += 1
 
