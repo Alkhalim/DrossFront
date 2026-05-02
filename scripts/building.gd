@@ -2377,6 +2377,7 @@ func get_producible_units() -> Array[UnitStatResource]:
 		&"advanced_foundry":
 			sable_paths = [
 				"res://resources/units/sable_harbinger.tres",
+				"res://resources/units/sable_pulsefont.tres",
 			]
 		&"aerodrome":
 			sable_paths = [

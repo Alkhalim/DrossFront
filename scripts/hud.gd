@@ -1749,19 +1749,17 @@ func _rebuild_armory_buttons(_building: Building) -> void:
 		_action_label.text = "No commit manager"
 		return
 
-	# Faction-aware branch pick. The branch_a/b system was originally
-	# only wired up for Anvil's Hound. Sable mediums (Specter / Jackal)
-	# don't have branch stats defined yet, so for Sable owners we
-	# surface a placeholder instead of the Anvil Hound buttons.
+	# Faction-aware branch pick. Anvil's armory commits the Hound's
+	# branches; Sable's commits the Specter's (Ghost / Glitch).
 	var settings: Node = get_node_or_null("/root/MatchSettings")
 	var player_faction: int = 0
 	if settings and "player_faction" in settings:
 		player_faction = settings.get("player_faction") as int
-	if player_faction == 1:  # Sable
-		_action_label.text = "Sable branch upgrades not yet available"
-		return
+	var base_path: String = "res://resources/units/anvil_hound.tres"
+	if player_faction == 1:
+		base_path = "res://resources/units/sable_specter.tres"
 
-	var hound_stats: UnitStatResource = load("res://resources/units/anvil_hound.tres") as UnitStatResource
+	var hound_stats: UnitStatResource = load(base_path) as UnitStatResource
 	if not hound_stats or not hound_stats.branch_a_stats:
 		_action_label.text = "No branches available"
 		return
@@ -1775,18 +1773,18 @@ func _rebuild_armory_buttons(_building: Building) -> void:
 		_action_label.text = "Commit in progress..."
 		return
 
-	_action_label.text = "Hound Branch (irreversible)"
+	_action_label.text = "%s Branch (irreversible)" % hound_stats.unit_name
 
 	var btn_a := Button.new()
 	btn_a.custom_minimum_size = Vector2(120, 44)
-	btn_a.text = "[Q] %s\nRecon / Smoke" % hound_stats.branch_a_name
+	btn_a.text = "[Q] %s" % hound_stats.branch_a_name
 	btn_a.tooltip_text = _unit_tooltip(hound_stats.branch_a_stats)
 	btn_a.pressed.connect(_on_branch_commit.bind(hound_stats, hound_stats.branch_a_stats, hound_stats.branch_a_name))
 	_button_grid.add_child(btn_a)
 
 	var btn_b := Button.new()
 	btn_b.custom_minimum_size = Vector2(120, 44)
-	btn_b.text = "[W] %s\nBrawler / HP++" % hound_stats.branch_b_name
+	btn_b.text = "[W] %s" % hound_stats.branch_b_name
 	btn_b.tooltip_text = _unit_tooltip(hound_stats.branch_b_stats)
 	btn_b.pressed.connect(_on_branch_commit.bind(hound_stats, hound_stats.branch_b_stats, hound_stats.branch_b_name))
 	_button_grid.add_child(btn_b)

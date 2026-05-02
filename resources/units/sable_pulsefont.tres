@@ -1,0 +1,34 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_pulse_sidearm"]
+script = ExtResource("2")
+weapon_name = "Pulse Sidearm"
+role_tag = &"AP"
+damage_tier = &"low"
+range_tier = &"medium"
+rof_tier = &"moderate"
+projectile_style = &"beam"
+base_accuracy = 0.95
+
+[resource]
+script = ExtResource("1")
+unit_name = "Pulsefont"
+unit_class = &"medium"
+hp_total = 980
+hp_per_unit = 980
+armor_class = &"light"
+speed_tier = &"moderate"
+sight_tier = &"long"
+squad_size = 1
+population = 14
+cost_salvage = 480
+cost_fuel = 60
+build_time = 28.0
+built_at = &"advanced_foundry"
+primary_weapon = SubResource("weapon_pulse_sidearm")
+detection_radius = 100.0
+mesh_provider_radius = 24.0
+special_description = "Sable mid-tier caster. Beam sidearm + active System Crash ability (planned). Mobile Mesh aura provider. Fragile and expensive — protect this unit; killing one degrades the entire Sable army's combat strength temporarily."

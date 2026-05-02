@@ -153,16 +153,41 @@ func _draw() -> void:
 		var pos: Vector2 = _world_to_map(node.global_position, map_size, half_world)
 		draw_circle(pos, 2.0, _wreck_color)
 
-	# Draw units
+	# Draw units. Aircraft get a slightly larger ring + a small
+	# diamond-shape pip so the player can tell at a glance whether
+	# a dot is on the ground or in the air. Stealthed enemy units
+	# that we haven't revealed yet are skipped — the minimap is the
+	# strategic overview, not an x-ray.
 	var units: Array[Node] = get_tree().get_nodes_in_group("units")
 	for node: Node in units:
 		if not is_instance_valid(node):
 			continue
 		if "alive_count" in node and node.get("alive_count") <= 0:
 			continue
+		# Hide stealthed enemy units when not revealed.
+		if "stealth_revealed" in node and not (node.get("stealth_revealed") as bool):
+			var stats_chk: Resource = node.get("stats") as Resource
+			if stats_chk and stats_chk.get("is_stealth_capable"):
+				var u_owner: int = node.get("owner_id") as int
+				if u_owner != 0:  # only hide enemies; show our own dim
+					continue
 		var pos: Vector2 = _world_to_map(node.global_position, map_size, half_world)
 		var color: Color = _color_for_owner(node.get("owner_id") as int)
-		draw_circle(pos, DOT_SIZE, color)
+		var is_air: bool = node.is_in_group("aircraft")
+		if is_air:
+			# Aircraft pip — outer ring + filled diamond inside.
+			# The double-shape reads even at small minimap zoom.
+			draw_arc(pos, DOT_SIZE + 1.5, 0.0, TAU, 12, color, 1.5, true)
+			var d: float = DOT_SIZE
+			var diamond: PackedVector2Array = PackedVector2Array([
+				pos + Vector2(0, -d),
+				pos + Vector2(d, 0),
+				pos + Vector2(0, d),
+				pos + Vector2(-d, 0),
+			])
+			draw_colored_polygon(diamond, color)
+		else:
+			draw_circle(pos, DOT_SIZE, color)
 
 	# Draw camera viewport rectangle
 	var cam: Camera3D = get_viewport().get_camera_3d()
