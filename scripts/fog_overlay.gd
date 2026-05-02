@@ -13,7 +13,14 @@ extends Node3D
 ## MultiMesh layout — only the per-instance colour buffer is
 ## re-uploaded.
 
-const CELL_LIFT_Y: float = 0.05  # sits just above the ground plane
+## Overlay quads sit ABOVE every world feature so an unexplored cell
+## (alpha = 1) actually occludes whatever's beneath it — the previous
+## 0.05u lift left buildings, plateaus, wrecks and aircraft poking
+## through the supposedly-black fog. 12u clears every aircraft + the
+## tallest plateau + every building roof on the V2 maps; the ortho
+## RTS camera sits well above this so the overlay is still beneath
+## the lens.
+const CELL_LIFT_Y: float = 12.0
 
 var _multimesh: MultiMeshInstance3D = null
 var _mm: MultiMesh = null
@@ -92,10 +99,13 @@ func _build_multimesh() -> void:
 
 
 func _make_overlay_material() -> ShaderMaterial:
-	# Unshaded shader that pulls the per-instance custom data .a as
-	# the alpha multiplier; .rgb fixed at black. Renders with
-	# alpha-blend so visible cells (alpha 0) are completely see-
-	# through, unexplored cells (alpha 1) are opaque black.
+	# Unshaded shader. INSTANCE_CUSTOM.rgb is the tint colour (black
+	# for unexplored, blue-grey for explored), INSTANCE_CUSTOM.a is
+	# the per-cell alpha multiplier. Visible cells push alpha to 0
+	# so the camera sees the world clearly; explored cells dim with
+	# a slightly desaturated cool grey so they read as MEMORY rather
+	# than just "dark"; unexplored cells go fully opaque black so
+	# the player has zero info on what's there.
 	var sh := Shader.new()
 	sh.code = """
 shader_type spatial;
@@ -106,16 +116,23 @@ void vertex() {
 }
 
 void fragment() {
-	// INSTANCE_CUSTOM.a carries the cell's alpha (0 = visible,
-	// 0.55 = explored, 1 = unexplored). Fragment colour is
-	// always near-black; alpha is what changes per cell.
-	ALBEDO = vec3(0.0, 0.0, 0.0);
+	ALBEDO = INSTANCE_CUSTOM.rgb;
 	ALPHA = INSTANCE_CUSTOM.a;
 }
 """
 	var mat := ShaderMaterial.new()
 	mat.shader = sh
 	return mat
+
+
+## Per-state overlay colours. Unexplored is opaque black so the
+## player sees nothing of what's there. Explored cells use a
+## desaturated cool grey at moderate alpha so they read as
+## "scouted but no live info" — different enough from the fully-
+## clear visible state that the player notices the boundary at a
+## glance.
+const FOG_COLOR_UNEXPLORED: Color = Color(0.0, 0.0, 0.0, 1.0)
+const FOG_COLOR_EXPLORED: Color = Color(0.10, 0.11, 0.14, 0.65)
 
 
 func _refresh_colors() -> void:
@@ -125,13 +142,13 @@ func _refresh_colors() -> void:
 	var size: int = mini(cells.size(), _mm.instance_count)
 	for i: int in size:
 		var state: int = cells[i]
-		var alpha: float = 0.0
+		var col: Color = Color(0, 0, 0, 0)
 		match state:
 			FogOfWar.CellState.UNEXPLORED:
-				alpha = 1.0
+				col = FOG_COLOR_UNEXPLORED
 			FogOfWar.CellState.EXPLORED:
-				alpha = 0.55
+				col = FOG_COLOR_EXPLORED
 			_:
-				alpha = 0.0
-		_mm.set_instance_custom_data(i, Color(0.0, 0.0, 0.0, alpha))
+				col = Color(0, 0, 0, 0)
+		_mm.set_instance_custom_data(i, col)
 	_last_revision = _fow.revision

@@ -215,6 +215,23 @@ func _apply_entity_visibility() -> void:
 		# seen stay hidden.
 		b3d.visible = is_explored_world(b3d.global_position)
 
+	# Wrecks + fuel deposits behave like terrain features: the
+	# player should be able to see scrap piles / fuel tanks they've
+	# scouted before even after losing live vision (they don't
+	# move), but anything inside an unexplored cell stays hidden.
+	for node: Node in get_tree().get_nodes_in_group("wrecks"):
+		if not is_instance_valid(node):
+			continue
+		var w3d: Node3D = node as Node3D
+		if w3d:
+			w3d.visible = is_explored_world(w3d.global_position)
+	for node: Node in get_tree().get_nodes_in_group("fuel_deposits"):
+		if not is_instance_valid(node):
+			continue
+		var f3d: Node3D = node as Node3D
+		if f3d:
+			f3d.visible = is_explored_world(f3d.global_position)
+
 
 func _is_friendly(node: Node) -> bool:
 	if not ("owner_id" in node):
