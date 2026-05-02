@@ -240,11 +240,16 @@ func _build_tutorial_mission_banner() -> void:
 	##     in. Visually distinct (green border, slightly smaller
 	##     panel) so it reads as a HUD banner rather than another
 	##     story line.
+	# Narrower + left-anchored so the dialogue + objective panels
+	# sit in a compact column on the left of the HUD instead of
+	# stretching across the screen. Player feedback: the wide
+	# centred boxes felt overwhelming + competed with the
+	# minimap for visual weight.
 	_tutorial_banner_panel = PanelContainer.new()
-	_tutorial_banner_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	_tutorial_banner_panel.offset_left = 220
-	_tutorial_banner_panel.offset_right = -260
-	_tutorial_banner_panel.offset_top = 38
+	_tutorial_banner_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_tutorial_banner_panel.offset_left = 18
+	_tutorial_banner_panel.offset_right = 460
+	_tutorial_banner_panel.offset_top = 42
 	_tutorial_banner_panel.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(_tutorial_banner_panel)
 	var inner := VBoxContainer.new()
@@ -268,12 +273,15 @@ func _build_tutorial_mission_banner() -> void:
 	inner.add_child(_tutorial_banner_dialogue)
 
 	# Objective — its own PanelContainer so the visual frame is
-	# distinct, anchored just below the dialogue panel.
+	# distinct, anchored just below the dialogue panel on the
+	# same left column. Tighter width than the dialogue (340 vs
+	# the dialogue's ~440) so the call-to-action reads as a
+	# focused HUD chip rather than a second narrative banner.
 	_tutorial_banner_objective_panel = PanelContainer.new()
-	_tutorial_banner_objective_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	_tutorial_banner_objective_panel.offset_left = 220
-	_tutorial_banner_objective_panel.offset_right = -260
-	_tutorial_banner_objective_panel.offset_top = 124
+	_tutorial_banner_objective_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_tutorial_banner_objective_panel.offset_left = 18
+	_tutorial_banner_objective_panel.offset_right = 358
+	_tutorial_banner_objective_panel.offset_top = 152
 	_tutorial_banner_objective_panel.process_mode = Node.PROCESS_MODE_ALWAYS
 	_tutorial_banner_objective_panel.modulate.a = 0.0
 	# Green-tinted stylebox so the panel reads as objective /

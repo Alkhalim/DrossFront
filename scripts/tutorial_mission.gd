@@ -73,6 +73,12 @@ func is_completed() -> bool:
 func _process(delta: float) -> void:
 	if _completed or _stages.is_empty():
 		return
+	# Ally march/follow logic ticks every frame (cheap — 5 units
+	# max). Idle when the ally hasn't been spawned yet.
+	_tick_ally_behaviour(delta)
+	# First-building-completion raid trigger (fires once when the
+	# player finishes their first non-HQ structure).
+	_tick_first_building_raid()
 	_poll_accum += delta
 	if _poll_accum < TRIGGER_POLL_INTERVAL:
 		return
@@ -123,17 +129,17 @@ func _any_player_unit_in_radius(centre: Vector3, radius_sq: float) -> bool:
 	return false
 
 
-func _spawn_player_unit(stats_path: String, pos: Vector3) -> void:
+func _spawn_player_unit(stats_path: String, pos: Vector3) -> Node3D:
 	var stats: UnitStatResource = load(stats_path) as UnitStatResource
 	if not stats:
-		return
+		return null
 	var scene_path: String = "res://scenes/aircraft.tscn" if stats.is_aircraft else "res://scenes/unit.tscn"
 	var ps: PackedScene = load(scene_path) as PackedScene
 	if not ps:
-		return
+		return null
 	var node: Node3D = ps.instantiate() as Node3D
 	if not node:
-		return
+		return null
 	node.set("stats", stats)
 	node.set("owner_id", 0)
 	var units_node: Node = get_tree().current_scene.get_node_or_null("Units")
@@ -142,6 +148,7 @@ func _spawn_player_unit(stats_path: String, pos: Vector3) -> void:
 	else:
 		get_tree().current_scene.add_child(node)
 	node.global_position = pos
+	return node
 
 
 ## --- Stage definitions ---------------------------------------------------
@@ -150,34 +157,36 @@ func _install_stages() -> void:
 	# Cast:
 	#   Steelmaster Kress  — Anvil dispatch officer. Player's contact.
 	#   Riven Yul          — Sable strike-force lead, ex-shadow ops,
-	#                        recently turned. Arrives at stage 5.
+	#                        recently turned. Arrives at stage 6.
 	#
-	# Discovery beats sit progressively further NORTH (positive Z
-	# in world space — +Z reads as "up the screen" with the camera's
-	# 50 deg pitch and is the direction of the team-A spawn corner).
-	# Every cue points the player in the same direction.
+	# Discovery beats sit progressively further SOUTH (negative Z
+	# in world space — south reads as "down the screen" with the
+	# camera's 50 deg pitch). The Sable enclave the player has to
+	# crack at the end sits at the OPPOSITE end of the map (+Z =
+	# north), so the climax involves turning around and pushing
+	# the strike force the other direction.
 
 	# Stage 0 — opening. The player has just their Rook scouts.
 	_stages.append({
 		"id": &"open",
-		"dialogue": "Steelmaster Kress: \"Scouts, advance north. There's a wreckage cache a hundred meters out — survivors might be holed up there.\"",
-		"objective": "Move your Rooks north to the wreckage.",
+		"dialogue": "Steelmaster Kress: \"Scouts, advance south. There's a wreckage cache a hundred meters out — survivors might be holed up there.\"",
+		"objective": "Move your Rooks south to the wreckage.",
 		"on_enter": Callable(self, "_stage_open_enter"),
 		"trigger": Callable(self, "_stage_open_done"),
 	})
 	# Stage 1 — reinforcements found.
 	_stages.append({
 		"id": &"reinforce",
-		"dialogue": "Steelmaster Kress: \"Two more Rook squads are intact. Keep pushing north — we have a Salvage Crawler hulk on the long-range scope.\"",
-		"objective": "Keep moving north to find the Crawler.",
+		"dialogue": "Steelmaster Kress: \"Two more Rook squads are intact. Keep pushing south — we have a Salvage Crawler hulk on the long-range scope.\"",
+		"objective": "Keep moving south to find the Crawler.",
 		"on_enter": Callable(self, "_stage_reinforce_enter"),
 		"trigger": Callable(self, "_stage_reinforce_done"),
 	})
 	# Stage 2 — Crawler.
 	_stages.append({
 		"id": &"crawler",
-		"dialogue": "Steelmaster Kress: \"That Crawler still runs — bring it with you. Push further north to the abandoned foundry.\"",
-		"objective": "Continue north to the foundry ruin.",
+		"dialogue": "Steelmaster Kress: \"That Crawler still runs — bring it with you. Push further south to the abandoned foundry.\"",
+		"objective": "Continue south to the foundry ruin.",
 		"on_enter": Callable(self, "_stage_crawler_enter"),
 		"trigger": Callable(self, "_stage_crawler_done"),
 	})
@@ -200,7 +209,7 @@ func _install_stages() -> void:
 	# Stage 5 — assemble strike force.
 	_stages.append({
 		"id": &"force",
-		"dialogue": "Steelmaster Kress: \"Train at least three additional units — Rooks for speed, Hounds for the punch. The Sable enclave is dug in further north and we are going to dislodge them.\"",
+		"dialogue": "Steelmaster Kress: \"Train at least three additional units — Rooks for speed, Hounds for the punch. The Sable enclave is dug in to the north and we are going to dislodge them.\"",
 		"objective": "Train at least 3 additional combat units (Rooks or Hounds).",
 		"on_enter": Callable(self, "_stage_force_enter"),
 		"trigger": Callable(self, "_stage_force_done"),
@@ -208,8 +217,8 @@ func _install_stages() -> void:
 	# Stage 6 — Sable ally arrives.
 	_stages.append({
 		"id": &"ally",
-		"dialogue": "Riven Yul: \"Easy, commander — drop the targeting solution. Yes, Sable colours, no, not the same outfit you used to chase. Reformed, retrained, and offering you a Harbinger plus two Switchblades to crack that camp. Let's not waste them.\"",
-		"objective": "Push north and destroy the Sable enclave alongside your ally.",
+		"dialogue": "Riven Yul: \"Easy, commander — drop the targeting solution. Yes, Sable colours, no, not the same outfit you used to chase. Reformed, retrained, and bringing three heavy bombers and two Harbinger squadrons. Let's go crack that camp to the north together.\"",
+		"objective": "Destroy the Sable enclave to the north alongside your ally.",
 		"on_enter": Callable(self, "_stage_ally_enter"),
 		"trigger": Callable(self, "_stage_ally_done"),
 	})
@@ -233,7 +242,8 @@ func _stage_open_enter() -> void:
 
 
 func _stage_open_done() -> bool:
-	# Player walks any Rook into the wreckage cache zone.
+	# Player walks any Rook into the wreckage cache zone (+Z =
+	# south on screen).
 	return _any_player_unit_in_radius(Vector3(0.0, 0.0, 28.0), VISIT_RADIUS_SQ)
 
 
@@ -245,7 +255,7 @@ func _stage_reinforce_enter() -> void:
 
 
 func _stage_reinforce_done() -> bool:
-	# Player walks units to the Crawler discovery point — further south.
+	# Player walks units further south to the Crawler discovery point.
 	return _any_player_unit_in_radius(Vector3(0.0, 0.0, 58.0), VISIT_RADIUS_SQ)
 
 
@@ -263,13 +273,13 @@ func _stage_crawler_enter() -> void:
 
 
 func _stage_crawler_done() -> bool:
-	# Player advances south to the foundry ruin position.
+	# Player advances further south to the foundry ruin.
 	return _any_player_unit_in_radius(Vector3(0.0, 0.0, 88.0), VISIT_RADIUS_SQ)
 
 
 func _stage_base_enter() -> void:
 	# Hand the abandoned HQ over to the player. TestArenaController
-	# parks it at (0, 0, 88) with owner_id 2 (neutral ruin) at
+	# parks it at (0, 0, -88) with owner_id 2 (neutral ruin) at
 	# match start; flipping owner_id to 0 here unlocks production,
 	# vision, and resource flow as the discovery beat resolves.
 	for n: Node in get_tree().get_nodes_in_group("buildings"):
@@ -299,9 +309,12 @@ func _stage_base_enter() -> void:
 	# Hand the player a couple of Ratchet engineers so they can
 	# actually act on the next objective ("build a Foundry + Yard")
 	# without first having to produce engineers from scratch — a
-	# fresh tutorial-mode HQ doesn't auto-spawn anything.
-	_spawn_player_unit("res://resources/units/anvil_ratchet.tres", Vector3(-4.0, 0.0, 92.0))
-	_spawn_player_unit("res://resources/units/anvil_ratchet.tres", Vector3(4.0, 0.0, 92.0))
+	# fresh tutorial-mode HQ doesn't auto-spawn anything. Spawn
+	# them ~14u south of the HQ (further out, NOT directly next
+	# to the building) so they're easy to spot against the
+	# silhouette of the freshly-claimed structure.
+	_spawn_player_unit("res://resources/units/anvil_ratchet.tres", Vector3(-6.0, 0.0, 102.0))
+	_spawn_player_unit("res://resources/units/anvil_ratchet.tres", Vector3(6.0, 0.0, 102.0))
 
 
 func _stage_base_done() -> bool:
@@ -327,6 +340,36 @@ func _stage_base_done() -> bool:
 ## fires, so the trigger can require "3 ADDITIONAL units trained"
 ## rather than counting the Rooks the player already has.
 var _force_baseline_count: int = 0
+
+## Sable ally tracking. _ally_units holds every unit spawned for
+## the player's strike-force ally; _ally_state walks them through
+## a two-phase behaviour:
+##   "marching"  — moving from southern edge to the player base
+##   "following" — trailing the player's army centroid toward
+##                 the enclave, refreshed at FOLLOW_INTERVAL_SEC
+##                 so the move target stays current as the
+##                 player advances.
+var _ally_units: Array[Node3D] = []
+var _ally_state: StringName = &""
+var _ally_follow_accum: float = 0.0
+
+## First-building-completion raid trigger. Once the player
+## finishes their first non-HQ structure, two Sable Courier Tank
+## squads spawn at the northern enclave edge and march south
+## toward the player base — a small early scare that introduces
+## the "enemy is in the north" concept before the climax push.
+var _raid_fired: bool = false
+## Player walks SOUTH (+Z) through the discovery beats and ends up
+## with their base at +88. Ally rally point sits just south of the
+## base; spawn point at the southern edge so the strike force
+## marches up visibly. Enemy enclave is at -Z (north on screen),
+## so the climax pivots direction from the discovery walk.
+const ALLY_RALLY_POINT: Vector3 = Vector3(0.0, 0.0, 95.0)
+const ALLY_RALLY_ARRIVE_SQ: float = 18.0 * 18.0
+const ALLY_FOLLOW_INTERVAL_SEC: float = 3.0
+const ALLY_TRAIL_OFFSET: float = 6.0  # ally rallies this far behind player centroid
+const ENEMY_ENCLAVE_CENTRE: Vector3 = Vector3(0.0, 0.0, -130.0)
+const ALLY_SPAWN_Z: float = 150.0
 
 
 func _stage_force_enter() -> void:
@@ -372,19 +415,216 @@ func _stage_reactors_done() -> bool:
 
 
 func _stage_ally_enter() -> void:
-	# Sable ally drops in: a Harbinger heavy + two Switchblades for
-	# anti-air. Owner_id = 1 with team 0 (allied to player) —
-	# PlayerRegistry handles the alliance lookup.
-	var ally_pos: Vector3 = Vector3(0.0, 0.0, 80.0)
-	_spawn_ally_unit("res://resources/units/sable_harbinger.tres", ally_pos)
-	_spawn_ally_unit("res://resources/units/sable_switchblade.tres", ally_pos + Vector3(8.0, 0.0, 0.0))
-	_spawn_ally_unit("res://resources/units/sable_switchblade.tres", ally_pos + Vector3(-8.0, 0.0, 0.0))
+	# Sable strike force drops in at the SOUTHERN edge of the
+	# map (the player walks NORTH through the mission, so the
+	# ally arrives behind them and pushes up to join). Owner 1
+	# with team 0 — PlayerRegistry's are_allied lookup treats
+	# them as friendly to the player.
+	#
+	# Composition per spec:
+	#   3 Wraith heavy bombers
+	#   2 Harbinger artillery walkers
+	# Wraith would normally require a Black Pylon to build, but
+	# the ally arrives pre-formed so the prereq is moot.
+	_ally_units.clear()
+	var spawn_z: float = ALLY_SPAWN_Z
+	var heavy_offsets: Array = [-18.0, -10.0, -2.0]   # Harbingers + air spread
+	for i: int in 3:
+		var p: Vector3 = Vector3(heavy_offsets[i], 0.0, spawn_z)
+		var u: Node3D = _spawn_ally_unit("res://resources/units/sable_wraith.tres", p)
+		if u:
+			_ally_units.append(u)
+	for i: int in 2:
+		var p2: Vector3 = Vector3(6.0 + float(i) * 10.0, 0.0, spawn_z + 4.0)
+		var u2: Node3D = _spawn_ally_unit("res://resources/units/sable_harbinger.tres", p2)
+		if u2:
+			_ally_units.append(u2)
+
+	# Issue the initial "march to player base" command. Allies
+	# move north toward ALLY_RALLY_POINT; the _process tick below
+	# flips them to FOLLOW state once they're close enough.
+	_ally_state = &"marching"
+	for u3: Node3D in _ally_units:
+		if u3.has_method("command_move"):
+			u3.call("command_move", ALLY_RALLY_POINT)
+
 	# Switch the playlist to the Sable folder so the moment the
 	# ally arrives the score shifts character. MusicManager's
 	# start() rebuilds the playlist + advances to a new track.
 	var music_mgr: Node = get_tree().current_scene.get_node_or_null("MusicManager")
 	if music_mgr and music_mgr.has_method("start"):
 		music_mgr.call("start", 1)  # 1 = Sable
+
+
+func _tick_ally_behaviour(delta: float) -> void:
+	## Drives the Sable strike force through their two phases.
+	## Called from _process every tick (cheap — N <= 5 ally
+	## units max). Bails out when there are no allies or the
+	## stage has progressed past ALLY.
+	if _ally_units.is_empty():
+		return
+	# Drop freed entries.
+	var i: int = _ally_units.size() - 1
+	while i >= 0:
+		if not is_instance_valid(_ally_units[i]):
+			_ally_units.remove_at(i)
+		i -= 1
+	if _ally_units.is_empty():
+		return
+
+	if _ally_state == &"marching":
+		# Look at the centroid of the (still-alive) allies — when
+		# they're close enough to the player rally point, flip to
+		# follow mode.
+		var centroid: Vector3 = _ally_centroid()
+		if centroid.distance_squared_to(ALLY_RALLY_POINT) <= ALLY_RALLY_ARRIVE_SQ:
+			_ally_state = &"following"
+			_ally_follow_accum = ALLY_FOLLOW_INTERVAL_SEC  # fire immediately
+		return
+
+	if _ally_state == &"following":
+		_ally_follow_accum += delta
+		if _ally_follow_accum < ALLY_FOLLOW_INTERVAL_SEC:
+			return
+		_ally_follow_accum = 0.0
+		# Re-target: trail behind the player's army on its push
+		# toward the enclave. Aim at a point just behind the
+		# player centroid (offset toward the player's spawn) so
+		# the ally pushes alongside rather than passing the
+		# player and getting picked off by the camp's outer ring
+		# of turrets first.
+		var player_centre: Vector3 = _player_combat_centroid()
+		var to_enclave: Vector3 = ENEMY_ENCLAVE_CENTRE - player_centre
+		to_enclave.y = 0.0
+		var trail: Vector3 = player_centre
+		if to_enclave.length_squared() > 0.0001:
+			trail = player_centre - to_enclave.normalized() * ALLY_TRAIL_OFFSET
+		# If the player has no combat units (early ally arrival
+		# before the player rebuilds), just push the allies
+		# straight at the enclave.
+		var target: Vector3 = trail
+		if _player_combat_count_only() == 0:
+			target = ENEMY_ENCLAVE_CENTRE
+		for u: Node3D in _ally_units:
+			if u.has_method("command_move"):
+				u.call("command_move", target)
+
+
+func _ally_centroid() -> Vector3:
+	if _ally_units.is_empty():
+		return Vector3.ZERO
+	var sum: Vector3 = Vector3.ZERO
+	var count: int = 0
+	for u: Node3D in _ally_units:
+		if not is_instance_valid(u):
+			continue
+		sum += u.global_position
+		count += 1
+	return sum / float(maxi(count, 1))
+
+
+func _player_combat_centroid() -> Vector3:
+	## Returns the average position of the player's combat
+	## units (no engineers, no crawlers). Falls back to the
+	## ally rally point when the player has none alive.
+	var sum: Vector3 = Vector3.ZERO
+	var count: int = 0
+	for u: Node3D in _player_units():
+		var s: UnitStatResource = u.get("stats") as UnitStatResource
+		if not s:
+			continue
+		if s.unit_class == &"engineer" or s.unit_class == &"crawler":
+			continue
+		sum += u.global_position
+		count += 1
+	if count == 0:
+		return ALLY_RALLY_POINT
+	return sum / float(count)
+
+
+func _player_combat_count_only() -> int:
+	return _count_player_combat_units()
+
+
+func _tick_first_building_raid() -> void:
+	## Fires once when the player finishes their first non-HQ
+	## structure (Foundry, Salvage Yard, Generator, etc). Spawns
+	## two Courier Tank squads at the northern enclave edge with
+	## a move command toward the player base — a small early
+	## raid to telegraph "enemy is in the north" before the
+	## climax push.
+	if _raid_fired:
+		return
+	for n: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(n):
+			continue
+		if not ("owner_id" in n) or n.get("owner_id") != 0:
+			continue
+		var b: Building = n as Building
+		if not b or not b.stats or not b.is_constructed:
+			continue
+		# Skip the HQ — it counts as already-built (the player
+		# claimed it, didn't construct it from scratch).
+		if b.stats.building_id == &"headquarters":
+			continue
+		_raid_fired = true
+		_spawn_first_building_raid()
+		return
+
+
+func _spawn_first_building_raid() -> void:
+	# Two Courier Tank squads spawn at the northern enclave edge
+	# (-Z) and start moving south toward the player base. Owner
+	# 2 (NEUTRAL pseudo-player) so they read as enemy — same
+	# slot the enclave defenders use.
+	var raid_z: float = -110.0
+	var raid_units: Array[Node3D] = []
+	for i: int in 2:
+		var rx: float = -8.0 + float(i) * 16.0
+		var u: Node3D = _spawn_tutorial_raid_unit(
+			"res://resources/units/sable_courier_tank.tres",
+			Vector3(rx, 0.0, raid_z),
+		)
+		if u:
+			raid_units.append(u)
+	# Issue a move toward the player's claimed HQ position so
+	# they actually push forward instead of idling at the spawn.
+	for ru: Node3D in raid_units:
+		if ru.has_method("command_move"):
+			ru.call("command_move", Vector3(0.0, 0.0, 70.0))
+	# Surface a one-line alert so the player sees the raid coming
+	# without having to scrub the minimap.
+	var alerts: Node = get_tree().current_scene.get_node_or_null("AlertManager")
+	if alerts and alerts.has_method("emit_alert"):
+		alerts.call(
+			"emit_alert",
+			"Sable raid inbound from the north — two Courier Tank squads",
+			1,
+			Vector3(0.0, 0.0, raid_z),
+		)
+
+
+func _spawn_tutorial_raid_unit(stats_path: String, pos: Vector3) -> Node3D:
+	## Same shape as _spawn_ally_unit but owner_id 2 (enemy
+	## neutral) and parented to the standard Units container.
+	var stats: UnitStatResource = load(stats_path) as UnitStatResource
+	if not stats:
+		return null
+	var ps: PackedScene = load("res://scenes/unit.tscn") as PackedScene
+	if not ps:
+		return null
+	var node: Node3D = ps.instantiate() as Node3D
+	if not node:
+		return null
+	node.set("stats", stats)
+	node.set("owner_id", 2)
+	var units_node: Node = get_tree().current_scene.get_node_or_null("Units")
+	if units_node:
+		units_node.add_child(node)
+	else:
+		get_tree().current_scene.add_child(node)
+	node.global_position = pos
+	return node
 
 
 func _stage_ally_done() -> bool:
@@ -416,17 +656,17 @@ func _stage_win_done() -> bool:
 	return false
 
 
-func _spawn_ally_unit(stats_path: String, pos: Vector3) -> void:
+func _spawn_ally_unit(stats_path: String, pos: Vector3) -> Node3D:
 	var stats: UnitStatResource = load(stats_path) as UnitStatResource
 	if not stats:
-		return
+		return null
 	var scene_path: String = "res://scenes/aircraft.tscn" if stats.is_aircraft else "res://scenes/unit.tscn"
 	var ps: PackedScene = load(scene_path) as PackedScene
 	if not ps:
-		return
+		return null
 	var node: Node3D = ps.instantiate() as Node3D
 	if not node:
-		return
+		return null
 	node.set("stats", stats)
 	# Owner 1 = ally slot (team 0 alongside the player) — matches
 	# PlayerRegistry's 2v2 roster wiring.
@@ -437,3 +677,4 @@ func _spawn_ally_unit(stats_path: String, pos: Vector3) -> void:
 	else:
 		get_tree().current_scene.add_child(node)
 	node.global_position = pos
+	return node

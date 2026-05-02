@@ -612,12 +612,16 @@ func _on_play_pressed() -> void:
 
 func _on_tutorial_pressed() -> void:
 	MatchSettings.tutorial_mode = true
-	# Tutorial always runs on Easy + 1v1 + Foundry Belt + Anvil vs Anvil.
+	# Tutorial: Anvil player, Sable enclave as the southern (uh,
+	# northern — +Z) target. enemy_faction flips to SABLE so the
+	# enclave's HQ + emplacements + SAM build with the Sable
+	# faceted-hull silhouette + violet accents instead of looking
+	# like Anvil structures the player has to attack.
 	MatchSettings.difficulty = MatchSettingsClass.Difficulty.EASY
 	MatchSettings.mode = MatchSettingsClass.Mode.ONE_V_ONE
 	MatchSettings.map_id = MatchSettingsClass.MapId.FOUNDRY_BELT
 	MatchSettings.player_faction = MatchSettingsClass.FactionId.ANVIL
-	MatchSettings.enemy_faction = MatchSettingsClass.FactionId.ANVIL
+	MatchSettings.enemy_faction = MatchSettingsClass.FactionId.SABLE
 	MatchSettings.ai_personalities = {}
 	MatchSettings.ai_difficulties = {}
 	MatchSettings.ai_factions = {}

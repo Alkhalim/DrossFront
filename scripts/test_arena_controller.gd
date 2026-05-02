@@ -836,10 +836,10 @@ func _setup_player() -> void:
 		# both bases pushed to opposite ends of the map.
 		var new_pos: Vector3 = _hq_position_for(0)
 		if in_tutorial:
-			# Foundry-ruin reclaim point. Sits at the centre of the
-			# straight-line southward path from the player's start
-			# at world origin (cache 28 -> crawler 58 -> HQ 88 ->
-			# enclave 130).
+			# Foundry-ruin reclaim point sits at +Z = south on
+			# screen. Player walks south through cache (+28),
+			# crawler (+58), HQ (+88), then turns around to push
+			# north against the Sable enclave at -130.
 			new_pos = Vector3(0.0, 0.0, 88.0)
 		hq_offset = new_pos - hq.global_position
 		hq.global_position = new_pos
@@ -991,32 +991,33 @@ func _setup_tutorial_enemy_camp() -> void:
 	var hq_path: String = "res://resources/buildings/headquarters.tres"
 	var gun_path: String = "res://resources/buildings/gun_emplacement.tres"
 	var sam_path: String = "res://resources/buildings/sam_site.tres"
-	# Enclave parked SOUTH of the player's HQ (which sits at z=88).
-	# All Z values positive so the player walks consistently south
-	# from world origin through cache (28) -> crawler (58) -> HQ
-	# (88) -> enclave (130+). Outer ring at z=120 denies the
-	# obvious approach lane; inner core sits at z=130-140.
-	_spawn_tutorial_enemy_building(hq_path, Vector3(0.0, 0.0, 134.0), ai_res, 2)
+	# Enclave parked at the NORTH end of the map (-Z = north on
+	# screen). The player walks SOUTH through discovery beats
+	# (cache 28 -> crawler 58 -> HQ 88), then turns around and
+	# pushes back NORTH for the climactic assault. Outer turret
+	# ring at z=-115 denies the approach corridor; inner core
+	# sits at z=-130 to -140.
+	_spawn_tutorial_enemy_building(hq_path, Vector3(0.0, 0.0, -134.0), ai_res, 2)
 	# Inner ring of gun emplacements + SAM coverage behind. Tight
 	# overlap on every approach axis.
-	_spawn_tutorial_enemy_building(gun_path, Vector3(-14.0, 0.0, 124.0), ai_res, 2)
-	_spawn_tutorial_enemy_building(gun_path, Vector3(14.0, 0.0, 124.0), ai_res, 2)
-	_spawn_tutorial_enemy_building(gun_path, Vector3(-10.0, 0.0, 140.0), ai_res, 2)
-	_spawn_tutorial_enemy_building(gun_path, Vector3(10.0, 0.0, 140.0), ai_res, 2)
-	_spawn_tutorial_enemy_building(sam_path, Vector3(0.0, 0.0, 118.0), ai_res, 2)
-	_spawn_tutorial_enemy_building(sam_path, Vector3(0.0, 0.0, 146.0), ai_res, 2)
-	# Outer ring — two more emplacements pushed forward (closer to
-	# the player) to deny the obvious northern approach lane.
-	_spawn_tutorial_enemy_building(gun_path, Vector3(-22.0, 0.0, 115.0), ai_res, 2)
-	_spawn_tutorial_enemy_building(gun_path, Vector3(22.0, 0.0, 115.0), ai_res, 2)
+	_spawn_tutorial_enemy_building(gun_path, Vector3(-14.0, 0.0, -124.0), ai_res, 2)
+	_spawn_tutorial_enemy_building(gun_path, Vector3(14.0, 0.0, -124.0), ai_res, 2)
+	_spawn_tutorial_enemy_building(gun_path, Vector3(-10.0, 0.0, -140.0), ai_res, 2)
+	_spawn_tutorial_enemy_building(gun_path, Vector3(10.0, 0.0, -140.0), ai_res, 2)
+	_spawn_tutorial_enemy_building(sam_path, Vector3(0.0, 0.0, -118.0), ai_res, 2)
+	_spawn_tutorial_enemy_building(sam_path, Vector3(0.0, 0.0, -146.0), ai_res, 2)
+	# Outer ring — two more emplacements pushed forward (closer
+	# to the player) to deny the obvious approach lane.
+	_spawn_tutorial_enemy_building(gun_path, Vector3(-22.0, 0.0, -115.0), ai_res, 2)
+	_spawn_tutorial_enemy_building(gun_path, Vector3(22.0, 0.0, -115.0), ai_res, 2)
 	# Defenders — two Fang drone swarms (the air drones the player
 	# will need AA for) + a couple of Specter ground squads patrolling
 	# the camp interior.
-	_spawn_tutorial_enemy_unit("res://resources/units/sable_fang.tres", Vector3(-6.0, 0.0, 125.0), 2)
-	_spawn_tutorial_enemy_unit("res://resources/units/sable_fang.tres", Vector3(6.0, 0.0, 125.0), 2)
-	_spawn_tutorial_enemy_unit("res://resources/units/sable_specter.tres", Vector3(-8.0, 0.0, 130.0), 2)
-	_spawn_tutorial_enemy_unit("res://resources/units/sable_specter.tres", Vector3(8.0, 0.0, 130.0), 2)
-	_spawn_tutorial_enemy_unit("res://resources/units/sable_specter.tres", Vector3(0.0, 0.0, 140.0), 2)
+	_spawn_tutorial_enemy_unit("res://resources/units/sable_fang.tres", Vector3(-6.0, 0.0, -125.0), 2)
+	_spawn_tutorial_enemy_unit("res://resources/units/sable_fang.tres", Vector3(6.0, 0.0, -125.0), 2)
+	_spawn_tutorial_enemy_unit("res://resources/units/sable_specter.tres", Vector3(-8.0, 0.0, -130.0), 2)
+	_spawn_tutorial_enemy_unit("res://resources/units/sable_specter.tres", Vector3(8.0, 0.0, -130.0), 2)
+	_spawn_tutorial_enemy_unit("res://resources/units/sable_specter.tres", Vector3(0.0, 0.0, -140.0), 2)
 	# owner_id 2 is the registry's pre-registered NEUTRAL player —
 	# treated as enemy by every other player and never allies with
 	# anyone, which is exactly the relationship we want for the
