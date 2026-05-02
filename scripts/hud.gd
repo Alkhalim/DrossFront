@@ -3954,7 +3954,7 @@ func _building_description(id: StringName) -> String:
 		&"advanced_armory":
 			return "Unlocks the gated unit slots at Advanced Foundry and Aerodrome, and hosts their branch upgrades."
 		&"salvage_yard":
-			return "Stationary harvester. Pulls salvage from wrecks inside its work radius."
+			return "Stationary harvester. Pulls salvage from wrecks inside its work radius. Hungry on power -- budget ahead before stacking yards."
 		&"gun_emplacement":
 			return "Anvil mode-switchable emplacement: Balanced / Anti-Light / Anti-Heavy. Ground only. +15% HP / damage vs the baseline turret."
 		&"gun_emplacement_basic":
