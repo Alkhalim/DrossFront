@@ -117,11 +117,14 @@ func _ready() -> void:
 
 	# Tutorial overlay — shown only when the player launched via the Tutorial
 	# button on the main menu. The mission-style banner reads its current
-	# objective + dialogue from the TutorialMission node every frame; the
-	# legacy task-checklist overlay stays available as a controls reference.
+	# objective + dialogue from the TutorialMission node every frame.
+	# The legacy 7-task checklist overlay was retired in favour of the
+	# mission banner — checklist was both visually noisy at start and
+	# referenced overlays that could leak across scene reloads, which
+	# crashed _check_tutorial_progress when it tried to update freed
+	# label instances.
 	var settings: Node = get_node_or_null("/root/MatchSettings")
 	if settings and settings.get("tutorial_mode"):
-		_build_tutorial_overlay()
 		_build_tutorial_mission_banner()
 
 
@@ -281,8 +284,17 @@ func _check_tutorial_progress() -> void:
 	## and ticks off completed tasks.
 	if not has_meta("tutorial_overlay"):
 		return
-	var overlay: Node = get_meta("tutorial_overlay")
-	if not is_instance_valid(overlay):
+	# Pull through Variant first — assigning a freed Object straight
+	# into a typed `var x: Node` slot triggers Godot 4's
+	# "Trying to assign invalid previously freed instance" error.
+	# Variant tolerates the freed reference long enough for the
+	# is_instance_valid check.
+	var overlay_v: Variant = get_meta("tutorial_overlay")
+	if not (overlay_v is Object) or not is_instance_valid(overlay_v):
+		remove_meta("tutorial_overlay")
+		return
+	var overlay: Node = overlay_v as Node
+	if not overlay:
 		remove_meta("tutorial_overlay")
 		return
 	if not _selection_manager:

@@ -821,15 +821,20 @@ func _setup_player() -> void:
 	var hq: Building = $PlayerHQ as Building
 	var hq_offset: Vector3 = Vector3.ZERO
 	if hq:
-		hq.owner_id = 0
+		# Tutorial: HQ starts as a NEUTRAL ruin (owner_id 2) at
+		# the foundry-ruin reclaim point. The player has no
+		# vision around it (FOW filters by friendly), no
+		# production from it, and won't lose if it falls. The
+		# TutorialMission's stage-3 (BASE) hand-off flips the
+		# ownership to 0 so the player can build / produce from
+		# it the moment they walk into the cell.
+		hq.owner_id = 2 if in_tutorial else 0
 		hq.is_constructed = true
 		hq.resource_manager = resource_manager
 		# Move the player HQ to its mode-specific corner — the .tscn places
 		# it at world origin for editor convenience, but real matches want
 		# both bases pushed to opposite ends of the map.
 		var new_pos: Vector3 = _hq_position_for(0)
-		# Tutorial: HQ sits at the foundry-ruin reclaim point so
-		# the player walks UP TO it rather than starting on it.
 		if in_tutorial:
 			new_pos = Vector3(0.0, 0.0, 95.0)
 		hq_offset = new_pos - hq.global_position
@@ -977,14 +982,28 @@ func _setup_tutorial_enemy_camp() -> void:
 	var hq_path: String = "res://resources/buildings/headquarters.tres"
 	var gun_path: String = "res://resources/buildings/gun_emplacement.tres"
 	var sam_path: String = "res://resources/buildings/sam_site.tres"
-	_spawn_tutorial_enemy_building(hq_path, Vector3(0.0, 0.0, -90.0), ai_res, 2)
-	_spawn_tutorial_enemy_building(gun_path, Vector3(-12.0, 0.0, -82.0), ai_res, 2)
-	_spawn_tutorial_enemy_building(gun_path, Vector3(12.0, 0.0, -82.0), ai_res, 2)
+	_spawn_tutorial_enemy_building(hq_path, Vector3(0.0, 0.0, -94.0), ai_res, 2)
+	# Inner ring of gun emplacements + a SAM behind them. Tight
+	# coverage on every approach axis so the player needs to bring
+	# real firepower (or the Sable ally) to crack it.
+	_spawn_tutorial_enemy_building(gun_path, Vector3(-14.0, 0.0, -84.0), ai_res, 2)
+	_spawn_tutorial_enemy_building(gun_path, Vector3(14.0, 0.0, -84.0), ai_res, 2)
+	_spawn_tutorial_enemy_building(gun_path, Vector3(-10.0, 0.0, -100.0), ai_res, 2)
+	_spawn_tutorial_enemy_building(gun_path, Vector3(10.0, 0.0, -100.0), ai_res, 2)
 	_spawn_tutorial_enemy_building(sam_path, Vector3(0.0, 0.0, -78.0), ai_res, 2)
-	# Defenders.
-	_spawn_tutorial_enemy_unit("res://resources/units/sable_fang.tres", Vector3(0.0, 0.0, -85.0), 2)
-	_spawn_tutorial_enemy_unit("res://resources/units/sable_specter.tres", Vector3(-8.0, 0.0, -88.0), 2)
-	_spawn_tutorial_enemy_unit("res://resources/units/sable_specter.tres", Vector3(8.0, 0.0, -88.0), 2)
+	_spawn_tutorial_enemy_building(sam_path, Vector3(0.0, 0.0, -106.0), ai_res, 2)
+	# Outer ring — two more emplacements pushed forward to deny
+	# the obvious northern approach lane.
+	_spawn_tutorial_enemy_building(gun_path, Vector3(-22.0, 0.0, -75.0), ai_res, 2)
+	_spawn_tutorial_enemy_building(gun_path, Vector3(22.0, 0.0, -75.0), ai_res, 2)
+	# Defenders — two Fang drone swarms (the air drones the player
+	# will need AA for) + a couple of Specter ground squads patrolling
+	# the camp interior.
+	_spawn_tutorial_enemy_unit("res://resources/units/sable_fang.tres", Vector3(-6.0, 0.0, -85.0), 2)
+	_spawn_tutorial_enemy_unit("res://resources/units/sable_fang.tres", Vector3(6.0, 0.0, -85.0), 2)
+	_spawn_tutorial_enemy_unit("res://resources/units/sable_specter.tres", Vector3(-8.0, 0.0, -90.0), 2)
+	_spawn_tutorial_enemy_unit("res://resources/units/sable_specter.tres", Vector3(8.0, 0.0, -90.0), 2)
+	_spawn_tutorial_enemy_unit("res://resources/units/sable_specter.tres", Vector3(0.0, 0.0, -100.0), 2)
 	# owner_id 2 is the registry's pre-registered NEUTRAL player —
 	# treated as enemy by every other player and never allies with
 	# anyone, which is exactly the relationship we want for the

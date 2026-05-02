@@ -129,6 +129,14 @@ func _on_hq_destroyed(destroyed_node: Node) -> void:
 		i -= 1
 
 	if lost_was_local_player:
+		# Tutorial mode skips the HQ-loss-equals-defeat rule. The
+		# player starts the mission HQ-less and only claims one
+		# partway through; losing it later (or never having one
+		# to begin with) shouldn't end the run. Win is gated on
+		# the TutorialMission's enemy-cleared check instead.
+		var settings: Node = get_node_or_null("/root/MatchSettings")
+		if settings and settings.get("tutorial_mode"):
+			return
 		_end_match(false)
 		return
 

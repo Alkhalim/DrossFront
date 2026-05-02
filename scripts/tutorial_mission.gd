@@ -249,10 +249,34 @@ func _stage_crawler_done() -> bool:
 
 
 func _stage_base_enter() -> void:
-	# The base reclaim is handled by TestArenaController spawning a
-	# pre-placed HQ at this location at match start (covered by the
-	# scaffold commit). This stage just announces the hand-off.
-	pass
+	# Hand the abandoned HQ over to the player. TestArenaController
+	# parks it at (0, 0, 95) with owner_id 2 (neutral ruin) at
+	# match start; flipping owner_id to 0 here unlocks production,
+	# vision, and resource flow as the discovery beat resolves.
+	for n: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(n):
+			continue
+		var b: Building = n as Building
+		if not b or not b.stats:
+			continue
+		if b.stats.building_id != &"headquarters":
+			continue
+		# Only claim the abandoned (neutral) HQ — leave the actual
+		# enemy enclave's HQ alone.
+		if b.owner_id != 2:
+			continue
+		# Distance check so we don't accidentally claim the wrong
+		# neutral HQ if the map ever has more than one.
+		if b.global_position.distance_squared_to(Vector3(0.0, 0.0, 95.0)) > 30.0 * 30.0:
+			continue
+		b.owner_id = 0
+		var rm: Node = get_tree().current_scene.get_node_or_null("ResourceManager")
+		if rm:
+			b.resource_manager = rm
+		# Re-skin the HQ with the new owner's team colour by
+		# rebuilding the placeholder shape.
+		if b.has_method("_apply_placeholder_shape"):
+			b._apply_placeholder_shape()
 
 
 func _stage_base_done() -> bool:
