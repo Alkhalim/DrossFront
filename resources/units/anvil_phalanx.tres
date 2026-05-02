@@ -12,7 +12,8 @@ role_tag = &"AAir_Light"
 damage_tier = &"low"
 range_tier = &"short"
 rof_tier = &"rapid"
-damage_value = 26
+damage_value = 1
+rof_seconds_value = 0.28
 
 [resource]
 script = ExtResource("1")
