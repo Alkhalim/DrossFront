@@ -409,6 +409,14 @@ const FORCE_TARGET_COUNT: int = 6
 var _ally_units: Array[Node3D] = []
 var _ally_state: StringName = &""
 var _ally_follow_accum: float = 0.0
+## Latches true once the strike force has committed to the
+## attack-move-toward-enclave path. The override only ISSUES the
+## command on the rising edge (false -> true) — re-issuing on
+## every tick would clear each ally's _current_target /
+## forced_target every second and the allies would walk past
+## enemies without engaging. Resets to false when the engagement
+## ends so a future fight re-commits.
+var _ally_attack_committed: bool = false
 
 ## First-building-completion raid trigger. Once the player
 ## finishes their first non-HQ structure, two Sable Courier Tank
@@ -601,20 +609,30 @@ func _tick_ally_behaviour(delta: float) -> void:
 	# Combat override applies in BOTH marching and following states.
 	# As soon as ANY player or ally unit (or any neutral enclave
 	# unit) is in an active engagement, the strike force commits
-	# and attack-moves straight at the enclave. Earlier the
-	# override only fired in "following" state, so allies stuck
-	# in "marching" because of map-edge wedges never engaged.
-	if _any_friendly_in_combat() or _any_enclave_taking_fire():
-		for u_atk: Node3D in _ally_units:
-			var combat_atk: Node = u_atk.get_node_or_null("CombatComponent")
-			if combat_atk and combat_atk.has_method("command_attack_move"):
-				combat_atk.call("command_attack_move", ENEMY_ENCLAVE_CENTRE)
-			elif u_atk.has_method("command_move"):
-				u_atk.call("command_move", ENEMY_ENCLAVE_CENTRE)
+	# and attack-moves straight at the enclave. Issued ONCE on
+	# the rising edge (false -> true) so the per-tick reset
+	# inside command_attack_move (which clears _current_target)
+	# doesn't keep wiping engagements every second — that bug
+	# was making allies walk past enemies without firing until
+	# they touched the enclave HQ.
+	var combat_now: bool = _any_friendly_in_combat() or _any_enclave_taking_fire()
+	if combat_now:
+		if not _ally_attack_committed:
+			_ally_attack_committed = true
+			for u_atk: Node3D in _ally_units:
+				var combat_atk: Node = u_atk.get_node_or_null("CombatComponent")
+				if combat_atk and combat_atk.has_method("command_attack_move"):
+					combat_atk.call("command_attack_move", ENEMY_ENCLAVE_CENTRE)
+				elif u_atk.has_method("command_move"):
+					u_atk.call("command_move", ENEMY_ENCLAVE_CENTRE)
 		# Stay in whatever state we were in — the override gets
-		# checked again next tick. If shooting stops the
-		# centroid-trail / march logic resumes.
+		# checked again next tick. The combat path returns early
+		# so the centroid-trail logic doesn't compete with the
+		# attack-move while engagement is active.
 		return
+	# Disengaged — reset the latch so the next fight re-commits.
+	if _ally_attack_committed:
+		_ally_attack_committed = false
 
 	if _ally_state == &"marching":
 		# Switched from "centroid within radius" to "ANY ally
@@ -657,12 +675,15 @@ func _tick_ally_behaviour(delta: float) -> void:
 
 
 func _combat_target_is_live(combat: Node, key: String) -> bool:
-	## Defensive read for combat target slots — pulls the value
-	## as Variant first so a freed Object reference doesn't
-	## crash the typed `as Node` cast (Godot 4 throws "Trying to
-	## cast a freed object" on the assignment).
+	## Defensive read for combat target slots. Even `v is Object`
+	## throws "Left operand of 'is' is a previously freed
+	## instance" in Godot 4 when the Variant holds a stale
+	## reference, so we type-check via typeof() FIRST (operates
+	## on the Variant container, doesn't dereference) and only
+	## then run is_instance_valid (which is documented safe on
+	## freed references).
 	var v: Variant = combat.get(key)
-	if not (v is Object):
+	if typeof(v) != TYPE_OBJECT:
 		return false
 	if not is_instance_valid(v):
 		return false
