@@ -420,14 +420,24 @@ func _create_visuals() -> void:
 
 
 func _update_visuals() -> void:
-	# Update colors based on state
+	# Update colors based on state. Owner colour pulls from the
+	# PlayerRegistry so the user's match-setup colour pick + AI
+	# auto-shuffle drive the flag tint -- the local PLAYER_COLOR
+	# constant is only the fallback when the registry isn't up yet
+	# (rare, mostly headless test scenes).
 	var color: Color = NEUTRAL_COLOR
 	if _is_contested:
 		color = CONTESTED_COLOR
-	elif owner_id == 0:
-		color = PLAYER_COLOR
-	elif owner_id > 0:
-		color = ENEMY_COLOR
+	elif owner_id != 2:
+		var registry: PlayerRegistry = null
+		if get_tree() and get_tree().current_scene:
+			registry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
+		if registry and registry.has_method("get_perspective_color"):
+			color = registry.get_perspective_color(owner_id)
+		elif owner_id == 0:
+			color = PLAYER_COLOR
+		else:
+			color = ENEMY_COLOR
 
 	# Update flag
 	var flag_mat := StandardMaterial3D.new()

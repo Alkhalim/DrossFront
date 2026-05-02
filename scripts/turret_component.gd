@@ -50,6 +50,13 @@ var profile: StringName = &"balanced"
 ## of all reading the same pivot. Falls back to building.turret_pivot
 ## when null.
 var pivot_override: Node3D = null
+## Idle rotation for the pivot. Captured from the pivot's
+## rotation.y the first time _process runs so we don't depend on
+## construction order. When _target is null the component lerps
+## back to this rotation -- HQ corner MG nests then point
+## outwards at rest instead of frozen on the last engagement angle.
+var _idle_pivot_rotation_y: float = 0.0
+var _idle_rotation_captured: bool = false
 
 var _building: Node = null
 var _target: Node3D = null
@@ -149,6 +156,16 @@ func _process(delta: float) -> void:
 	_fire_timer -= delta
 	_search_timer -= delta
 
+	# Capture the pivot's authored rotation the first time we run --
+	# that's the "idle" / outward-facing pose set by the building's
+	# detail script (e.g. HQ corner nests aim outwards at construct
+	# time). When idle we lerp the pivot back to this rotation.
+	if not _idle_rotation_captured:
+		var pivot_init: Node3D = _resolve_pivot()
+		if pivot_init and is_instance_valid(pivot_init):
+			_idle_pivot_rotation_y = pivot_init.rotation.y
+			_idle_rotation_captured = true
+
 	# Validate target
 	if _target and not _is_valid_target(_target):
 		_target = null
@@ -159,6 +176,8 @@ func _process(delta: float) -> void:
 		_target = _find_nearest_enemy()
 
 	if not _target:
+		# Idle -- ease the pivot back to its outward-facing pose.
+		_relax_to_idle(delta)
 		return
 
 	# Slew the turret pivot toward the target before firing.
@@ -261,6 +280,23 @@ func _find_nearest_enemy() -> Node3D:
 			nearest = node as Node3D
 
 	return nearest
+
+
+func _relax_to_idle(delta: float) -> void:
+	## Lerps the pivot back to its captured idle (outward-facing)
+	## rotation when there's no target to track. Slower than the
+	## active aim slew so the relax reads as "stand down" rather
+	## than a snappy flick. Skips work when the pivot is already
+	## aligned within ~1 degree.
+	if not _idle_rotation_captured:
+		return
+	var pivot: Node3D = _resolve_pivot()
+	if not pivot or not is_instance_valid(pivot):
+		return
+	var diff: float = absf(wrapf(pivot.rotation.y - _idle_pivot_rotation_y + PI, 0.0, TAU) - PI)
+	if diff < 0.02:
+		return
+	pivot.rotation.y = lerp_angle(pivot.rotation.y, _idle_pivot_rotation_y, clampf(TURRET_TURN_SPEED * 0.5 * delta, 0.0, 1.0))
 
 
 func _aim_at_target(delta: float) -> void:

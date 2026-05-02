@@ -3439,6 +3439,11 @@ func _clear_buttons() -> void:
 	# armory / turret button rebuilds reach this same path).
 	if _build_tab_row and is_instance_valid(_build_tab_row):
 		_build_tab_row.visible = false
+	# Same for the HQ Train / Defense tab row -- only the HQ panel
+	# wants it; engineer command panels and other building panels
+	# leave it hidden.
+	if _hq_tab_row and is_instance_valid(_hq_tab_row):
+		_hq_tab_row.visible = false
 
 
 ## --- Affordability tint ---
