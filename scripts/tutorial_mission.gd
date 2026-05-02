@@ -264,7 +264,12 @@ func _stage_reinforce_done() -> bool:
 
 
 func _stage_crawler_enter() -> void:
-	# A Salvage Crawler joins the player at the discovery point.
+	# A Salvage Crawler joins the player just off the discovery
+	# point. Spawn pulled ~10u east of the centerline so any
+	# leftover map decoration (rock outcrops, scrap piles, ruin
+	# blocks) on the z=75 axis can't swallow the Crawler at
+	# spawn time. Trigger zone is still centred so the player
+	# reaches the discovery beat at the same point.
 	var crawler_scene: PackedScene = load("res://scenes/salvage_crawler.tscn") as PackedScene
 	if not crawler_scene:
 		return
@@ -273,7 +278,7 @@ func _stage_crawler_enter() -> void:
 		return
 	crawler.set("owner_id", 0)
 	get_tree().current_scene.add_child(crawler)
-	crawler.global_position = Vector3(0.0, 0.0, 75.0)
+	crawler.global_position = Vector3(10.0, 0.0, 78.0)
 
 
 func _stage_crawler_done() -> bool:
@@ -609,8 +614,12 @@ func _spawn_first_building_raid() -> void:
 	# punching above the player's defensive weight.
 	var raid_z: float = -110.0
 	var raid_units: Array[Node3D] = []
+	# Tightened from +-8 to +-5 X spread so the two squads arrive
+	# in a noticeably tighter formation (per playtest). Still
+	# enough horizontal space to read as two distinct units, not
+	# squad members of one squad.
 	for i: int in 2:
-		var rx: float = -8.0 + float(i) * 16.0
+		var rx: float = -5.0 + float(i) * 10.0
 		var u: Node3D = _spawn_tutorial_raid_unit(
 			"res://resources/units/sable_specter.tres",
 			Vector3(rx, 0.0, raid_z),
