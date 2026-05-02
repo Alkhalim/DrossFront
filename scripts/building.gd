@@ -1448,15 +1448,42 @@ func _detail_armory() -> void:
 	lip.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.2, 0.18)))
 	_attach_visual(lip)
 
+	# Small roof antenna with a coloured tip — Anvil's warm-red warning
+	# light, Sable's violet pulse. Reads as "this building has comms"
+	# without needing the full Advanced Armory mast/dish kit.
+	var ant_accent: Color = Color(1.0, 0.30, 0.20) if _resolve_faction_id() == 0 else Color(0.78, 0.45, 1.0)
+	var antenna := MeshInstance3D.new()
+	var ant_box := BoxMesh.new()
+	ant_box.size = Vector3(0.06, fs.y * 0.55, 0.06)
+	antenna.mesh = ant_box
+	antenna.position = Vector3(fs.x * 0.18, fs.y + ant_box.size.y * 0.5, fs.z * 0.18)
+	antenna.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.16, 0.14, 0.14)))
+	_attach_visual(antenna)
+	var ant_tip := MeshInstance3D.new()
+	var tip_sph := SphereMesh.new()
+	tip_sph.radius = 0.10
+	tip_sph.height = 0.20
+	ant_tip.mesh = tip_sph
+	ant_tip.position = Vector3(antenna.position.x, fs.y + ant_box.size.y + 0.04, antenna.position.z)
+	ant_tip.set_surface_override_material(0, _detail_emissive_mat(ant_accent, 2.4))
+	_attach_visual(ant_tip)
+
 
 func _detail_advanced_armory() -> void:
 	## Advanced Armory silhouette — reads as "upgraded armory" rather
 	## than a different building. Keeps the rib panels + dock door of
 	## the basic armory so the family resemblance is obvious, then
 	## adds: a raised research bay with skylights on the roof, a
-	## dish/scanner on top, and violet emissive accents (vs the basic
-	## armory's amber strip) so the player can pick it out at range.
+	## dish/scanner on top, and emissive accents (Anvil red / Sable
+	## violet) so the player can pick the upgrade tier out at range.
 	var fs: Vector3 = stats.footprint_size
+	# Faction accent — Anvil reads as warm-red warning lights matching
+	# unit antennae and barrel tips; Sable keeps the violet tech-glow.
+	# Earlier the violet was hard-coded for both factions and the
+	# Anvil armory looked like a Sable defection.
+	var accent: Color = Color(0.78, 0.45, 1.0)
+	if _resolve_faction_id() == 0:
+		accent = Color(1.0, 0.30, 0.20)
 	# Hex-aligned ribs -- one per hex face, matching the basic
 	# armory pattern but in a slightly cooler tone for the advanced
 	# tier read.
@@ -1493,7 +1520,7 @@ func _detail_advanced_armory() -> void:
 		sk_box.size = Vector3(0.04, bay_box.size.y * 0.4, bay_box.size.z * 0.85)
 		skylight.mesh = sk_box
 		skylight.position = Vector3(sx, fs.y + bay_box.size.y * 0.55, 0)
-		skylight.set_surface_override_material(0, _detail_emissive_mat(Color(0.78, 0.45, 1.0), 1.6))
+		skylight.set_surface_override_material(0, _detail_emissive_mat(accent, 1.6))
 		_attach_visual(skylight)
 
 	# Dish / scanner mast on the roof bay — angled slightly so the
@@ -1539,16 +1566,16 @@ func _detail_advanced_armory() -> void:
 		ring.mesh = ring_torus
 		var ry: float = fs.y + bay_box.size.y + 0.30 + float(ring_i) * 0.50
 		ring.position = Vector3(-fs.x * 0.22, ry, -fs.z * 0.10)
-		ring.set_surface_override_material(0, _detail_emissive_mat(Color(0.78, 0.45, 1.0), 1.0))
+		ring.set_surface_override_material(0, _detail_emissive_mat(accent, 1.0))
 		_attach_visual(ring)
-	# Violet pulse beacon at the spire tip.
+	# Pulse beacon at the spire tip — same accent as rings/skylights.
 	var beacon := MeshInstance3D.new()
 	var beacon_sphere := SphereMesh.new()
 	beacon_sphere.radius = 0.10
 	beacon_sphere.height = 0.20
 	beacon.mesh = beacon_sphere
 	beacon.position = Vector3(-fs.x * 0.22, fs.y + bay_box.size.y + spire_box.size.y + 0.05, -fs.z * 0.10)
-	beacon.set_surface_override_material(0, _detail_emissive_mat(Color(0.78, 0.45, 1.0), 2.4))
+	beacon.set_surface_override_material(0, _detail_emissive_mat(accent, 2.4))
 	_attach_visual(beacon)
 
 	# Optics ports along the front bay wall -- small extruded
@@ -1563,17 +1590,17 @@ func _detail_advanced_armory() -> void:
 		port.rotation.x = PI * 0.5
 		var px: float = (float(op_i) - 1.0) * bay_box.size.x * 0.30
 		port.position = Vector3(px, fs.y + bay_box.size.y * 0.55, -bay_box.size.z * 0.5 - 0.04)
-		port.set_surface_override_material(0, _detail_emissive_mat(Color(0.78, 0.45, 1.0), 1.6))
+		port.set_surface_override_material(0, _detail_emissive_mat(accent, 1.6))
 		_attach_visual(port)
 
 	# Loading dock -- same recessed-with-interior treatment as the
-	# basic armory but with violet accent lights so the upgraded
-	# armory's tech-violet identity reads through the entrance too.
+	# basic armory, lit with the faction accent so the upgrade tier's
+	# identity reads through the entrance too.
 	_build_lit_doorway(
 		Vector3(0.0, fs.y * 0.30, -fs.z * 0.5),
 		fs.x * 0.40,
 		fs.y * 0.55,
-		Color(0.78, 0.45, 1.0),
+		accent,
 	)
 
 
@@ -3294,6 +3321,12 @@ func _apply_anvil_brutalist_extras() -> void:
 	## while an Anvil structure looks like a poured-concrete fortress.
 	if not stats or not _visual_root:
 		return
+	# Hex-chassis armories get their own hex-aligned brutalist pass --
+	# pouring rectangular crenellations / corner pylons around a
+	# 6-sided hull reads as a layout bug.
+	if stats.building_id == &"basic_armory" or stats.building_id == &"advanced_armory":
+		_apply_anvil_brutalist_extras_hex()
+		return
 	var fs: Vector3 = stats.footprint_size
 
 	# Concrete plinth — a wider, shorter slab at the base of the
@@ -3371,6 +3404,76 @@ func _apply_anvil_brutalist_extras() -> void:
 			crenel2.position = Vector3(px3, fs.y * 1.02 + 0.15, pz3)
 			crenel2.set_surface_override_material(0, _detail_dark_metal_mat(parapet_color))
 			_attach_visual(crenel2)
+
+
+func _apply_anvil_brutalist_extras_hex() -> void:
+	## Hex-aware brutalist pass for the hex-prism armories. Same
+	## visual language as the rectangular variant (plinth + corner
+	## pylons + crenellated parapet) but every element is laid out
+	## along the hex's 6 faces so the silhouette reads as one
+	## consistent fortified shape instead of a hex hull stuck inside
+	## a rectangular fortification.
+	if not stats or not _visual_root:
+		return
+	var fs: Vector3 = stats.footprint_size
+	var hull_radius: float = fs.x * 0.5
+
+	# Concrete plinth — short hex prism wider than the hull.
+	var plinth := MeshInstance3D.new()
+	var plinth_hex := CylinderMesh.new()
+	plinth_hex.radial_segments = 6
+	plinth_hex.top_radius = hull_radius * 1.10
+	plinth_hex.bottom_radius = hull_radius * 1.10
+	plinth_hex.height = fs.y * 0.10
+	plinth.mesh = plinth_hex
+	plinth.position.y = fs.y * 0.05
+	plinth.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.16, 0.14)))
+	_attach_visual(plinth)
+
+	# Corner pylons — one tall column at each of the 6 hex corner
+	# vertices. Pylons sit slightly outside the hex face line so they
+	# read as the structural skeleton wrapping the hull.
+	var pylon_color := Color(0.24, 0.22, 0.20)
+	var pylon_radius: float = hull_radius * 1.02
+	for face_i: int in 6:
+		# Corner angles sit between two flat faces. Hex faces in
+		# `_apply_placeholder_shape` use a 6-segment cylinder, whose
+		# corner vertices sit at angles (PI/6) + face_i*(PI/3).
+		var ang: float = (PI / 6.0) + float(face_i) * (PI / 3.0)
+		var pylon := MeshInstance3D.new()
+		var pbox := BoxMesh.new()
+		pbox.size = Vector3(fs.x * 0.16, fs.y * 1.02, fs.x * 0.16)
+		pylon.mesh = pbox
+		pylon.position = Vector3(sin(ang) * pylon_radius, fs.y * 0.51, cos(ang) * pylon_radius)
+		pylon.rotation.y = ang
+		pylon.set_surface_override_material(0, _detail_dark_metal_mat(pylon_color))
+		_attach_visual(pylon)
+		# Iron strap mid-height.
+		var strap := MeshInstance3D.new()
+		var sbox := BoxMesh.new()
+		sbox.size = Vector3(fs.x * 0.20, 0.10, fs.x * 0.20)
+		strap.mesh = sbox
+		strap.position = Vector3(sin(ang) * pylon_radius, fs.y * 0.42, cos(ang) * pylon_radius)
+		strap.rotation.y = ang
+		strap.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.32, 0.26, 0.20)))
+		_attach_visual(strap)
+
+	# Crenellated parapet — small blocks ringing the hex perimeter at
+	# even arc-length intervals. 18 merlons (3 per face) gives enough
+	# density to read as a battlement without crowding the silhouette.
+	var parapet_color := Color(0.22, 0.20, 0.17)
+	const MERLON_COUNT: int = 18
+	var parapet_radius: float = hull_radius * 0.96
+	for m_i: int in MERLON_COUNT:
+		var ang: float = float(m_i) / float(MERLON_COUNT) * TAU
+		var crenel := MeshInstance3D.new()
+		var cbox := BoxMesh.new()
+		cbox.size = Vector3(0.26, 0.30, 0.22)
+		crenel.mesh = cbox
+		crenel.position = Vector3(sin(ang) * parapet_radius, fs.y * 1.02 + 0.15, cos(ang) * parapet_radius)
+		crenel.rotation.y = ang
+		crenel.set_surface_override_material(0, _detail_dark_metal_mat(parapet_color))
+		_attach_visual(crenel)
 
 
 func _make_sable_hull_mat(c: Color) -> StandardMaterial3D:
