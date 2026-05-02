@@ -99,8 +99,14 @@ func _process(delta: float) -> void:
 ## --- World <-> grid helpers -----------------------------------------------
 
 func _world_to_cell(world_pos: Vector3) -> Vector2i:
-	var cx: int = int(floor((world_pos.x + MAP_HALF_EXTENT) / CELL_SIZE))
-	var cz: int = int(floor((world_pos.z + MAP_HALF_EXTENT) / CELL_SIZE))
+	# Round (not floor) so cell N is centred at world (N*CELL_SIZE -
+	# MAP_HALF_EXTENT). A unit at world (0, 0, 0) lands in cell
+	# (GRID_SIZE/2, GRID_SIZE/2) whose centre IS world (0, 0, 0)
+	# instead of being a half-cell biased away. The floor variant
+	# was causing a visible ~2u offset between a unit's actual
+	# position and the centre of its FOW vision circle.
+	var cx: int = int(round((world_pos.x + MAP_HALF_EXTENT) / CELL_SIZE))
+	var cz: int = int(round((world_pos.z + MAP_HALF_EXTENT) / CELL_SIZE))
 	cx = clampi(cx, 0, GRID_SIZE - 1)
 	cz = clampi(cz, 0, GRID_SIZE - 1)
 	return Vector2i(cx, cz)
@@ -275,12 +281,16 @@ func _stamp_visibility(world_pos: Vector3, radius: float) -> void:
 	var z0: int = maxi(c.y - cell_radius, 0)
 	var z1: int = mini(c.y + cell_radius, GRID_SIZE - 1)
 	var radius_sq: float = radius * radius
+	# Cell N centre = N * CELL_SIZE - MAP_HALF_EXTENT (matches
+	# _world_to_cell's round-based mapping). The previous
+	# +CELL_SIZE * 0.5 offset stacked with floor's bias and pulled
+	# the visibility footprint half a cell off-target.
 	for cz: int in range(z0, z1 + 1):
 		for cx: int in range(x0, x1 + 1):
 			var cell_centre := Vector3(
-				float(cx) * CELL_SIZE - MAP_HALF_EXTENT + CELL_SIZE * 0.5,
+				float(cx) * CELL_SIZE - MAP_HALF_EXTENT,
 				world_pos.y,
-				float(cz) * CELL_SIZE - MAP_HALF_EXTENT + CELL_SIZE * 0.5,
+				float(cz) * CELL_SIZE - MAP_HALF_EXTENT,
 			)
 			if cell_centre.distance_squared_to(world_pos) <= radius_sq:
 				_cells[_cell_index(cx, cz)] = CellState.VISIBLE

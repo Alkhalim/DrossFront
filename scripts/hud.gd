@@ -845,10 +845,14 @@ func _update_crawler_panel(crawler: SalvageCrawler) -> void:
 	## button when the upgrade is researched.
 
 	# Rebuild buttons only when the action changes — keep state stable when
-	# selection is unchanged.
+	# selection is unchanged. ALSO force a rebuild when transitioning IN
+	# from another panel type that left _showing_build_buttons set
+	# (e.g. the player had an engineer + crawler selected, then
+	# deselected the engineer); without this the previous panel's
+	# build buttons would persist on a crawler-only selection.
 	var current_action: String = _crawler_action_key(crawler)
 	var prev_action: String = str(get_meta("_crawler_action", ""))
-	if current_action != prev_action:
+	if _showing_build_buttons or current_action != prev_action:
 		set_meta("_crawler_action", current_action)
 		_clear_buttons()
 		_action_label.text = ""

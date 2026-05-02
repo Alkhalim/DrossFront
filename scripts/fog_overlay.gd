@@ -13,14 +13,15 @@ extends Node3D
 ## MultiMesh layout — only the per-instance colour buffer is
 ## re-uploaded.
 
-## Overlay quads sit ABOVE every world feature so an unexplored cell
-## (alpha = 1) actually occludes whatever's beneath it — the previous
-## 0.05u lift left buildings, plateaus, wrecks and aircraft poking
-## through the supposedly-black fog. 12u clears every aircraft + the
-## tallest plateau + every building roof on the V2 maps; the ortho
-## RTS camera sits well above this so the overlay is still beneath
-## the lens.
-const CELL_LIFT_Y: float = 12.0
+## Overlay quads sit just above the ground plane. Lifting them higher
+## pushes them in front of the tilted RTS camera (50 deg pitch) and
+## introduces a parallax offset — a unit at world (X, 0, Z) appears
+## centred ~10u south of where its vision circle is actually punched
+## out. Keeping it at ground level removes the offset entirely.
+## Per-entity FOW visibility hooks (units, buildings, wrecks,
+## projectiles) handle hiding TALL stuff in unexplored cells; the
+## overlay only needs to cover ground texture.
+const CELL_LIFT_Y: float = 0.1
 
 var _multimesh: MultiMeshInstance3D = null
 var _mm: MultiMesh = null
@@ -72,12 +73,15 @@ func _build_multimesh() -> void:
 
 	# Pre-place every quad transform once. Per-frame work only
 	# touches the custom data buffer (alpha multiplier per cell),
-	# not the position transforms.
+	# not the position transforms. Cell N centre at world
+	# (N*cell - half_extent) — matches FogOfWar._world_to_cell's
+	# round-based mapping so a unit's visibility cells line up
+	# pixel-for-pixel with where the unit actually is.
 	for cz: int in _grid_size:
 		for cx: int in _grid_size:
 			var i: int = cz * _grid_size + cx
-			var x: float = float(cx) * _cell_size - _half_extent + _cell_size * 0.5
-			var z: float = float(cz) * _cell_size - _half_extent + _cell_size * 0.5
+			var x: float = float(cx) * _cell_size - _half_extent
+			var z: float = float(cz) * _cell_size - _half_extent
 			var t := Transform3D()
 			t = t.rotated(Vector3.RIGHT, -PI * 0.5)
 			t.origin = Vector3(x, CELL_LIFT_Y, z)
@@ -135,12 +139,12 @@ void fragment() {
 
 ## Per-state overlay colours. Unexplored is opaque black so the
 ## player sees nothing of what's there. Explored cells use a
-## desaturated cool grey at moderate alpha so they read as
-## "scouted but no live info" — different enough from the fully-
-## clear visible state that the player notices the boundary at a
-## glance.
+## very-light cool grey at low alpha so the underlying terrain +
+## buildings + wrecks read clearly — the previous 0.65 alpha was
+## reading as a "block of grey colour" that swamped detail.
+## Currently visible cells stay fully clear.
 const FOG_COLOR_UNEXPLORED: Color = Color(0.0, 0.0, 0.0, 1.0)
-const FOG_COLOR_EXPLORED: Color = Color(0.10, 0.11, 0.14, 0.65)
+const FOG_COLOR_EXPLORED: Color = Color(0.05, 0.06, 0.08, 0.32)
 
 
 func _refresh_colors() -> void:
