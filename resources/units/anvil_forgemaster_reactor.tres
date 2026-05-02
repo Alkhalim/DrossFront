@@ -1,0 +1,37 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_riveter"]
+script = ExtResource("2")
+weapon_name = "Riveter Autocannon"
+role_tag = &"AP"
+damage_tier = &"high"
+range_tier = &"medium"
+rof_tier = &"fast"
+base_accuracy = 0.88
+
+[resource]
+script = ExtResource("1")
+unit_name = "Forgemaster (Reactor)"
+unit_class = &"heavy"
+hp_total = 1100
+hp_per_unit = 1100
+armor_class = &"medium"
+speed_tier = &"slow"
+sight_tier = &"medium"
+squad_size = 1
+population = 14
+cost_salvage = 335
+cost_fuel = 45
+build_time = 32.0
+built_at = &"advanced_foundry"
+primary_weapon = SubResource("weapon_riveter")
+ability_name = "Reactor Surge"
+ability_hotkey = "D"
+ability_cooldown = 28.0
+ability_radius = 18.0
+ability_duration = 6.0
+ability_description = "Friendly mechs within 18u gain +30% damage for 6s."
+special_description = "Forgemaster Reactor branch — pulls the heal ring offline and overdrives nearby mechs' weapons instead. Damage-boost aura, slightly tougher autocannon. The frontline-DPS build."

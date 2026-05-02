@@ -1,0 +1,37 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_riveter"]
+script = ExtResource("2")
+weapon_name = "Riveter Autocannon"
+role_tag = &"AP"
+damage_tier = &"moderate"
+range_tier = &"medium"
+rof_tier = &"fast"
+base_accuracy = 0.86
+
+[resource]
+script = ExtResource("1")
+unit_name = "Forgemaster (Foreman)"
+unit_class = &"heavy"
+hp_total = 1200
+hp_per_unit = 1200
+armor_class = &"medium"
+speed_tier = &"slow"
+sight_tier = &"medium"
+squad_size = 1
+population = 14
+cost_salvage = 335
+cost_fuel = 45
+build_time = 32.0
+built_at = &"advanced_foundry"
+primary_weapon = SubResource("weapon_riveter")
+ability_name = "Factory Pulse"
+ability_hotkey = "D"
+ability_cooldown = 22.0
+ability_radius = 22.0
+ability_duration = 0.0
+ability_description = "Heal friendly mechs within 22u for 220 HP (extended Foreman radius + amount)."
+special_description = "Forgemaster Foreman branch — bigger Factory Pulse radius and a heavier heal pop. Trades the Reactor's damage boost for pure heal throughput. The army-wide medic build."

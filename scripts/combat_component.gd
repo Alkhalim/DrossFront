@@ -14,6 +14,13 @@ var _search_timer: float = 0.0
 ## the silence is visible (unit visibly stops shooting) without
 ## leaving the unit completely unresponsive.
 var _silence_remaining: float = 0.0
+
+## Damage multiplier buff timer + value, set by Reactor Surge (and
+## any other future damage-aura ability). While > 0 the multiplier
+## scales every outgoing weapon hit. _damage_mult_value is reset on
+## expiry so a stale value can't leak into the next cast.
+var _damage_mult_remaining: float = 0.0
+var _damage_mult_value: float = 1.0
 ## Cached PlayerRegistry — used to ask "is my owner allied with this owner?"
 ## instead of comparing raw owner_ids. Falls back to the raw compare when
 ## the registry isn't present, so headless / test scenes keep working.
@@ -74,6 +81,18 @@ func is_silenced() -> bool:
 	return _silence_remaining > 0.0
 
 
+func apply_damage_buff(multiplier: float, duration: float) -> void:
+	## Called by friendly damage-aura abilities (Forgemaster Reactor
+	## Surge). Stacks by MAX on both axes so re-casting an aura
+	## mid-fight doesn't shrink an already-running stronger one.
+	_damage_mult_value = maxf(_damage_mult_value, multiplier)
+	_damage_mult_remaining = maxf(_damage_mult_remaining, duration)
+
+
+func get_damage_buff_mult() -> float:
+	return _damage_mult_value if _damage_mult_remaining > 0.0 else 1.0
+
+
 func _is_hostile(my_owner: int, target_owner: int) -> bool:
 	# Single shape used by the targeting and validation paths so a future
 	# alliance change (gifting / treason / 2v2 ally betrayal) only has to
@@ -113,6 +132,10 @@ func _physics_process(delta: float) -> void:
 	_search_timer -= delta
 	if _silence_remaining > 0.0:
 		_silence_remaining = maxf(0.0, _silence_remaining - delta)
+	if _damage_mult_remaining > 0.0:
+		_damage_mult_remaining = maxf(0.0, _damage_mult_remaining - delta)
+		if _damage_mult_remaining <= 0.0:
+			_damage_mult_value = 1.0
 
 	var unit_has_move_order: bool = _unit.get("has_move_order") as bool
 
@@ -445,8 +468,11 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	if _unit.global_position.y - _current_target.global_position.y >= 0.4:
 		elevation_mod = 1.15
 
-	# Per-member damage
-	var damage_per_member: float = float(base_damage) * role_mod * dir_mod * elevation_mod * accuracy * (1.0 - armor_reduction)
+	# Per-member damage. damage_buff is the active Reactor-Surge style
+	# multiplier (1.0 when no friendly aura is up); applied late so
+	# armor and accuracy still gate the result the same way.
+	var damage_buff: float = get_damage_buff_mult()
+	var damage_per_member: float = float(base_damage) * role_mod * dir_mod * elevation_mod * accuracy * (1.0 - armor_reduction) * damage_buff
 	var per_member_dmg: int = maxi(int(damage_per_member), 1)
 
 	# Fire one projectile per alive squad member, originating at the actual

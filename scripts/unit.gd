@@ -1968,6 +1968,10 @@ func trigger_ability() -> bool:
 	match stats.ability_name:
 		"System Crash":
 			fired = _ability_system_crash()
+		"Factory Pulse":
+			fired = _ability_factory_pulse()
+		"Reactor Surge":
+			fired = _ability_reactor_surge()
 		_:
 			# Unknown ability name on stats — don't crash, just
 			# refuse to fire so the player notices.
@@ -2005,7 +2009,117 @@ func _ability_system_crash() -> bool:
 	# Spawn a quick blue pulse so the player sees the AOE land.
 	_spawn_system_crash_visual(stats.ability_radius)
 	return hits > 0 or true  # Always succeed even if zero hits — the
-	                        # cooldown still applies (cast committed).
+							# cooldown still applies (cast committed).
+
+
+func _ability_factory_pulse() -> bool:
+	## Forgemaster's Factory Pulse — heals every friendly mech
+	## inside stats.ability_radius for a fixed-amount pop. Heal
+	## amount scales with the variant: base 180, Foreman branch
+	## 220 (derived from unit_name to avoid threading another stat
+	## field for one variant difference).
+	var heal_amount: int = 180
+	if stats.unit_name.findn("Foreman") >= 0:
+		heal_amount = 220
+	var origin: Vector3 = global_position
+	var radius_sq: float = stats.ability_radius * stats.ability_radius
+	var hits: int = 0
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node):
+			continue
+		var ally: Unit = node as Unit
+		if not ally:
+			continue
+		if ally.owner_id != owner_id:
+			continue
+		if ally.alive_count <= 0:
+			continue
+		if ally.global_position.distance_squared_to(origin) > radius_sq:
+			continue
+		ally.apply_heal(heal_amount)
+		hits += 1
+	_spawn_pulse_visual(stats.ability_radius, Color(1.0, 0.65, 0.25))
+	return hits > 0 or true
+
+
+func _ability_reactor_surge() -> bool:
+	## Forgemaster Reactor branch — friendly mechs in radius gain a
+	## temporary outgoing-damage multiplier (handled inside
+	## CombatComponent.apply_damage_buff so subsequent _fire_weapon
+	## calls scale automatically).
+	var origin: Vector3 = global_position
+	var radius_sq: float = stats.ability_radius * stats.ability_radius
+	var hits: int = 0
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node):
+			continue
+		var ally: Unit = node as Unit
+		if not ally:
+			continue
+		if ally.owner_id != owner_id:
+			continue
+		if ally.alive_count <= 0:
+			continue
+		if ally.global_position.distance_squared_to(origin) > radius_sq:
+			continue
+		var combat: Node = ally.get_node_or_null("CombatComponent")
+		if combat and combat.has_method("apply_damage_buff"):
+			combat.apply_damage_buff(1.30, stats.ability_duration)
+			hits += 1
+	_spawn_pulse_visual(stats.ability_radius, Color(1.0, 0.5, 0.2))
+	return hits > 0 or true
+
+
+func apply_heal(amount: int) -> void:
+	## Distributes a heal across alive members. Caps at hp_per_unit
+	## per member so a single huge heal doesn't overheal one member
+	## past full while another sits at 1 HP. Walks the array and
+	## dumps excess into the next still-wounded member.
+	if alive_count <= 0 or not stats:
+		return
+	var remaining: int = amount
+	for i: int in member_hp.size():
+		if remaining <= 0:
+			break
+		if member_hp[i] <= 0:
+			continue
+		var deficit: int = stats.hp_per_unit - member_hp[i]
+		if deficit <= 0:
+			continue
+		var apply_amt: int = mini(deficit, remaining)
+		member_hp[i] += apply_amt
+		remaining -= apply_amt
+	_update_hp_bar()
+
+
+func _spawn_pulse_visual(radius: float, tint: Color) -> void:
+	## Friendly-target ring used by Factory Pulse + Reactor Surge.
+	## Same shape as System Crash's visual but a colour the player
+	## reads as a buff (warm gold / amber) rather than a debuff.
+	var ring := MeshInstance3D.new()
+	var disc := SphereMesh.new()
+	disc.radius = 1.0
+	disc.height = 0.2
+	disc.radial_segments = 24
+	disc.rings = 4
+	ring.mesh = disc
+	ring.scale = Vector3.ZERO
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(tint.r, tint.g, tint.b, 0.55)
+	mat.emission_enabled = true
+	mat.emission = tint
+	mat.emission_energy_multiplier = 2.6
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ring.set_surface_override_material(0, mat)
+	get_tree().current_scene.add_child(ring)
+	ring.global_position = global_position + Vector3(0, 0.4, 0)
+	var tween: Tween = ring.create_tween().set_parallel(true)
+	tween.tween_property(ring, "scale", Vector3(radius, radius, radius), 0.45)
+	tween.tween_property(mat, "albedo_color:a", 0.0, 0.45)
+	tween.tween_property(mat, "emission_energy_multiplier", 0.0, 0.45)
+	tween.chain().tween_callback(ring.queue_free)
+
 
 func _spawn_system_crash_visual(radius: float) -> void:
 	## A flat emissive disc that scales out from 0 -> radius over
