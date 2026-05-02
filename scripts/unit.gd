@@ -339,13 +339,29 @@ func _ready() -> void:
 		# _ready / _build_squad_visuals re-init path.
 		if _faction_id() == 0:
 			_move_speed *= 0.95
-			# Anvil light mechs and engineers slow another 10% on top
-			# of the faction modifier — they're the units the Courier
-			# Tank's Garrison ability transports, so the speed gap on
-			# foot makes the embark / disembark loop actually save
-			# time. Stacks multiplicatively (0.95 * 0.90 = 0.855).
-			if stats.unit_class == &"light" or stats.unit_class == &"engineer":
+
+		# The Courier Tank is the FACTION transport for Sable, so the
+		# speed gap "on foot vs in the tank" needs to live on Sable's
+		# side of the roster. Sable infantry / engineers eat a small
+		# nerf so embarking actually saves travel time, but the cuts
+		# stay small enough that Sable still outpaces Anvil's
+		# equivalents (Sable light goes from 12.0 -> 11.52 vs Anvil
+		# light at 12.0 * 0.95 = 11.4; Sable engineer goes from
+		# fast-tier 12.0 -> 10.8, still well ahead of Anvil's
+		# moderate-tier 8.0 * 0.95 = 7.6).
+		if _faction_id() == 1:
+			if stats.unit_class == &"light":
+				_move_speed *= 0.96
+			elif stats.unit_class == &"engineer":
 				_move_speed *= 0.90
+
+		# Transports (Courier Tank) get a small speed bump on top of
+		# their tier so the embark loop reads as a real upgrade over
+		# walking. Applies regardless of faction since "transport" is
+		# a unit-class concept, but in practice only Sable ships one
+		# right now.
+		if stats.unit_class == &"transport":
+			_move_speed *= 1.10
 		var shape: Dictionary = CLASS_SHAPES.get(stats.unit_class, CLASS_SHAPES[&"medium"])
 		_turn_speed = shape.get("turn_speed", 6.0) as float
 		# Avoidance radius — covers the LEADER's collision capsule with
