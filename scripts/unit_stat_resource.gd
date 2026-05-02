@@ -24,6 +24,52 @@ extends Resource
 ## Sight tier: "short", "medium", "long", "very_long", "extreme"
 @export var sight_tier: StringName = &"medium"
 
+## Numeric overrides for the tier lookups. -1 (default) = use the
+## tier table. Set to a concrete value to override per-unit during
+## balance work without shifting the whole tier table.
+##
+## Tier-resolved defaults for reference:
+##   speed_tier (units/s):  static=0, very_slow=3, slow=5,
+##                          moderate=8, fast=12, very_fast=16
+##   sight_tier (units):    short=12, medium=18, long=26,
+##                          very_long=36, extreme=50
+##   armor_class (% red):   unarmored=0, light=15, medium=30,
+##                          heavy=45, structure=30,
+##                          light_air=10, heavy_air=35
+@export var speed_value: float = -1.0
+@export var sight_radius_value: float = -1.0
+## Flat damage reduction (0.0..1.0). -1 = use armor_class default.
+@export var armor_reduction_value: float = -1.0
+
+
+func resolved_speed() -> float:
+	if speed_value >= 0.0:
+		return speed_value
+	# UNIT_SPEED_MAP duplicates Unit.SPEED_MAP — kept on the resource
+	# so balance code (HUD readouts, AI heuristics) can look up speed
+	# without importing Unit.gd.
+	const UNIT_SPEED_MAP: Dictionary = {
+		&"static": 0.0, &"very_slow": 3.0, &"slow": 5.0,
+		&"moderate": 8.0, &"fast": 12.0, &"very_fast": 16.0,
+	}
+	return UNIT_SPEED_MAP.get(speed_tier, 8.0) as float
+
+
+func resolved_sight_radius() -> float:
+	if sight_radius_value >= 0.0:
+		return sight_radius_value
+	const SIGHT_MAP: Dictionary = {
+		&"short": 12.0, &"medium": 18.0, &"long": 26.0,
+		&"very_long": 36.0, &"extreme": 50.0,
+	}
+	return SIGHT_MAP.get(sight_tier, 18.0) as float
+
+
+func resolved_armor_reduction() -> float:
+	if armor_reduction_value >= 0.0:
+		return armor_reduction_value
+	return CombatTables.get_armor_reduction(armor_class)
+
 ## Number of units in a full-strength squad.
 @export var squad_size: int = 1
 

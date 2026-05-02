@@ -324,6 +324,8 @@ func _unit_sight_radius(node: Node) -> float:
 	var stats: UnitStatResource = node.get("stats") as UnitStatResource if "stats" in node else null
 	if not stats:
 		return DEFAULT_SIGHT_RADIUS
+	if stats is UnitStatResource:
+		return (stats as UnitStatResource).resolved_sight_radius()
 	return SIGHT_RADIUS_BY_TIER.get(stats.sight_tier, DEFAULT_SIGHT_RADIUS) as float
 
 

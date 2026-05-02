@@ -372,7 +372,7 @@ func _ready() -> void:
 	add_child(_nav_agent)
 
 	if stats:
-		_move_speed = SPEED_MAP.get(stats.speed_tier, 8.0)
+		_move_speed = stats.resolved_speed()
 		# Anvil units run 5% slower than the speed-tier baseline so
 		# the heavy industrial silhouette also reads in motion — Sable
 		# units feel measurably quicker side-by-side without needing

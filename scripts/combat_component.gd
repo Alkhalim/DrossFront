@@ -174,7 +174,7 @@ func _physics_process(delta: float) -> void:
 		var stats: UnitStatResource = _unit.get("stats") as UnitStatResource
 		var weapon_range: float = 10.0
 		if stats and stats.primary_weapon:
-			weapon_range = CombatTables.get_range(stats.primary_weapon.range_tier)
+			weapon_range = stats.primary_weapon.resolved_range()
 		var engage_radius: float = weapon_range * ENGAGE_RANGE_MULT
 		# Patrol units (any unit with a `home_position` set) get a -20%
 		# aggro multiplier so a careful player can sneak past them
@@ -215,7 +215,7 @@ func _physics_process(delta: float) -> void:
 	var dist: float = _unit.global_position.distance_to(_current_target.global_position)
 	var stats: UnitStatResource = _unit.get("stats") as UnitStatResource
 	var primary: WeaponResource = stats.primary_weapon
-	var primary_range: float = CombatTables.get_range(primary.range_tier) if primary else 10.0
+	var primary_range: float = primary.resolved_range() if primary else 10.0
 
 	if dist <= primary_range:
 		# In range: stop and engage. We always stop here because the only way
@@ -242,7 +242,7 @@ func _physics_process(delta: float) -> void:
 					_unit.call("trigger_ability")
 
 		if stats.secondary_weapon and _secondary_cooldown <= 0.0 and _silence_remaining <= 0.0:
-			var sec_range: float = CombatTables.get_range(stats.secondary_weapon.range_tier)
+			var sec_range: float = stats.secondary_weapon.resolved_range()
 			if dist <= sec_range:
 				_fire_weapon(stats.secondary_weapon, false)
 	else:
@@ -370,7 +370,7 @@ func notify_attacked(attacker: Node3D) -> void:
 		var stats: UnitStatResource = _unit.get("stats") as UnitStatResource
 		var weapon_range: float = 10.0
 		if stats and stats.primary_weapon:
-			weapon_range = CombatTables.get_range(stats.primary_weapon.range_tier)
+			weapon_range = stats.primary_weapon.resolved_range()
 		var my_pos: Vector3 = _unit.global_position
 		var d_current: float = my_pos.distance_to(forced_target.global_position)
 		var d_attacker: float = my_pos.distance_to(attacker.global_position)
@@ -448,7 +448,7 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	if mesh_sys and mesh_sys.has_method("reload_factor"):
 		reload_factor = mesh_sys.call("reload_factor", mesh_strength) as float
 
-	var rof: float = CombatTables.get_rof(weapon.rof_tier) * reload_factor
+	var rof: float = weapon.resolved_rof_seconds() * reload_factor
 	# Garrison fire-rate buff — divide cooldown by GARRISON_FIRE_RATE_MULT
 	# so fire happens faster (1.2x = 20% quicker rolls). Applied AFTER the
 	# Mesh reload factor so both effects compound multiplicatively.
@@ -473,7 +473,7 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	else:
 		_secondary_cooldown = rof
 
-	var base_damage: int = CombatTables.get_damage(weapon.damage_tier)
+	var base_damage: int = weapon.resolved_damage()
 	# Salvo support — a salvo_count of N fires N projectiles per
 	# squad member per fire tick. Each projectile deals base_damage
 	# independently; weapons with high salvo (Hammerhead missiles)
@@ -495,8 +495,16 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	var target_armor: StringName = _get_target_armor()
 	var role_mod: float = CombatTables.get_role_modifier(weapon.role_tag, target_armor)
 
-	# Armor flat reduction
+	# Armor flat reduction — prefer the target's resolved_armor_reduction()
+	# (honors per-unit numeric override), fall back to the armor_class
+	# table for buildings / non-unit targets that don't carry a unit stat.
 	var armor_reduction: float = CombatTables.get_armor_reduction(target_armor)
+	if "stats" in _current_target:
+		var ts_v: Variant = _current_target.get("stats")
+		if typeof(ts_v) == TYPE_OBJECT and is_instance_valid(ts_v):
+			var ts_unit: UnitStatResource = ts_v as UnitStatResource
+			if ts_unit:
+				armor_reduction = ts_unit.resolved_armor_reduction()
 
 	# Directional modifier
 	var dir_mod: float = CombatTables.get_directional_multiplier(
@@ -550,7 +558,7 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	# while moving is less accurate). Clamped to [0.30, 0.99] so no
 	# shot is impossible AND no shot is guaranteed for non-elite
 	# weapons. Misses spawn dust + ricochet sound, no damage.
-	var weapon_range: float = CombatTables.get_range(weapon.range_tier)
+	var weapon_range: float = weapon.resolved_range()
 	var dist_to_target: float = _unit.global_position.distance_to(_current_target.global_position)
 	var range_t: float = clampf(dist_to_target / maxf(weapon_range, 0.01), 0.0, 1.0)
 	var range_penalty: float = 0.0

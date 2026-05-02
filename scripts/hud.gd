@@ -3227,9 +3227,9 @@ func _max_weapon_range(stat: UnitStatResource) -> float:
 		return 0.0
 	var r: float = 0.0
 	if stat.primary_weapon:
-		r = maxf(r, CombatTables.get_range(stat.primary_weapon.range_tier))
+		r = maxf(r, stat.primary_weapon.resolved_range())
 	if stat.secondary_weapon:
-		r = maxf(r, CombatTables.get_range(stat.secondary_weapon.range_tier))
+		r = maxf(r, stat.secondary_weapon.resolved_range())
 	return r
 
 
@@ -3292,8 +3292,8 @@ func _role_hint_for(stat: UnitStatResource) -> String:
 func _weapon_dps(weapon: WeaponResource) -> float:
 	if not weapon:
 		return 0.0
-	var dmg: float = float(CombatTables.get_damage(weapon.damage_tier))
-	var rof: float = CombatTables.get_rof(weapon.rof_tier)
+	var dmg: float = float(weapon.resolved_damage())
+	var rof: float = weapon.resolved_rof_seconds()
 	if rof <= 0.0:
 		return 0.0
 	# Salvo weapons fire salvo_count projectiles per cooldown,

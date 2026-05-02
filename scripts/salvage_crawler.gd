@@ -111,7 +111,7 @@ func _ready() -> void:
 
 	if stats:
 		current_hp = maxi(stats.hp_total, 1)
-		_move_speed = _speed_from_tier(stats.speed_tier)
+		_move_speed = stats.resolved_speed()
 
 	# Collision: layer 2 (units, so click-select raycasts find it) AND
 	# layer 4 (obstacles, so other units' mask=5 actually collides with

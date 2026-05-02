@@ -42,3 +42,39 @@ extends Resource
 ## (DPS readout in HUD, fire loop in CombatComponent) multiplies by
 ## salvo_count automatically.
 @export_range(1, 12, 1) var salvo_count: int = 1
+
+@export_group("Numeric overrides (balance work)")
+## When non-negative, these fields override the tier defaults from
+## CombatTables. -1 (the default) means "use the tier lookup". Lets
+## you fine-tune individual weapons without inventing new tier names
+## or shifting the entire tier table for one unit.
+##
+## Tier-resolved defaults for reference (from CombatTables):
+##   damage_tier:   very_low=5, low=12, moderate=25, high=50,
+##                  very_high=85, extreme=150
+##   range_tier:    melee=2, short=8, medium=15, long=25,
+##                  very_long=40, extreme=60
+##   rof_seconds:   single=4.0, slow=2.0, moderate=1.0, fast=0.5,
+##                  volley=0.3, rapid=0.25, continuous=0.15
+@export var damage_value: int = -1
+@export var range_value: float = -1.0
+## Seconds between shots. Lower = faster; matches CombatTables.ROF_MAP.
+@export var rof_seconds_value: float = -1.0
+
+
+func resolved_damage() -> int:
+	if damage_value >= 0:
+		return damage_value
+	return CombatTables.get_damage(damage_tier)
+
+
+func resolved_range() -> float:
+	if range_value >= 0.0:
+		return range_value
+	return CombatTables.get_range(range_tier)
+
+
+func resolved_rof_seconds() -> float:
+	if rof_seconds_value >= 0.0:
+		return rof_seconds_value
+	return CombatTables.get_rof(rof_tier)
