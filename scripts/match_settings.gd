@@ -47,9 +47,14 @@ const PLAYER_COLOR_PALETTE: Array[Color] = [
 	Color(0.95, 0.55, 0.10, 1.0),  # orange
 	Color(0.78, 0.35, 1.00, 1.0),  # violet
 	Color(0.15, 0.78, 0.95, 1.0),  # cyan
+	Color(0.45, 0.30, 0.18, 1.0),  # brown
+	Color(0.55, 0.55, 0.58, 1.0),  # grey
+	Color(0.95, 0.92, 0.55, 1.0),  # pale yellow
+	Color(0.10, 0.42, 0.20, 1.0),  # dark green
 ]
 const PLAYER_COLOR_NAMES: Array[String] = [
 	"Blue", "Red", "Green", "Orange", "Violet", "Cyan",
+	"Brown", "Grey", "Pale Yellow", "Dark Green",
 ]
 var player_color: Color = Color(0.08, 0.25, 0.85, 1.0)
 ## Faction the AI opponent (or each AI enemy in 2v2) plays. ANVIL by

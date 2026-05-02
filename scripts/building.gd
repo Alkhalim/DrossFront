@@ -1852,8 +1852,11 @@ func _detail_sam_site() -> void:
 
 func _detail_gun_emplacement() -> void:
 	var fs: Vector3 = stats.footprint_size
-	# Team collar around the base of the turret.
-	_team_collar(fs.x * 0.95, 0.1, fs.z * 0.95, Vector3(0, fs.y + 0.05, 0))
+	# Slimmer team collar -- the previous fs.x * 0.95 wrapped the
+	# entire turret cap and the player-coloured band ate most of the
+	# silhouette. 0.45 gives a thinner waist band that still reads
+	# as "this is mine" without dominating the chassis.
+	_team_collar(fs.x * 0.45, 0.06, fs.z * 0.45, Vector3(0, fs.y + 0.05, 0))
 	# Pivot at the top center of the chassis; the turret + barrel rotate
 	# around its Y axis to track targets. The barrel meshes themselves are
 	# rebuilt by `rebuild_turret_visual` whenever the profile changes.
