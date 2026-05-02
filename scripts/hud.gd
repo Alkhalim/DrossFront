@@ -1617,11 +1617,12 @@ func _rebuild_production_buttons(building: Building) -> void:
 		var hotkey: String = hotkeys[i] if i < hotkeys.size() else str(i + 1)
 
 		var btn := Button.new()
-		btn.custom_minimum_size = Vector2(108, 56)
+		# Bumped to 70px height so a wrapped two-line name + the
+		# bottom cost-chip strip both fit cleanly without overlap.
+		btn.custom_minimum_size = Vector2(108, 70)
 		btn.size_flags_horizontal = Control.SIZE_FILL
 		btn.size_flags_vertical = Control.SIZE_FILL
-		btn.clip_text = true
-		btn.text = "[%s] %s" % [hotkey, unit_stat.unit_name]
+		_set_label_button(btn, "[%s]" % hotkey, unit_stat.unit_name)
 		btn.tooltip_text = _unit_tooltip(unit_stat)
 		btn.pressed.connect(_on_production_button.bind(i))
 		_button_grid.add_child(btn)
@@ -1640,6 +1641,59 @@ func _on_production_button(index: int) -> void:
 const RES_COLOR_SALVAGE: Color = Color(1.00, 0.78, 0.30, 1.0)  # warm gold
 const RES_COLOR_FUEL: Color = Color(0.30, 0.85, 1.00, 1.0)     # cyan
 const RES_COLOR_POP: Color = Color(0.78, 0.95, 0.55, 1.0)      # green-tan
+
+
+func _set_label_button(btn: Button, prefix: String, name: String) -> void:
+	## Production / build / branch buttons label themselves with a
+	## hotkey prefix + a unit / building name. Long names like
+	## "Switchblade (Strafe Runner)" or "Hammerhead Bomber" used to
+	## clip on the 108px-wide button. This helper:
+	##   - turns clip_text off
+	##   - splits the name onto a second line at a sensible space
+	##     when the full label would not fit on one
+	##   - drops the font one notch if the longest line is still wide
+	## so every name reads in full without the player having to hover
+	## the tooltip.
+	var single_line: String = "%s %s" % [prefix, name] if prefix != "" else name
+	var max_one_line: int = 14  # roughly fits in 108px at default font
+	if single_line.length() <= max_one_line:
+		btn.clip_text = false
+		btn.text = single_line
+		return
+
+	# Try to break the name itself in half. rfind with a starting
+	# index searches backwards from that index, so we get the last
+	# space at or before the cutoff — keeps the first line short
+	# enough to fit, and pushes the long suffix onto line two.
+	var name_cut: int = max_one_line - prefix.length() - 1
+	if name_cut < 1:
+		name_cut = 1
+	var split_idx: int = name.rfind(" ", name_cut)
+	if split_idx <= 0:
+		split_idx = name.find(" ")  # fall back to first space if any
+
+	var line_a: String = single_line
+	var line_b: String = ""
+	if split_idx > 0:
+		line_a = "%s %s" % [prefix, name.substr(0, split_idx)] if prefix != "" else name.substr(0, split_idx)
+		line_b = name.substr(split_idx + 1)
+
+	btn.clip_text = false
+	if line_b == "":
+		# No splittable space — keep on one line and just shrink
+		# the font so it fits inside the button.
+		btn.text = single_line
+		btn.add_theme_font_size_override("font_size", 11)
+		return
+
+	btn.text = "%s\n%s" % [line_a, line_b]
+	# Shrink slightly when either half is still long, so the wider
+	# of the two lines doesn't bleed into the cost strip below.
+	var widest: int = maxi(line_a.length(), line_b.length())
+	if widest > 14:
+		btn.add_theme_font_size_override("font_size", 11)
+	elif widest > 12:
+		btn.add_theme_font_size_override("font_size", 12)
 
 
 func _attach_cost_widget(btn: Button, salvage: int, fuel: int, pop: int) -> Dictionary:
@@ -1800,15 +1854,15 @@ func _rebuild_armory_buttons(_building: Building) -> void:
 	_action_label.text = "%s Branch (irreversible)" % hound_stats.unit_name
 
 	var btn_a := Button.new()
-	btn_a.custom_minimum_size = Vector2(120, 44)
-	btn_a.text = "[Q] %s" % hound_stats.branch_a_name
+	btn_a.custom_minimum_size = Vector2(120, 56)
+	_set_label_button(btn_a, "[Q]", hound_stats.branch_a_name)
 	btn_a.tooltip_text = _unit_tooltip(hound_stats.branch_a_stats)
 	btn_a.pressed.connect(_on_branch_commit.bind(hound_stats, hound_stats.branch_a_stats, hound_stats.branch_a_name))
 	_button_grid.add_child(btn_a)
 
 	var btn_b := Button.new()
-	btn_b.custom_minimum_size = Vector2(120, 44)
-	btn_b.text = "[W] %s" % hound_stats.branch_b_name
+	btn_b.custom_minimum_size = Vector2(120, 56)
+	_set_label_button(btn_b, "[W]", hound_stats.branch_b_name)
 	btn_b.tooltip_text = _unit_tooltip(hound_stats.branch_b_stats)
 	btn_b.pressed.connect(_on_branch_commit.bind(hound_stats, hound_stats.branch_b_stats, hound_stats.branch_b_name))
 	_button_grid.add_child(btn_b)
@@ -2240,14 +2294,11 @@ func _rebuild_build_buttons() -> void:
 			continue
 		var prereqs_ok: bool = _prerequisites_met(bstat, built_ids)
 		var btn := Button.new()
-		btn.custom_minimum_size = Vector2(108, 56)
+		btn.custom_minimum_size = Vector2(108, 70)
 		btn.size_flags_horizontal = Control.SIZE_FILL
 		btn.size_flags_vertical = Control.SIZE_FILL
-		btn.clip_text = true
-		var label_text: String = "[%d] %s" % [visible_index + 1, bstat.building_name]
-		if not prereqs_ok:
-			label_text = "[Locked] %s" % bstat.building_name
-		btn.text = label_text
+		var prefix: String = "[%d]" % (visible_index + 1) if prereqs_ok else "[Locked]"
+		_set_label_button(btn, prefix, bstat.building_name)
 		btn.tooltip_text = _building_tooltip_with_prereq(bstat, prereqs_ok)
 		btn.disabled = not prereqs_ok
 		# Bind by stat reference, not visible index — visible_index only
