@@ -837,10 +837,13 @@ func _setup_player() -> void:
 		var new_pos: Vector3 = _hq_position_for(0)
 		if in_tutorial:
 			# Foundry-ruin reclaim point sits at +Z = south on
-			# screen. Player walks south through cache (+28),
-			# crawler (+58), HQ (+88), then turns around to push
-			# north against the Sable enclave at -130.
-			new_pos = Vector3(0.0, 0.0, 88.0)
+			# screen. Discovery beats land at z=+50 (cache),
+			# +75 (Crawler), +100 (HQ) — all SOUTH of the
+			# Foundry Belt central plateau (which spans z=16-34
+			# at X=-14..+14). Putting the HQ on the plateau
+			# wedged the freshly-spawned Ratchets inside the
+			# elevation collider; +100 sits cleanly past it.
+			new_pos = Vector3(0.0, 0.0, 100.0)
 		hq_offset = new_pos - hq.global_position
 		hq.global_position = new_pos
 		hq._apply_placeholder_shape()

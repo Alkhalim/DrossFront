@@ -242,21 +242,25 @@ func _stage_open_enter() -> void:
 
 
 func _stage_open_done() -> bool:
-	# Player walks any Rook into the wreckage cache zone (+Z =
-	# south on screen).
-	return _any_player_unit_in_radius(Vector3(0.0, 0.0, 28.0), VISIT_RADIUS_SQ)
+	# Player walks any Rook into the wreckage cache zone. Sits
+	# safely SOUTH of the Foundry Belt central plateau (which
+	# covers z=+16 to +34) so the cache + reinforcement spawn
+	# both land on flat ground rather than wedged inside the
+	# plateau geometry.
+	return _any_player_unit_in_radius(Vector3(0.0, 0.0, 50.0), VISIT_RADIUS_SQ)
 
 
 func _stage_reinforce_enter() -> void:
-	# Two more Rook squads spawn at the cache, slightly off-axis
-	# so they don't all overlap the lead squad.
-	_spawn_player_unit("res://resources/units/anvil_rook.tres", Vector3(-3.0, 0.0, 28.0))
-	_spawn_player_unit("res://resources/units/anvil_rook.tres", Vector3(3.0, 0.0, 28.0))
+	# Two more Rook squads spawn at the cache (south of the
+	# central plateau), slightly off-axis so they don't all
+	# overlap the lead squad.
+	_spawn_player_unit("res://resources/units/anvil_rook.tres", Vector3(-3.0, 0.0, 50.0))
+	_spawn_player_unit("res://resources/units/anvil_rook.tres", Vector3(3.0, 0.0, 50.0))
 
 
 func _stage_reinforce_done() -> bool:
 	# Player walks units further south to the Crawler discovery point.
-	return _any_player_unit_in_radius(Vector3(0.0, 0.0, 58.0), VISIT_RADIUS_SQ)
+	return _any_player_unit_in_radius(Vector3(0.0, 0.0, 75.0), VISIT_RADIUS_SQ)
 
 
 func _stage_crawler_enter() -> void:
@@ -269,12 +273,12 @@ func _stage_crawler_enter() -> void:
 		return
 	crawler.set("owner_id", 0)
 	get_tree().current_scene.add_child(crawler)
-	crawler.global_position = Vector3(0.0, 0.0, 58.0)
+	crawler.global_position = Vector3(0.0, 0.0, 75.0)
 
 
 func _stage_crawler_done() -> bool:
 	# Player advances further south to the foundry ruin.
-	return _any_player_unit_in_radius(Vector3(0.0, 0.0, 88.0), VISIT_RADIUS_SQ)
+	return _any_player_unit_in_radius(Vector3(0.0, 0.0, 100.0), VISIT_RADIUS_SQ)
 
 
 func _stage_base_enter() -> void:
@@ -296,7 +300,7 @@ func _stage_base_enter() -> void:
 			continue
 		# Distance check so we don't accidentally claim the wrong
 		# neutral HQ if the map ever has more than one.
-		if b.global_position.distance_squared_to(Vector3(0.0, 0.0, 88.0)) > 30.0 * 30.0:
+		if b.global_position.distance_squared_to(Vector3(0.0, 0.0, 100.0)) > 30.0 * 30.0:
 			continue
 		b.owner_id = 0
 		var rm: Node = get_tree().current_scene.get_node_or_null("ResourceManager")
@@ -313,8 +317,8 @@ func _stage_base_enter() -> void:
 	# them ~14u south of the HQ (further out, NOT directly next
 	# to the building) so they're easy to spot against the
 	# silhouette of the freshly-claimed structure.
-	_spawn_player_unit("res://resources/units/anvil_ratchet.tres", Vector3(-6.0, 0.0, 102.0))
-	_spawn_player_unit("res://resources/units/anvil_ratchet.tres", Vector3(6.0, 0.0, 102.0))
+	_spawn_player_unit("res://resources/units/anvil_ratchet.tres", Vector3(-6.0, 0.0, 114.0))
+	_spawn_player_unit("res://resources/units/anvil_ratchet.tres", Vector3(6.0, 0.0, 114.0))
 
 
 func _stage_base_done() -> bool:
@@ -359,12 +363,13 @@ var _ally_follow_accum: float = 0.0
 ## toward the player base — a small early scare that introduces
 ## the "enemy is in the north" concept before the climax push.
 var _raid_fired: bool = false
-## Player walks SOUTH (+Z) through the discovery beats and ends up
-## with their base at +88. Ally rally point sits just south of the
-## base; spawn point at the southern edge so the strike force
-## marches up visibly. Enemy enclave is at -Z (north on screen),
-## so the climax pivots direction from the discovery walk.
-const ALLY_RALLY_POINT: Vector3 = Vector3(0.0, 0.0, 95.0)
+## Player walks SOUTH (+Z) through the discovery beats and ends
+## up with their base at +100. Ally rally point sits just south
+## of the base; spawn point at the southern edge so the strike
+## force marches up visibly. Enemy enclave is at -Z (north on
+## screen), so the climax pivots direction from the discovery
+## walk.
+const ALLY_RALLY_POINT: Vector3 = Vector3(0.0, 0.0, 108.0)
 const ALLY_RALLY_ARRIVE_SQ: float = 18.0 * 18.0
 const ALLY_FOLLOW_INTERVAL_SEC: float = 3.0
 const ALLY_TRAIL_OFFSET: float = 6.0  # ally rallies this far behind player centroid
@@ -573,32 +578,25 @@ func _tick_first_building_raid() -> void:
 
 
 func _spawn_first_building_raid() -> void:
-	# Two Courier Tank squads spawn at the northern enclave edge
-	# (-Z) and start moving south toward the player base. Owner
-	# 2 (NEUTRAL pseudo-player) so they read as enemy — same
-	# slot the enclave defenders use.
+	# One Courier Tank squad spawns at the northern enclave edge
+	# (-Z) and starts moving south toward the player base. Owner
+	# 2 (NEUTRAL pseudo-player) so it reads as enemy — same
+	# slot the enclave defenders use. Single squad keeps the
+	# raid as a soft warning rather than a real fight.
 	var raid_z: float = -110.0
-	var raid_units: Array[Node3D] = []
-	for i: int in 2:
-		var rx: float = -8.0 + float(i) * 16.0
-		var u: Node3D = _spawn_tutorial_raid_unit(
-			"res://resources/units/sable_courier_tank.tres",
-			Vector3(rx, 0.0, raid_z),
-		)
-		if u:
-			raid_units.append(u)
-	# Issue a move toward the player's claimed HQ position so
-	# they actually push forward instead of idling at the spawn.
-	for ru: Node3D in raid_units:
-		if ru.has_method("command_move"):
-			ru.call("command_move", Vector3(0.0, 0.0, 70.0))
+	var u: Node3D = _spawn_tutorial_raid_unit(
+		"res://resources/units/sable_courier_tank.tres",
+		Vector3(0.0, 0.0, raid_z),
+	)
+	if u and u.has_method("command_move"):
+		u.call("command_move", Vector3(0.0, 0.0, 80.0))
 	# Surface a one-line alert so the player sees the raid coming
 	# without having to scrub the minimap.
 	var alerts: Node = get_tree().current_scene.get_node_or_null("AlertManager")
 	if alerts and alerts.has_method("emit_alert"):
 		alerts.call(
 			"emit_alert",
-			"Sable raid inbound from the north — two Courier Tank squads",
+			"Sable raid inbound from the north — one Courier Tank squad",
 			1,
 			Vector3(0.0, 0.0, raid_z),
 		)
