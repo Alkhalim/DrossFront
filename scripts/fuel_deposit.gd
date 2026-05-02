@@ -98,6 +98,15 @@ func _update_capture(delta: float) -> void:
 			continue
 		if not ("alive_count" in node) or node.get("alive_count") <= 0:
 			continue
+		# Gatherers (salvage crawlers + engineers) can't claim oil
+		# fields -- the player has to bring military to the deposit.
+		# Stops the early game where a lone Crawler dropping by a
+		# contested deposit would silently flip ownership.
+		if node.is_in_group("crawlers"):
+			continue
+		var node_stats: UnitStatResource = (node.get("stats") as UnitStatResource) if "stats" in node else null
+		if node_stats and node_stats.can_build:
+			continue
 		var uid: int = node.get("owner_id")
 		var dist: float = global_position.distance_to(node.global_position)
 		if dist > capture_radius:
