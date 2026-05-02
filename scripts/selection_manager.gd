@@ -922,6 +922,13 @@ func _select_all_buildings_of_type(building_id: StringName) -> void:
 	# also resets the cohort to just that one, so we re-populate after.
 	_select_building(matches[0])
 	_selected_buildings = matches
+	# Also light up the selection ring on every other building in the
+	# cohort so the player can SEE the full double-click set, not just
+	# the primary. Without this the queue fan-out worked but only one
+	# foundry showed the selection highlight.
+	for b: Building in matches:
+		if b != matches[0] and is_instance_valid(b) and b.has_method("select_building"):
+			b.select_building()
 
 
 ## --- Control Groups ---
@@ -1253,6 +1260,12 @@ func _deselect_building() -> void:
 		_selected_building.deselect_building()
 		_hide_yard_range(_selected_building)
 		_hide_attack_range(_selected_building)
+	# Drop the selection ring on every other cohort member too --
+	# without this the secondary buildings from a double-click would
+	# stay visually highlighted after the player clicked elsewhere.
+	for b: Building in _selected_buildings:
+		if b != _selected_building and is_instance_valid(b) and b.has_method("deselect_building"):
+			b.deselect_building()
 	_selected_building = null
 	_selected_buildings.clear()
 	_hide_rally_marker()
