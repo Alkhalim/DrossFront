@@ -415,6 +415,19 @@ func _click_select(event: InputEventMouseButton) -> void:
 						_clear_selection()
 					_select_building(building)
 			else:
+				# No friendly building hit — but we may still be over an
+				# enemy structure. Same treatment as enemy units / Crawlers:
+				# clear local selection, route to the inspect slot so the
+				# HUD shows the building's name + stats, and bail before
+				# the wreck branch swallows the click.
+				var enemy_building: Building = _find_building_at(event.position, false)
+				if enemy_building and enemy_building.owner_id != 0:
+					_inspected_enemy = enemy_building
+					_clear_selection()
+					_clear_crawler_selection()
+					_deselect_building()
+					get_viewport().set_input_as_handled()
+					return
 				# Wreck click → just surface its remaining salvage value.
 				# Doesn't clear other selections; treats the wreck as a
 				# queryable info-only object.
@@ -1028,14 +1041,14 @@ func _raycast_ground(screen_pos: Vector2) -> Vector3:
 
 ## --- Building Selection ---
 
-func _find_building_at(screen_pos: Vector2) -> Building:
-	## Find a building under the click. Filters to *local-player-owned*
-	## buildings only — clicking on an ally's foundry shouldn't count as a
-	## selection (the player would otherwise be able to queue units from
-	## the ally's HQ on the player's own resource budget). Enemy / ally
-	## buildings are discoverable through other paths (right-click attack,
-	## minimap dot, perspective coloring) so they're never invisible, just
-	## not commandable.
+func _find_building_at(screen_pos: Vector2, local_only: bool = true) -> Building:
+	## Find a building under the click. By default filters to
+	## *local-player-owned* buildings — selecting an ally's foundry
+	## shouldn't let the player queue units on their own budget. Pass
+	## `local_only=false` to find any building under the cursor (used
+	## by the enemy-inspect path so the player can left-click an enemy
+	## structure to read its name and stats, the same as left-clicking
+	## an enemy unit).
 	var nearest: Building = null
 	var nearest_dist: float = INF
 
@@ -1055,8 +1068,9 @@ func _find_building_at(screen_pos: Vector2) -> Building:
 			continue
 		if not ("stats" in node) or node.get("stats") == null:
 			continue
-		# Local-player owned only.
-		if not ("owner_id" in node) or node.get("owner_id") != 0:
+		if not ("owner_id" in node):
+			continue
+		if local_only and node.get("owner_id") != 0:
 			continue
 
 		var bstats: BuildingStatResource = node.get("stats") as BuildingStatResource

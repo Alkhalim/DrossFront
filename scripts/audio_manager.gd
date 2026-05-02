@@ -463,7 +463,7 @@ func play_defeat() -> void:
 		# choice plus a slight pitch shift gives 4-5 distinct flavours
 		# across runs.
 		var pitch: float = randf_range(0.96, 1.04)
-		_emit(stream, randf_range(-2.0, 1.0), pitch)
+		_emit(stream, randf_range(-14.0, -11.0), pitch)
 
 
 func play_victory() -> void:
@@ -479,21 +479,23 @@ func play_victory() -> void:
 	const D5: float = 587.33
 	const NOTE_DUR: float = 0.34
 	const STAGGER: float = 0.22
-	# First note immediately.
-	_play_tone(G4, NOTE_DUR, -3.0)
-	_play_tone(G4 * 2.0, NOTE_DUR, -8.0)  # octave overlay for shimmer
+	# First note immediately. All gains pulled ~12 dB below the
+	# original mix so the stinger sits *under* the player's ambient
+	# session volume instead of slamming the master bus on match end.
+	_play_tone(G4, NOTE_DUR, -15.0)
+	_play_tone(G4 * 2.0, NOTE_DUR, -20.0)  # octave overlay for shimmer
 	# Second + third deferred via tree-timer so the arpeggio reads.
 	var tree: SceneTree = get_tree()
 	if tree:
 		tree.create_timer(STAGGER).timeout.connect(func() -> void:
-			_play_tone(B4, NOTE_DUR, -3.0)
-			_play_tone(B4 * 2.0, NOTE_DUR, -8.0)
+			_play_tone(B4, NOTE_DUR, -15.0)
+			_play_tone(B4 * 2.0, NOTE_DUR, -20.0)
 		)
 		tree.create_timer(STAGGER * 2.0).timeout.connect(func() -> void:
-			_play_tone(D5, NOTE_DUR * 1.4, -2.0)
-			_play_tone(D5 * 2.0, NOTE_DUR * 1.4, -7.0)
+			_play_tone(D5, NOTE_DUR * 1.4, -14.0)
+			_play_tone(D5 * 2.0, NOTE_DUR * 1.4, -19.0)
 			# Body thump on the resolution note for weight.
-			_play_thump(120.0, 0.45, -6.0)
+			_play_thump(120.0, 0.45, -18.0)
 		)
 
 

@@ -746,26 +746,31 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 
 		# Faction-driven cross-section. Anvil's Bulwark uses round
 		# barrels + a domed mantlet (period-correct industrial cannon).
-		# Sable's Harbinger takes the same chassis but with hexagonal
-		# barrel sections and a faceted polyhedral mantlet — a cleaner
-		# multi-angular Sable read that stops short of just being a
-		# recolour of the same gun.
+		# Sable's Harbinger takes the same chassis but with a square
+		# (4-sided) barrel and a chamfered tapered mantlet — sharp,
+		# edged, faceted geometry so the gun reads as a Sable
+		# precision weapon rather than just a recolour of the Anvil
+		# cannon.
 		var is_sable_heavy: bool = _faction_id() == 1
 
 		# Mantlet — armored housing where barrel meets the chassis front.
 		var mantlet_radius: float = cannon_size.x * 2.4
 		var mantlet := MeshInstance3D.new()
 		if is_sable_heavy:
-			# Polyhedral block — roughly the same volume as the sphere
-			# but as a low-radial cylinder (8 sides, squashed) so the
-			# silhouette reads as faceted prism, not ball.
+			# Tapered square block — narrower at the muzzle end, wider
+			# at the chassis end. 4 radial segments → a wedge-prism
+			# silhouette with crisp corners. Rotated 45° on Z so the
+			# corners face up/down/left/right rather than aligning
+			# face-up with the deck (reads sharper from a top-down
+			# camera).
 			var mant_facet := CylinderMesh.new()
-			mant_facet.top_radius = mantlet_radius * 0.95
-			mant_facet.bottom_radius = mantlet_radius * 1.05
+			mant_facet.top_radius = mantlet_radius * 0.7
+			mant_facet.bottom_radius = mantlet_radius * 1.15
 			mant_facet.height = mantlet_radius * 1.7
-			mant_facet.radial_segments = 8
+			mant_facet.radial_segments = 4
 			mantlet.mesh = mant_facet
 			mantlet.rotation.x = -PI / 2
+			mantlet.rotation.z = deg_to_rad(45.0)
 		else:
 			var mantlet_mesh := SphereMesh.new()
 			mantlet_mesh.radius = mantlet_radius
@@ -783,9 +788,13 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		cannon_pivot.position = Vector3(0, gun_y, front_z - 0.05)
 		torso_pivot.add_child(cannon_pivot)
 
-		# Main barrel — round for Anvil, hex prism for Sable. Both use
-		# the cylinder/-PI/2 X rotation so the length axis points -Z.
-		var barrel_segs: int = 6 if is_sable_heavy else 64
+		# Main barrel — round for Anvil, square (4-sided prism) for
+		# Sable. Both use the cylinder/-PI/2 X rotation so the length
+		# axis points -Z. Sable's barrel is also rotated 45° on Z so
+		# its corner edges sit at 12-o'clock from a top-down view —
+		# the silhouette reads as a sharp-edged blade rather than a
+		# soft tube.
+		var barrel_segs: int = 4 if is_sable_heavy else 64
 		var barrel_len: float = cannon_size.z
 		var barrel := MeshInstance3D.new()
 		var barrel_cyl := CylinderMesh.new()
@@ -795,41 +804,50 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		barrel_cyl.radial_segments = barrel_segs
 		barrel.mesh = barrel_cyl
 		barrel.rotation.x = -PI / 2
+		if is_sable_heavy:
+			barrel.rotation.z = deg_to_rad(45.0)
 		barrel.position.z = -barrel_len * 0.5
 		var barrel_mat := _make_metal_mat(trim_dark)
 		barrel.set_surface_override_material(0, barrel_mat)
 		cannon_pivot.add_child(barrel)
 		mats.append(barrel_mat)
 
-		# Recoil sleeve — wider section near the breech. Sable rotates
-		# the hex an extra 22.5° on Z so the breech facets stagger
-		# against the barrel's, reading as separate machined parts.
+		# Recoil sleeve — wider section near the breech. For Sable the
+		# square sleeve is rotated 0° on Z (corners up/right/down/left)
+		# while the barrel is rotated 45° → the two share a length
+		# axis but their corners alternate by 45°, so the joint reads
+		# as two separate machined parts catching light differently.
 		var sleeve_len: float = barrel_len * 0.22
 		var sleeve := MeshInstance3D.new()
 		var sleeve_cyl := CylinderMesh.new()
-		sleeve_cyl.top_radius = cannon_size.x * 1.25
-		sleeve_cyl.bottom_radius = cannon_size.x * 1.25
+		sleeve_cyl.top_radius = cannon_size.x * 1.3
+		sleeve_cyl.bottom_radius = cannon_size.x * 1.3
 		sleeve_cyl.height = sleeve_len
 		sleeve_cyl.radial_segments = barrel_segs
 		sleeve.mesh = sleeve_cyl
 		sleeve.rotation.x = -PI / 2
-		if is_sable_heavy:
-			sleeve.rotation.z = deg_to_rad(22.5)
+		# (Sable sleeve stays at z-rot 0 so its facets stagger 45°
+		#  against the barrel above; Anvil sleeve doesn't care.)
 		sleeve.position.z = -barrel_len * 0.55
 		var sleeve_mat := _make_metal_mat(darker)
 		sleeve.set_surface_override_material(0, sleeve_mat)
 		cannon_pivot.add_child(sleeve)
 		mats.append(sleeve_mat)
 
-		# Muzzle brake — wider cap at the tip.
+		# Muzzle brake — wider cap at the tip. Sable's flares wider on
+		# the leading edge for an angular bayonet-tip silhouette and
+		# inherits the 45° z-rotation so its corners stay aligned
+		# with the barrel above it.
 		var muzzle := MeshInstance3D.new()
 		var muzzle_cyl := CylinderMesh.new()
-		muzzle_cyl.top_radius = cannon_size.x * 1.4
-		muzzle_cyl.bottom_radius = cannon_size.x * 1.25
-		muzzle_cyl.height = 0.15
+		muzzle_cyl.top_radius = cannon_size.x * 1.55 if is_sable_heavy else cannon_size.x * 1.4
+		muzzle_cyl.bottom_radius = cannon_size.x * 1.2
+		muzzle_cyl.height = 0.18 if is_sable_heavy else 0.15
 		muzzle_cyl.radial_segments = barrel_segs
 		muzzle.mesh = muzzle_cyl
 		muzzle.rotation.x = -PI / 2
+		if is_sable_heavy:
+			muzzle.rotation.z = deg_to_rad(45.0)
 		muzzle.position.z = -barrel_len - 0.07
 		var muzzle_mat := _make_metal_mat(Color(0.1, 0.1, 0.1))
 		muzzle.set_surface_override_material(0, muzzle_mat)
@@ -991,6 +1009,14 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 	if _faction_id() == 1:
 		_apply_sable_silhouette(torso_pivot, torso, head, torso_size, head_size, base_color, mats)
 
+	# Pulsefont caster overlay — a unique silhouette so the unit
+	# reads as a support / Mesh-aura caster rather than another
+	# Hound chassis. Keeps the underlying medium chassis (cannons,
+	# legs, torso) intact so combat code still works, but stacks
+	# faction-distinct emitter geometry on top.
+	if stats and stats.unit_name == "Pulsefont":
+		_apply_pulsefont_overlay(torso_pivot, torso_size, head_size, mats)
+
 	# Per-member gait variation so a squad doesn't goose-step in lockstep.
 	# Each mech has its own phase, slightly different stride speed, swing
 	# amplitude, and torso bob amount — same skeleton, individual feel.
@@ -1149,6 +1175,123 @@ func _apply_sable_silhouette(
 	tip.position = Vector3(0.0, spire_h * 0.5 + 0.04, 0.0)
 	tip.set_surface_override_material(0, accent_mat)
 	spire.add_child(tip)
+
+
+func _apply_pulsefont_overlay(
+	torso_pivot: Node3D,
+	torso_size: Vector3,
+	head_size: Vector3,
+	mats: Array[StandardMaterial3D],
+) -> void:
+	## Overlay geometry that turns a generic Sable medium chassis into
+	## a Pulsefont caster. Adds: a tall crystalline emitter spire on
+	## the back of the torso, an emissive halo ring around the chest
+	## (the visible Mesh aura band), and three small floating pulse
+	## nodes orbiting at shoulder height. The original head + cannons
+	## stay where they are so combat code (muzzle pivots, recoil) is
+	## unaffected.
+	var halo_color: Color = Color(0.4, 0.8, 1.0)
+	var crystal_color: Color = Color(0.55, 0.7, 1.0)
+
+	# --- Halo ring around the chest (the Mesh aura visual). ---
+	var halo := MeshInstance3D.new()
+	var halo_torus := TorusMesh.new()
+	halo_torus.inner_radius = torso_size.x * 0.62
+	halo_torus.outer_radius = torso_size.x * 0.72
+	halo_torus.ring_segments = 6
+	halo_torus.rings = 24
+	halo.mesh = halo_torus
+	halo.position = Vector3(0.0, torso_size.y * 0.55, 0.0)
+	# Lay it flat so it reads as a circular band when seen from above.
+	var halo_mat := StandardMaterial3D.new()
+	halo_mat.albedo_color = halo_color
+	halo_mat.emission_enabled = true
+	halo_mat.emission = halo_color
+	halo_mat.emission_energy_multiplier = 2.4
+	halo_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	halo.set_surface_override_material(0, halo_mat)
+	torso_pivot.add_child(halo)
+	mats.append(halo_mat)
+
+	# --- Tall crystalline emitter spire on the upper back. ---
+	# Three stacked tapering prisms (4-sided cylinders rotated 45°)
+	# read as a sharp crystal antenna catching the rim light.
+	var spire_root := Node3D.new()
+	spire_root.position = Vector3(0.0, torso_size.y, torso_size.z * 0.35)
+	torso_pivot.add_child(spire_root)
+	var heights: Array = [0.42, 0.30, 0.22]
+	var radii: Array = [0.14, 0.10, 0.07]
+	var stack_y: float = 0.0
+	for i: int in heights.size():
+		var seg_h: float = heights[i] as float
+		var seg_top: float = (radii[i + 1] as float) if i + 1 < radii.size() else (radii[i] as float) * 0.4
+		var seg_bot: float = radii[i] as float
+		var seg := MeshInstance3D.new()
+		var seg_cyl := CylinderMesh.new()
+		seg_cyl.top_radius = seg_top
+		seg_cyl.bottom_radius = seg_bot
+		seg_cyl.height = seg_h
+		seg_cyl.radial_segments = 4
+		seg.mesh = seg_cyl
+		seg.position.y = stack_y + seg_h * 0.5
+		seg.rotation.y = deg_to_rad(45.0 * float(i))
+		var seg_mat := StandardMaterial3D.new()
+		seg_mat.albedo_color = crystal_color
+		seg_mat.emission_enabled = true
+		seg_mat.emission = crystal_color
+		seg_mat.emission_energy_multiplier = 1.3 + 0.6 * float(i)
+		seg_mat.metallic = 0.4
+		seg_mat.roughness = 0.25
+		seg.set_surface_override_material(0, seg_mat)
+		spire_root.add_child(seg)
+		mats.append(seg_mat)
+		stack_y += seg_h - 0.02
+
+	# Capstone — a small bright pyramid tip on top of the spire.
+	var cap := MeshInstance3D.new()
+	var cap_cyl := CylinderMesh.new()
+	cap_cyl.top_radius = 0.0
+	cap_cyl.bottom_radius = 0.06
+	cap_cyl.height = 0.18
+	cap_cyl.radial_segments = 4
+	cap.mesh = cap_cyl
+	cap.position.y = stack_y + 0.09
+	cap.rotation.y = deg_to_rad(22.5)
+	var cap_mat := StandardMaterial3D.new()
+	cap_mat.albedo_color = halo_color
+	cap_mat.emission_enabled = true
+	cap_mat.emission = halo_color
+	cap_mat.emission_energy_multiplier = 3.5
+	cap_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	cap.set_surface_override_material(0, cap_mat)
+	spire_root.add_child(cap)
+	mats.append(cap_mat)
+
+	# --- Three small floating pulse nodes around the chest. ---
+	# Equilateral arrangement at chest height; emissive blue cubes
+	# tilted 45° to read as glowing diamonds from above.
+	var node_radius: float = torso_size.x * 0.95
+	for i: int in 3:
+		var angle: float = TAU * float(i) / 3.0 - PI / 2.0
+		var pulse_node := MeshInstance3D.new()
+		var pulse_box := BoxMesh.new()
+		pulse_box.size = Vector3(0.13, 0.13, 0.13)
+		pulse_node.mesh = pulse_box
+		pulse_node.position = Vector3(
+			cos(angle) * node_radius,
+			torso_size.y * 0.6 + sin(float(i) * 1.7) * 0.05,
+			sin(angle) * node_radius,
+		)
+		pulse_node.rotation = Vector3(deg_to_rad(45.0), deg_to_rad(45.0), 0.0)
+		var pulse_mat := StandardMaterial3D.new()
+		pulse_mat.albedo_color = halo_color
+		pulse_mat.emission_enabled = true
+		pulse_mat.emission = halo_color
+		pulse_mat.emission_energy_multiplier = 2.8
+		pulse_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		pulse_node.set_surface_override_material(0, pulse_mat)
+		torso_pivot.add_child(pulse_node)
+		mats.append(pulse_mat)
 
 
 func _build_legs(member: Node3D, shape: Dictionary, mats: Array[StandardMaterial3D], kind: String) -> Dictionary:

@@ -763,8 +763,9 @@ func _update_selection_display() -> void:
 
 
 func _update_enemy_inspect_panel(target: Node3D) -> void:
-	## Read-only panel for an enemy / neutral unit or Crawler. No
-	## buttons, no progress bar — just identification + HP + stats.
+	## Read-only panel for an enemy / neutral unit, Crawler, or
+	## building. No buttons, no progress bar interaction — just
+	## identification + HP + a one-line stats summary.
 	_clear_buttons()
 	_action_label.text = ""
 	_queue_label.text = ""
@@ -773,7 +774,32 @@ func _update_enemy_inspect_panel(target: Node3D) -> void:
 	_last_building_id = -1
 	_showing_build_buttons = false
 
-	var stats: UnitStatResource = target.get("stats") as UnitStatResource if "stats" in target else null
+	# Owner tag — Enemy / Neutral.
+	var owner_id: int = (target.get("owner_id") as int) if "owner_id" in target else -1
+	var owner_label: String = "Enemy"
+	if owner_id == 2:
+		owner_label = "Neutral"
+
+	var raw_stats: Resource = target.get("stats") as Resource if "stats" in target else null
+
+	# Building branch — BuildingStatResource has its own field names
+	# (building_name, hp) that don't line up with UnitStatResource, so
+	# they need a separate readout. Right-clicking an enemy structure
+	# already routes here via the inspect path.
+	var bstats: BuildingStatResource = raw_stats as BuildingStatResource
+	if bstats:
+		var bhp_now: int = (target.get("current_hp") as int) if "current_hp" in target else 0
+		var bhp_max: int = bstats.hp
+		_name_label.text = "%s (%s)" % [bstats.building_name, owner_label]
+		_stats_label.text = "Structure   HP %d / %d" % [bhp_now, bhp_max]
+		var bhp_pct: float = float(bhp_now) / float(maxi(bhp_max, 1))
+		var bhp_color: Color = Color(0.95, 0.4, 0.35, 0.95)
+		if bhp_pct >= 0.5:
+			bhp_color = Color(0.95, 0.78, 0.32, 0.95)
+		_show_progress(bhp_pct, bhp_color)
+		return
+
+	var stats: UnitStatResource = raw_stats as UnitStatResource
 	# Unit tracks HP via per-member arrays; the only public total is
 	# `get_total_hp()`. Aircraft also expose it as a method (returning
 	# `current_hp`). Falling through to the field for nodes without
@@ -785,12 +811,6 @@ func _update_enemy_inspect_panel(target: Node3D) -> void:
 		hp_now = target.get("current_hp") as int
 	var hp_max: int = stats.hp_total if stats else hp_now
 	var alive: int = (target.get("alive_count") as int) if "alive_count" in target else 1
-
-	# Owner tag — Enemy / Neutral.
-	var owner_id: int = (target.get("owner_id") as int) if "owner_id" in target else -1
-	var owner_label: String = "Enemy"
-	if owner_id == 2:
-		owner_label = "Neutral"
 
 	if stats:
 		_name_label.text = "%s (%s)" % [stats.unit_name, owner_label]
