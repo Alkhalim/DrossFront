@@ -811,11 +811,11 @@ func _show_faction_tech_tree(faction_id: int) -> void:
 	# are silently skipped by the per-tier role iteration below.
 	var chain: Array[Dictionary] = [
 		{"gate": "Headquarters (start)", "roles": ["engineer", "crawler"]},
-		{"gate": "Basic Foundry (250 S, requires Headquarters)", "roles": ["light_a", "light_b"]},
-		{"gate": "Advanced Foundry (350 S, requires Basic Foundry)", "roles": ["heavy_base"]},
-		{"gate": "Aerodrome (300 S, requires Advanced Foundry)", "roles": ["air_base"]},
-		{"gate": "Advanced Armory (320 S, requires Basic Armory) — unlocks the second slot at Adv Foundry & Aerodrome and houses their branch upgrades", "roles": ["heavy_adv", "transport_adv", "air_adv"]},
-		{"gate": "Black Pylon (Sable only, requires Basic Armory) — Mesh anchor; unlocks the Wraith bomber", "roles": ["pylon_air"]},
+		{"gate": "Basic Foundry (190 S, requires Headquarters)", "roles": ["light_a", "light_b"]},
+		{"gate": "Advanced Foundry (265 S, requires Basic Foundry)", "roles": ["heavy_base"]},
+		{"gate": "Aerodrome (160 S / 65 F, requires Advanced Foundry)", "roles": ["air_base"]},
+		{"gate": "Advanced Armory (200 S / 90 F, requires Basic Armory) — unlocks the second slot at Adv Foundry & Aerodrome and houses their branch upgrades", "roles": ["heavy_adv", "transport_adv", "air_adv"]},
+		{"gate": "Black Pylon (200 S / 90 F, Sable only, requires Basic Armory) — Mesh anchor; unlocks the Wraith bomber", "roles": ["pylon_air"]},
 	]
 	for tier: Dictionary in chain:
 		var tier_lbl := Label.new()

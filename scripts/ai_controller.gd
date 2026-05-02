@@ -537,8 +537,8 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 		return
 	# AI must afford the building, just like the player. _ai_resource_manager
 	# handles the spending inside builder.place_building.
-	if _ai_resource_manager and _ai_resource_manager.has_method("can_afford_salvage"):
-		if not _ai_resource_manager.can_afford_salvage(bstats.cost_salvage):
+	if _ai_resource_manager and _ai_resource_manager.has_method("can_afford"):
+		if not _ai_resource_manager.can_afford(bstats.cost_salvage, bstats.cost_fuel):
 			return
 
 	# AI now needs an engineer to build. If none are free, skip — the AI

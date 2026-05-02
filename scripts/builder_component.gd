@@ -322,10 +322,10 @@ func _try_auto_assist() -> void:
 
 
 func place_building(building_stats: BuildingStatResource, position: Vector3, resource_mgr: ResourceManager) -> Building:
-	if not resource_mgr.can_afford_salvage(building_stats.cost_salvage):
+	if not resource_mgr.can_afford(building_stats.cost_salvage, building_stats.cost_fuel):
 		return null
 
-	resource_mgr.spend(building_stats.cost_salvage, 0)
+	resource_mgr.spend(building_stats.cost_salvage, building_stats.cost_fuel)
 
 	var building_scene: PackedScene = load("res://scenes/building.tscn") as PackedScene
 	var building: Building = building_scene.instantiate() as Building

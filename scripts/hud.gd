@@ -2906,7 +2906,7 @@ func _rebuild_build_buttons() -> void:
 		# want a hotkey collision to pick the wrong building.
 		btn.pressed.connect(_on_build_button_for_stat.bind(bstat))
 		_button_grid.add_child(btn)
-		var chip_refs: Dictionary = _attach_cost_widget(btn, bstat.cost_salvage, 0, 0)
+		var chip_refs: Dictionary = _attach_cost_widget(btn, bstat.cost_salvage, bstat.cost_fuel, 0)
 		_action_buttons.append({ "button": btn, "kind": "build", "stat": bstat, "locked": not prereqs_ok, "chips": chip_refs })
 		visible_index += 1
 
@@ -3074,7 +3074,8 @@ func _update_button_affordability() -> void:
 		elif kind == "build":
 			var bstat: BuildingStatResource = entry["stat"] as BuildingStatResource
 			lack_salvage = _resource_manager.salvage < bstat.cost_salvage
-			affordable = not lack_salvage
+			lack_fuel = _resource_manager.fuel < bstat.cost_fuel
+			affordable = not (lack_salvage or lack_fuel)
 			# Prereq-locked entries should stay disabled regardless of
 			# whether the player has the salvage to pay for them.
 			if entry.get("locked", false):
@@ -3368,7 +3369,10 @@ func _building_tooltip(stat: BuildingStatResource) -> String:
 	# Header: name + a one-line role hint so the player knows WHAT the
 	# building is FOR before parsing the cost numbers.
 	lines.append("%s — %s" % [stat.building_name, _building_role_hint(stat)])
-	lines.append("HP %d   Cost %dS   Build %.1fs" % [stat.hp, stat.cost_salvage, stat.build_time])
+	if stat.cost_fuel > 0:
+		lines.append("HP %d   Cost %dS / %dF   Build %.1fs" % [stat.hp, stat.cost_salvage, stat.cost_fuel, stat.build_time])
+	else:
+		lines.append("HP %d   Cost %dS   Build %.1fs" % [stat.hp, stat.cost_salvage, stat.build_time])
 	if stat.power_production > 0:
 		lines.append("Power: +%d" % stat.power_production)
 	elif stat.power_consumption > 0:

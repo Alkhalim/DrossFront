@@ -15,6 +15,12 @@ extends Resource
 ## Salvage cost to construct.
 @export var cost_salvage: int = 0
 
+## Fuel cost to construct. Most buildings use 0 (pure salvage); tech /
+## research / advanced-air structures (Armory, Advanced Armory, Black
+## Pylon, Aerodrome, SAM Site) split their cost between salvage and
+## fuel so fuel matters at the building tier, not just the unit tier.
+@export var cost_fuel: int = 0
+
 ## Construction time in seconds.
 @export var build_time: float = 30.0
 
