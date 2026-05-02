@@ -765,8 +765,31 @@ func _show_faction_tech_tree(faction_id: int) -> void:
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	bg.add_child(center)
 
+	# Faction palette -- Anvil = warm industrial (brass / orange),
+	# Sable = cool corpo (cyan / violet). Drives the card border,
+	# title hue, and unit-chip accents so the tech-tree modal reads
+	# as belonging to the chosen faction.
+	var palette: Dictionary = _faction_palette(faction_id)
+
 	var card := PanelContainer.new()
 	card.custom_minimum_size = Vector2(1100, 640)
+	# Faction-tinted card frame.
+	var card_style := StyleBoxFlat.new()
+	card_style.bg_color = palette["card_bg"] as Color
+	card_style.border_color = palette["card_border"] as Color
+	card_style.border_width_top = 2
+	card_style.border_width_bottom = 2
+	card_style.border_width_left = 2
+	card_style.border_width_right = 2
+	card_style.corner_radius_top_left = 6
+	card_style.corner_radius_top_right = 6
+	card_style.corner_radius_bottom_left = 6
+	card_style.corner_radius_bottom_right = 6
+	card_style.content_margin_left = 16
+	card_style.content_margin_right = 16
+	card_style.content_margin_top = 14
+	card_style.content_margin_bottom = 14
+	card.add_theme_stylebox_override("panel", card_style)
 	center.add_child(card)
 
 	var vbox := VBoxContainer.new()
@@ -776,7 +799,7 @@ func _show_faction_tech_tree(faction_id: int) -> void:
 	var title := Label.new()
 	title.text = "%s — Tech Tree" % (roster["label"] as String)
 	title.add_theme_font_size_override("font_size", 28)
-	title.add_theme_color_override("font_color", COLOR_TITLE)
+	title.add_theme_color_override("font_color", palette["title"] as Color)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(title)
 
@@ -797,7 +820,7 @@ func _show_faction_tech_tree(faction_id: int) -> void:
 	graph_scroll.custom_minimum_size = Vector2(1060, 480)
 	graph_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(graph_scroll)
-	graph_scroll.add_child(_build_tech_tree_graph(faction_id, roster))
+	graph_scroll.add_child(_build_tech_tree_graph(faction_id, roster, palette))
 
 	var close_btn := Button.new()
 	close_btn.text = "Close"
@@ -832,7 +855,40 @@ const _TECH_GRAPH_NODES: Array[Dictionary] = [
 ]
 
 
-func _build_tech_tree_graph(faction_id: int, roster: Dictionary) -> Control:
+func _faction_palette(faction_id: int) -> Dictionary:
+	## Per-faction colour kit for the tech-tree modal. Anvil =
+	## warm industrial (brass title, tan border, dark-warm card bg).
+	## Sable = cool corpo specops (violet/cyan title, dark cool card
+	## bg). Falls back to Anvil for unknown ids.
+	if faction_id == 1:
+		return {
+			"title":         Color(0.78, 0.45, 1.00, 1.0),  # SABLE_NEON
+			"card_bg":       Color(0.06, 0.07, 0.10, 0.96),
+			"card_border":   Color(0.78, 0.45, 1.00, 0.9),
+			"node_bg":       Color(0.08, 0.09, 0.13, 0.96),
+			"node_border":   Color(0.55, 0.78, 1.00, 0.85),
+			"node_name":     Color(0.92, 0.92, 0.98, 1.0),
+			"node_cost":     Color(0.78, 0.85, 0.95, 1.0),
+			"unit_text":     Color(0.85, 0.85, 0.92, 1.0),
+			"arrow":         Color(0.78, 0.55, 1.00, 0.85),
+			"arrow_head":    Color(0.92, 0.78, 1.00, 0.95),
+		}
+	# Anvil default.
+	return {
+		"title":         Color(0.95, 0.78, 0.32, 1.0),  # warm brass
+		"card_bg":       Color(0.10, 0.08, 0.06, 0.96),
+		"card_border":   Color(0.85, 0.55, 0.20, 0.85),
+		"node_bg":       Color(0.13, 0.10, 0.08, 0.96),
+		"node_border":   Color(0.78, 0.55, 0.20, 0.85),
+		"node_name":     Color(0.95, 0.92, 0.78, 1.0),
+		"node_cost":     Color(0.95, 0.85, 0.55, 1.0),
+		"unit_text":     Color(0.92, 0.88, 0.78, 1.0),
+		"arrow":         Color(0.95, 0.65, 0.20, 0.85),
+		"arrow_head":    Color(1.00, 0.85, 0.40, 0.95),
+	}
+
+
+func _build_tech_tree_graph(faction_id: int, roster: Dictionary, palette: Dictionary = {}) -> Control:
 	## Returns a Control containing per-tier building cards laid out
 	## in columns + an arrow overlay drawing prereq links. The whole
 	## thing sits inside a ScrollContainer so wide trees scroll
@@ -906,6 +962,10 @@ func _build_tech_tree_graph(faction_id: int, roster: Dictionary) -> Control:
 	arrows.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	arrows.card_rects = {}  # building_id -> Rect2 (filled below)
 	arrows.edges = []       # array of [from_id, to_id]
+	if palette.has("arrow"):
+		arrows.line_color = palette["arrow"] as Color
+	if palette.has("arrow_head"):
+		arrows.head_color = palette["arrow_head"] as Color
 	root.add_child(arrows)
 
 	# Place each tier's cards.
@@ -917,7 +977,7 @@ func _build_tech_tree_graph(faction_id: int, roster: Dictionary) -> Control:
 			var card_pos: Vector2 = Vector2(col_x, pad + j * (row_h + row_gap))
 			var card_rect: Rect2 = Rect2(card_pos, Vector2(col_w, row_h))
 			arrows.card_rects[n_data["id"]] = card_rect
-			var card_panel: Control = _build_tech_tree_card(n_data, roster)
+			var card_panel: Control = _build_tech_tree_card(n_data, roster, palette)
 			card_panel.position = card_pos
 			card_panel.size = card_rect.size
 			root.add_child(card_panel)
@@ -933,14 +993,15 @@ func _build_tech_tree_graph(faction_id: int, roster: Dictionary) -> Control:
 	return root
 
 
-func _build_tech_tree_card(n: Dictionary, roster: Dictionary) -> PanelContainer:
+func _build_tech_tree_card(n: Dictionary, roster: Dictionary, palette: Dictionary = {}) -> PanelContainer:
 	## Single building card -- name, cost, and a list of unit chips
 	## for the units this gate unlocks. Compact enough to fit a
-	## 220x150 cell.
+	## 220x150 cell. Honors the faction palette for bg / border so
+	## cards visually match the modal's faction theme.
 	var panel := PanelContainer.new()
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.10, 0.12, 0.16, 0.95)
-	style.border_color = Color(0.55, 0.62, 0.78, 0.85)
+	style.bg_color = (palette.get("node_bg", Color(0.10, 0.12, 0.16, 0.95))) as Color
+	style.border_color = (palette.get("node_border", Color(0.55, 0.62, 0.78, 0.85))) as Color
 	style.border_width_top = 1
 	style.border_width_bottom = 1
 	style.border_width_left = 1
@@ -962,13 +1023,13 @@ func _build_tech_tree_card(n: Dictionary, roster: Dictionary) -> PanelContainer:
 	var name_lbl := Label.new()
 	name_lbl.text = n["name"] as String
 	name_lbl.add_theme_font_size_override("font_size", 15)
-	name_lbl.add_theme_color_override("font_color", Color(0.92, 0.92, 0.78, 1.0))
+	name_lbl.add_theme_color_override("font_color", (palette.get("node_name", Color(0.92, 0.92, 0.78, 1.0))) as Color)
 	col.add_child(name_lbl)
 
 	var cost_lbl := Label.new()
 	cost_lbl.text = n["cost"] as String
 	cost_lbl.add_theme_font_size_override("font_size", 11)
-	cost_lbl.add_theme_color_override("font_color", Color(0.78, 0.85, 0.95, 1.0))
+	cost_lbl.add_theme_color_override("font_color", (palette.get("node_cost", Color(0.78, 0.85, 0.95, 1.0))) as Color)
 	col.add_child(cost_lbl)
 
 	var sep := HSeparator.new()
@@ -1004,7 +1065,7 @@ func _build_tech_tree_card(n: Dictionary, roster: Dictionary) -> PanelContainer:
 			u_btn.flat = true
 			u_btn.focus_mode = Control.FOCUS_NONE
 			u_btn.add_theme_font_size_override("font_size", 12)
-			u_btn.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85, 1.0))
+			u_btn.add_theme_color_override("font_color", (palette.get("unit_text", Color(0.85, 0.85, 0.85, 1.0))) as Color)
 			u_btn.add_theme_color_override("font_hover_color", Color(1.0, 0.95, 0.78, 1.0))
 			u_btn.tooltip_text = _tech_tree_unit_tooltip(unit_stat)
 			col.add_child(u_btn)
@@ -1021,10 +1082,12 @@ class _TechTreeArrowOverlay extends Control:
 	## multi-prereq fans don't collapse onto each other.
 	var card_rects: Dictionary = {}
 	var edges: Array = []
+	var line_color: Color = Color(0.55, 0.78, 1.0, 0.85)
+	var head_color: Color = Color(0.78, 0.92, 1.0, 0.95)
 
 	func _draw() -> void:
-		var color := Color(0.55, 0.78, 1.0, 0.85)
-		var arrow_color := Color(0.78, 0.92, 1.0, 0.95)
+		var color: Color = line_color
+		var arrow_color: Color = head_color
 		for edge_v: Variant in edges:
 			var edge: Array = edge_v as Array
 			if edge.size() < 2:
