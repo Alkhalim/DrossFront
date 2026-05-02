@@ -224,7 +224,16 @@ func _fire_one_shot(damage: int) -> void:
 		return
 	if not _is_valid_target(_target):
 		return
-	_target.take_damage(damage, _building as Node3D)
+	# HQ-defense bonus: HQ MG nests deal +25% damage vs light ground
+	# and light air targets so the corner emplacements remain a real
+	# threat to the early-game scout / drone rush they're meant to
+	# break, even with the Universal role's modest base multipliers.
+	var final_damage: int = damage
+	if profile == &"hq_defense":
+		var target_armor: StringName = _resolve_target_armor(_target)
+		if target_armor == &"light" or target_armor == &"light_air":
+			final_damage = int(round(float(damage) * 1.25))
+	_target.take_damage(final_damage, _building as Node3D)
 
 	var observable: bool = _firing_observable()
 	if not observable:
@@ -333,6 +342,24 @@ var _idle_scan_initialized: bool = false
 const IDLE_SCAN_RANGE_RAD: float = 0.8     # ~46 degrees off-axis sweep
 const IDLE_SCAN_INTERVAL_MIN: float = 3.5
 const IDLE_SCAN_INTERVAL_MAX: float = 6.5
+
+
+func _resolve_target_armor(target: Node3D) -> StringName:
+	## Reads the target's armor_class via its UnitStatResource. Falls
+	## through to "structure" for buildings (structures share that
+	## armor class in CombatTables) so the HQ-defense bonus check
+	## doesn't accidentally flag a building as light-armored.
+	if not target or not is_instance_valid(target):
+		return &"medium"
+	if "stats" in target:
+		var ts: Variant = target.get("stats")
+		if typeof(ts) == TYPE_OBJECT and is_instance_valid(ts):
+			var unit_stats: UnitStatResource = ts as UnitStatResource
+			if unit_stats:
+				return unit_stats.armor_class
+	if target is Building:
+		return &"structure"
+	return &"medium"
 
 
 func _relax_to_idle(delta: float) -> void:
