@@ -41,6 +41,18 @@ var _phase: int = 0
 
 var _cargo_mat: StandardMaterial3D = null
 
+## Stuck detection — workers don't path with NavigationAgent3D, just
+## push toward the target with move_and_slide. When something blocks
+## the line they grind in place forever, especially against tightly-
+## packed AI building walls. _stuck_pos remembers where progress last
+## stalled; when that lasts past STUCK_GIVE_UP_SEC the worker drops
+## the current target and goes IDLE so it can reacquire a different
+## wreck on the next tick.
+const STUCK_GIVE_UP_SEC: float = 4.0
+const STUCK_PROGRESS_EPS: float = 0.6
+var _stuck_check_pos: Vector3 = Vector3.INF
+var _stuck_time: float = 0.0
+
 
 func _ready() -> void:
 	add_to_group("units")
@@ -427,6 +439,8 @@ func _move_toward(target: Vector3, delta: float) -> bool:
 
 	if distance < ARRIVE_THRESHOLD:
 		velocity = Vector3.ZERO
+		_stuck_time = 0.0
+		_stuck_check_pos = Vector3.INF
 		return true
 
 	var direction := to_target / distance
@@ -436,4 +450,35 @@ func _move_toward(target: Vector3, delta: float) -> bool:
 		look_at(global_position + direction, Vector3.UP)
 
 	move_and_slide()
+
+	# Stuck-progress check — sample our position; if it has not moved
+	# more than STUCK_PROGRESS_EPS over STUCK_GIVE_UP_SEC seconds,
+	# bail on the current move target so the state machine can pick
+	# a different wreck rather than grinding forever against a
+	# building wall the AI base packed in too tight.
+	if _stuck_check_pos == Vector3.INF:
+		_stuck_check_pos = global_position
+		_stuck_time = 0.0
+	else:
+		_stuck_time += delta
+		if _stuck_time >= STUCK_GIVE_UP_SEC:
+			var progress: float = global_position.distance_to(_stuck_check_pos)
+			if progress < STUCK_PROGRESS_EPS:
+				# Drop the current move; reset state to IDLE so the
+				# next tick re-scans for a reachable wreck. Returning
+				# true here makes the caller treat the move as
+				# "arrived enough"; the state-machine branches that
+				# call _move_toward all check post-arrival action
+				# (HARVEST / RETURN), so just transitioning to IDLE
+				# from outside is cleanest.
+				state = State.IDLE
+				_target_wreck = null
+				_move_target = Vector3.INF
+				velocity = Vector3.ZERO
+				_stuck_time = 0.0
+				_stuck_check_pos = Vector3.INF
+				return false
+			# Made progress over the window — restart the sample.
+			_stuck_check_pos = global_position
+			_stuck_time = 0.0
 	return false

@@ -1035,7 +1035,12 @@ func _find_clear_placement(desired: Vector3, footprint: Vector3) -> Vector3:
 ## visually packed and gives Crawlers room to drive out of the base. Wider
 ## than the player's BUILD_PLACEMENT_GAP because the AI's foundation grid is
 ## tighter and a Crawler that can't egress its spawn corner is dead weight.
-const PLACEMENT_GAP: float = 5.5
+## A Salvage Crawler is ~5 units wide; the gap needs to clear both half-widths
+## of the neighbour buildings PLUS the Crawler's full width with breathing
+## room, otherwise a freshly-spawned Crawler boxed between an Advanced Foundry
+## and a Generator can't path around either of them. Bumped from 5.5 -> 9.0
+## after a player report showing a Sable Crawler stuck against the HQ.
+const PLACEMENT_GAP: float = 9.0
 
 
 ## How far units / fuel deposits / wrecks must be from the placement footprint.
