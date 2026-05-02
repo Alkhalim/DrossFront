@@ -564,18 +564,20 @@ func _detail_hq_defense_turret() -> void:
 
 
 func _build_hq_corner_mg_nest(corner: Vector3, carries_pivot: bool) -> void:
-	## Sandbag ring + tiny MG. Sandbags are 6 small box segments
-	## arranged in a rough hex around a centre point; the MG is a
-	## stubby barrel poking over the ring.
-	var ring_radius: float = 0.42
-	var bag_h: float = 0.16
+	## Sandbag ring + small MG. Sandbags are 6 box segments arranged
+	## in a rough hex around a centre point; the MG is a stubby
+	## barrel poking over the ring. Sized up ~40% from the original
+	## tiny pass so the nests actually read at typical RTS camera
+	## distance.
+	var ring_radius: float = 0.62
+	var bag_h: float = 0.22
 	for s: int in 6:
 		var ang: float = float(s) / 6.0 * TAU
 		var bx: float = corner.x + cos(ang) * ring_radius
 		var bz: float = corner.z + sin(ang) * ring_radius
 		var bag := MeshInstance3D.new()
 		var bg_box := BoxMesh.new()
-		bg_box.size = Vector3(0.22, bag_h, 0.34)
+		bg_box.size = Vector3(0.32, bag_h, 0.50)
 		bag.mesh = bg_box
 		bag.position = Vector3(bx, corner.y + bag_h * 0.5, bz)
 		# Rotate each sandbag so its long axis follows the ring's
@@ -584,12 +586,12 @@ func _build_hq_corner_mg_nest(corner: Vector3, carries_pivot: bool) -> void:
 		bag.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.30, 0.27, 0.20)))
 		_attach_visual(bag)
 
-	# MG mount -- a tiny tripod base inside the ring.
+	# MG mount -- tripod base inside the ring.
 	var mount := MeshInstance3D.new()
 	var mount_box := BoxMesh.new()
-	mount_box.size = Vector3(0.16, 0.10, 0.16)
+	mount_box.size = Vector3(0.24, 0.14, 0.24)
 	mount.mesh = mount_box
-	mount.position = Vector3(corner.x, corner.y + 0.05, corner.z)
+	mount.position = Vector3(corner.x, corner.y + 0.07, corner.z)
 	mount.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.20, 0.18, 0.16)))
 	_attach_visual(mount)
 
@@ -600,13 +602,13 @@ func _build_hq_corner_mg_nest(corner: Vector3, carries_pivot: bool) -> void:
 	if carries_pivot:
 		var pivot := Node3D.new()
 		pivot.name = "TurretPivot"
-		pivot.position = Vector3(corner.x, corner.y + 0.14, corner.z)
+		pivot.position = Vector3(corner.x, corner.y + 0.20, corner.z)
 		_attach_visual(pivot)
 		turret_pivot = pivot
 		anchor = pivot
 	else:
 		var static_pivot := Node3D.new()
-		static_pivot.position = Vector3(corner.x, corner.y + 0.14, corner.z)
+		static_pivot.position = Vector3(corner.x, corner.y + 0.20, corner.z)
 		# Aim outward from the building centre so the barrel reads
 		# as "covering its arc" rather than all four facing the same
 		# direction.
@@ -616,12 +618,12 @@ func _build_hq_corner_mg_nest(corner: Vector3, carries_pivot: bool) -> void:
 
 	var barrel := MeshInstance3D.new()
 	var bc := CylinderMesh.new()
-	bc.top_radius = 0.035
-	bc.bottom_radius = 0.045
-	bc.height = 0.42
+	bc.top_radius = 0.05
+	bc.bottom_radius = 0.065
+	bc.height = 0.62
 	barrel.mesh = bc
 	barrel.rotation.x = -PI / 2
-	barrel.position = Vector3(0.0, 0.04, -bc.height * 0.5 - 0.05)
+	barrel.position = Vector3(0.0, 0.05, -bc.height * 0.5 - 0.05)
 	barrel.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.14, 0.13, 0.12)))
 	anchor.add_child(barrel)
 
@@ -1768,6 +1770,14 @@ func rebuild_turret_visual(profile: StringName) -> void:
 	## anti_light = quad-barrel rotary; anti_heavy = single thick howitzer;
 	## anti_air = tall slim missile rack with skyward tilt; balanced = the
 	## original cylindrical autocannon.
+	##
+	## HQ defensive profile is hand-built by _build_hq_corner_mg_nest
+	## (sandbag ring + tripod + small barrel) and skips this function
+	## entirely -- otherwise the gun-emplacement-scaled dome
+	## (fs.x * 0.42 = ~3u wide on the HQ) would land on top of the
+	## corner nest as a massive turret cap.
+	if profile == &"hq_defense":
+		return
 	if not turret_pivot:
 		return
 	var fs: Vector3 = stats.footprint_size
