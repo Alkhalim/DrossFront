@@ -2308,20 +2308,24 @@ func _setup_elevation_foundry_belt() -> void:
 	# the plateau's top, so they read as one continuous walkable surface
 	# rather than a separate piece sticking out. The plateau is also
 	# octagonal (corners cut) so the silhouette feels less rectilinear.
+	# Heights bumped 1.5 -> 2.6 so the plateaus visibly tower over
+	# ground units (mech height ~2u). Without the visible step the
+	# "ground units can't see uphill" FOW rule would read as a bug
+	# rather than terrain consequence.
 	var plateaus: Array[Dictionary] = [
 		# Central plateau — the contested high ground. Larger footprint
 		# so a Bulwark squad can comfortably perch on it. Ramps N + S.
 		{"center": Vector3(0.0, 0.0, 25.0), "top": Vector2(28.0, 18.0),
-		 "height": 1.5, "ramps": ["N", "S"]},
+		 "height": 2.6, "ramps": ["N", "S"]},
 		# Southern (AI-side) plateau.
 		{"center": Vector3(0.0, 0.0, -75.0), "top": Vector2(24.0, 14.0),
-		 "height": 1.5, "ramps": ["S"]},
+		 "height": 2.6, "ramps": ["S"]},
 		# East ridge — wider+longer, ramp on east side toward back-door.
 		{"center": Vector3(72.0, 0.0, 0.0), "top": Vector2(12.0, 22.0),
-		 "height": 1.5, "ramps": ["E"]},
+		 "height": 2.6, "ramps": ["E"]},
 		# West ridge mirror.
 		{"center": Vector3(-72.0, 0.0, 0.0), "top": Vector2(12.0, 22.0),
-		 "height": 1.5, "ramps": ["W"]},
+		 "height": 2.6, "ramps": ["W"]},
 	]
 	for p: Dictionary in plateaus:
 		_spawn_walkable_plateau(
@@ -2336,11 +2340,13 @@ func _setup_elevation_ashplains() -> void:
 	# Main ridge dominates the central plain — much wider than before so
 	# multiple squads can comfortably hold it. Three ramps (N + S + E)
 	# spread access points across both teams' approach lanes.
+	# Heights bumped (1.4/2.0 -> 2.4/3.0) so plateaus visibly tower
+	# over ground units, making the FOW LOS gate believable.
 	var plateaus: Array[Dictionary] = [
 		{"center": Vector3(0.0, 0.0, -8.0), "top": Vector2(90.0, 14.0),
-		 "height": 2.0, "ramps": ["N", "S", "E"]},
+		 "height": 3.0, "ramps": ["N", "S", "E"]},
 		{"center": Vector3(0.0, 0.0, 38.0), "top": Vector2(28.0, 10.0),
-		 "height": 1.4, "ramps": ["N"]},
+		 "height": 2.4, "ramps": ["N"]},
 	]
 	for p: Dictionary in plateaus:
 		_spawn_walkable_plateau(
@@ -2370,6 +2376,12 @@ func _spawn_walkable_plateau(center: Vector3, top_size: Vector2, height: float, 
 		Vector2(center.x + hx, center.z + hz),
 		Vector2(center.x - hx, center.z + hz),
 	]))
+	# Tell the FOW which cells sit on the plateau top so ground
+	# observers' vision can't reveal them. Ground LOS gates on
+	# plateau elevation; aircraft + plateau-top observers bypass.
+	var fow: Node = get_node_or_null("FogOfWar")
+	if fow and fow.has_method("register_plateau_footprint"):
+		fow.call("register_plateau_footprint", center, top_size)
 
 	var root := StaticBody3D.new()
 	root.collision_layer = 4

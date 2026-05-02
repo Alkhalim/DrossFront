@@ -34,6 +34,48 @@ const GRID_SIZE: int = int((MAP_HALF_EXTENT * 2.0) / CELL_SIZE)
 
 const FOW_REFRESH_HZ: float = 5.0
 
+## Plateau-top elevation flag per cell. 1 = cell sits on top of a
+## walkable plateau; 0 = ground / open. Set by the arena setup via
+## register_plateau_footprint() once plateau geometry is placed.
+## Used during _stamp_visibility -- ground observers' vision skips
+## plateau-top cells (they can't see uphill); plateau-top observers
+## and aircraft pass through the gate.
+var _plateau_cells: PackedByteArray = PackedByteArray()
+
+## Y threshold above which an observer counts as "elevated" for
+## plateau LOS purposes. Plateaus are 2.5-3u tall in v2, so anything
+## standing above ~1.0u is on top of one (or in the air).
+const ELEVATED_OBSERVER_Y: float = 1.0
+
+## Sight bonus multiplier for elevated observers. +30% reads as a
+## meaningful "high ground advantage" without making plateau-top
+## squads functionally omniscient.
+const ELEVATED_SIGHT_BONUS: float = 1.30
+
+
+func register_plateau_footprint(centre: Vector3, top_size: Vector2) -> void:
+	## Marks every cell whose centre falls inside the AABB
+	## [centre.xz - top_size/2, centre.xz + top_size/2] as plateau-top.
+	## Called by arena setup once a walkable plateau is placed; the
+	## ground footprint defaults to 0 (non-plateau).
+	if _plateau_cells.size() != _cells.size():
+		_plateau_cells.resize(_cells.size())
+	var hx: float = top_size.x * 0.5
+	var hz: float = top_size.y * 0.5
+	var min_x: float = centre.x - hx
+	var max_x: float = centre.x + hx
+	var min_z: float = centre.z - hz
+	var max_z: float = centre.z + hz
+	# Convert AABB to cell range (inclusive).
+	var c_min: Vector2i = _world_to_cell(Vector3(min_x, 0.0, min_z))
+	var c_max: Vector2i = _world_to_cell(Vector3(max_x, 0.0, max_z))
+	for cz: int in range(c_min.y, c_max.y + 1):
+		for cx: int in range(c_min.x, c_max.x + 1):
+			if cx < 0 or cx >= GRID_SIZE or cz < 0 or cz >= GRID_SIZE:
+				continue
+			_plateau_cells[_cell_index(cx, cz)] = 1
+
+
 ## Material overlay applied to each MeshInstance3D inside an entity
 ## sitting in an explored-but-not-currently-visible cell. Renders
 ## on top of the regular material with the fog tint, so buildings /
@@ -130,6 +172,10 @@ func _ready() -> void:
 	_cells.resize(GRID_SIZE * GRID_SIZE)
 	for i: int in _cells.size():
 		_cells[i] = CellState.UNEXPLORED
+	# Plateau-elevation grid pre-sized so register_plateau_footprint
+	# can stamp into it without an additional resize.
+	if _plateau_cells.size() != _cells.size():
+		_plateau_cells.resize(_cells.size())
 	_registry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
 	# Full first pass on enter so cells around the local-player base
 	# are visible the moment the HUD wakes up.
@@ -235,8 +281,16 @@ func _recompute_visibility() -> void:
 			continue
 		if "alive_count" in node and (node.get("alive_count") as int) <= 0:
 			continue
+		var node3d: Node3D = node as Node3D
 		var radius: float = _unit_sight_radius(node)
-		_stamp_visibility((node as Node3D).global_position, radius)
+		var is_air: bool = node.is_in_group("aircraft")
+		var is_elevated: bool = is_air or node3d.global_position.y >= ELEVATED_OBSERVER_Y
+		# +30% radius for elevated observers (plateau-top units +
+		# aircraft) so high ground actually translates to a longer
+		# spotting range.
+		if is_elevated and not is_air:
+			radius *= ELEVATED_SIGHT_BONUS
+		_stamp_visibility(node3d.global_position, radius, is_elevated, is_air)
 
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(node):
@@ -249,7 +303,9 @@ func _recompute_visibility() -> void:
 		# (is_constructed flips true).
 		if "is_constructed" in node and not (node.get("is_constructed") as bool):
 			continue
-		_stamp_visibility((node as Node3D).global_position, BUILDING_SIGHT_RADIUS)
+		var b3d: Node3D = node as Node3D
+		var b_elevated: bool = b3d.global_position.y >= ELEVATED_OBSERVER_Y
+		_stamp_visibility(b3d.global_position, BUILDING_SIGHT_RADIUS, b_elevated, false)
 
 	# Temporary reveals — satellite-crash flares, scan pings, etc.
 	# Drop expired entries first; the rest stamp visibility just
@@ -404,12 +460,22 @@ func _unit_sight_radius(node: Node) -> float:
 	return SIGHT_RADIUS_BY_TIER.get(stats.sight_tier, DEFAULT_SIGHT_RADIUS) as float
 
 
-func _stamp_visibility(world_pos: Vector3, radius: float) -> void:
+func _stamp_visibility(world_pos: Vector3, radius: float, observer_elevated: bool = false, observer_aircraft: bool = false) -> void:
 	# Compute the cell-bounding box of the radius and walk every
 	# cell inside it, marking those whose centre falls inside the
 	# circle as VISIBLE. Square -> circle filter is cheap because
 	# the bounding-box loop is small (sight radius capped well
 	# below the map size).
+	#
+	# Plateau LOS: ground-level observers can't reveal cells that
+	# sit on top of a plateau -- the elevation breaks line of
+	# sight from below. Aircraft and observers already standing on
+	# a plateau bypass the gate. Temporary reveals (sat crash
+	# flares, ping pong) reveal regardless because they represent
+	# events, not unit vision.
+	var has_plateau_data: bool = _plateau_cells.size() == _cells.size()
+	var skip_plateau_cells: bool = has_plateau_data and not observer_elevated and not observer_aircraft
+
 	var cell_radius: int = int(ceil(radius / CELL_SIZE))
 	var c: Vector2i = _world_to_cell(world_pos)
 	var x0: int = maxi(c.x - cell_radius, 0)
@@ -417,10 +483,6 @@ func _stamp_visibility(world_pos: Vector3, radius: float) -> void:
 	var z0: int = maxi(c.y - cell_radius, 0)
 	var z1: int = mini(c.y + cell_radius, GRID_SIZE - 1)
 	var radius_sq: float = radius * radius
-	# Cell N centre = N * CELL_SIZE - MAP_HALF_EXTENT (matches
-	# _world_to_cell's round-based mapping). The previous
-	# +CELL_SIZE * 0.5 offset stacked with floor's bias and pulled
-	# the visibility footprint half a cell off-target.
 	for cz: int in range(z0, z1 + 1):
 		for cx: int in range(x0, x1 + 1):
 			var cell_centre := Vector3(
@@ -428,5 +490,9 @@ func _stamp_visibility(world_pos: Vector3, radius: float) -> void:
 				world_pos.y,
 				float(cz) * CELL_SIZE - MAP_HALF_EXTENT,
 			)
-			if cell_centre.distance_squared_to(world_pos) <= radius_sq:
-				_cells[_cell_index(cx, cz)] = CellState.VISIBLE
+			if cell_centre.distance_squared_to(world_pos) > radius_sq:
+				continue
+			var idx: int = _cell_index(cx, cz)
+			if skip_plateau_cells and _plateau_cells[idx] == 1:
+				continue
+			_cells[idx] = CellState.VISIBLE
