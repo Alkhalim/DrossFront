@@ -10,9 +10,30 @@ extends Node
 ## universal one — both pools are eligible for the next pick — so the
 ## faction music dominates without repeating endlessly.
 
-const MUSIC_DIR_UNIVERSAL: String = "res://assets/audio/Music/Universal"
-const MUSIC_DIR_ANVIL: String = "res://assets/audio/Music/Anvil"
-const MUSIC_DIR_SABLE: String = "res://assets/audio/Music/Sable"
+## Track manifests are hard-coded rather than discovered via
+## DirAccess. Runtime directory scans on res:// paths look fine
+## in the editor (it sees the project filesystem) but return
+## nothing in exported builds — Godot's .pck doesn't expose the
+## same directory listing for imported audio, so DirAccess
+## iterates an empty or obscured set and the playlist comes back
+## empty. Listing the paths explicitly forces each file through
+## the static-load path, which DOES survive exporting (the
+## resource loader follows the .import chain per path). When
+## adding a new track, drop it in the folder AND add the path
+## here.
+const MUSIC_TRACKS_UNIVERSAL: Array[String] = [
+	"res://assets/audio/Music/Universal/Steel Order.mp3",
+]
+const MUSIC_TRACKS_ANVIL: Array[String] = [
+	"res://assets/audio/Music/Anvil/Red Alert March.mp3",
+	"res://assets/audio/Music/Anvil/Red Parade Sector.mp3",
+	"res://assets/audio/Music/Anvil/Red Tundra March.mp3",
+]
+const MUSIC_TRACKS_SABLE: Array[String] = [
+	"res://assets/audio/Music/Sable/Silent Ops.mp3",
+	"res://assets/audio/Music/Sable/Silent Spec Ops.mp3",
+	"res://assets/audio/Music/Sable/Silent Spec Ops (1).mp3",
+]
 
 ## Playback volume on the music bus. -16 dB drops another ~20%
 ## from the previous -14 default so the score sits well behind
@@ -88,33 +109,26 @@ func _build_playlist(faction_id: int) -> Array[AudioStream]:
 	var out: Array[AudioStream] = []
 	# Universal tracks always go in so even in-match the menu themes
 	# break up the faction motif.
-	out.append_array(_load_dir(MUSIC_DIR_UNIVERSAL))
+	out.append_array(_load_paths(MUSIC_TRACKS_UNIVERSAL))
 	if faction_id == 0:
-		out.append_array(_load_dir(MUSIC_DIR_ANVIL))
+		out.append_array(_load_paths(MUSIC_TRACKS_ANVIL))
 	elif faction_id == 1:
-		out.append_array(_load_dir(MUSIC_DIR_SABLE))
-	# Universal-only fallback when the requested faction folder is
+		out.append_array(_load_paths(MUSIC_TRACKS_SABLE))
+	# Universal-only fallback when the requested faction list is
 	# empty or the id is out of range.
 	if out.is_empty():
-		out.append_array(_load_dir(MUSIC_DIR_UNIVERSAL))
+		out.append_array(_load_paths(MUSIC_TRACKS_UNIVERSAL))
 	return out
 
 
-func _load_dir(path: String) -> Array[AudioStream]:
+func _load_paths(paths: Array[String]) -> Array[AudioStream]:
 	var streams: Array[AudioStream] = []
-	var dir: DirAccess = DirAccess.open(path)
-	if not dir:
-		return streams
-	dir.list_dir_begin()
-	var entry: String = dir.get_next()
-	while entry != "":
-		# Skip the .import sidecars — they're metadata, not playable.
-		if not dir.current_is_dir() and not entry.ends_with(".import"):
-			var full: String = "%s/%s" % [path, entry]
-			var stream: AudioStream = load(full) as AudioStream
-			if stream:
-				streams.append(stream)
-		entry = dir.get_next()
+	for p: String in paths:
+		var stream: AudioStream = load(p) as AudioStream
+		if stream:
+			streams.append(stream)
+		else:
+			push_warning("MusicManager: failed to load %s" % p)
 	return streams
 
 
