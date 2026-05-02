@@ -48,6 +48,48 @@ func ping(world_pos: Vector3, color: Color = Color.WHITE) -> void:
 	})
 
 
+func _draw_fog_tint(fow: FogOfWar, map_origin: Vector2, map_size: Vector2, half_world: float) -> void:
+	## One filled rect per FOW cell, drawn directly in the minimap's
+	## map area. Per-cell px size is derived from the FOW grid size.
+	## Iterates the flat byte array linearly so we hit each cell at
+	## most once.
+	var grid_size: int = fow.get_grid_size()
+	if grid_size <= 0:
+		return
+	var cells: PackedByteArray = fow.get_cells()
+	var cell_px: Vector2 = map_size / float(grid_size)
+	# Tint world fits the same MAP_WORLD_SIZE the entity loops use.
+	# half_world is unused for the fog tint (cells map directly to
+	# the minimap rect 1:1), but kept in the signature for symmetry.
+	var _hw: float = half_world  # quiet the unused-arg warning
+	for cz: int in grid_size:
+		for cx: int in grid_size:
+			var i: int = cz * grid_size + cx
+			if i >= cells.size():
+				continue
+			var alpha: float = 0.0
+			match cells[i]:
+				FogOfWar.CellState.UNEXPLORED:
+					alpha = 0.95
+				FogOfWar.CellState.EXPLORED:
+					alpha = 0.55
+				_:
+					continue
+			var px := Vector2(
+				map_origin.x + float(cx) * cell_px.x,
+				# World +Z (south) maps to minimap +Y (down) — matches
+				# _world_to_map's convention so fog overlay aligns
+				# with where entities are actually drawn.
+				map_origin.y + float(cz) * cell_px.y,
+			)
+			# Bump rect size by ~0.5 px so adjacent cell rects don't
+			# leave hairline gaps at fractional cell sizes.
+			draw_rect(
+				Rect2(px, cell_px + Vector2(0.5, 0.5)),
+				Color(0.02, 0.02, 0.04, alpha)
+			)
+
+
 func _color_for_owner(owner_idx: int) -> Color:
 	# Prefer the PlayerRegistry's perspective rule so 2v2 allies show in
 	# their own tint instead of generic enemy red. Falls back to the
@@ -110,13 +152,34 @@ func _draw() -> void:
 	draw_rect(Rect2(map_origin, map_size), Color(0.08, 0.08, 0.07, 0.85))
 	draw_rect(Rect2(map_origin, map_size), Color(0.3, 0.3, 0.3, 0.55), false, 1.0)
 
+	# Cache FOW once for the rest of the draw — every entity loop
+	# below filters through it so the minimap shows what the player
+	# actually knows, not ground truth.
+	var fow: FogOfWar = get_tree().current_scene.get_node_or_null("FogOfWar") as FogOfWar
+
+	# Fog tint over the minimap background — one rect per cell of
+	# the FOW grid. UNEXPLORED cells render fully opaque black so
+	# the player sees a hard edge at the explored boundary;
+	# EXPLORED cells render a darker tint so the player still
+	# reads "this terrain is known but I have no live info." Drawn
+	# AFTER the background and BEFORE entities so dots overlay the
+	# fog (visible cells are no-draw; explored buildings render
+	# under the explored tint, which softens but doesn't hide).
+	if fow:
+		_draw_fog_tint(fow, map_origin, map_size, half_world)
+
 	# Draw buildings
 	var buildings: Array[Node] = get_tree().get_nodes_in_group("buildings")
 	for node: Node in buildings:
 		if not is_instance_valid(node):
 			continue
+		var b_owner: int = node.get("owner_id") as int
+		# Enemy buildings stick around once explored (AoE-style
+		# memory). Friendly + ally buildings always show.
+		if fow and b_owner != 0 and not fow.is_explored_world((node as Node3D).global_position):
+			continue
 		var pos: Vector2 = _world_to_map(node.global_position, map_size, half_world)
-		var color: Color = _color_for_owner(node.get("owner_id") as int)
+		var color: Color = _color_for_owner(b_owner)
 		draw_rect(Rect2(pos - Vector2(BUILDING_SIZE / 2.0, BUILDING_SIZE / 2.0), Vector2(BUILDING_SIZE, BUILDING_SIZE)), color)
 
 	# Draw fuel deposits
@@ -145,10 +208,14 @@ func _draw() -> void:
 		])
 		draw_colored_polygon(pts, color)
 
-	# Draw wrecks
+	# Draw wrecks — only those in EXPLORED or VISIBLE cells.
+	# Unexplored map cells should be totally featureless on the
+	# minimap, so the player can't scout salvage piles for free.
 	var wrecks: Array[Node] = get_tree().get_nodes_in_group("wrecks")
 	for node: Node in wrecks:
 		if not is_instance_valid(node):
+			continue
+		if fow and not fow.is_explored_world((node as Node3D).global_position):
 			continue
 		var pos: Vector2 = _world_to_map(node.global_position, map_size, half_world)
 		draw_circle(pos, 2.0, _wreck_color)
@@ -171,6 +238,12 @@ func _draw() -> void:
 				var u_owner: int = node.get("owner_id") as int
 				if u_owner != 0:  # only hide enemies; show our own dim
 					continue
+		# FOW filter — enemy unit dots only render when CURRENTLY
+		# in vision (not just explored). Friendly + ally dots
+		# always show.
+		var unit_owner: int = node.get("owner_id") as int
+		if fow and unit_owner != 0 and not fow.is_visible_world((node as Node3D).global_position):
+			continue
 		var pos: Vector2 = _world_to_map(node.global_position, map_size, half_world)
 		var color: Color = _color_for_owner(node.get("owner_id") as int)
 		var is_air: bool = node.is_in_group("aircraft")
