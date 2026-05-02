@@ -1479,6 +1479,55 @@ func _detail_advanced_armory() -> void:
 	dish.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.30, 0.28, 0.32)))
 	_attach_visual(dish)
 
+	# Tall comm spire on the OPPOSITE corner of the bay -- balances
+	# the dish's right-side mast and gives the advanced armory a
+	# distinct vertical silhouette beyond just "box with skylights".
+	var spire := MeshInstance3D.new()
+	var spire_box := BoxMesh.new()
+	spire_box.size = Vector3(0.10, fs.y * 1.10, 0.10)
+	spire.mesh = spire_box
+	spire.position = Vector3(-fs.x * 0.22, fs.y + bay_box.size.y + spire_box.size.y * 0.5, -fs.z * 0.10)
+	spire.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.16, 0.14, 0.16)))
+	_attach_visual(spire)
+	# Two coil rings stacked on the spire -- evoke the tesla-coil
+	# look that says "research building".
+	for ring_i: int in 2:
+		var ring := MeshInstance3D.new()
+		var ring_torus := TorusMesh.new()
+		ring_torus.inner_radius = 0.18
+		ring_torus.outer_radius = 0.24
+		ring_torus.rings = 18
+		ring_torus.ring_segments = 6
+		ring.mesh = ring_torus
+		var ry: float = fs.y + bay_box.size.y + 0.30 + float(ring_i) * 0.50
+		ring.position = Vector3(-fs.x * 0.22, ry, -fs.z * 0.10)
+		ring.set_surface_override_material(0, _detail_emissive_mat(Color(0.78, 0.45, 1.0), 1.0))
+		_attach_visual(ring)
+	# Violet pulse beacon at the spire tip.
+	var beacon := MeshInstance3D.new()
+	var beacon_sphere := SphereMesh.new()
+	beacon_sphere.radius = 0.10
+	beacon_sphere.height = 0.20
+	beacon.mesh = beacon_sphere
+	beacon.position = Vector3(-fs.x * 0.22, fs.y + bay_box.size.y + spire_box.size.y + 0.05, -fs.z * 0.10)
+	beacon.set_surface_override_material(0, _detail_emissive_mat(Color(0.78, 0.45, 1.0), 2.4))
+	_attach_visual(beacon)
+
+	# Optics ports along the front bay wall -- small extruded
+	# cylinders with violet "eyes", reading as scanning equipment.
+	for op_i: int in 3:
+		var port := MeshInstance3D.new()
+		var port_cyl := CylinderMesh.new()
+		port_cyl.top_radius = 0.06
+		port_cyl.bottom_radius = 0.06
+		port_cyl.height = 0.08
+		port.mesh = port_cyl
+		port.rotation.x = PI * 0.5
+		var px: float = (float(op_i) - 1.0) * bay_box.size.x * 0.30
+		port.position = Vector3(px, fs.y + bay_box.size.y * 0.55, -bay_box.size.z * 0.5 - 0.04)
+		port.set_surface_override_material(0, _detail_emissive_mat(Color(0.78, 0.45, 1.0), 1.6))
+		_attach_visual(port)
+
 	# Loading dock -- same recessed-with-interior treatment as the
 	# basic armory but with violet accent lights so the upgraded
 	# armory's tech-violet identity reads through the entrance too.
