@@ -13,8 +13,8 @@ const CARRY_CAPACITY: int = 30
 const ARRIVE_THRESHOLD: float = 1.5
 const MAX_HP: int = 100
 
-const PLAYER_COLOR := Color(0.15, 0.45, 0.9, 1.0)
-const ENEMY_COLOR := Color(0.85, 0.2, 0.15, 1.0)
+const PLAYER_COLOR := Color(0.08, 0.25, 0.85, 1.0)
+const ENEMY_COLOR := Color(0.80, 0.10, 0.10, 1.0)
 
 ## Combat compatibility — workers register as 1-member units so the same
 ## targeting / projectile / damage code that handles squads also works here.

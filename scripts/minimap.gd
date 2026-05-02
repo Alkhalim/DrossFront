@@ -7,8 +7,8 @@ const DOT_SIZE: float = 3.0
 const BUILDING_SIZE: float = 5.0
 const DEPOSIT_SIZE: float = 4.0
 
-var _player_color := Color(0.2, 0.5, 1.0, 1.0)
-var _enemy_color := Color(1.0, 0.2, 0.15, 1.0)
+var _player_color := Color(0.08, 0.25, 0.85, 1.0)
+var _enemy_color := Color(0.80, 0.10, 0.10, 1.0)
 var _neutral_color := Color(0.85, 0.7, 0.3, 1.0)
 var _wreck_color := Color(0.4, 0.35, 0.25, 0.5)
 

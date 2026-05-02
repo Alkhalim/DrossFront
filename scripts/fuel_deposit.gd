@@ -45,8 +45,8 @@ var _capture_label: Label3D = null
 var _owner_indicator: MeshInstance3D = null
 
 const NEUTRAL_COLOR := Color(0.6, 0.5, 0.3, 1.0)
-const PLAYER_COLOR := Color(0.10, 0.32, 1.0, 1.0)
-const ENEMY_COLOR := Color(0.9, 0.3, 0.2, 1.0)
+const PLAYER_COLOR := Color(0.08, 0.25, 0.85, 1.0)
+const ENEMY_COLOR := Color(0.80, 0.10, 0.10, 1.0)
 const CONTESTED_COLOR := Color(0.9, 0.7, 0.1, 1.0)
 
 

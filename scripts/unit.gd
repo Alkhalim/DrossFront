@@ -188,8 +188,8 @@ var _deflect_sign: float = 0.0
 var _deflect_angle_deg: float = 50.0
 
 ## Player colors.
-const PLAYER_COLOR := Color(0.15, 0.45, 0.9, 1.0)
-const ENEMY_COLOR := Color(0.85, 0.2, 0.15, 1.0)
+const PLAYER_COLOR := Color(0.08, 0.25, 0.85, 1.0)
+const ENEMY_COLOR := Color(0.80, 0.10, 0.10, 1.0)
 const NEUTRAL_COLOR := Color(0.85, 0.7, 0.3, 1.0)
 ## Anvil faction identity band — additive accent layered on top of the
 ## team-color stripe per READABILITY_PASS.md §Task 7. When other factions

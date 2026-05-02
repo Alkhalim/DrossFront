@@ -23,10 +23,10 @@ enum Relation { SELF, ALLY, ENEMY, NEUTRAL }
 ## Self uses the local player's `player_color`; ally / enemy / neutral
 ## are perspective colors picked to read at a glance regardless of what
 ## faction shows underneath.
-const COLOR_ALLY: Color = Color(0.3, 0.85, 0.4, 1.0)        # green
-const COLOR_ENEMY: Color = Color(0.85, 0.2, 0.15, 1.0)      # red
+const COLOR_ALLY: Color = Color(0.18, 0.72, 0.22, 1.0)      # green (saturated, slightly darker)
+const COLOR_ENEMY: Color = Color(0.80, 0.10, 0.10, 1.0)     # red (saturated, slightly darker)
 const COLOR_NEUTRAL: Color = Color(0.85, 0.7, 0.3, 1.0)     # amber
-const COLOR_SELF_FALLBACK: Color = Color(0.10, 0.32, 1.0, 1.0)  # saturated royal blue (away from Sable cyan)
+const COLOR_SELF_FALLBACK: Color = Color(0.08, 0.25, 0.85, 1.0)  # saturated royal blue (slightly darker, distinct from Sable cyan)
 
 ## Whose perspective drives `get_relation` / `get_perspective_color`. For
 ## now this is the local human player; observer / split-screen modes can

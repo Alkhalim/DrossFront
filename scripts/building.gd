@@ -51,8 +51,8 @@ var resource_manager: Node = null
 @onready var _collision: CollisionShape3D = $CollisionShape3D as CollisionShape3D
 @onready var _spawn_marker: Marker3D = $SpawnPoint as Marker3D
 
-const PLAYER_COLOR := Color(0.10, 0.32, 1.0, 1.0)
-const ENEMY_COLOR := Color(0.85, 0.2, 0.15, 1.0)
+const PLAYER_COLOR := Color(0.08, 0.25, 0.85, 1.0)
+const ENEMY_COLOR := Color(0.80, 0.10, 0.10, 1.0)
 const NEUTRAL_COLOR := Color(0.85, 0.7, 0.3, 1.0)
 
 
