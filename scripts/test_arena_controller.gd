@@ -1461,7 +1461,10 @@ func _setup_fuel_deposits() -> void:
 		# reach two of them with covered approaches.
 		positions = [
 			Vector3(0.0, 0.0, 80.0),    # Player safe deposit
-			Vector3(0.0, 0.0, -80.0),   # Enemy safe deposit
+			# Was (0, 0, -80) -- sat inside the south plateau's body
+			# (z range -82..-68). Moved to z=-95 so it's clear of the
+			# plateau and its south ramp foot.
+			Vector3(0.0, 0.0, -95.0),   # Enemy safe deposit
 			Vector3(55.0, 0.0, 0.0),    # East flank contested
 			Vector3(-55.0, 0.0, 0.0),   # West flank contested
 		]
@@ -1528,7 +1531,11 @@ func _deposit_positions_ashplains_1v1() -> Array[Vector3]:
 	return [
 		Vector3(0, 0, 80),     # Player safe (north)
 		Vector3(0, 0, -80),    # AI safe (south)
-		Vector3(0, 0, 0),      # Central — the primary objective, Heavy patrol
+		# Was (0, 0, 0) -- sat under the central plateau's N ramp
+		# (which extends to ~z=12.5). Moved to z=20 so the deposit
+		# lives in the open corridor between the central and northern
+		# plateaus, still in the contested mid-zone.
+		Vector3(0, 0, 20),     # Central — the primary objective, Heavy patrol
 		# Additional flank deposits — give the player meaningful
 		# expansion targets beyond the safe + central. Mid-z so they
 		# sit between safe and central, encouraging scouting pushes.
@@ -1547,7 +1554,9 @@ func _deposit_positions_ashplains_2v2() -> Array[Vector3]:
 		Vector3(30, 0, 70),     # Team A east safe
 		Vector3(-30, 0, -70),   # Team B west safe
 		Vector3(30, 0, -70),    # Team B east safe
-		Vector3(0, 0, 0),       # Central — primary objective
+		# Same (0, 0, 0) -> (0, 0, 20) move as 1v1 — central plateau's
+		# N ramp foot sits over the previous spot.
+		Vector3(0, 0, 20),      # Central — primary objective
 		Vector3(70, 0, 0),      # East flank
 		Vector3(-70, 0, 0),     # West flank
 	]
