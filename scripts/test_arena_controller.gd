@@ -817,6 +817,14 @@ func _setup_player() -> void:
 	var settings_for_tut: Node = get_node_or_null("/root/MatchSettings")
 	var in_tutorial: bool = settings_for_tut and settings_for_tut.get("tutorial_mode")
 
+	# Tutorial seed bonus — 100 extra salvage on top of the
+	# default 300 so the player can comfortably afford the
+	# Foundry + Yard + first round of Reactors that the BASE +
+	# REACTORS objectives ask for. Non-tutorial play keeps the
+	# vanilla starting purse.
+	if in_tutorial and resource_manager and resource_manager.has_method("add_salvage"):
+		resource_manager.add_salvage(100)
+
 	# Mark the HQ as already constructed
 	var hq: Building = $PlayerHQ as Building
 	var hq_offset: Vector3 = Vector3.ZERO
