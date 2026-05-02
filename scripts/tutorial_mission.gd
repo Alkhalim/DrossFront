@@ -519,6 +519,21 @@ func _tick_ally_behaviour(delta: float) -> void:
 		if _ally_follow_accum < ALLY_FOLLOW_INTERVAL_SEC:
 			return
 		_ally_follow_accum = 0.0
+		# Combat override — once anyone on either friendly side
+		# is engaged with an enemy, the strike force commits and
+		# attack-moves straight at the enclave instead of trailing
+		# the player's centroid. Reason: when the player produces
+		# a fresh unit at base mid-fight the centroid jumps
+		# rearward, and the trail-follow logic was visibly pulling
+		# the allies BACKWARDS out of an active engagement.
+		if _any_friendly_in_combat():
+			for u_atk: Node3D in _ally_units:
+				var combat_atk: Node = u_atk.get_node_or_null("CombatComponent")
+				if combat_atk and combat_atk.has_method("command_attack_move"):
+					combat_atk.call("command_attack_move", ENEMY_ENCLAVE_CENTRE)
+				elif u_atk.has_method("command_move"):
+					u_atk.call("command_move", ENEMY_ENCLAVE_CENTRE)
+			return
 		# Re-target: trail behind the player's army on its push
 		# toward the enclave. Aim at a point just behind the
 		# player centroid (offset toward the player's spawn) so
@@ -540,6 +555,31 @@ func _tick_ally_behaviour(delta: float) -> void:
 		for u: Node3D in _ally_units:
 			if u.has_method("command_move"):
 				u.call("command_move", target)
+
+
+func _any_friendly_in_combat() -> bool:
+	## True when ANY friendly unit (player- or ally-owned) has a
+	## live target in its CombatComponent — i.e. shots are flying
+	## somewhere in the strike force right now. Cheap walk; bails
+	## on the first engaged unit found.
+	for n: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(n):
+			continue
+		var owner_id: int = (n.get("owner_id") as int) if "owner_id" in n else -1
+		if owner_id != 0 and owner_id != 1:
+			continue
+		if "alive_count" in n and (n.get("alive_count") as int) <= 0:
+			continue
+		var combat: Node = n.get_node_or_null("CombatComponent")
+		if not combat:
+			continue
+		var tgt: Node = combat.get("_current_target") as Node
+		if tgt and is_instance_valid(tgt):
+			return true
+		var forced: Node = combat.get("forced_target") as Node
+		if forced and is_instance_valid(forced):
+			return true
+	return false
 
 
 func _ally_centroid() -> Vector3:
