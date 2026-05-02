@@ -2346,6 +2346,30 @@ func _build_unit_stat_sheet(unit: Node3D, _include_cost: bool = false) -> String
 	return _build_stat_sheet([row_defense, row_combat, row_mobility, row_attack_bonus])
 
 
+func _role_matchup_chips(role_tag: StringName) -> Array:
+	## Same shape as `_attack_bonus_chips` but takes a raw role tag --
+	## used by combat buildings (gun emplacement / SAM site / HQ defense)
+	## to surface their role multipliers without requiring a
+	## UnitStatResource. Anti-air roles drop the ground-class chips so
+	## SAMs read as 'air specialist', and ground roles drop air chips
+	## so the row stays compact.
+	var out: Array = []
+	if role_tag == &"":
+		return out
+	var classes: Array[StringName]
+	var labels: Array[String]
+	if role_tag == &"AAir" or role_tag == &"AAir_Light":
+		classes = [&"light_air", &"heavy_air"]
+		labels = ["LtAir", "HvAir"]
+	else:
+		classes = [&"light", &"medium", &"heavy", &"structure"]
+		labels = ["Lt", "Md", "Hv", "Struct"]
+	for i: int in classes.size():
+		var mult: float = CombatTables.get_role_modifier(role_tag, classes[i])
+		out.append(_stat_chip("vs " + labels[i], "%.1fx" % mult, STAT_LABEL_COLOR_DAMAGE))
+	return out
+
+
 func _attack_bonus_chips(stats: UnitStatResource) -> Array:
 	## Builds a chip row showing the primary weapon's role-vs-armor
 	## multipliers. Reads as "vs Light 1.0x | vs Heavy 0.3x | ..."
@@ -2415,6 +2439,14 @@ func _build_building_stat_sheet(building: Node3D, bstats: BuildingStatResource, 
 			_stat_chip("Range", "%.0fu" % t_rng, STAT_LABEL_COLOR_RANGE),
 		]
 		rows.append(combat_row)
+		# Role-vs-armor matchups for the turret's current profile -- so
+		# the player can see why a SAM site shreds aircraft but barely
+		# scratches mechs, or why an AP emplacement under-performs vs
+		# heavy armor. Mirrors the unit panel's attack-bonus row.
+		var role_tag: StringName = (turret.call("get_role") as StringName) if turret.has_method("get_role") else &"Universal"
+		var bonus_row: Array = _role_matchup_chips(role_tag)
+		if not bonus_row.is_empty():
+			rows.append(bonus_row)
 
 	if not bstats.producible_units.is_empty():
 		var produces_row: Array = [
