@@ -22,12 +22,12 @@ const RESPAWN_INTERVAL_MAX: float = 240.0
 ## controlling one swings the whole match.
 const SATELLITE_SALVAGE: int = 220
 
-## Microchip payload range — 1 / 2 / 3 chips per pile, biased
-## low so the average match drops "enough chips for one to two
-## branch upgrades" per spawn cycle. With 2 chips per branch
-## commit, three chips lets a savvy player snag a research +
-## save the leftover.
-const SATELLITE_CHIPS_MIN: int = 1
+## Microchip payload range — 2 or 3 chips per pile. With 2 chips
+## per branch commit, that's "exactly one commit's worth, sometimes
+## a chip leftover for the next" -- meaningful payoff for racing
+## the satellite without the bottom of the range (1) feeling like a
+## wasted trip.
+const SATELLITE_CHIPS_MIN: int = 2
 const SATELLITE_CHIPS_MAX: int = 3
 
 ## Pile placement: a square around the origin. Avoids the very

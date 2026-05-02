@@ -787,9 +787,44 @@ func _bake_navmesh_now() -> void:
 	pass
 
 
+## Debounced navmesh rebake. Buildings call this on construction
+## start / finish + on destruction so dynamic structures actually
+## carve the path-planner mesh (NavigationObstacle3D's runtime
+## carving doesn't reliably update a pre-baked NavigationRegion).
+## Without it, a unit en-route to a build site keeps the path
+## computed before the new building existed and grinds against it.
+const _NAVMESH_REBAKE_DEBOUNCE_SEC: float = 1.5
+var _navmesh_rebake_pending: bool = false
+var _navmesh_rebake_last_time: float = -1000.0
+
+
 func request_navmesh_rebake() -> void:
-	# Same — a manual navmesh doesn't need re-baking when buildings appear.
-	pass
+	if not _nav_region:
+		return
+	var now: float = float(Time.get_ticks_msec()) / 1000.0
+	if now - _navmesh_rebake_last_time >= _NAVMESH_REBAKE_DEBOUNCE_SEC:
+		_perform_navmesh_rebake()
+		return
+	# Otherwise queue exactly one trailing rebake at the end of the
+	# debounce window. Multiple buildings completing on the same
+	# frame collapse to a single rebake.
+	if _navmesh_rebake_pending:
+		return
+	_navmesh_rebake_pending = true
+	var remaining: float = _NAVMESH_REBAKE_DEBOUNCE_SEC - (now - _navmesh_rebake_last_time)
+	get_tree().create_timer(maxf(remaining, 0.05)).timeout.connect(_perform_navmesh_rebake)
+
+
+func _perform_navmesh_rebake() -> void:
+	_navmesh_rebake_pending = false
+	if not _nav_region:
+		return
+	_navmesh_rebake_last_time = float(Time.get_ticks_msec()) / 1000.0
+	_nav_region.bake_navigation_mesh(false)
+	# Refresh the edge-connection margin since some bakes reset it.
+	var nav_map: RID = _nav_region.get_navigation_map()
+	if nav_map.is_valid():
+		NavigationServer3D.map_set_edge_connection_margin(nav_map, 1.0)
 
 
 ## HQ placement — both modes use opposite corners around the map center
