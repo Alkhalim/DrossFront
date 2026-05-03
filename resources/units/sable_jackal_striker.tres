@@ -11,6 +11,7 @@ damage_tier = &"high"
 range_tier = &"medium"
 rof_tier = &"moderate"
 projectile_style = &"beam"
+damage_value = 75
 base_accuracy = 0.85
 
 [resource]
@@ -29,4 +30,4 @@ cost_fuel = 15
 build_time = 23.0
 built_at = &"basic_foundry"
 primary_weapon = SubResource("weapon_striker_cannons")
-special_description = "Jackal Striker branch — strips the jump jets for a heavier mainline cannon and a thicker chassis. Reads as a duelling line skirmisher rather than a flanker."
+special_description = "Jackal Striker branch — heavier laser cannons (75 dmg per shot vs base 45) and a thicker chassis. Reads as a duelling line skirmisher rather than a flanker."

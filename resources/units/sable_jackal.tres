@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="UnitStatResource" load_steps=6 format=3]
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
@@ -13,16 +13,9 @@ damage_tier = &"moderate"
 range_tier = &"medium"
 rof_tier = &"fast"
 projectile_style = &"beam"
+damage_value = 45
 can_hit_air = true
 air_damage_mult = 0.2
-
-[sub_resource type="Resource" id="weapon_jump_rockets"]
-script = ExtResource("2")
-weapon_name = "Jump-Pack Mini Rockets"
-role_tag = &"Universal"
-damage_tier = &"low"
-range_tier = &"short"
-rof_tier = &"volley"
 
 [resource]
 script = ExtResource("1")
@@ -40,8 +33,7 @@ cost_fuel = 13
 build_time = 22.5
 built_at = &"basic_foundry"
 primary_weapon = SubResource("weapon_jackal_smg")
-secondary_weapon = SubResource("weapon_jump_rockets")
-special_description = "Sable fast skirmisher with twin pulse lasers and jump jets — hops over short obstacles to flank. Lasers replace standard projectile fire so a Jackal squad reads as 'laser line' at range."
+special_description = "Sable fast skirmisher with twin pulse lasers and jump jets — hops over short obstacles to flank. Damage rolled into the lasers; no missile secondary."
 branch_a_name = "Striker"
 branch_b_name = "Widow"
 branch_a_stats = ExtResource("3")
