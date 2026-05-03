@@ -23,6 +23,7 @@ hp_total = 1104
 hp_per_unit = 276
 armor_class = &"light"
 speed_tier = &"fast"
+speed_value = 10.8
 sight_tier = &"long"
 squad_size = 4
 population = 8
