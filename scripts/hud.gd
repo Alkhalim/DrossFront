@@ -2104,7 +2104,10 @@ func _append_superweapon_button(building: Building, sw: Node) -> void:
 	_button_grid.add_child(btn)
 
 
-func _on_superweapon_activate(building: Building, sw: Node) -> void:
+func _on_superweapon_activate(_building: Building, sw: Node) -> void:
+	# `_building` arg unused -- kept on the signature so HUD callers
+	# can extend the activation flow with per-building UX later
+	# without re-binding every superweapon button.
 	if not _selection_manager:
 		return
 	if _selection_manager.has_method("enter_superweapon_target_mode"):
