@@ -42,7 +42,10 @@ var _build_queue: Array[UnitStatResource] = []
 var _build_progress: float = 0.0
 
 ## Rally point for produced units.
-var rally_point: Vector3 = Vector3.ZERO
+## Sentinel value used during _ready before rally is initialised so a
+## building never accidentally defaults to map-centre (Vector3.ZERO).
+const RALLY_UNSET: Vector3 = Vector3.INF
+var rally_point: Vector3 = RALLY_UNSET
 
 ## Reference to the game's resource manager (set externally).
 var resource_manager: Node = null
@@ -199,20 +202,24 @@ func _ready() -> void:
 		# A building at z=+110 (player base, north end of map)
 		# rallies further north so freshly-produced units stay
 		# safely behind the line. A building at z=-110 (AI base,
-		# south) rallies further south. Fixed +Z south used to
-		# default the player's units straight toward the enemy
-		# front. Faction-agnostic — the heuristic just looks at
-		# where the building actually is relative to the map.
+		# south) rallies further south. Faction-agnostic — the
+		# heuristic just looks at where the building actually is
+		# relative to the map. Buildings parked near origin (for
+		# example a forward outpost on the centre line) fall back
+		# to the SpawnPoint marker so units still pop out next to
+		# the building instead of marching to map-centre.
 		var away_from_origin: Vector3 = global_position
 		away_from_origin.y = 0.0
-		if away_from_origin.length_squared() > 0.0001:
-			away_from_origin = away_from_origin.normalized()
-		else:
-			# Building parked at exact origin — fall back to a
-			# fixed +Z offset.
-			away_from_origin = Vector3(0.0, 0.0, 1.0)
 		var rally_dist: float = stats.footprint_size.z * 0.5 + 2.5
-		rally_point = global_position + away_from_origin * rally_dist
+		if away_from_origin.length() >= 6.0:
+			rally_point = global_position + away_from_origin.normalized() * rally_dist
+		elif _spawn_marker:
+			rally_point = _spawn_marker.global_position
+		else:
+			# No marker available + sitting on origin: fall back
+			# to the building's local +Z so the rally still sits
+			# next to the structure rather than at world centre.
+			rally_point = global_position + global_transform.basis.z * rally_dist
 		_ensure_visual_root()
 		_apply_placeholder_shape()
 		_add_nav_obstacle()
@@ -4361,7 +4368,11 @@ func _spawn_unit(unit_stats: UnitStatResource) -> void:
 	# stuck. Spawning toward the rally point keeps the freshly-produced
 	# unit inside the same navmesh region as their destination.
 	var fwd: Vector3
-	var rally_dir: Vector3 = rally_point - global_position
+	# Guard against the RALLY_UNSET sentinel reaching this far --
+	# the subtraction (INF - global_position) propagates INF/NaN
+	# through normalize() and breaks the spawn placement, so treat
+	# it as 'no rally' and fall through to the spawn-marker path.
+	var rally_dir: Vector3 = (rally_point - global_position) if rally_point != RALLY_UNSET else Vector3.ZERO
 	rally_dir.y = 0.0
 	if rally_dir.length_squared() > 0.001:
 		fwd = rally_dir.normalized()
@@ -4386,7 +4397,7 @@ func _spawn_unit(unit_stats: UnitStatResource) -> void:
 	else:
 		get_tree().current_scene.add_child(spawned)
 	spawned.global_position = spawn_pos
-	if spawned.has_method("command_move"):
+	if spawned.has_method("command_move") and rally_point != RALLY_UNSET:
 		spawned.command_move(rally_point)
 	unit_produced.emit(unit_scene, spawn_pos)
 	var audio: AudioManager = get_tree().current_scene.get_node_or_null("AudioManager") as AudioManager
