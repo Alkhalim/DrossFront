@@ -3957,8 +3957,47 @@ func _spawn_neutral_building(b_stats: BuildingStatResource, pos: Vector3, y_rot:
 	b.owner_id = 2  # PlayerRegistry.NEUTRAL_PLAYER_ID
 	b.is_constructed = true
 	add_child(b)
-	b.global_position = pos
+	# Snap the spawn position so the building doesn't end up
+	# embedded in a plateau body. _resolve_neutral_spawn_position
+	# nudges the position out of any plateau footprint, falling back
+	# to the original position when no overlap is found.
+	b.global_position = _resolve_neutral_spawn_position(pos, b_stats)
 	b.rotation.y = y_rot
+
+
+func _resolve_neutral_spawn_position(pos: Vector3, b_stats: BuildingStatResource) -> Vector3:
+	## Walks the queued blocked footprints (plateau bodies + ramps);
+	## if `pos` overlaps one, radially nudges the position outside
+	## the AABB plus a clearance margin equal to the building's
+	## longest footprint extent. Returns the original position when
+	## no overlap exists.
+	if not b_stats or _pending_blocked_footprints.is_empty():
+		return pos
+	var clearance: float = maxf(b_stats.footprint_size.x, b_stats.footprint_size.z) * 0.5 + 1.0
+	var here: Vector2 = Vector2(pos.x, pos.z)
+	for blocked: PackedVector2Array in _pending_blocked_footprints:
+		if blocked.is_empty():
+			continue
+		var aabb: Rect2 = Rect2(blocked[0], Vector2.ZERO)
+		for v: Vector2 in blocked:
+			aabb = aabb.expand(v)
+		var grown: Rect2 = aabb.grow(clearance)
+		if not grown.has_point(here):
+			continue
+		var centre: Vector2 = aabb.position + aabb.size * 0.5
+		var dx: float = here.x - centre.x
+		var dz: float = here.y - centre.y
+		var hx: float = aabb.size.x * 0.5 + clearance
+		var hz: float = aabb.size.y * 0.5 + clearance
+		# Push along whichever axis exits the AABB soonest so the
+		# nudge stays minimal.
+		var push_x: float = hx - absf(dx)
+		var push_z: float = hz - absf(dz)
+		if push_x <= push_z:
+			here.x = centre.x + (hx if dx >= 0.0 else -hx)
+		else:
+			here.y = centre.y + (hz if dz >= 0.0 else -hz)
+	return Vector3(here.x, pos.y, here.y)
 
 
 func _spawn_neutral_unit(unit_stats: UnitStatResource, pos: Vector3) -> void:
