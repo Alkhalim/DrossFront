@@ -69,20 +69,62 @@ func stop_pulse_pin(key: String) -> void:
 	_pulse_pins.erase(key)
 
 
-## Per-state minimap fog tint. UNEXPLORED is near-opaque dark,
-## EXPLORED is dimmed grey, VISIBLE is pass-through (alpha 0).
-const _FOG_TINT_UNEXPLORED: Color = Color(0.02, 0.02, 0.04, 0.95)
-const _FOG_TINT_EXPLORED: Color = Color(0.02, 0.02, 0.04, 0.55)
-const _FOG_TINT_VISIBLE: Color = Color(0, 0, 0, 0)
-
-## Cached fog-of-war ImageTexture sized GRID_SIZE x GRID_SIZE,
-## one RGBA8 pixel per cell. Refreshed only when FOW.revision
-## changes (5Hz worst case) instead of redrawing 62500 rects per
-## minimap repaint at 15Hz. Massive RenderingServer-call cut.
+## Fog-of-war minimap overlay. The cell grid is uploaded as a
+## single zero-copy R8 ImageTexture; a child TextureRect with a
+## CanvasItem shader maps the R sample to the unexplored /
+## explored / visible tint. Only re-uploads when FOW.revision
+## changes -- replaces the per-pixel RGBA loop (and before that
+## the 62500-rect draw loop) that dominated the per-frame budget.
 var _fog_tint_image: Image = null
 var _fog_tint_texture: ImageTexture = null
+var _fog_tint_rect: TextureRect = null
 var _fog_tint_last_revision: int = -1
 var _fog_tint_grid_size: int = 0
+
+
+func _ensure_fog_tint_overlay(map_origin: Vector2, map_size: Vector2) -> void:
+	if _fog_tint_rect != null and is_instance_valid(_fog_tint_rect):
+		# Keep the overlay sized + positioned with the current
+		# map area in case the minimap was resized.
+		_fog_tint_rect.position = map_origin
+		_fog_tint_rect.size = map_size
+		return
+	var sh := Shader.new()
+	sh.code = """
+shader_type canvas_item;
+
+uniform sampler2D fog_texture : filter_nearest, repeat_disable;
+
+void fragment() {
+	int state = int(texture(fog_texture, UV).r * 255.0 + 0.5);
+	if (state == 0) {
+		COLOR = vec4(0.02, 0.02, 0.04, 0.95);
+	} else if (state == 1) {
+		COLOR = vec4(0.02, 0.02, 0.04, 0.55);
+	} else {
+		COLOR = vec4(0.0, 0.0, 0.0, 0.0);
+	}
+}
+"""
+	var mat := ShaderMaterial.new()
+	mat.shader = sh
+	_fog_tint_rect = TextureRect.new()
+	_fog_tint_rect.name = "MinimapFogOverlay"
+	_fog_tint_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_fog_tint_rect.stretch_mode = TextureRect.STRETCH_SCALE
+	_fog_tint_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fog_tint_rect.material = mat
+	_fog_tint_rect.position = map_origin
+	_fog_tint_rect.size = map_size
+	# Renders AFTER the minimap _draw entity loop so the fog
+	# overlay sits on top of entity dots. Visible cells use alpha
+	# 0 (pass-through) so visible-area dots stay fully bright;
+	# explored cells dim them (intentional -- matches the world
+	# fog dim semantic for remembered terrain); unexplored cells
+	# are near opaque (the per-entity FOW filter already hides
+	# those entities anyway, so the dot is gone before the fog
+	# alpha matters).
+	add_child(_fog_tint_rect)
 
 
 func _refresh_fog_tint_texture(fow: FogOfWar) -> void:
@@ -90,55 +132,36 @@ func _refresh_fog_tint_texture(fow: FogOfWar) -> void:
 	if grid_size <= 0:
 		return
 	if _fog_tint_image == null or _fog_tint_grid_size != grid_size:
-		_fog_tint_image = Image.create(grid_size, grid_size, false, Image.FORMAT_RGBA8)
+		_fog_tint_image = Image.create(grid_size, grid_size, false, Image.FORMAT_R8)
 		_fog_tint_texture = ImageTexture.create_from_image(_fog_tint_image)
 		_fog_tint_grid_size = grid_size
 		_fog_tint_last_revision = -1
+		if _fog_tint_rect:
+			_fog_tint_rect.texture = _fog_tint_texture
+			(_fog_tint_rect.material as ShaderMaterial).set_shader_parameter("fog_texture", _fog_tint_texture)
 	# Skip the upload when FOW hasn't recomputed since last refresh.
 	if fow.revision == _fog_tint_last_revision:
 		return
 	_fog_tint_last_revision = fow.revision
 	var cells: PackedByteArray = fow.get_cells()
-	var pixel_count: int = mini(cells.size(), grid_size * grid_size)
-	# Build the RGBA buffer in one pass; uploading the whole
-	# texture per FOW recompute is ~one RenderingServer call vs
-	# 62500 draw_rect calls every minimap repaint.
-	var data: PackedByteArray = PackedByteArray()
-	data.resize(pixel_count * 4)
-	for i: int in pixel_count:
-		var tint: Color = _FOG_TINT_VISIBLE
-		match cells[i]:
-			FogOfWar.CellState.UNEXPLORED:
-				tint = _FOG_TINT_UNEXPLORED
-			FogOfWar.CellState.EXPLORED:
-				tint = _FOG_TINT_EXPLORED
-		var b: int = i * 4
-		data[b] = int(tint.r * 255.0)
-		data[b + 1] = int(tint.g * 255.0)
-		data[b + 2] = int(tint.b * 255.0)
-		data[b + 3] = int(tint.a * 255.0)
-	_fog_tint_image.set_data(grid_size, grid_size, false, Image.FORMAT_RGBA8, data)
+	if cells.size() != grid_size * grid_size:
+		return
+	# Hand the cell PackedByteArray straight to the image -- R8
+	# layout matches 1 byte per cell carrying the CellState enum.
+	# No GDScript loop required; the shader does the colour map.
+	_fog_tint_image.set_data(grid_size, grid_size, false, Image.FORMAT_R8, cells)
 	_fog_tint_texture.update(_fog_tint_image)
 
 
 func _draw_fog_tint(fow: FogOfWar, map_origin: Vector2, map_size: Vector2, half_world: float) -> void:
-	## Refresh the cached fog texture (no-op when FOW hasn't moved)
-	## and draw it as a single textured rect. Replaces a 62500 x
-	## per-frame draw_rect loop -- the previous version was the
-	## dominant per-frame CPU cost on the entire game.
+	## Builds / sizes the fog overlay child rect and refreshes the
+	## fog texture. The actual drawing is handled by the child
+	## TextureRect's own render pass -- the parent _draw method
+	## handles the BG / entities / pings, and the child overlay is
+	## stacked between them via z_index ordering.
 	var _hw: float = half_world  # quiet the unused-arg warning
+	_ensure_fog_tint_overlay(map_origin, map_size)
 	_refresh_fog_tint_texture(fow)
-	if _fog_tint_texture == null:
-		return
-	# draw_texture_rect samples the texture across the destination
-	# rect using the current default_filter (nearest neighbour
-	# would feel too pixelated; the small upscale interpolation
-	# is fine for a minimap).
-	draw_texture_rect(
-		_fog_tint_texture,
-		Rect2(map_origin, map_size),
-		false,
-	)
 
 
 func _color_for_owner(owner_idx: int) -> Color:
