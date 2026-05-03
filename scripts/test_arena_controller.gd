@@ -4170,9 +4170,10 @@ func _apply_scenario_team_overrides() -> void:
 
 
 func _apply_scenario_seeding() -> void:
-	## Per-scenario world post-setup. Stub for now; subsequent commits
-	## fill in pre-built bases, full-economy resource preloads, and
-	## seeded armies per scenario brief.
+	## Per-scenario world post-setup. Drops a forward base around
+	## every player, primes resource banks, and rolls out a starting
+	## army so the player can engage immediately instead of waiting on
+	## a fresh skirmish economy to ramp.
 	var sid: int = _scenario_id()
 	if sid == 0:
 		return
@@ -4180,6 +4181,41 @@ func _apply_scenario_seeding() -> void:
 	# a healthy economy on every side so the briefing 'full resources
 	# and economy setup' actually lands.
 	_scenario_preload_resources()
+	# Per-scenario army roll-out + base seeding. Stress test bumps to
+	# a 250-pop army; proving grounds keep things at a moderate
+	# 12-unit starter so the player isn't drowning on tick one.
+	var roster: Array[Dictionary] = _current_roster()
+	# Stress test wants 250 pop per side. Average pop per spawned
+	# unit ~12, so ~20 units lands a player at the 250 cap with the
+	# standard production buildings still queued.
+	var per_player_count: int = 12 if sid != 3 else 20
+	for entry: Dictionary in roster:
+		var pid: int = entry["id"] as int
+		_scenario_seed_base_for_player(pid)
+		var faction: int = _faction_for_player(pid)
+		_scenario_seed_army_for_player(pid, faction, per_player_count)
+	# Stress test pours an extra resource cushion so the player isn't
+	# starved while the 20-unit army actually starts shooting.
+	if sid == 3:
+		_scenario_extra_stress_preload()
+
+
+func _scenario_extra_stress_preload() -> void:
+	## Stress test only -- adds another 3000 salvage / 400 fuel on
+	## top of the standard preload so every side can immediately
+	## queue more units to hit the 250 pop cap.
+	var registry: PlayerRegistry = get_node_or_null("PlayerRegistry") as PlayerRegistry
+	if not registry:
+		return
+	for entry: Dictionary in _current_roster():
+		var pid: int = entry["id"] as int
+		var rm: Node = registry.get_resource_manager(pid)
+		if rm == null:
+			continue
+		if rm.has_method("add_salvage"):
+			rm.call("add_salvage", 3000)
+		if rm.has_method("add_fuel"):
+			rm.call("add_fuel", 400)
 
 
 func _scenario_preload_resources() -> void:
@@ -4201,3 +4237,108 @@ func _scenario_preload_resources() -> void:
 			rm.call("add_salvage", 1500)
 		if rm.has_method("add_fuel"):
 			rm.call("add_fuel", 200)
+
+
+## --- Scenario base + army seeding -------------------------------------------
+##
+## Seeds buildings + units around each player's HQ so the briefing
+## "established base + full economy" is real on match load. The
+## proving-ground scenarios get a moderate base + a handful of
+## units; the stress test bumps to a packed base + a 250-pop army
+## per side.
+
+const _SCENARIO_BASE_OFFSETS: Array[Vector3] = [
+	Vector3(-12.0, 0.0, -10.0),  # Generator
+	Vector3( 12.0, 0.0, -10.0),  # Basic Foundry
+	Vector3(-12.0, 0.0,  10.0),  # Salvage Yard
+	Vector3( 12.0, 0.0,  10.0),  # Advanced Foundry
+	Vector3(  0.0, 0.0, -16.0),  # Aerodrome
+	Vector3(  0.0, 0.0,  16.0),  # Basic Armory
+]
+const _SCENARIO_BASE_PATHS: Array[String] = [
+	"res://resources/buildings/basic_generator.tres",
+	"res://resources/buildings/basic_foundry.tres",
+	"res://resources/buildings/salvage_yard.tres",
+	"res://resources/buildings/advanced_foundry.tres",
+	"res://resources/buildings/aerodrome.tres",
+	"res://resources/buildings/basic_armory.tres",
+]
+
+
+func _scenario_seed_base_for_player(player_id: int) -> void:
+	## Drops a 6-building forward base around the given player's HQ.
+	## Each building spawns is_constructed=true so the player can use
+	## production / power / training immediately. Direction the cluster
+	## faces inward (toward map center) is implicit in the offset
+	## table; we mirror Z for top-of-map players so the cluster
+	## doesn't spawn off the back of the map.
+	var registry: PlayerRegistry = get_node_or_null("PlayerRegistry") as PlayerRegistry
+	if not registry:
+		return
+	var rm: Node = registry.get_resource_manager(player_id) as ResourceManager
+	if player_id == 0 and not rm:
+		rm = resource_manager  # local human path
+	var hq_pos: Vector3 = _hq_position_for(player_id)
+	# Players in the +Z (top-of-map) corners face -Z; players in the
+	# -Z corners face +Z. Flip the offset's Z so the base wraps the
+	# HQ on the inward side either way.
+	var facing_sign: float = -1.0 if hq_pos.z > 0.0 else 1.0
+	for i: int in _SCENARIO_BASE_PATHS.size():
+		var path: String = _SCENARIO_BASE_PATHS[i]
+		var offset: Vector3 = _SCENARIO_BASE_OFFSETS[i]
+		offset.z *= facing_sign
+		_spawn_tutorial_enemy_building(path, hq_pos + offset, rm as ResourceManager, player_id)
+
+
+func _scenario_seed_army_for_player(player_id: int, faction: int, count: int) -> void:
+	## Spawn `count` units in a loose ring around the player's HQ,
+	## drawn from the faction's basic-foundry-tier roster so the
+	## composition reads as a respectable opening force without
+	## requiring tech buildings to already be queued.
+	var hq_pos: Vector3 = _hq_position_for(player_id)
+	var facing_sign: float = -1.0 if hq_pos.z > 0.0 else 1.0
+	# Per-faction unit pool. Anvil = Hound + Bulwark + Phalanx;
+	# Sable = Jackal + Specter + Fang.
+	var paths: Array[String] = []
+	if faction == 1:  # Sable
+		paths = [
+			"res://resources/units/sable_jackal.tres",
+			"res://resources/units/sable_specter.tres",
+			"res://resources/units/sable_fang.tres",
+		]
+	else:
+		paths = [
+			"res://resources/units/anvil_hound.tres",
+			"res://resources/units/anvil_bulwark.tres",
+			"res://resources/units/anvil_phalanx.tres",
+		]
+	for i: int in count:
+		var path: String = paths[i % paths.size()]
+		var ang: float = float(i) / float(maxi(count, 1)) * TAU
+		var radius: float = 22.0 + float(i / paths.size()) * 3.5
+		var pos := hq_pos + Vector3(
+			cos(ang) * radius,
+			0.0,
+			sin(ang) * radius * 0.6 + facing_sign * 8.0,
+		)
+		_spawn_tutorial_enemy_unit(path, pos, player_id)
+
+
+func _faction_for_player(player_id: int) -> int:
+	## Resolves the faction for a roster slot from MatchSettings:
+	## player_id 0 = local human (player_faction); allies on team 0
+	## share the player_faction by default (or per-AI override);
+	## team 1 enemies use enemy_faction (or per-AI override).
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if not settings:
+		return 0
+	if player_id == 0:
+		return settings.get("player_faction") as int
+	if settings.has_method("has_ai_faction") and settings.call("has_ai_faction", player_id):
+		return settings.call("get_ai_faction", player_id) as int
+	var registry: PlayerRegistry = get_node_or_null("PlayerRegistry") as PlayerRegistry
+	if registry:
+		var st: PlayerState = registry.get_state(player_id)
+		if st and st.team_id == 0:
+			return settings.get("player_faction") as int
+	return settings.get("enemy_faction") as int
