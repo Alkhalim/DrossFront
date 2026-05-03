@@ -2663,13 +2663,13 @@ func _ability_factory_pulse() -> bool:
 	## to get the full benefit. Ticker registered as a Timer-driven
 	## callback chain anchored on the Forgemaster itself; if the
 	## caster dies mid-pulse the timer dies with it.
-	# Per-tick heal trimmed 20% (was 80 / 100) — Factory Pulse now
-	# converts its overflow into squad-member restorations, so the
-	# raw HP throughput can come down without making the ability
-	# weaker overall.
-	var per_tick: int = 64
+	# Per-tick heal lifted to 125 (Foreman branch scales by the same
+	# 1.25x ratio it had before -> 156). Previous 64/80 baseline read
+	# as a chip heal that didn't justify the cooldown commitment;
+	# 125 makes a single Pulse meaningfully stitch a squad back up.
+	var per_tick: int = 125
 	if stats.unit_name.findn("Foreman") >= 0:
-		per_tick = 80
+		per_tick = 156
 	var ticks_left: int = 5
 	var radius: float = stats.ability_radius
 	# Every second: heal allies in radius for per_tick + spawn a
