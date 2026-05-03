@@ -1973,6 +1973,9 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 		var motion: InputEventMouseMotion = event as InputEventMouseMotion
 		var ground_pos := _raycast_ground(motion.position)
 		if ground_pos != Vector3.INF and _build_ghost:
+			# Snap to the building grid so adjacent foundations align
+			# and the navmesh carves cleaner gaps between them.
+			ground_pos = _snap_to_build_grid(ground_pos)
 			# Ghost origin matches the actual hit y so building on a
 			# plateau places the building flush with the plateau top
 			# (not sunken into the floor underneath).
@@ -2008,10 +2011,28 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 
 
+## Building placement grid -- 0.25u steps along XZ. Locks foundations
+## to a regular lattice so adjacent buildings share a clean edge and
+## the navmesh carves uniform corridors between them.
+const BUILD_GRID_STEP: float = 0.25
+
+
+func _snap_to_build_grid(pos: Vector3) -> Vector3:
+	return Vector3(
+		round(pos.x / BUILD_GRID_STEP) * BUILD_GRID_STEP,
+		pos.y,
+		round(pos.z / BUILD_GRID_STEP) * BUILD_GRID_STEP,
+	)
+
+
 func _confirm_build_placement(screen_pos: Vector2, keep_placing: bool = false) -> void:
 	var ground_pos := _raycast_ground(screen_pos)
 	if ground_pos == Vector3.INF:
 		return
+	# Snap the actual placement to the same grid the ghost previews
+	# from so the spawned building lands exactly where the player saw
+	# the ghost.
+	ground_pos = _snap_to_build_grid(ground_pos)
 
 	# Reject placement that would overlap another building, a unit, or a
 	# terrain feature (fuel deposit, wreck). Stay in build mode so the player
