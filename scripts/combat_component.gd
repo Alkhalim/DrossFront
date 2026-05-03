@@ -22,6 +22,14 @@ var _silence_remaining: float = 0.0
 var _damage_mult_remaining: float = 0.0
 var _damage_mult_value: float = 1.0
 
+## Incoming-damage reduction buff (Phalanx Shield's Barrier Bloom).
+## While > 0, every incoming damage application is multiplied by
+## (1 - _damage_taken_reduction). 0.0 = no shield, 0.5 = take half
+## damage. Cleared on expiry so a stale shield can't leak into the
+## next cast.
+var _damage_taken_reduction_remaining: float = 0.0
+var _damage_taken_reduction: float = 0.0
+
 ## Garrison passive — set by Courier Tank's Garrison ability and
 ## any future "passenger-buff" hook. When true, outgoing damage
 ## scales by GARRISON_DAMAGE_MULT and fire cooldowns shrink by
@@ -143,6 +151,25 @@ func get_damage_buff_mult() -> float:
 	return aura
 
 
+func apply_damage_reduction(reduction: float, duration: float) -> void:
+	## Called by friendly shield-aura abilities (Phalanx Shield's
+	## Barrier Bloom). `reduction` is the fraction of incoming damage
+	## absorbed (0.5 = take half damage). Stacks by MAX so re-casting
+	## a weaker shield over an already-running stronger one doesn't
+	## clobber it.
+	_damage_taken_reduction = maxf(_damage_taken_reduction, reduction)
+	_damage_taken_reduction_remaining = maxf(_damage_taken_reduction_remaining, duration)
+
+
+func get_damage_taken_mult() -> float:
+	## Fraction of incoming damage that lands. 1.0 = unmitigated;
+	## 0.5 = half damage. Read by Unit.apply_damage so structures
+	## and aircraft route through the same shield-buff hook.
+	if _damage_taken_reduction_remaining > 0.0:
+		return clampf(1.0 - _damage_taken_reduction, 0.0, 1.0)
+	return 1.0
+
+
 func set_garrison_active(active: bool) -> void:
 	_garrison_active = active
 
@@ -190,6 +217,10 @@ func _physics_process(delta: float) -> void:
 		_damage_mult_remaining = maxf(0.0, _damage_mult_remaining - delta)
 		if _damage_mult_remaining <= 0.0:
 			_damage_mult_value = 1.0
+	if _damage_taken_reduction_remaining > 0.0:
+		_damage_taken_reduction_remaining = maxf(0.0, _damage_taken_reduction_remaining - delta)
+		if _damage_taken_reduction_remaining <= 0.0:
+			_damage_taken_reduction = 0.0
 
 	var unit_has_move_order: bool = _unit.get("has_move_order") as bool
 

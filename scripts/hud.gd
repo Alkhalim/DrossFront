@@ -2118,7 +2118,18 @@ func _on_ability_button(units: Array[Node3D]) -> void:
 	## Fire the ability on every unit in the cohort that has one
 	## ready. Cooldown gating happens per-unit inside trigger_ability,
 	## so a half-on-cooldown squad will partial-fire — the units that
-	## are ready cast, the ones still cooling down skip.
+	## are ready cast, the ones still cooling down skip. For
+	## area-target abilities (stats.ability_targeted) the press
+	## instead enters target mode; the next LEFT-click on the ground
+	## resolves the cast position via SelectionManager.
+	if units.is_empty():
+		return
+	var first_unit: Node3D = units[0]
+	if is_instance_valid(first_unit) and "stats" in first_unit:
+		var stats: UnitStatResource = first_unit.get("stats")
+		if stats and stats.ability_targeted and _selection_manager and _selection_manager.has_method("enter_ability_target_mode"):
+			_selection_manager.call("enter_ability_target_mode", units, stats)
+			return
 	for unit: Node3D in units:
 		if is_instance_valid(unit) and unit.has_method("trigger_ability"):
 			unit.call("trigger_ability")

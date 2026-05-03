@@ -242,6 +242,14 @@ func can_target_air() -> bool:
 ## autocast" at a glance.
 @export var ability_autocast: bool = false
 
+## Target-selection flag. When true, pressing the ability button
+## puts the cursor into ABILITY targeting mode (blue glow); the
+## next LEFT-click sets the target world position passed to
+## trigger_ability(target_pos). Right-click cancels. Used by
+## area-target abilities like Barrier Bloom + Plant Charge.
+## Default false = ability fires immediately on button press.
+@export var ability_targeted: bool = false
+
 ## Optional human-readable passive identity. Surfaced by the HUD
 ## as a 'Passive' placeholder button (greyed-out, with this text
 ## as the tooltip) for units that don't have an active ability

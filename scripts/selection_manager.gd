@@ -66,6 +66,14 @@ var _attack_move_mode: bool = false
 ## when the player escapes / changes selection.
 var _superweapon_targeting: Node = null
 
+## Active unit-ability waiting for a target. Set when the player
+## clicks an ability button whose stat carries `ability_targeted =
+## true`; the cursor goes to ABILITY (blue glow) and the next
+## LEFT-click on the map resolves the target world position passed
+## to each unit's trigger_ability(target_pos). Right-click cancels.
+var _ability_targeting_units: Array[Node3D] = []
+var _ability_targeting_stat: UnitStatResource = null
+
 ## Control groups: index 0-9 maps to arrays of unit instance IDs.
 var _control_groups: Array[Array] = []
 
@@ -141,6 +149,12 @@ func _update_cursor_kind(hovered: Node3D) -> void:
 	# not be globally registered when this script first parses. Order
 	# matches `enum Kind`: 0 DEFAULT 1 ATTACK 2 REPAIR 3 BUILD 4 MOVE.
 	var registry: PlayerRegistry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
+	# Ability targeting mode dominates the hover -- blue ABILITY
+	# cursor so the player reads 'next LEFT-click places the
+	# ability target'. Cancel via right-click (handled in input).
+	if not _ability_targeting_units.is_empty() and _ability_targeting_stat:
+		cursor_mgr.set_kind(5)  # ABILITY
+		return
 	# Superweapon targeting mode dominates the hover -- always show
 	# the attack reticle so the player can read 'next right-click is
 	# the strike target' instead of normal move-cursor feedback.
@@ -245,6 +259,23 @@ var _pending_double_click: bool = false
 func _handle_mouse_button(event: InputEventMouseButton) -> void:
 	if event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
+			# Ability targeting consumes the LEFT-click as a target
+			# placement instead of a selection start. Doesn't store
+			# drag state, doesn't open a marquee.
+			if not _ability_targeting_units.is_empty() and _ability_targeting_stat:
+				var ab_target: Vector3 = _raycast_ground(event.position)
+				if ab_target != Vector3.INF:
+					var fired_any: bool = false
+					for u: Node3D in _ability_targeting_units:
+						if not is_instance_valid(u):
+							continue
+						if u.has_method("trigger_ability"):
+							if u.call("trigger_ability", ab_target):
+								fired_any = true
+					var _used: bool = fired_any
+				cancel_ability_target_mode()
+				_suppress_next_release = true
+				return
 			_drag_start = event.position
 			_is_dragging = false
 			_pending_double_click = event.double_click
@@ -264,6 +295,10 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 			_is_dragging = false
 
 	elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+		# Right-click cancels ability target mode without firing.
+		if not _ability_targeting_units.is_empty():
+			cancel_ability_target_mode()
+			return
 		# Ctrl OR Shift held → queue this command after whatever the unit
 		# is already doing instead of replacing it. Shift is the standard
 		# RTS modifier; Ctrl is preserved as an alternate. Only the plain
@@ -881,6 +916,21 @@ func enter_superweapon_target_mode(component: Node) -> void:
 	_superweapon_targeting = component
 	_attack_move_mode = false
 	_patrol_target_mode = false
+
+
+func enter_ability_target_mode(units: Array[Node3D], stat: UnitStatResource) -> void:
+	## Puts the cursor into ABILITY targeting mode (blue glow). The
+	## next LEFT-click on the map resolves the target world position
+	## and fires the ability on each unit; right-click cancels.
+	_ability_targeting_units = units
+	_ability_targeting_stat = stat
+	_attack_move_mode = false
+	_patrol_target_mode = false
+
+
+func cancel_ability_target_mode() -> void:
+	_ability_targeting_units = []
+	_ability_targeting_stat = null
 
 
 func enter_attack_move_mode() -> void:

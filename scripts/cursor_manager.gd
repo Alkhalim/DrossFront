@@ -12,12 +12,15 @@ extends Node
 ##   REPAIR  — green tint, wrench glyph
 ##   BUILD   — cyan tint, brick glyph
 ##   MOVE    — amber tint, chevron glyph
+##   ABILITY — bright blue tint, used while the player is targeting
+##             an active ability (Barrier Bloom, Plant Charge,
+##             superweapon strikes). Reads as 'left-click to place'.
 ##
 ## SelectionManager calls `set_kind()` whenever its hover state changes.
 ## Static helper `apply_default_cursor(tree)` lets the main menu / boot
 ## scenes set the gunmetal cursor without spinning up a full manager.
 
-enum Kind { DEFAULT, ATTACK, REPAIR, BUILD, MOVE }
+enum Kind { DEFAULT, ATTACK, REPAIR, BUILD, MOVE, ABILITY }
 
 const _SIZE: int = 28
 
@@ -47,6 +50,9 @@ func _ready() -> void:
 	_textures[Kind.MOVE] = _make_arrow(
 		Color(0.55, 0.42, 0.12, 1.0), Color(1.00, 0.85, 0.32, 1.0), Kind.MOVE, false
 	)
+	_textures[Kind.ABILITY] = _make_arrow(
+		Color(0.18, 0.42, 0.95, 1.0), Color(0.55, 0.82, 1.00, 1.0), Kind.ABILITY, false
+	)
 	# Pressed variants — same shape and tint but darkened and pixel-
 	# shifted 2px down-right, simulating the cursor being physically
 	# pushed when the player clicks. Generated once at startup so the
@@ -63,6 +69,9 @@ func _ready() -> void:
 	)
 	_textures_pressed[Kind.MOVE] = _make_arrow(
 		Color(0.40, 0.30, 0.08, 1.0), Color(0.78, 0.65, 0.22, 1.0), Kind.MOVE, true
+	)
+	_textures_pressed[Kind.ABILITY] = _make_arrow(
+		Color(0.10, 0.28, 0.70, 1.0), Color(0.40, 0.62, 0.90, 1.0), Kind.ABILITY, true
 	)
 	set_kind(Kind.DEFAULT)
 
@@ -182,6 +191,10 @@ static func _build_arrow_static(body: Color, highlight: Color, kind: int, presse
 			_draw_glyph_brick(img, Color(0.65, 0.95, 1.0, 1.0))
 		Kind.MOVE:
 			_draw_glyph_chevron(img, Color(1.0, 0.85, 0.30, 1.0))
+		Kind.ABILITY:
+			# Reuse the crosshair glyph in bright cyan-blue so it
+			# reads as 'aim a special'. Distinct from ATTACK red.
+			_draw_glyph_crosshair(img, Color(0.55, 0.85, 1.0, 1.0))
 		_:
 			pass  # DEFAULT — no glyph
 	return ImageTexture.create_from_image(img)

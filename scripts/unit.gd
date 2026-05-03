@@ -3463,15 +3463,25 @@ func ability_ready() -> bool:
 func ability_cooldown_remaining() -> float:
 	return _ability_cd_remaining
 
-func trigger_ability() -> bool:
+## Track the most recent target world position passed to a
+## targeted ability. Targeted ability implementations read this
+## instead of taking an explicit arg so the existing dispatch
+## table keeps its zero-arg signature.
+var _ability_target_pos: Vector3 = Vector3.INF
+
+
+func trigger_ability(target_pos: Vector3 = Vector3.INF) -> bool:
 	## Called by the HUD ability button (or hotkey). Dispatches by
 	## stats.ability_name to the concrete effect implementation.
 	## Returns true on a successful cast so the HUD can play
-	## confirmation feedback.
+	## confirmation feedback. `target_pos` is set for area-target
+	## abilities (ability_targeted = true on the stat); instant
+	## abilities ignore it and use the caster's position.
 	if not has_ability() or alive_count == 0:
 		return false
 	if _ability_cd_remaining > 0.0:
 		return false
+	_ability_target_pos = target_pos
 	var fired: bool = false
 	match stats.ability_name:
 		"System Crash":
@@ -3486,6 +3496,10 @@ func trigger_ability() -> bool:
 			fired = _ability_heavy_volley()
 		"Glowing Shot":
 			fired = _ability_glowing_shot()
+		"Barrier Bloom":
+			fired = _ability_barrier_bloom()
+		"Plant Charge":
+			fired = _ability_plant_charge()
 		_:
 			# Unknown ability name on stats — don't crash, just
 			# refuse to fire so the player notices.
@@ -3620,6 +3634,135 @@ func _ability_heavy_volley() -> bool:
 		return false
 	combat.call("queue_glowing_volley", 2.0, true)
 	return true
+
+
+func _ability_barrier_bloom() -> bool:
+	## Phalanx Shield's area-target ability. Drops a directional
+	## barrier centered on the targeted ground point: every friendly
+	## unit (ground or air) inside stats.ability_radius gets a
+	## damage-reduction shield for stats.ability_duration. Spawned
+	## in front of higher-value gunships -- the player picks the
+	## arc, the drones project the field. Visual is a translucent
+	## blue dome at the target site.
+	if _ability_target_pos == Vector3.INF:
+		return false
+	var radius_sq: float = stats.ability_radius * stats.ability_radius
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node):
+			continue
+		var ally: Unit = node as Unit
+		if not ally:
+			continue
+		if ally.owner_id != owner_id:
+			continue
+		if ally.alive_count <= 0:
+			continue
+		if ally.global_position.distance_squared_to(_ability_target_pos) > radius_sq:
+			continue
+		var combat: Node = ally.get_node_or_null("CombatComponent")
+		if combat and combat.has_method("apply_damage_reduction"):
+			combat.call("apply_damage_reduction", 0.45, stats.ability_duration)
+	_spawn_pulse_visual_at(_ability_target_pos, stats.ability_radius, Color(0.45, 0.75, 1.0))
+	return true
+
+
+func _ability_plant_charge() -> bool:
+	## Rook Sapper's area-target ability. Plants a delayed demolition
+	## charge at the target point; after a 2.0s arming window the
+	## charge detonates dealing AS-tag damage in stats.ability_radius.
+	## Manual-cast on purpose -- the Sapper picks where + when the
+	## bomb goes, and the arming window is the miscast risk.
+	if _ability_target_pos == Vector3.INF:
+		return false
+	var arm_pos: Vector3 = _ability_target_pos
+	var radius: float = stats.ability_radius
+	# 2.0s fuse, then resolve in the same hostility-filtered loop the
+	# other AOE abilities use. Anchored on a SceneTreeTimer so the
+	# charge survives the caster dying mid-fuse (the bomb was already
+	# planted; the Sapper's death doesn't disarm it).
+	var timer: SceneTreeTimer = get_tree().create_timer(2.0)
+	timer.timeout.connect(_resolve_plant_charge.bind(arm_pos, radius, owner_id))
+	# Visual: a small ground marker so the player can SEE the bomb.
+	_spawn_pulse_visual_at(arm_pos, radius * 0.35, Color(1.0, 0.6, 0.2))
+	return true
+
+
+func _resolve_plant_charge(at_pos: Vector3, radius: float, src_owner: int) -> void:
+	## Detonate the planted demolition charge. Hostile to the placer's
+	## owner — uses the registry-driven hostility check instead of a
+	## raw owner_id compare so 2v2 alliance changes propagate.
+	var radius_sq: float = radius * radius
+	var registry: PlayerRegistry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
+	# Damage units.
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node):
+			continue
+		var u: Unit = node as Unit
+		if not u or u.alive_count <= 0:
+			continue
+		var allied: bool
+		if registry:
+			allied = registry.are_allied(src_owner, u.owner_id)
+		else:
+			allied = u.owner_id == src_owner
+		if allied:
+			continue
+		if u.global_position.distance_squared_to(at_pos) > radius_sq:
+			continue
+		# AS-tag heavy hit -- 320 base damage, then standard armor.
+		u.take_damage(320, null)
+	# Damage buildings (the AS tag's whole point).
+	for b_node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(b_node):
+			continue
+		var b: Node3D = b_node as Node3D
+		if not b:
+			continue
+		if "owner_id" in b:
+			var b_owner: int = b.get("owner_id")
+			var b_allied: bool
+			if registry:
+				b_allied = registry.are_allied(src_owner, b_owner)
+			else:
+				b_allied = b_owner == src_owner
+			if b_allied:
+				continue
+		if b.global_position.distance_squared_to(at_pos) > radius_sq:
+			continue
+		if b.has_method("take_damage"):
+			b.call("take_damage", 480, null)
+	_spawn_pulse_visual_at(at_pos, radius, Color(1.0, 0.5, 0.15))
+
+
+func _spawn_pulse_visual_at(at_pos: Vector3, radius: float, tint: Color) -> void:
+	## Same visual as _spawn_pulse_visual but anchored to a world
+	## position instead of the caster -- needed for area-target
+	## abilities where the pulse is at the click site, not on the
+	## caster itself.
+	var pulse: MeshInstance3D = MeshInstance3D.new()
+	var sphere: SphereMesh = SphereMesh.new()
+	sphere.radius = radius
+	sphere.height = radius * 2.0
+	sphere.radial_segments = 16
+	sphere.rings = 8
+	pulse.mesh = sphere
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = Color(tint.r, tint.g, tint.b, 0.18)
+	mat.emission_enabled = true
+	mat.emission = tint
+	mat.emission_energy_multiplier = 1.5
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	pulse.material_override = mat
+	pulse.global_position = at_pos
+	get_tree().current_scene.add_child(pulse)
+	# Fade + grow over 0.6s, then free.
+	var tween: Tween = pulse.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(pulse, "scale", Vector3.ONE * 1.35, 0.6)
+	tween.tween_property(mat, "albedo_color:a", 0.0, 0.6)
+	tween.chain().tween_callback(pulse.queue_free)
 
 
 func _ability_glowing_shot() -> bool:
@@ -4646,6 +4789,19 @@ func _damage_priority_order() -> Array[int]:
 func take_damage(amount: int, attacker: Node3D = null) -> void:
 	if alive_count <= 0:
 		return
+
+	# Barrier Bloom (Phalanx Shield) and any future incoming-damage
+	# aura applies BEFORE armor and member splitting -- the shield
+	# is conceptually a flat-front damage absorber, so it scales the
+	# incoming amount and lets the rest of the resolution stay
+	# unchanged.
+	var combat: Node = get_node_or_null("CombatComponent")
+	if combat and combat.has_method("get_damage_taken_mult"):
+		var taken_mult: float = combat.call("get_damage_taken_mult")
+		if taken_mult < 1.0:
+			amount = int(round(float(amount) * taken_mult))
+			if amount <= 0:
+				return
 
 	# Stealth break — taking damage forces the unit into the
 	# "revealed" state for stealth_restore_time seconds. Per V3
