@@ -3133,6 +3133,14 @@ func cancel_queue_at(index: int) -> bool:
 
 
 ## Queue a unit for production. Returns true if successfully queued.
+## Population is the CALLER's responsibility -- SelectionManager's
+## queue path checks has_population() and calls add_population()
+## BEFORE invoking this function, so the pop is already reserved by
+## the time the build tick starts ticking. The build loop itself is
+## intentionally pop-agnostic: once queued, a unit always completes
+## (no "99% stalled waiting for pop" trap). Building.queue_unit only
+## guards on construction state + producibility so the production
+## button never silently eats a click.
 func queue_unit(unit_stats: UnitStatResource) -> bool:
 	if not is_constructed:
 		return false

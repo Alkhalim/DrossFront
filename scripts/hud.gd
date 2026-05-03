@@ -4366,15 +4366,15 @@ func _building_description(id: StringName) -> String:
 	## here.
 	match id:
 		&"headquarters":
-			return "Command building. Trains Engineers and Salvage Crawlers. Anvil HQs can buy defensive upgrades."
+			return "Command building. Trains Engineers and Salvage Crawlers. Grants +25 population cap. Anvil HQs can buy defensive upgrades."
 		&"basic_foundry":
 			if _local_player_faction() == 1:
-				return "Light-mech assembly line. Trains Specters and Jackals."
-			return "Light-mech assembly line. Trains Rooks and Hounds."
+				return "Light-mech assembly line. Trains Specters and Jackals. Grants +25 population cap."
+			return "Light-mech assembly line. Trains Rooks and Hounds. Grants +25 population cap."
 		&"advanced_foundry":
 			if _local_player_faction() == 1:
-				return "Heavy-mech foundry. Trains Harbingers; Adv Armory unlocks Pulsefont and Courier Tank."
-			return "Heavy-mech foundry. Trains Bulwarks; Adv Armory unlocks Forgemaster."
+				return "Heavy-mech foundry. Trains Harbingers; Adv Armory unlocks Pulsefont and Courier Tank. Grants +25 population cap."
+			return "Heavy-mech foundry. Trains Bulwarks; Adv Armory unlocks Forgemaster. Grants +25 population cap."
 		&"basic_generator":
 			return "Power source. Adds capacity so additional production buildings stay at full output."
 		&"advanced_generator":
@@ -4391,8 +4391,8 @@ func _building_description(id: StringName) -> String:
 			return "Fixed-mode ground turret. No profile swap, no air targeting."
 		&"aerodrome":
 			if _local_player_faction() == 1:
-				return "Aircraft hangar. Trains Switchblade; Adv Armory unlocks Fang, Black Pylon unlocks Wraith."
-			return "Aircraft hangar. Trains Phalanx; Adv Armory unlocks Hammerhead."
+				return "Aircraft hangar. Trains Switchblade; Adv Armory unlocks Fang, Black Pylon unlocks Wraith. Grants +25 population cap."
+			return "Aircraft hangar. Trains Phalanx; Adv Armory unlocks Hammerhead. Grants +25 population cap."
 		&"sam_site":
 			return "Anti-air missile rack. Strong against aircraft, near-zero against ground."
 		&"black_pylon":
