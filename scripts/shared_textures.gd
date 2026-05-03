@@ -13,6 +13,9 @@ const _TEX_SIZE: int = 256
 static var _metal_wear_tex: Texture2D = null
 static var _wall_panel_tex: Texture2D = null
 static var _scorched_ground_tex: Texture2D = null
+static var _sand_dunes_tex: Texture2D = null
+static var _cracked_mud_tex: Texture2D = null
+static var _packed_snow_tex: Texture2D = null
 
 
 static func get_metal_wear_texture() -> Texture2D:
@@ -144,3 +147,89 @@ static func get_scorched_ground_texture() -> Texture2D:
 	img.generate_mipmaps()
 	_scorched_ground_tex = ImageTexture.create_from_image(img)
 	return _scorched_ground_tex
+
+
+
+static func get_sand_dunes_texture() -> Texture2D:
+	## Granular sand-drift surface. Two octaves of low-frequency
+	## bands form the dune-line ridges; high-frequency speckle adds
+	## the grain. Sampled by warm-tan biome patches so they read as
+	## actual sand instead of a flat ochre tint.
+	if _sand_dunes_tex:
+		return _sand_dunes_tex
+	var img := Image.create(_TEX_SIZE, _TEX_SIZE, false, Image.FORMAT_RGBA8)
+	var bands := FastNoiseLite.new()
+	bands.seed = 211
+	bands.frequency = 0.012
+	bands.fractal_octaves = 2
+	var grain := FastNoiseLite.new()
+	grain.seed = 47
+	grain.frequency = 0.18
+	for y: int in _TEX_SIZE:
+		for x: int in _TEX_SIZE:
+			var bv: float = bands.get_noise_2d(float(x), float(y)) * 0.5 + 0.5
+			var gv: float = grain.get_noise_2d(float(x), float(y)) * 0.5 + 0.5
+			var v: float = lerp(0.62, 1.05, bv)
+			v += (gv - 0.5) * 0.18  # speckled grain
+			v = clampf(v, 0.40, 1.10)
+			img.set_pixel(x, y, Color(v, v * 0.95, v * 0.86, 1.0))
+	img.generate_mipmaps()
+	_sand_dunes_tex = ImageTexture.create_from_image(img)
+	return _sand_dunes_tex
+
+
+static func get_cracked_mud_texture() -> Texture2D:
+	## Dried-mud pattern: cellular noise gives the polygonal crack
+	## network; a low-frequency value layer adds plate-by-plate
+	## brightness variation so the cracked surface doesn't read as a
+	## uniform texture.
+	if _cracked_mud_tex:
+		return _cracked_mud_tex
+	var img := Image.create(_TEX_SIZE, _TEX_SIZE, false, Image.FORMAT_RGBA8)
+	var cells := FastNoiseLite.new()
+	cells.seed = 613
+	cells.noise_type = FastNoiseLite.TYPE_CELLULAR
+	cells.cellular_distance_function = FastNoiseLite.DISTANCE_EUCLIDEAN
+	cells.cellular_return_type = FastNoiseLite.RETURN_DISTANCE2_DIV
+	cells.frequency = 0.040
+	var plates := FastNoiseLite.new()
+	plates.seed = 89
+	plates.frequency = 0.025
+	for y: int in _TEX_SIZE:
+		for x: int in _TEX_SIZE:
+			var c: float = cells.get_noise_2d(float(x), float(y)) * 0.5 + 0.5
+			var p: float = plates.get_noise_2d(float(x), float(y)) * 0.5 + 0.5
+			var v: float = lerp(0.62, 0.95, p)
+			if c < 0.16:
+				v *= lerp(0.30, 0.70, c / 0.16)  # dark crack veins
+			img.set_pixel(x, y, Color(v, v * 0.92, v * 0.80, 1.0))
+	img.generate_mipmaps()
+	_cracked_mud_tex = ImageTexture.create_from_image(img)
+	return _cracked_mud_tex
+
+
+static func get_packed_snow_texture() -> Texture2D:
+	## Trampled snowpack: high-frequency speckle for the granular
+	## ice crystal feel + a sparse darker spotting from boot prints
+	## / rut tracks. Stays close to white so callers can tint it
+	## subtly without losing the snow read.
+	if _packed_snow_tex:
+		return _packed_snow_tex
+	var img := Image.create(_TEX_SIZE, _TEX_SIZE, false, Image.FORMAT_RGBA8)
+	var grain := FastNoiseLite.new()
+	grain.seed = 743
+	grain.frequency = 0.40
+	var prints := FastNoiseLite.new()
+	prints.seed = 113
+	prints.frequency = 0.07
+	for y: int in _TEX_SIZE:
+		for x: int in _TEX_SIZE:
+			var g: float = grain.get_noise_2d(float(x), float(y)) * 0.5 + 0.5
+			var pr: float = prints.get_noise_2d(float(x), float(y)) * 0.5 + 0.5
+			var v: float = lerp(0.85, 1.0, g)
+			if pr < 0.35:
+				v *= lerp(0.65, 0.92, pr / 0.35)  # boot / rut prints
+			img.set_pixel(x, y, Color(v, v, v * 1.02, 1.0))
+	img.generate_mipmaps()
+	_packed_snow_tex = ImageTexture.create_from_image(img)
+	return _packed_snow_tex
