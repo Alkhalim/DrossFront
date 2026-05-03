@@ -45,3 +45,4 @@ ability_cooldown = 12.0
 ability_autocast = true
 ability_description = "Next autocannon shot deals +50% damage with a glowing yellow tracer. Autocasts on cooldown when a target is in range."
 special_description = "Close-range brawler. Shoulder shotgun array replaces the AT missile rack. Tougher chassis (640 HP / unit) so the Ripper survives the close approach. The Glowing Shot autocast keeps the opening volley honest -- a fresh engagement always opens with the buffed tracer."
+branch_summary = "Trades the AT missile rack for a shoulder shotgun array and a tougher chassis. Glowing Shot autocast opens every engagement with a buffed tracer round."

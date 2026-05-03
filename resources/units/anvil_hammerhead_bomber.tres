@@ -43,3 +43,4 @@ is_aircraft = true
 flight_altitude = 8.0
 flight_speed = 16.0
 special_description = "Hammerhead Bomber — anti-structure carpet bombing variant. AS-tagged Cluster Bomb Bay devastates buildings and squad formations. Slower in dogfights; pair with Escort Hammerheads or SAM cover."
+branch_summary = "Pintle gun replaced with a heavy bomb bay (AS-tagged). Devastates buildings and packed squads; vulnerable in dogfights — needs Escort cover."

@@ -41,3 +41,4 @@ is_aircraft = true
 flight_altitude = 8.0
 flight_speed = 18.0
 special_description = "Hammerhead Escort — anti-air variant. Pintle suppression for ground harassment + a 9s-cooldown 6-missile AAir barrage that autocasts in combat. The screening variant — flies with Bombers."
+branch_summary = "Twin AAir cannons replace the bomb bay. Air-superiority gunship that protects bombers and clears AAir threats."

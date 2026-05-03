@@ -31,3 +31,4 @@ built_at = &"basic_foundry"
 primary_weapon = SubResource("weapon_autocannons")
 special_description = "Recon-support refit. Very-long sight extends Anvil scouting range. Friendly units within 25u of a Tracker get +15% sight radius -- park a Tracker squad with your line to extend the army's eyes."
 passive_description = "Sight Aura — friendly units within 25u gain +15% sight radius. Stacks with each Tracker squad in range."
+branch_summary = "Trades raw rate of fire for a tall sensor mast that projects a +15% sight aura on nearby Anvil units. Read as the recon variant — the eyes of an Anvil push."
