@@ -1955,6 +1955,17 @@ func _build_courier_tank_member(index: int, offset: Vector3, team_color: Color) 
 		cannon_pivot.add_child(mg)
 		mats.append(mg_mat)
 
+	# Branch variant overlays for the Courier Tank. Infiltrator gets
+	# a stealth tarp draped over the hull (matte mottled colour);
+	# Sensor Carrier gets a dish array on the rear deck. Combat
+	# geometry stays put; overlays attach to `member`.
+	if stats:
+		match stats.unit_name:
+			"Courier (Infiltrator)":
+				_apply_courier_infiltrator_overlay(member, mats)
+			"Courier (Sensor Carrier)":
+				_apply_courier_sensor_overlay(member, mats)
+
 	# --- Bookkeeping dict. Returns the same shape Unit's per-member
 	# logic expects. Empty `legs` + `leg_phases` mean the walk-bob
 	# pass skips this member entirely (tracks don't need it). The
@@ -2484,6 +2495,101 @@ func _apply_harbinger_swarm_marshal_overlay(torso_pivot: Node3D, torso_size: Vec
 		ant.rotation = Vector3(deg_to_rad(-25.0), 0.0, sx * deg_to_rad(15.0))
 		ant.set_surface_override_material(0, _make_metal_mat(Color(0.10, 0.10, 0.13)))
 		torso_pivot.add_child(ant)
+
+
+func _apply_courier_infiltrator_overlay(member: Node3D, mats: Array[StandardMaterial3D]) -> void:
+	# Stealth tarp draped over the hull -- a slightly larger, matte,
+	# mottled-darker box sitting on top of the chassis. Reads as
+	# 'this one wears a camo cover' rather than the bare Sensor
+	# Carrier hull.
+	var tarp := MeshInstance3D.new()
+	var t_box := BoxMesh.new()
+	t_box.size = Vector3(2.30, 0.18, 2.20)
+	tarp.mesh = t_box
+	tarp.position = Vector3(0.0, 1.10, 0.10)
+	tarp.rotation.x = randf_range(-0.04, 0.04)
+	tarp.rotation.z = randf_range(-0.04, 0.04)
+	var t_mat := StandardMaterial3D.new()
+	t_mat.albedo_color = Color(0.10, 0.10, 0.12, 1.0)
+	t_mat.roughness = 1.0
+	t_mat.metallic = 0.0
+	tarp.set_surface_override_material(0, t_mat)
+	member.add_child(tarp)
+	mats.append(t_mat)
+	# Two faint cyan optical-camo strips wrapping the tarp's edges so
+	# the silhouette catches a hint of light at zoom.
+	for side: int in 2:
+		var sx: float = -1.0 if side == 0 else 1.0
+		var strip := MeshInstance3D.new()
+		var s_box := BoxMesh.new()
+		s_box.size = Vector3(0.04, 0.04, 2.10)
+		strip.mesh = s_box
+		strip.position = Vector3(sx * 1.10, 1.18, 0.10)
+		var s_mat := StandardMaterial3D.new()
+		s_mat.albedo_color = Color(0.30, 0.78, 1.0)
+		s_mat.emission_enabled = true
+		s_mat.emission = Color(0.30, 0.78, 1.0)
+		s_mat.emission_energy_multiplier = 0.7
+		strip.set_surface_override_material(0, s_mat)
+		member.add_child(strip)
+		mats.append(s_mat)
+
+
+func _apply_courier_sensor_overlay(member: Node3D, mats: Array[StandardMaterial3D]) -> void:
+	# Sensor dish array on the rear deck -- a central tilted dish
+	# flanked by two slim antennae. Reads as the Mesh-providing
+	# sensor variant rather than the stealth Infiltrator.
+	var mast := MeshInstance3D.new()
+	var m_box := BoxMesh.new()
+	m_box.size = Vector3(0.08, 0.55, 0.08)
+	mast.mesh = m_box
+	mast.position = Vector3(0.0, 1.30, -0.85)
+	mast.set_surface_override_material(0, _make_metal_mat(Color(0.12, 0.12, 0.14)))
+	member.add_child(mast)
+	# Central dish.
+	var dish := MeshInstance3D.new()
+	var d_cyl := CylinderMesh.new()
+	d_cyl.top_radius = 0.30
+	d_cyl.bottom_radius = 0.30
+	d_cyl.height = 0.06
+	d_cyl.radial_segments = 18
+	dish.mesh = d_cyl
+	dish.rotation.x = deg_to_rad(-25.0)
+	dish.position = Vector3(0.0, 1.55, -0.85)
+	var d_mat := StandardMaterial3D.new()
+	d_mat.albedo_color = Color(0.20, 0.20, 0.22)
+	d_mat.emission_enabled = true
+	d_mat.emission = SABLE_NEON
+	d_mat.emission_energy_multiplier = 0.4
+	dish.set_surface_override_material(0, d_mat)
+	member.add_child(dish)
+	mats.append(d_mat)
+	# Two slim flanking antennae.
+	for side: int in 2:
+		var sx: float = -1.0 if side == 0 else 1.0
+		var ant := MeshInstance3D.new()
+		var a_box := BoxMesh.new()
+		a_box.size = Vector3(0.05, 0.45, 0.05)
+		ant.mesh = a_box
+		ant.position = Vector3(sx * 0.55, 1.30, -0.65)
+		ant.rotation.z = sx * deg_to_rad(8.0)
+		ant.set_surface_override_material(0, _make_metal_mat(Color(0.12, 0.12, 0.14)))
+		member.add_child(ant)
+		# Violet tip light.
+		var tip := MeshInstance3D.new()
+		var ts := SphereMesh.new()
+		ts.radius = 0.05
+		ts.height = 0.10
+		tip.mesh = ts
+		tip.position = Vector3(sx * 0.62, 1.55, -0.65)
+		var tm := StandardMaterial3D.new()
+		tm.albedo_color = SABLE_NEON
+		tm.emission_enabled = true
+		tm.emission = SABLE_NEON
+		tm.emission_energy_multiplier = 2.0
+		tip.set_surface_override_material(0, tm)
+		member.add_child(tip)
+		mats.append(tm)
 
 
 func _build_legs(member: Node3D, shape: Dictionary, mats: Array[StandardMaterial3D], kind: String) -> Dictionary:
