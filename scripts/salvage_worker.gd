@@ -91,7 +91,10 @@ func _ready() -> void:
 	collision_mask = 3   # ground + units
 
 	# Round-robin half-frame stagger across worker fleet.
-	_phase = int(get_instance_id() & 1)
+	# Third-frame stagger across the worker fleet. Worker state-
+	# machine ticks (find/harvest/return) are coarse enough that
+	# 20 Hz is invisible compared to the previous 30 Hz tick.
+	_phase = int(get_instance_id() % 3)
 
 	_build_visuals()
 
@@ -356,16 +359,17 @@ func drop_carried_salvage() -> int:
 func _physics_process(delta: float) -> void:
 	if alive_count <= 0:
 		return
-	# Stagger heavy state-machine work to ~30Hz; off frames just skip.
-	# Worker movement is coarse-grained (drive toward target, harvest,
-	# drop off) — sampling at 30Hz vs 60Hz is invisible during play.
+	# Stagger heavy state-machine work to ~20 Hz; off frames just
+	# skip. Worker movement is coarse-grained (drive toward target,
+	# harvest, drop off) -- sampling at 20 Hz vs 60 Hz is invisible
+	# during play.
 	_phys_frame += 1
-	if (_phys_frame & 1) != _phase:
+	if (_phys_frame % 3) != _phase:
 		return
-	# Off-frames skip work entirely; the halved delta means timers tick
-	# half as often, but we double the effective delta on heavy frames
-	# so cargo accumulation / movement progress remain at the same rate.
-	delta *= 2.0
+	# Off-frames skip entirely; tripling the delta on heavy frames
+	# keeps cargo accumulation / movement progress at the same
+	# real-time rate.
+	delta *= 3.0
 	# Tick down the temporary blacklist so a wreck we couldn't reach
 	# 5 seconds ago becomes a candidate again once the blockade
 	# (transient unit traffic, mid-pile crawler swap) clears.
