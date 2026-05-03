@@ -4946,8 +4946,9 @@ func _resolve_research_managers() -> void:
 
 func _is_producing_or_researching() -> bool:
 	## Anything the player should see a 'this building is busy'
-	## progress bar for: a queued unit, an armory branch commit, or
-	## an active research project on this armory.
+	## progress bar for: a queued unit, an armory branch commit, an
+	## active research project on this armory, or a salvage yard
+	## training the next gatherer.
 	if not is_constructed:
 		return false
 	if not _build_queue.is_empty():
@@ -4957,6 +4958,13 @@ func _is_producing_or_researching() -> bool:
 		if _cached_research_manager and _cached_research_manager.has_method("is_in_progress") and _cached_research_manager.call("is_in_progress"):
 			return true
 		if _cached_branch_commit_manager and _cached_branch_commit_manager.has_method("is_committing") and _cached_branch_commit_manager.call("is_committing"):
+			return true
+	# Salvage Yard busy = next worker still being built (count < max).
+	var yard: Node = get_node_or_null("SalvageYardComponent")
+	if yard and yard.has_method("get_worker_count") and yard.has_method("get_max_workers"):
+		var c: int = yard.call("get_worker_count") as int
+		var mx: int = yard.call("get_max_workers") as int
+		if c < mx:
 			return true
 	return false
 
@@ -4977,6 +4985,15 @@ func _current_production_progress() -> float:
 		if _cached_branch_commit_manager and _cached_branch_commit_manager.has_method("is_committing") and _cached_branch_commit_manager.call("is_committing"):
 			if _cached_branch_commit_manager.has_method("get_commit_progress"):
 				return clampf(_cached_branch_commit_manager.call("get_commit_progress") as float, 0.0, 1.0)
+	# Salvage Yard worker spawn progress -- so the world-space
+	# production bar fills as the next gatherer is being built,
+	# matching the HUD-panel readout.
+	var yard: Node = get_node_or_null("SalvageYardComponent")
+	if yard and yard.has_method("get_spawn_progress") and yard.has_method("get_worker_count") and yard.has_method("get_max_workers"):
+		var c: int = yard.call("get_worker_count") as int
+		var mx: int = yard.call("get_max_workers") as int
+		if c < mx:
+			return clampf(yard.call("get_spawn_progress") as float, 0.0, 1.0)
 	return 0.0
 
 
