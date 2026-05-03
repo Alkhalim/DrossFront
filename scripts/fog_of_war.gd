@@ -81,6 +81,20 @@ var _observer_stamp_cache: Dictionary = {}
 ## stamp cache doesn't grow unboundedly across a long match.
 var _recompute_tick: int = 0
 
+## Per-recompute signature dedup. Multiple observers (a 4-mech squad
+## moving together, two buildings sitting in the same FOW cell, a
+## stack of aircraft over the same cell) very often share an
+## identical stamp signature on a given tick. We track the
+## signatures already stamped this tick and reuse the cell list for
+## any subsequent observer with the same signature -- skipping both
+## the bounding-box-with-LOS walk AND the per-observer cache write.
+## Cleared at the start of every recompute.
+##
+## Key shape: "<cell_idx>:<radius_int>:<elev>:<air>" (string for
+## cheap dict hashing; built via String() once per observer).
+## Value: PackedInt32Array of stamped cell indices.
+var _stamp_signature_cache: Dictionary = {}
+
 ## Y threshold above which an observer counts as "elevated" for
 ## plateau LOS purposes. Plateaus are 2.5-3u tall in v2, so anything
 ## standing above ~1.0u is on top of one (or in the air).
@@ -403,6 +417,11 @@ func _recompute_visibility() -> void:
 	_recompute_tick += 1
 	if (_recompute_tick % 20) == 0:
 		_prune_observer_cache()
+	# Reset the per-tick signature dedup. Squad-mates / co-located
+	# observers will repopulate this within the loop below; entries
+	# don't persist across recomputes (the underlying _cells state
+	# is wiped each tick).
+	_stamp_signature_cache.clear()
 
 	# Demote currently-VISIBLE cells to EXPLORED. New vision will
 	# bump them back up below; cells that were visible last tick but
@@ -734,6 +753,36 @@ func _stamp_visibility_cached(observer_id: int, world_pos: Vector3, radius: floa
 		for i: int in n:
 			_cells[cached_cells[i]] = CellState.VISIBLE
 		return
+	# Per-tick signature dedup BEFORE doing the full stamp work.
+	# Quantise the radius to integer cells so a 18.0 / 18.05 difference
+	# (e.g. floating-point drift across recomputes) doesn't bust the
+	# share. Multiple co-located observers (squad members in lockstep,
+	# stacked aircraft) all hash to the same key and reuse the first
+	# observer's stamp work entirely.
+	var radius_q: int = int(round(radius / CELL_SIZE))
+	var sig: String = "%d:%d:%d:%d" % [
+		origin_cell_idx,
+		radius_q,
+		1 if observer_elevated else 0,
+		1 if observer_aircraft else 0,
+	]
+	var sig_cells: PackedInt32Array = _stamp_signature_cache.get(sig, PackedInt32Array()) as PackedInt32Array
+	if sig_cells.size() > 0:
+		# Another observer this tick already stamped this footprint --
+		# re-mark the same cells and update the per-observer cache so
+		# this observer also fast-paths next tick.
+		var sn: int = sig_cells.size()
+		for i: int in sn:
+			_cells[sig_cells[i]] = CellState.VISIBLE
+		_observer_stamp_cache[observer_id] = {
+			"cell": origin_cell_idx,
+			"radius": radius,
+			"elev": observer_elevated,
+			"air": observer_aircraft,
+			"occ_rev": _occluder_revision,
+			"vis_cells": sig_cells,
+		}
+		return
 	# Cache miss -- run the full stamp and snapshot the cells we
 	# touched. _stamp_visibility returns the PackedInt32Array of
 	# stamped indices (passed via return rather than out-arg because
@@ -748,6 +797,9 @@ func _stamp_visibility_cached(observer_id: int, world_pos: Vector3, radius: floa
 		"occ_rev": _occluder_revision,
 		"vis_cells": collected,
 	}
+	# Publish to the per-tick signature dedup so the next observer
+	# with the same signature reuses this work.
+	_stamp_signature_cache[sig] = collected
 
 
 func _prune_observer_cache() -> void:
