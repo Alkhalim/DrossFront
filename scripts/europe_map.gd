@@ -8,7 +8,12 @@ extends Control
 ## Stump buttons are positioned absolutely by the caller using
 ## get_marker_position(key); this control just paints the backdrop.
 
-const MAP_SIZE := Vector2(800, 580)
+## Map render size. Tuned to fill the center of a typical 1280x720
+## or larger main-menu viewport without exceeding it; the campaigns
+## screen now anchors this Control full-rect and the map paints
+## inside its own intrinsic size, so the dimensions here directly
+## drive how much screen space the map takes.
+const MAP_SIZE := Vector2(1180, 760)
 
 const WATER := Color(0.06, 0.10, 0.16, 1.0)
 const WATER_DEEP := Color(0.04, 0.07, 0.12, 1.0)

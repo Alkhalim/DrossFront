@@ -673,6 +673,7 @@ func _build_settings_panel() -> void:
 ## --- Navigation ---
 
 func _show_main() -> void:
+	_root_vbox.visible = true
 	_main_buttons.visible = true
 	_setup_panel.visible = false
 	_settings_panel.visible = false
@@ -683,6 +684,7 @@ func _show_main() -> void:
 
 
 func _show_setup() -> void:
+	_root_vbox.visible = true
 	_main_buttons.visible = false
 	_setup_panel.visible = true
 	_settings_panel.visible = false
@@ -693,6 +695,7 @@ func _show_setup() -> void:
 
 
 func _show_settings() -> void:
+	_root_vbox.visible = true
 	_main_buttons.visible = false
 	_setup_panel.visible = false
 	_settings_panel.visible = true
@@ -703,6 +706,12 @@ func _show_settings() -> void:
 
 
 func _show_campaigns() -> void:
+	# Campaigns swaps to a full-screen Control (the Europe-map page
+	# should fill the screen, not live as a small window over the
+	# main-menu layout). Hide the centered root VBox while the
+	# campaigns page is up so the title block + main buttons don't
+	# bleed through.
+	_root_vbox.visible = false
 	_main_buttons.visible = false
 	_setup_panel.visible = false
 	_settings_panel.visible = false
@@ -713,6 +722,9 @@ func _show_campaigns() -> void:
 
 
 func _show_scenarios() -> void:
+	# Scenarios likewise gets the full-screen treatment so the cards
+	# can be read at a comfortable size.
+	_root_vbox.visible = false
 	_main_buttons.visible = false
 	_setup_panel.visible = false
 	_settings_panel.visible = false
@@ -1407,39 +1419,52 @@ func _build_tactical_background() -> Control:
 ## --- Campaigns + Special Operations ----------------------------------------
 
 func _build_campaigns_panel() -> void:
-	## Stylized tactical Europe map with five marker stumps. Four of
-	## them are disabled (campaigns coming soon); the fifth, located
-	## at Geneva (CERN), opens the Special Operations scenarios.
+	## Full-screen Campaigns page: the Europe map fills the centre,
+	## a heading sits at the top, and a Back button anchors the
+	## bottom-left. Anchored as a top-level child of `self` so it
+	## can take the full viewport rather than getting squeezed inside
+	## the main menu's centered VBox.
 	_campaigns_panel = VBoxContainer.new()
+	_campaigns_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_campaigns_panel.add_theme_constant_override("separation", 12)
 	_campaigns_panel.alignment = BoxContainer.ALIGNMENT_CENTER
 	_campaigns_panel.visible = false
-	_root_vbox.add_child(_campaigns_panel)
+	# Slight inner margin so the map doesn't touch the screen edges.
+	_campaigns_panel.offset_left = 24
+	_campaigns_panel.offset_right = -24
+	_campaigns_panel.offset_top = 18
+	_campaigns_panel.offset_bottom = -18
+	add_child(_campaigns_panel)
 
 	var heading := Label.new()
 	heading.text = "Campaigns — European Theatre"
-	heading.add_theme_font_size_override("font_size", 24)
+	heading.add_theme_font_size_override("font_size", 30)
 	heading.add_theme_color_override("font_color", COLOR_SUBTITLE)
 	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_campaigns_panel.add_child(heading)
 
 	var hint := Label.new()
 	hint.text = "Select a deployment site. CERN site offers Special Operations missions."
-	hint.add_theme_font_size_override("font_size", 14)
+	hint.add_theme_font_size_override("font_size", 16)
 	hint.add_theme_color_override("font_color", COLOR_HINT)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_campaigns_panel.add_child(hint)
 
 	# The map + buttons live in a Control wrapper so the stumps can be
 	# positioned absolutely on top of the painted backdrop without the
-	# parent VBox stretching them around.
+	# parent VBox stretching them around. The wrapper takes the
+	# vertical fill so the map sits in the middle of the page.
+	var map_holder := CenterContainer.new()
+	map_holder.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	map_holder.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_campaigns_panel.add_child(map_holder)
+
 	var map_script: GDScript = preload("res://scripts/europe_map.gd")
 	var map: Control = Control.new()
 	map.set_script(map_script)
-	# Center horizontally inside the panel; preserve the map's intrinsic
-	# size so the stumps land on the painted geography.
 	map.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_campaigns_panel.add_child(map)
+	map.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	map_holder.add_child(map)
 
 	# Deferred stump placement -- the map's _ready (which sets its
 	# custom_minimum_size) needs to fire before we ask for marker
@@ -1450,7 +1475,8 @@ func _build_campaigns_panel() -> void:
 
 	var back := Button.new()
 	back.text = "Back"
-	back.custom_minimum_size = Vector2(160, 36)
+	back.custom_minimum_size = Vector2(180, 40)
+	back.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	back.pressed.connect(_show_main)
 	_campaigns_panel.add_child(back)
 
@@ -1498,12 +1524,18 @@ func _build_scenarios_panel() -> void:
 	## Three Special Operations scenario cards. Each card sets up
 	## MatchSettings (faction, mode, scenario flag) and launches the
 	## arena scene; TestArenaController reads MatchSettings.scenario
-	## and seeds the match accordingly.
+	## and seeds the match accordingly. Anchored full-rect like the
+	## Campaigns panel so the cards have room to breathe.
 	_scenarios_panel = VBoxContainer.new()
+	_scenarios_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_scenarios_panel.add_theme_constant_override("separation", 12)
 	_scenarios_panel.alignment = BoxContainer.ALIGNMENT_CENTER
 	_scenarios_panel.visible = false
-	_root_vbox.add_child(_scenarios_panel)
+	_scenarios_panel.offset_left = 24
+	_scenarios_panel.offset_right = -24
+	_scenarios_panel.offset_top = 30
+	_scenarios_panel.offset_bottom = -18
+	add_child(_scenarios_panel)
 
 	var heading := Label.new()
 	heading.text = "Special Operations"
