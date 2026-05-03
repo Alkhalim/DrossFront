@@ -1295,9 +1295,11 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 	# reads as a support / Mesh-aura caster rather than another
 	# Hound chassis. Keeps the underlying medium chassis (cannons,
 	# legs, torso) intact so combat code still works, but stacks
-	# faction-distinct emitter geometry on top.
+	# faction-distinct emitter geometry on top. Sized up 1.18x
+	# below so it visibly reads as a special-class unit.
 	if stats and stats.unit_name == "Pulsefont":
 		_apply_pulsefont_overlay(torso_pivot, torso_size, head_size, mats)
+		_apply_special_chassis_scale(member, 1.18)
 
 	# Anvil Forgemaster overlay — unique support-mech read so it
 	# doesn't read as a recoloured Bulwark. Adds a tall furnace
@@ -1306,6 +1308,7 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 	# repair-coil ring tinted Anvil amber.
 	if stats and stats.unit_name.findn("Forgemaster") >= 0:
 		_apply_forgemaster_overlay(torso_pivot, torso_size, head_size, mats)
+		_apply_special_chassis_scale(member, 1.18)
 
 	# Branch-variant overlays. Each branch gets a distinct
 	# silhouette element so the player can read 'this is a Sapper /
@@ -1502,6 +1505,97 @@ func _apply_sable_silhouette(
 	spire.add_child(tip)
 
 
+func _apply_special_chassis_scale(member: Node3D, scale: float) -> void:
+	## Cosmetic-only chassis scale-up for special / hero units. The
+	## CharacterBody3D's collision + combat math don't move with this
+	## (they read from global_position, not the visual subtree), so
+	## the unit reads visibly larger without affecting hitboxes,
+	## squad spacing, or movement.
+	if not is_instance_valid(member) or scale <= 0.0:
+		return
+	member.scale = Vector3(scale, scale, scale)
+
+
+func _apply_pulsefont_caster_turret(
+	torso_pivot: Node3D,
+	torso_size: Vector3,
+	head_size: Vector3,
+	mats: Array[StandardMaterial3D],
+) -> void:
+	## Distinct caster turret that visually overrides the standard
+	## medium-chassis side cannon: two side prongs flanking a hovering
+	## emitter orb mounted on top of the head. Stacks on top of the
+	## existing head + cannons so combat-code geometry isn't disturbed,
+	## but the silhouette reads as 'broadcast caster' instead of 'one
+	## of those Jackal-class shooters'.
+	var beam_color: Color = Color(0.55, 0.85, 1.0)
+	var top_y: float = torso_size.y + head_size.y * 0.55
+	# Two angled prongs on the head sides -- thin tapered cylinders
+	# meeting above the head like an antenna fork.
+	for side: int in 2:
+		var sx: float = -1.0 if side == 0 else 1.0
+		var prong: MeshInstance3D = MeshInstance3D.new()
+		var p_cyl: CylinderMesh = CylinderMesh.new()
+		p_cyl.top_radius = 0.04
+		p_cyl.bottom_radius = 0.10
+		p_cyl.height = head_size.y * 1.4
+		p_cyl.radial_segments = 8
+		prong.mesh = p_cyl
+		prong.rotation = Vector3(0.0, 0.0, deg_to_rad(-22.0 * sx))
+		prong.position = Vector3(
+			sx * head_size.x * 0.46,
+			top_y + p_cyl.height * 0.45,
+			0.0,
+		)
+		var p_mat: StandardMaterial3D = StandardMaterial3D.new()
+		p_mat.albedo_color = Color(0.16, 0.18, 0.22)
+		p_mat.metallic = 0.55
+		p_mat.roughness = 0.30
+		prong.set_surface_override_material(0, p_mat)
+		torso_pivot.add_child(prong)
+		mats.append(p_mat)
+	# Hovering emitter orb cradled between the prongs -- bright
+	# emissive sphere that visually outranks the head-mounted
+	# cannons below it.
+	var orb: MeshInstance3D = MeshInstance3D.new()
+	var sph: SphereMesh = SphereMesh.new()
+	sph.radius = head_size.x * 0.42
+	sph.height = head_size.x * 0.84
+	orb.mesh = sph
+	orb.position = Vector3(0.0, top_y + head_size.y * 0.95, 0.0)
+	var orb_mat: StandardMaterial3D = StandardMaterial3D.new()
+	orb_mat.albedo_color = beam_color
+	orb_mat.emission_enabled = true
+	orb_mat.emission = beam_color
+	orb_mat.emission_energy_multiplier = 3.5
+	orb_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	orb.set_surface_override_material(0, orb_mat)
+	torso_pivot.add_child(orb)
+	mats.append(orb_mat)
+	# Inner core ring -- a flat torus laid horizontally inside the
+	# orb gives a distinctive 'energy field' read at any zoom.
+	var ring: MeshInstance3D = MeshInstance3D.new()
+	var t_mesh: TorusMesh = TorusMesh.new()
+	t_mesh.inner_radius = sph.radius * 0.7
+	t_mesh.outer_radius = sph.radius * 1.05
+	t_mesh.rings = 24
+	t_mesh.ring_segments = 8
+	ring.mesh = t_mesh
+	ring.rotation.x = PI * 0.5
+	ring.position = orb.position
+	var ring_mat: StandardMaterial3D = StandardMaterial3D.new()
+	ring_mat.albedo_color = Color(beam_color.r, beam_color.g, beam_color.b, 0.85)
+	ring_mat.emission_enabled = true
+	ring_mat.emission = beam_color
+	ring_mat.emission_energy_multiplier = 4.5
+	ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ring_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	ring.set_surface_override_material(0, ring_mat)
+	torso_pivot.add_child(ring)
+	mats.append(ring_mat)
+
+
 func _apply_pulsefont_overlay(
 	torso_pivot: Node3D,
 	torso_size: Vector3,
@@ -1591,6 +1685,12 @@ func _apply_pulsefont_overlay(
 	cap.set_surface_override_material(0, cap_mat)
 	spire_root.add_child(cap)
 	mats.append(cap_mat)
+
+	# Distinct caster turret on top of the head. Visually outranks
+	# the standard medium-chassis side cannon so the silhouette
+	# reads as 'broadcast emitter' rather than 'Jackal-class
+	# shooter' at typical zoom levels.
+	_apply_pulsefont_caster_turret(torso_pivot, torso_size, head_size, mats)
 
 	# --- Three small floating pulse nodes around the chest. ---
 	# Equilateral arrangement at chest height; emissive blue cubes
