@@ -810,10 +810,14 @@ func _build_hp_bar() -> void:
 	_hp_bar_bg.set_surface_override_material(0, bg_mat)
 	_hp_bar.add_child(_hp_bar_bg)
 
-	# Fill
+	# Fill -- native width matches the background so scale.x just
+	# expresses the HP percentage (0..1). Earlier the fill was 1.0u
+	# native and we scaled by pct * 4.4, but at full HP the displayed
+	# size could come out half of the background due to the pivot
+	# offset; keeping the native widths in sync sidesteps that.
 	_hp_bar_fill = MeshInstance3D.new()
 	var fill_box := BoxMesh.new()
-	fill_box.size = Vector3(1.0, 0.22, 0.12)
+	fill_box.size = Vector3(4.4, 0.22, 0.12)
 	_hp_bar_fill.mesh = fill_box
 	var fill_mat := StandardMaterial3D.new()
 	fill_mat.albedo_color = Color(0.3, 0.95, 0.4, 0.9)
@@ -995,8 +999,13 @@ func _update_hp_bar_fill() -> void:
 		return
 	var pct: float = float(current_hp) / float(maxi(stats.hp_total, 1))
 	var bar_width: float = 4.4
-	_hp_bar_fill.scale.x = maxf(pct * bar_width, 0.01)
-	_hp_bar_fill.position.x = -bar_width / 2.0 * (1.0 - pct)
+	# Fill mesh is now native 4.4u wide -- scale.x is the HP fraction
+	# directly, and the position offset shifts the pivot so the fill
+	# anchors on the LEFT edge of the background rather than centering
+	# (so the missing chunk reads as "right-side empty", not
+	# "centered shrink").
+	_hp_bar_fill.scale.x = maxf(pct, 0.01)
+	_hp_bar_fill.position.x = -bar_width * 0.5 * (1.0 - pct)
 	var fmat: StandardMaterial3D = _hp_bar_fill.get_surface_override_material(0) as StandardMaterial3D
 	if fmat:
 		var r: float = 1.0 - pct
