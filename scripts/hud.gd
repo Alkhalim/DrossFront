@@ -3076,10 +3076,22 @@ func _branch_delta_summary(base_stats: UnitStatResource, branch_stats: UnitStatR
 	# wasn't on the base unit.
 	if branch_stats.ability_name != "" and base_stats.ability_name == "":
 		pros.append("Gains ability: %s" % branch_stats.ability_name)
+		if branch_stats.ability_description != "":
+			pros.append("  • %s" % branch_stats.ability_description)
 	elif branch_stats.ability_name != base_stats.ability_name and branch_stats.ability_name != "":
 		pros.append("Ability: %s -> %s" % [base_stats.ability_name, branch_stats.ability_name])
+		if branch_stats.ability_description != "":
+			pros.append("  • %s" % branch_stats.ability_description)
 	elif branch_stats.ability_name == "" and base_stats.ability_name != "":
 		cons.append("Loses ability: %s" % base_stats.ability_name)
+
+	# Passive / role-defining stats that aren't an active ability
+	# but functionally ARE the upgrade. The previous tooltip only
+	# surfaced active-ability gains, so a Spotter branch (gains
+	# 200u stealth detection) read as 'no ability change' even
+	# though that detection radius is the entire point of taking
+	# the branch. Surface a representative slice here.
+	_emit_passive_ability_deltas(pros, cons, base_stats, branch_stats)
 
 	var lines: PackedStringArray = PackedStringArray()
 	for p: String in pros:
@@ -3089,6 +3101,65 @@ func _branch_delta_summary(base_stats: UnitStatResource, branch_stats: UnitStatR
 	if lines.is_empty():
 		lines.append("[color=#aaaaaa]No stat differences.[/color]")
 	return "\n".join(lines)
+
+
+func _emit_passive_ability_deltas(
+	pros: PackedStringArray,
+	cons: PackedStringArray,
+	base_stats: UnitStatResource,
+	branch_stats: UnitStatResource,
+) -> void:
+	## Surface passive / role-defining stat changes that aren't an
+	## active ability but functionally ARE the branch upgrade --
+	## stealth-detection radius (Spotter), Mesh aura range,
+	## repair_rate (Forgemaster), is_stealth_capable (Specter
+	## Ghost), first_strike_bonus (Hound Ripper), etc. Only
+	## emits a line when the delta is meaningful so identical
+	## branches stay quiet.
+	# Stealth-detection radius gain / change.
+	var det_b: float = (base_stats.get("detection_radius") as float) if "detection_radius" in base_stats else 0.0
+	var det_n: float = (branch_stats.get("detection_radius") as float) if "detection_radius" in branch_stats else 0.0
+	if absf(det_n - det_b) > 0.5:
+		var line: String = "Stealth detection %.0fu -> %.0fu" % [det_b, det_n]
+		if det_n > det_b:
+			pros.append(line)
+		else:
+			cons.append(line)
+	# Mesh aura range gain.
+	var mesh_b: float = (base_stats.get("mesh_provider_radius") as float) if "mesh_provider_radius" in base_stats else 0.0
+	var mesh_n: float = (branch_stats.get("mesh_provider_radius") as float) if "mesh_provider_radius" in branch_stats else 0.0
+	if absf(mesh_n - mesh_b) > 0.5:
+		var line2: String = "Mesh aura %.0fu -> %.0fu" % [mesh_b, mesh_n]
+		if mesh_n > mesh_b:
+			pros.append(line2)
+		else:
+			cons.append(line2)
+	# Repair rate change (engineers / Forgemaster).
+	var rep_b: float = (base_stats.get("repair_rate") as float) if "repair_rate" in base_stats else 0.0
+	var rep_n: float = (branch_stats.get("repair_rate") as float) if "repair_rate" in branch_stats else 0.0
+	if absf(rep_n - rep_b) > 0.5:
+		var line3: String = "Repair rate %+.0f" % (rep_n - rep_b)
+		if rep_n > rep_b:
+			pros.append(line3)
+		else:
+			cons.append(line3)
+	# First-strike opener bonus (Hound Ripper +50% on first shot).
+	var fs_b: float = (base_stats.get("first_strike_bonus") as float) if "first_strike_bonus" in base_stats else 1.0
+	var fs_n: float = (branch_stats.get("first_strike_bonus") as float) if "first_strike_bonus" in branch_stats else 1.0
+	if absf(fs_n - fs_b) > 0.01:
+		var pct_n: int = int(round((fs_n - 1.0) * 100.0))
+		if pct_n > 0:
+			pros.append("First-strike: +%d%% damage on opening shot" % pct_n)
+		elif pct_n < 0:
+			cons.append("First-strike: %d%% damage on opening shot" % pct_n)
+	# Stealth gain. is_stealth_capable is a bool so emit a
+	# 'Gains stealth' line when the branch flips it on.
+	var stl_b: bool = (base_stats.get("is_stealth_capable") as bool) if "is_stealth_capable" in base_stats else false
+	var stl_n: bool = (branch_stats.get("is_stealth_capable") as bool) if "is_stealth_capable" in branch_stats else false
+	if stl_n and not stl_b:
+		pros.append("Gains stealth (concealed when not under fire)")
+	elif stl_b and not stl_n:
+		cons.append("Loses stealth")
 
 
 func _emit_branch_delta(pros: PackedStringArray, cons: PackedStringArray, label: String, delta: float, base_val: float, decimals: int) -> void:
