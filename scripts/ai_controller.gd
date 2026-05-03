@@ -263,6 +263,16 @@ func _find_nearest_enemy_hq_pos(buildings: Array[Node]) -> Vector3:
 	return best_pos
 
 
+## Throttle for the AI's state-tick. The AI's decision loop runs
+## at multi-second timescales (state durations measured in 5-30s
+## blocks); ticking it at 60Hz wasted ~58 frames out of every 60
+## walking the owner group + checking timers that hadn't moved
+## meaningfully. 5Hz is fast enough that any in-flight transition
+## still feels reactive.
+const AI_TICK_INTERVAL: float = 0.20
+var _ai_tick_accum: float = 0.0
+
+
 func _process(delta: float) -> void:
 	if _hq_destroyed:
 		return
@@ -271,7 +281,9 @@ func _process(delta: float) -> void:
 		return
 
 	# Passive income — scaled by difficulty's economy multiplier so Easy
-	# starves the AI a bit and Hard makes it tech up faster.
+	# starves the AI a bit and Hard makes it tech up faster. Income
+	# accumulator stays on the per-frame path because it integrates
+	# fractional salvage that we don't want to drop on throttled ticks.
 	if _ai_resource_manager and _ai_resource_manager.has_method("add_salvage"):
 		_salvage_accumulator += AI_SALVAGE_TRICKLE * _econ_mul * delta
 		if _salvage_accumulator >= 1.0:
@@ -281,6 +293,16 @@ func _process(delta: float) -> void:
 			# Also give some fuel
 			if _ai_resource_manager.has_method("add_fuel"):
 				_ai_resource_manager.add_fuel(max(trickle / 3, 1))
+
+	# Throttle the rest of the AI tick (state machine + group walks
+	# + expansion timer) to ~5Hz. Below this point `delta` is the
+	# accumulated delta since the last tick, NOT the per-frame
+	# delta, so any per-second math stays correct.
+	_ai_tick_accum += delta
+	if _ai_tick_accum < AI_TICK_INTERVAL:
+		return
+	delta = _ai_tick_accum
+	_ai_tick_accum = 0.0
 
 	# Update unit list
 	_units.clear()
