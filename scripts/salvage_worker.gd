@@ -11,6 +11,13 @@ const MOVE_SPEED: float = 6.0
 const HARVEST_RATE: float = 15.0
 const CARRY_CAPACITY: int = 30
 const ARRIVE_THRESHOLD: float = 1.5
+## Dropoff radius at the home crawler. Wider than ARRIVE_THRESHOLD
+## because the crawler is a chunky chassis -- the worker can be
+## physically touching the side of the crawler and still be 2.5u
+## from its CENTRE, which the strict 1.5u arrive check rejected.
+## Bumping to 3.0u so a worker that's bumped up against the chassis
+## counts as 'docked' for the deposit.
+const DROPOFF_RADIUS: float = 3.0
 const MAX_HP: int = 100
 
 const PLAYER_COLOR := Color(0.08, 0.25, 0.85, 1.0)
@@ -443,7 +450,17 @@ func _return_to_yard(delta: float) -> void:
 		state = State.IDLE
 		return
 
-	if _move_toward(home_yard.global_position, delta):
+	# Move toward the crawler. The worker docks (deposits) the moment
+	# its centre falls within DROPOFF_RADIUS of the crawler's centre,
+	# even if _move_toward's strict ARRIVE_THRESHOLD hasn't fired yet
+	# -- the crawler chassis is wide enough that the worker can be
+	# physically touching the side without the arrive check passing.
+	var arrived: bool = _move_toward(home_yard.global_position, delta)
+	var docked: bool = arrived
+	if not docked:
+		var d: float = global_position.distance_to(home_yard.global_position)
+		docked = d < DROPOFF_RADIUS
+	if docked:
 		if resource_manager:
 			resource_manager.add_salvage(_carried_salvage)
 			if _carried_microchips > 0 and resource_manager.has_method("add_microchips"):
