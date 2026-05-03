@@ -92,6 +92,11 @@ var _sel_hp_mat: StandardMaterial3D = null
 var _sel_prod_bg: MeshInstance3D = null
 var _sel_prod_fill: MeshInstance3D = null
 var _sel_prod_mat: StandardMaterial3D = null
+## Faint green outline drawn on the floor under a selected
+## building to show the player exactly where the structure
+## blocks pathing + future placement (matches the collision
+## footprint, not the visual silhouette).
+var _sel_footprint: Node3D = null
 ## Per-frame construction stats so the progress label can show
 ## current worker count and an estimated remaining time. The dicts
 ## are flipped in _process so a builder still counts even if it
@@ -4648,6 +4653,7 @@ func select_building() -> void:
 	_is_selected = true
 	_update_selection_visual()
 	_build_selection_bars()
+	_build_selection_footprint()
 
 
 func deselect_building() -> void:
@@ -4655,6 +4661,7 @@ func deselect_building() -> void:
 		return
 	_is_selected = false
 	_update_selection_visual()
+	_remove_selection_footprint()
 	# Keep the HP bar around when the building is still damaged
 	# so the player can see lingering harm without re-selecting.
 	# Production bar (selection-only) is torn down either way.
@@ -4788,6 +4795,67 @@ func _remove_selection_bars() -> void:
 	_sel_prod_bg = null
 	_sel_prod_fill = null
 	_sel_prod_mat = null
+
+
+func _build_selection_footprint() -> void:
+	## Faint emissive-green rectangular outline laid flat on the
+	## floor along the building's collision footprint. Helps the
+	## player see exactly where the structure blocks pathing /
+	## placement (the visual silhouette can extend past the
+	## collision box for taller details, so the in-game
+	## 'no-go area' is the box, not the silhouette).
+	if _sel_footprint and is_instance_valid(_sel_footprint):
+		return
+	if not stats:
+		return
+	var fs: Vector3 = stats.footprint_size
+	var hx: float = fs.x * 0.5
+	var hz: float = fs.z * 0.5
+	var thickness: float = 0.10
+	var root: Node3D = Node3D.new()
+	root.name = "SelectionFootprint"
+	# Sit just above the ground plane to clear depth-fight without
+	# floating visibly above the floor at oblique camera angles.
+	root.position = Vector3(0.0, 0.05, 0.0)
+	add_child(root)
+	_sel_footprint = root
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.albedo_color = Color(0.30, 0.95, 0.40, 0.85)
+	mat.emission_enabled = true
+	mat.emission = Color(0.30, 0.95, 0.40, 1.0)
+	mat.emission_energy_multiplier = 1.6
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.no_depth_test = true
+	mat.render_priority = 4
+	# Four thin boxes forming the outline rectangle. Each side is a
+	# stretched BoxMesh; corners overlap by one thickness so the
+	# rectangle reads as continuous from any angle.
+	for side: int in 4:
+		var bar: MeshInstance3D = MeshInstance3D.new()
+		var box: BoxMesh = BoxMesh.new()
+		match side:
+			0:
+				box.size = Vector3(fs.x + thickness, 0.04, thickness)
+				bar.position = Vector3(0.0, 0.0, hz)
+			1:
+				box.size = Vector3(fs.x + thickness, 0.04, thickness)
+				bar.position = Vector3(0.0, 0.0, -hz)
+			2:
+				box.size = Vector3(thickness, 0.04, fs.z + thickness)
+				bar.position = Vector3(hx, 0.0, 0.0)
+			3:
+				box.size = Vector3(thickness, 0.04, fs.z + thickness)
+				bar.position = Vector3(-hx, 0.0, 0.0)
+		bar.mesh = box
+		bar.set_surface_override_material(0, mat)
+		root.add_child(bar)
+
+
+func _remove_selection_footprint() -> void:
+	if _sel_footprint and is_instance_valid(_sel_footprint):
+		_sel_footprint.queue_free()
+	_sel_footprint = null
 
 
 ## Cached scene-tree references for the armory-only research /
