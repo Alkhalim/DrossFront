@@ -11,6 +11,7 @@ damage_tier = &"very_high"
 range_tier = &"long"
 rof_tier = &"moderate"
 base_accuracy = 0.80
+can_damage_trees = true
 
 [sub_resource type="Resource" id="weapon_ironwall_aa"]
 script = ExtResource("2")

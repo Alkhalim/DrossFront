@@ -13,6 +13,7 @@ rof_tier = &"slow"
 base_accuracy = 0.78
 damage_value = 133
 structure_damage_mult = 3.0
+can_damage_trees = true
 
 [resource]
 script = ExtResource("1")

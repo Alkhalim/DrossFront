@@ -90,6 +90,15 @@ extends Resource
 ## Default -1 = fall through to CombatTables.ROLE_VS_ARMOR.
 @export var structure_damage_mult: float = -1.0
 
+## Tree damage gate. Default false: small-arms / SMGs / minigun
+## turrets / continuous-beam lasers can't chew through forest --
+## Schwarzwald / dense brush actually means something. Set true
+## on slow / heavy weapons that should clear vegetation: rockets
+## (Hammerhead missiles), large-caliber slow guns (Bulwark cannon,
+## Anvil heavy turret), bombs (Wraith bomb bay), heavy slow
+## lasers (Ratchet cutter), flamethrowers, artillery shells.
+@export var can_damage_trees: bool = false
+
 
 ## Drone-bay weapon flag. When true, each "shot" of this weapon
 ## spawns a Drone instead of a regular projectile -- the drone

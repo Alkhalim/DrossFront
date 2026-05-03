@@ -13,6 +13,7 @@ rof_tier = &"slow"
 base_accuracy = 0.78
 damage_value = 81
 bomb_drop = true
+can_damage_trees = true
 
 [resource]
 script = ExtResource("1")

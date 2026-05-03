@@ -22,6 +22,7 @@ damage_tier = &"high"
 range_tier = &"short"
 rof_tier = &"slow"
 base_accuracy = 0.92
+can_damage_trees = true
 
 [resource]
 script = ExtResource("1")

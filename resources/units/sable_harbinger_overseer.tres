@@ -10,6 +10,7 @@ role_tag = &"AP"
 damage_tier = &"very_high"
 range_tier = &"long"
 rof_tier = &"slow"
+can_damage_trees = true
 
 [sub_resource type="Resource" id="weapon_overseer_drone_swarm"]
 script = ExtResource("2")

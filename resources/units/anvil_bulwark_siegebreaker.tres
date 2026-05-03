@@ -11,6 +11,7 @@ damage_tier = &"extreme"
 range_tier = &"very_long"
 rof_tier = &"single"
 base_accuracy = 0.75
+can_damage_trees = true
 
 [sub_resource type="Resource" id="weapon_siege_pod"]
 script = ExtResource("2")
@@ -20,6 +21,7 @@ damage_tier = &"high"
 range_tier = &"medium"
 rof_tier = &"slow"
 base_accuracy = 0.92
+can_damage_trees = true
 
 [resource]
 script = ExtResource("1")
