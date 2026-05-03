@@ -241,3 +241,12 @@ func can_target_air() -> bool:
 ## shows a circling dot so the player can read "this is on
 ## autocast" at a glance.
 @export var ability_autocast: bool = false
+
+## Optional human-readable passive identity. Surfaced by the HUD
+## as a 'Passive' placeholder button (greyed-out, with this text
+## as the tooltip) for units that don't have an active ability
+## but DO carry a meaningful passive trait (Spotter detection,
+## Tracker sight aura, Specter stealth, Harbinger Mesh aura,
+## etc.). Empty = no passive button. Branch tooltips also list
+## this in the gains pros column when a branch acquires it.
+@export var passive_description: String = ""

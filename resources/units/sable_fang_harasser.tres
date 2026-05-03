@@ -35,3 +35,4 @@ is_aircraft = true
 flight_altitude = 5.5
 flight_speed = 22.0
 special_description = "Fang Harasser — fast (22 u/s) high-ROF light pulse repeaters tuned for picking off enemy salvage workers + Crawler escorts. Lower HP, lower pop cost, much higher mobility. Reads as the economy-disruption build."
+passive_description = "Economy Disruption Loadout — high-ROF light pulse repeaters and 22 u/s top speed for picking off enemy workers + Crawler escorts."

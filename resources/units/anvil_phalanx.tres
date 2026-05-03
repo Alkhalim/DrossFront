@@ -33,6 +33,7 @@ build_time = 22.0
 built_at = &"aerodrome"
 primary_weapon = SubResource("weapon_drone_mg")
 special_description = "Anvil's standard air patrol — light interceptor drones flying close formation."
+passive_description = "Drone Pack — close-formation interceptor swarm. Light air armour, leans on numbers."
 branch_a_name = "Shield"
 branch_b_name = "Interceptor"
 branch_a_stats = ExtResource("3")

@@ -1901,6 +1901,33 @@ func _rebuild_unit_command_buttons() -> void:
 			"stat": ability_stat,
 		})
 
+	# Passive-identity placeholder buttons. Units that lack an
+	# active ability but carry a meaningful passive (Spotter
+	# detection, Tracker sight aura, Specter stealth, etc.) get a
+	# disabled "Passive" slot here so the bottom row visually
+	# reads "this unit's special is on, just not clickable" instead
+	# of an empty action panel for half the roster.
+	var passive_groups: Array[Dictionary] = _selection_passive_groups()
+	for group: Dictionary in passive_groups:
+		var passive_units: Array[Node3D] = group["units"] as Array[Node3D]
+		var passive_stat: UnitStatResource = group["stat"] as UnitStatResource
+		var passive_btn := Button.new()
+		passive_btn.custom_minimum_size = Vector2(150, 42)
+		var pcount_label: String = ""
+		if passive_units.size() > 1:
+			pcount_label = "  ×%d" % passive_units.size()
+		passive_btn.text = "Passive%s" % pcount_label
+		passive_btn.tooltip_text = passive_stat.passive_description
+		passive_btn.disabled = true
+		_paint_passive_button_style(passive_btn)
+		_button_grid.add_child(passive_btn)
+		_action_buttons.append({
+			"button": passive_btn,
+			"kind": "passive",
+			"units": passive_units,
+			"stat": passive_stat,
+		})
+
 
 ## Bottom-row capacity for ability slots. The command row already
 ## fills three slots (Hold / Patrol / Attack-Move); leaving three
@@ -1954,6 +1981,71 @@ func _selection_ability_groups() -> Array[Dictionary]:
 		out.append(buckets[key])
 		emitted += 1
 	return out
+
+
+func _selection_passive_groups() -> Array[Dictionary]:
+	## Mirrors _selection_ability_groups but for units that have no
+	## active ability and instead carry a passive_description string.
+	## Buckets by passive_description so identical passives across
+	## different unit_names still collapse into one row.
+	var out: Array[Dictionary] = []
+	if not _selection_manager:
+		return out
+	var selected: Array[Node3D] = _selection_manager.get_selected_units() as Array[Node3D]
+	if selected.is_empty():
+		return out
+	var buckets: Dictionary = {}
+	var bucket_order: Array[String] = []
+	for unit: Node3D in selected:
+		if not is_instance_valid(unit) or not "stats" in unit:
+			continue
+		var s: UnitStatResource = unit.get("stats") as UnitStatResource
+		if not s or s.passive_description == "":
+			continue
+		# Skip units that ALSO have an active ability -- the active
+		# slot already represents them; doubling up clutters the row.
+		if s.ability_name != "":
+			continue
+		var key: String = s.passive_description
+		if not buckets.has(key):
+			buckets[key] = { "units": [] as Array[Node3D], "stat": s }
+			bucket_order.append(key)
+		(buckets[key]["units"] as Array[Node3D]).append(unit)
+	bucket_order.sort_custom(func(a: String, b: String) -> bool:
+		return (buckets[a]["units"] as Array).size() > (buckets[b]["units"] as Array).size()
+	)
+	var emitted: int = 0
+	for key: String in bucket_order:
+		if emitted >= ABILITY_BUTTON_LIMIT:
+			break
+		out.append(buckets[key])
+		emitted += 1
+	return out
+
+
+func _paint_passive_button_style(btn: Button) -> void:
+	## Subdued grey-blue stylebox so a Passive slot reads as
+	## 'always-on, not interactive' next to the violet active
+	## ability buttons. Disabled-state styling matches normal so
+	## the button looks the same whether or not Godot considers it
+	## hovered (it's disabled = true so hover never visually fires
+	## anyway).
+	var passive_accent: Color = Color(0.45, 0.62, 0.78, 1.0)
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color(0.12, 0.16, 0.20, 1.0)
+	bg.border_color = passive_accent
+	bg.set_border_width_all(1)
+	bg.set_corner_radius_all(3)
+	bg.content_margin_left = 6
+	bg.content_margin_right = 6
+	bg.content_margin_top = 4
+	bg.content_margin_bottom = 4
+	btn.add_theme_stylebox_override("normal", bg)
+	btn.add_theme_stylebox_override("hover", bg)
+	btn.add_theme_stylebox_override("pressed", bg)
+	btn.add_theme_stylebox_override("disabled", bg)
+	btn.add_theme_color_override("font_color", passive_accent)
+	btn.add_theme_color_override("font_disabled_color", passive_accent)
 
 
 func _paint_ability_button_style(btn: Button) -> void:

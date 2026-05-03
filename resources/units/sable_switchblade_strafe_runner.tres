@@ -33,3 +33,4 @@ is_aircraft = true
 flight_altitude = 7.0
 flight_speed = 22.0
 special_description = "Switchblade Strafe Runner — Pulse Cannons retuned for ground attack (AP tag). Eats medium / heavy mech armour but is helpless against enemy air. Pair with Dogfighter Switchblades or SAM coverage."
+passive_description = "AP Strafe Loadout — Pulse Cannons retuned for anti-ground work. Helpless against enemy aircraft."

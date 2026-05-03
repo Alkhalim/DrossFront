@@ -37,6 +37,7 @@ is_stealth_capable = true
 detection_radius = 80.0
 stealth_restore_time = 4.0
 special_description = "Sable stealth scout. Can fire from concealment without breaking stealth (per V3 stealth rules)."
+passive_description = "Stealth — concealed unless taking damage or within 80u of an enemy. Firing does NOT break concealment."
 branch_a_name = "Ghost"
 branch_b_name = "Glitch"
 branch_a_stats = ExtResource("3")

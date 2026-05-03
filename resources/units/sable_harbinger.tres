@@ -47,6 +47,7 @@ sees_over_buildings = true
 secondary_weapon = SubResource("weapon_drone_swarm")
 mesh_provider_radius = 30.0
 special_description = "Sable heavy drone carrier. Spinal railgun for armored targets, drone bay releases for sustained mid-range pressure, and a 30u Mesh aura provider. Requires Black Pylon to build."
+passive_description = "Mesh Aura 30u + Sees Over Buildings — extends Sable's Mesh accuracy buff to nearby allies; tall-mech vision pierces rooftops + dense terrain."
 branch_a_name = "Swarm Marshal"
 branch_b_name = "Overseer"
 branch_a_stats = ExtResource("3")

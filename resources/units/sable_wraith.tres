@@ -40,3 +40,4 @@ is_stealth_capable = true
 detection_radius = 60.0
 stealth_restore_time = 5.0
 special_description = "Sable stealth bomber. Anti-structure bomb bay (heavy damage vs buildings, weak vs mechs). Stealthed when not damaged or under direct surveillance — ideal for backline-strike plays. Requires Black Pylon to build."
+passive_description = "Stealth Bomber — concealed when not under fire or observed. AS-tagged bomb bay devastates structures; weak vs mechs."

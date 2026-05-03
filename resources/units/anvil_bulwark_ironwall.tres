@@ -45,3 +45,4 @@ built_at = &"advanced_foundry"
 primary_weapon = SubResource("weapon_ironwall_cannon")
 secondary_weapon = SubResource("weapon_ironwall_aa")
 special_description = "Bulwark Ironwall — heavier armour plating (+25% HP) and shoulder pods retuned to AAir for self-defense against enemy aircraft. The frontline anchor — eats damage so the rest of the army can manoeuvre."
+passive_description = "Reinforced Plating — +25% HP and AAir shoulder pods for self-defense against aircraft."

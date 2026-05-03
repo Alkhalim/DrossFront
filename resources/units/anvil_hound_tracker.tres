@@ -30,3 +30,4 @@ build_time = 24.5
 built_at = &"basic_foundry"
 primary_weapon = SubResource("weapon_autocannons")
 special_description = "Recon-support refit. Very-long sight extends Anvil scouting range. Friendly units within 25u of a Tracker get +15% sight radius -- park a Tracker squad with your line to extend the army's eyes."
+passive_description = "Sight Aura — friendly units within 25u gain +15% sight radius. Stacks with each Tracker squad in range."

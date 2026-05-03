@@ -35,3 +35,4 @@ is_stealth_capable = true
 detection_radius = 80.0
 stealth_restore_time = 4.0
 special_description = "Specter Ghost branch — Long Pulse Repeater extends shooting range so the Ghost can pick targets from outside their detection bubble. Slightly faster + tougher than the base Specter; no Mesh contribution."
+passive_description = "Stealth + Long Pulse — concealed unless damaged or within 80u of an enemy; engages from outside the enemy's detection bubble."

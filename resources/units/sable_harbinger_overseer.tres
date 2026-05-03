@@ -45,3 +45,4 @@ primary_weapon = SubResource("weapon_overseer_railgun")
 secondary_weapon = SubResource("weapon_overseer_drone_swarm")
 mesh_provider_radius = 42.0
 special_description = "Harbinger Overseer — drone-carrier branch upgraded with AAir-tagged missile drones (heavy per-shot damage vs aircraft, no ground capability). Mesh aura extends to 42u. The standoff air-control carrier; pair with the base Harbinger or a Swarm Marshal for ground answers."
+passive_description = "Mesh Aura 42u + AAir Drone Bay — extended Mesh radius for the army's accuracy buff plus anti-air drones; no ground drone capability."
