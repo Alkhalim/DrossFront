@@ -1287,6 +1287,33 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 	if stats and stats.unit_name.findn("Forgemaster") >= 0:
 		_apply_forgemaster_overlay(torso_pivot, torso_size, head_size, mats)
 
+	# Branch-variant overlays. Each branch gets a distinct
+	# silhouette element so the player can read 'this is a Sapper /
+	# Spotter / Ironwall / etc.' without selecting the unit. Visuals
+	# stack on top of the base chassis -- combat geometry stays put.
+	if stats:
+		match stats.unit_name:
+			"Rook (Spotter)":
+				_apply_rook_spotter_overlay(torso_pivot, torso_size, head_size)
+			"Rook (Sapper)":
+				_apply_rook_sapper_overlay(torso_pivot, torso_size)
+			"Hound — Tracker":
+				_apply_hound_tracker_overlay(torso_pivot, torso_size)
+			"Hound — Ripper":
+				_apply_hound_ripper_overlay(torso_pivot, torso_size)
+			"Bulwark (Ironwall)":
+				_apply_bulwark_ironwall_overlay(torso_pivot, torso_size)
+			"Bulwark (Siegebreaker)":
+				_apply_bulwark_siegebreaker_overlay(torso_pivot, torso_size)
+			"Specter (Ghost)":
+				_apply_specter_ghost_overlay(torso_pivot, torso_size, mats)
+			"Specter (Glitch)":
+				_apply_specter_glitch_overlay(torso_pivot, torso_size, mats)
+			"Jackal (Striker)":
+				_apply_jackal_striker_overlay(torso_pivot, torso_size, mats)
+			"Jackal (Widow)":
+				_apply_jackal_widow_overlay(torso_pivot, torso_size, mats)
+
 	# Per-member gait variation so a squad doesn't goose-step in lockstep.
 	# Each mech has its own phase, slightly different stride speed, swing
 	# amplitude, and torso bob amount — same skeleton, individual feel.
@@ -1944,6 +1971,328 @@ func _build_courier_tank_member(index: int, offset: Vector3, team_color: Color) 
 		"idle_phase": randf_range(0.0, TAU),
 		"idle_speed": randf_range(0.4, 0.7),
 	}
+
+
+## --- Branch variant overlays ---
+##
+## Each function adds geometry under `torso_pivot` so the unit
+## silhouettes as its specific branch. Combat geometry (cannons,
+## head, legs) stays put; overlays are pure visual differentiation.
+
+const _ANVIL_RED: Color = Color(1.0, 0.30, 0.20)
+
+
+func _apply_rook_spotter_overlay(torso_pivot: Node3D, torso_size: Vector3, head_size: Vector3) -> void:
+	# Sensor mast on the right shoulder + a pale-blue eye on top.
+	# Reads as the long-sight reconnaissance variant.
+	var mast := MeshInstance3D.new()
+	var mb := BoxMesh.new()
+	mb.size = Vector3(0.06, 0.65, 0.06)
+	mast.mesh = mb
+	mast.position = Vector3(torso_size.x * 0.45, torso_size.y + 0.32, 0.0)
+	mast.set_surface_override_material(0, _make_metal_mat(Color(0.18, 0.16, 0.14)))
+	torso_pivot.add_child(mast)
+	# Sensor eye -- emissive cyan disk on the mast tip.
+	var eye := MeshInstance3D.new()
+	var eye_sph := SphereMesh.new()
+	eye_sph.radius = 0.10
+	eye_sph.height = 0.20
+	eye.mesh = eye_sph
+	eye.position = Vector3(torso_size.x * 0.45, torso_size.y + 0.66, 0.0)
+	var eye_mat := StandardMaterial3D.new()
+	eye_mat.albedo_color = Color(0.30, 0.78, 1.0)
+	eye_mat.emission_enabled = true
+	eye_mat.emission = Color(0.30, 0.78, 1.0)
+	eye_mat.emission_energy_multiplier = 2.0
+	eye.set_surface_override_material(0, eye_mat)
+	torso_pivot.add_child(eye)
+
+
+func _apply_rook_sapper_overlay(torso_pivot: Node3D, torso_size: Vector3) -> void:
+	# Demolition charges strapped to the hip -- two cylindrical
+	# satchels with a cord between them. Reads as 'this one is
+	# carrying the building-cracker payload'.
+	for side: int in 2:
+		var sx: float = -1.0 if side == 0 else 1.0
+		var charge := MeshInstance3D.new()
+		var c_cyl := CylinderMesh.new()
+		c_cyl.top_radius = 0.10
+		c_cyl.bottom_radius = 0.10
+		c_cyl.height = 0.22
+		c_cyl.radial_segments = 10
+		charge.mesh = c_cyl
+		charge.rotation.x = PI * 0.5
+		charge.position = Vector3(sx * torso_size.x * 0.42, torso_size.y * 0.20, torso_size.z * 0.30)
+		var c_mat := StandardMaterial3D.new()
+		c_mat.albedo_color = Color(0.78, 0.16, 0.10)
+		c_mat.roughness = 0.7
+		charge.set_surface_override_material(0, c_mat)
+		torso_pivot.add_child(charge)
+		# Tan fuse cap.
+		var fuse := MeshInstance3D.new()
+		var f_cyl := CylinderMesh.new()
+		f_cyl.top_radius = 0.025
+		f_cyl.bottom_radius = 0.025
+		f_cyl.height = 0.10
+		fuse.mesh = f_cyl
+		fuse.position = Vector3(sx * torso_size.x * 0.42, torso_size.y * 0.20 + 0.08, torso_size.z * 0.30)
+		var f_mat := StandardMaterial3D.new()
+		f_mat.albedo_color = Color(0.78, 0.62, 0.32)
+		fuse.set_surface_override_material(0, f_mat)
+		torso_pivot.add_child(fuse)
+
+
+func _apply_hound_tracker_overlay(torso_pivot: Node3D, torso_size: Vector3) -> void:
+	# Sensor dish mounted on the rear of the torso -- the Tracker is
+	# the ranged spotter Hound, so a back-mounted dish + emissive
+	# pickup reads at zoom.
+	var mast := MeshInstance3D.new()
+	var m_box := BoxMesh.new()
+	m_box.size = Vector3(0.08, 0.55, 0.08)
+	mast.mesh = m_box
+	mast.position = Vector3(0.0, torso_size.y + 0.28, -torso_size.z * 0.40)
+	mast.set_surface_override_material(0, _make_metal_mat(Color(0.18, 0.16, 0.14)))
+	torso_pivot.add_child(mast)
+	var dish := MeshInstance3D.new()
+	var d_cyl := CylinderMesh.new()
+	d_cyl.top_radius = 0.22
+	d_cyl.bottom_radius = 0.22
+	d_cyl.height = 0.05
+	d_cyl.radial_segments = 18
+	dish.mesh = d_cyl
+	dish.rotation.x = deg_to_rad(-30.0)
+	dish.position = Vector3(0.0, torso_size.y + 0.55, -torso_size.z * 0.40)
+	var d_mat := StandardMaterial3D.new()
+	d_mat.albedo_color = Color(0.20, 0.20, 0.22)
+	d_mat.emission_enabled = true
+	d_mat.emission = Color(0.30, 0.85, 1.0)
+	d_mat.emission_energy_multiplier = 0.4
+	dish.set_surface_override_material(0, d_mat)
+	torso_pivot.add_child(dish)
+
+
+func _apply_hound_ripper_overlay(torso_pivot: Node3D, torso_size: Vector3) -> void:
+	# Shoulder shotgun pod -- a chunky drum on the right shoulder
+	# with three barrel mouths poking forward. Pairs with the
+	# Ripper's shoulder shotgun array secondary weapon.
+	var pod := MeshInstance3D.new()
+	var pod_box := BoxMesh.new()
+	pod_box.size = Vector3(0.32, 0.32, 0.42)
+	pod.mesh = pod_box
+	pod.position = Vector3(torso_size.x * 0.48, torso_size.y * 0.85, torso_size.z * 0.20)
+	pod.set_surface_override_material(0, _make_metal_mat(Color(0.22, 0.18, 0.14)))
+	torso_pivot.add_child(pod)
+	# Three barrel mouths in a triangle on the front face.
+	var barrel_offsets: Array[Vector2] = [
+		Vector2(-0.08, 0.06), Vector2(0.08, 0.06), Vector2(0.0, -0.08),
+	]
+	for off: Vector2 in barrel_offsets:
+		var barrel := MeshInstance3D.new()
+		var b_cyl := CylinderMesh.new()
+		b_cyl.top_radius = 0.05
+		b_cyl.bottom_radius = 0.05
+		b_cyl.height = 0.10
+		b_cyl.radial_segments = 8
+		barrel.mesh = b_cyl
+		barrel.rotation.x = PI * 0.5
+		barrel.position = Vector3(
+			torso_size.x * 0.48 + off.x,
+			torso_size.y * 0.85 + off.y,
+			torso_size.z * 0.20 + 0.26,
+		)
+		barrel.set_surface_override_material(0, _make_metal_mat(Color(0.08, 0.08, 0.08)))
+		torso_pivot.add_child(barrel)
+
+
+func _apply_bulwark_ironwall_overlay(torso_pivot: Node3D, torso_size: Vector3) -> void:
+	# Reinforced shoulder plating -- two thick angled plates riveted
+	# over the standard shoulders. Reads as 'this one tanks more'.
+	for side: int in 2:
+		var sx: float = -1.0 if side == 0 else 1.0
+		var plate := MeshInstance3D.new()
+		var p_box := BoxMesh.new()
+		p_box.size = Vector3(0.55, 0.45, 0.55)
+		plate.mesh = p_box
+		plate.position = Vector3(sx * torso_size.x * 0.55, torso_size.y * 0.85, 0.0)
+		plate.rotation.z = sx * deg_to_rad(-12.0)
+		plate.set_surface_override_material(0, _make_metal_mat(Color(0.32, 0.28, 0.22)))
+		torso_pivot.add_child(plate)
+		# Riveted edge strip along the lower lip of the plate.
+		var rivet_strip := MeshInstance3D.new()
+		var rs_box := BoxMesh.new()
+		rs_box.size = Vector3(0.55, 0.06, 0.06)
+		rivet_strip.mesh = rs_box
+		rivet_strip.position = Vector3(sx * torso_size.x * 0.55, torso_size.y * 0.65, torso_size.z * 0.30)
+		rivet_strip.rotation.z = sx * deg_to_rad(-12.0)
+		rivet_strip.set_surface_override_material(0, _make_metal_mat(Color(0.55, 0.45, 0.18)))
+		torso_pivot.add_child(rivet_strip)
+
+
+func _apply_bulwark_siegebreaker_overlay(torso_pivot: Node3D, torso_size: Vector3) -> void:
+	# Long siege barrel mounted along the spine. The Siegebreaker
+	# branch's identity is its big anti-structure cannon, so the
+	# silhouette grows a forward-pointing barrel that protrudes well
+	# past the standard cannons.
+	var barrel := MeshInstance3D.new()
+	var b_cyl := CylinderMesh.new()
+	b_cyl.top_radius = 0.14
+	b_cyl.bottom_radius = 0.18
+	b_cyl.height = 1.40
+	b_cyl.radial_segments = 14
+	barrel.mesh = b_cyl
+	barrel.rotation.x = PI * 0.5
+	barrel.position = Vector3(0.0, torso_size.y * 0.65, torso_size.z * 0.55)
+	barrel.set_surface_override_material(0, _make_metal_mat(Color(0.18, 0.16, 0.14)))
+	torso_pivot.add_child(barrel)
+	# Muzzle brake -- chunky ring at the barrel tip.
+	var brake := MeshInstance3D.new()
+	var br_cyl := CylinderMesh.new()
+	br_cyl.top_radius = 0.22
+	br_cyl.bottom_radius = 0.22
+	br_cyl.height = 0.16
+	br_cyl.radial_segments = 12
+	brake.mesh = br_cyl
+	brake.rotation.x = PI * 0.5
+	brake.position = Vector3(0.0, torso_size.y * 0.65, torso_size.z * 0.55 + 0.78)
+	brake.set_surface_override_material(0, _make_metal_mat(Color(0.10, 0.09, 0.08)))
+	torso_pivot.add_child(brake)
+
+
+func _apply_specter_ghost_overlay(torso_pivot: Node3D, torso_size: Vector3, mats: Array[StandardMaterial3D]) -> void:
+	# Stealth-cloak shimmer -- thin emissive cyan strips wrapping the
+	# torso edges. Reads as the always-on cloaking variant.
+	for edge_y: int in 3:
+		var ey: float = (float(edge_y) + 0.5) * (torso_size.y / 3.0)
+		var strip := MeshInstance3D.new()
+		var s_box := BoxMesh.new()
+		s_box.size = Vector3(torso_size.x * 1.04, 0.03, torso_size.z * 1.04)
+		strip.mesh = s_box
+		strip.position = Vector3(0.0, ey, 0.0)
+		var s_mat := StandardMaterial3D.new()
+		s_mat.albedo_color = Color(0.55, 0.85, 1.0)
+		s_mat.emission_enabled = true
+		s_mat.emission = Color(0.55, 0.85, 1.0)
+		s_mat.emission_energy_multiplier = 0.9
+		s_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		s_mat.albedo_color.a = 0.7
+		strip.set_surface_override_material(0, s_mat)
+		torso_pivot.add_child(strip)
+		mats.append(s_mat)
+
+
+func _apply_specter_glitch_overlay(torso_pivot: Node3D, torso_size: Vector3, mats: Array[StandardMaterial3D]) -> void:
+	# CRT glitch panels -- two violet-emissive flat panels on the
+	# chest + back, each carrying a fine scanline pattern feel via
+	# differing emission energies. Reads as the EW / Mesh-projecting
+	# variant rather than the cloaking Ghost.
+	for side: int in 2:
+		var sz: float = 1.0 if side == 0 else -1.0
+		var panel := MeshInstance3D.new()
+		var p_box := BoxMesh.new()
+		p_box.size = Vector3(torso_size.x * 0.7, torso_size.y * 0.55, 0.04)
+		panel.mesh = p_box
+		panel.position = Vector3(0.0, torso_size.y * 0.55, sz * (torso_size.z * 0.51))
+		var p_mat := StandardMaterial3D.new()
+		p_mat.albedo_color = Color(0.18, 0.04, 0.22)
+		p_mat.emission_enabled = true
+		p_mat.emission = SABLE_NEON
+		p_mat.emission_energy_multiplier = 1.6
+		panel.set_surface_override_material(0, p_mat)
+		torso_pivot.add_child(panel)
+		mats.append(p_mat)
+	# Spinning emitter ring above the head -- a small horizontal
+	# torus that spins via _process. Cheap to leave un-animated for
+	# now since the emission energy carries most of the read.
+	var ring := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.20
+	torus.outer_radius = 0.26
+	torus.rings = 8
+	torus.ring_segments = 18
+	ring.mesh = torus
+	ring.position = Vector3(0.0, torso_size.y + 0.35, 0.0)
+	var r_mat := StandardMaterial3D.new()
+	r_mat.albedo_color = SABLE_NEON
+	r_mat.emission_enabled = true
+	r_mat.emission = SABLE_NEON
+	r_mat.emission_energy_multiplier = 2.0
+	r_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ring.set_surface_override_material(0, r_mat)
+	torso_pivot.add_child(ring)
+	mats.append(r_mat)
+
+
+func _apply_jackal_striker_overlay(torso_pivot: Node3D, torso_size: Vector3, mats: Array[StandardMaterial3D]) -> void:
+	# Overcharged primary barrels -- glowing violet rings around the
+	# muzzle ends so the Striker reads as 'pumped-up shooter'. Adds
+	# a chest energy pack with two cooling fins for silhouette.
+	var pack := MeshInstance3D.new()
+	var p_box := BoxMesh.new()
+	p_box.size = Vector3(torso_size.x * 0.55, torso_size.y * 0.30, 0.18)
+	pack.mesh = p_box
+	pack.position = Vector3(0.0, torso_size.y * 0.65, torso_size.z * 0.50)
+	pack.set_surface_override_material(0, _make_metal_mat(Color(0.10, 0.10, 0.13)))
+	torso_pivot.add_child(pack)
+	# Two cooling fins jutting out the sides of the pack.
+	for side: int in 2:
+		var sx: float = -1.0 if side == 0 else 1.0
+		var fin := MeshInstance3D.new()
+		var f_box := BoxMesh.new()
+		f_box.size = Vector3(0.06, 0.30, 0.20)
+		fin.mesh = f_box
+		fin.position = Vector3(sx * torso_size.x * 0.36, torso_size.y * 0.65, torso_size.z * 0.50)
+		var f_mat := StandardMaterial3D.new()
+		f_mat.albedo_color = SABLE_NEON.darkened(0.30)
+		f_mat.emission_enabled = true
+		f_mat.emission = SABLE_NEON
+		f_mat.emission_energy_multiplier = 1.4
+		fin.set_surface_override_material(0, f_mat)
+		torso_pivot.add_child(fin)
+		mats.append(f_mat)
+
+
+func _apply_jackal_widow_overlay(torso_pivot: Node3D, torso_size: Vector3, mats: Array[StandardMaterial3D]) -> void:
+	# Spider-leg accents -- four slim angled struts off the back of
+	# the torso, plus a tall sniper sight on the right shoulder.
+	# Sells the Widow's long-range coilgun-needle identity.
+	for i: int in 4:
+		var ang_deg: float = -45.0 + float(i) * 30.0
+		var ang: float = deg_to_rad(ang_deg)
+		var leg := MeshInstance3D.new()
+		var l_box := BoxMesh.new()
+		l_box.size = Vector3(0.05, 0.50, 0.05)
+		leg.mesh = l_box
+		leg.position = Vector3(0.0, torso_size.y * 0.85, -torso_size.z * 0.40)
+		leg.rotation = Vector3(deg_to_rad(40.0), 0.0, ang)
+		leg.set_surface_override_material(0, _make_metal_mat(Color(0.10, 0.10, 0.13)))
+		torso_pivot.add_child(leg)
+	# Sniper sight tube on the right shoulder.
+	var sight := MeshInstance3D.new()
+	var s_cyl := CylinderMesh.new()
+	s_cyl.top_radius = 0.05
+	s_cyl.bottom_radius = 0.05
+	s_cyl.height = 0.40
+	s_cyl.radial_segments = 10
+	sight.mesh = s_cyl
+	sight.rotation.x = PI * 0.5
+	sight.position = Vector3(torso_size.x * 0.42, torso_size.y * 0.95, 0.10)
+	sight.set_surface_override_material(0, _make_metal_mat(Color(0.08, 0.08, 0.10)))
+	torso_pivot.add_child(sight)
+	# Violet eye on the front of the sight.
+	var eye := MeshInstance3D.new()
+	var e_sph := SphereMesh.new()
+	e_sph.radius = 0.05
+	e_sph.height = 0.10
+	eye.mesh = e_sph
+	eye.position = Vector3(torso_size.x * 0.42, torso_size.y * 0.95, 0.32)
+	var e_mat := StandardMaterial3D.new()
+	e_mat.albedo_color = SABLE_NEON
+	e_mat.emission_enabled = true
+	e_mat.emission = SABLE_NEON
+	e_mat.emission_energy_multiplier = 2.4
+	eye.set_surface_override_material(0, e_mat)
+	torso_pivot.add_child(eye)
+	mats.append(e_mat)
 
 
 func _build_legs(member: Node3D, shape: Dictionary, mats: Array[StandardMaterial3D], kind: String) -> Dictionary:
