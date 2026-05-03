@@ -4790,6 +4790,27 @@ func _remove_selection_bars() -> void:
 	_sel_prod_mat = null
 
 
+## Cached scene-tree references for the armory-only research /
+## branch-commit progress checks. _is_producing_or_researching runs
+## per-frame on every building; the previous get_node_or_null calls
+## per check were ~2 lookups per armory per frame on top of the
+## entity walk. Resolved lazily on first use.
+var _cached_research_manager: Node = null
+var _cached_branch_commit_manager: Node = null
+var _cached_research_lookup_done: bool = false
+
+
+func _resolve_research_managers() -> void:
+	if _cached_research_lookup_done:
+		return
+	_cached_research_lookup_done = true
+	var scene: Node = get_tree().current_scene if get_tree() else null
+	if not scene:
+		return
+	_cached_research_manager = scene.get_node_or_null("ResearchManager")
+	_cached_branch_commit_manager = scene.get_node_or_null("BranchCommitManager")
+
+
 func _is_producing_or_researching() -> bool:
 	## Anything the player should see a 'this building is busy'
 	## progress bar for: a queued unit, an armory branch commit, or
@@ -4799,14 +4820,11 @@ func _is_producing_or_researching() -> bool:
 	if not _build_queue.is_empty():
 		return true
 	if stats and (stats.building_id == &"basic_armory" or stats.building_id == &"advanced_armory"):
-		var scene: Node = get_tree().current_scene if get_tree() else null
-		if scene:
-			var rm: Node = scene.get_node_or_null("ResearchManager")
-			if rm and rm.has_method("is_in_progress") and rm.call("is_in_progress"):
-				return true
-			var bcm: Node = scene.get_node_or_null("BranchCommitManager")
-			if bcm and bcm.has_method("is_committing") and bcm.call("is_committing"):
-				return true
+		_resolve_research_managers()
+		if _cached_research_manager and _cached_research_manager.has_method("is_in_progress") and _cached_research_manager.call("is_in_progress"):
+			return true
+		if _cached_branch_commit_manager and _cached_branch_commit_manager.has_method("is_committing") and _cached_branch_commit_manager.call("is_committing"):
+			return true
 	return false
 
 
@@ -4819,16 +4837,13 @@ func _current_production_progress() -> float:
 		var build_t: float = maxf(unit_stats.build_time, 0.01)
 		return clampf(_build_progress / build_t, 0.0, 1.0)
 	if stats and (stats.building_id == &"basic_armory" or stats.building_id == &"advanced_armory"):
-		var scene: Node = get_tree().current_scene if get_tree() else null
-		if scene:
-			var rm: Node = scene.get_node_or_null("ResearchManager")
-			if rm and rm.has_method("is_in_progress") and rm.call("is_in_progress"):
-				if rm.has_method("get_progress"):
-					return clampf(rm.call("get_progress") as float, 0.0, 1.0)
-			var bcm: Node = scene.get_node_or_null("BranchCommitManager")
-			if bcm and bcm.has_method("is_committing") and bcm.call("is_committing"):
-				if bcm.has_method("get_commit_progress"):
-					return clampf(bcm.call("get_commit_progress") as float, 0.0, 1.0)
+		_resolve_research_managers()
+		if _cached_research_manager and _cached_research_manager.has_method("is_in_progress") and _cached_research_manager.call("is_in_progress"):
+			if _cached_research_manager.has_method("get_progress"):
+				return clampf(_cached_research_manager.call("get_progress") as float, 0.0, 1.0)
+		if _cached_branch_commit_manager and _cached_branch_commit_manager.has_method("is_committing") and _cached_branch_commit_manager.call("is_committing"):
+			if _cached_branch_commit_manager.has_method("get_commit_progress"):
+				return clampf(_cached_branch_commit_manager.call("get_commit_progress") as float, 0.0, 1.0)
 	return 0.0
 
 
