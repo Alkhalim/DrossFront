@@ -971,7 +971,11 @@ func _on_bus_volume_changed(db: float, bus_name: String) -> void:
 
 
 func _start_match() -> void:
-	get_tree().change_scene_to_file(ARENA_SCENE)
+	## Route through the loading screen so the player gets the
+	## map-zoom briefing animation between menu and arena. The
+	## loading screen handles change_scene_to_file(ARENA_SCENE)
+	## itself once the zoom finishes.
+	get_tree().change_scene_to_file("res://scenes/loading_screen.tscn")
 
 
 const _FACTION_ROSTER: Dictionary = {
