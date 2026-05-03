@@ -153,7 +153,12 @@ const _DAMAGE_EMBER_VISIBLE: Array[int] = [0, 1, 5, 7]
 ## Albedo darken factor (multiplied as `1 - factor`) at each stage.
 ## Bumped from [0, 0, 0.10, 0.22] -- the old values were too subtle
 ## to read; stage 3 buildings were barely darker than freshly built.
-const _DAMAGE_DARKEN: Array[float] = [0.0, 0.08, 0.22, 0.42]
+const _DAMAGE_DARKEN: Array[float] = [0.0, 0.22, 0.45, 0.65]
+## Spark-burst cadence per damage stage. Indexed [0..3]; stage 0
+## is unused (no sparks on undamaged buildings). Pulled from
+## _spawn_damage_sparks call schedule.
+const _DAMAGE_SPARK_INTERVAL_MIN: Array[float] = [0.0, 0.85, 0.45, 0.20]
+const _DAMAGE_SPARK_INTERVAL_MAX: Array[float] = [0.0, 1.40, 0.80, 0.40]
 ## Original albedo per material we've darkened, keyed by material instance_id.
 ## Lets us restore + reapply when the stage changes (including healing back
 ## up the chain) without compounding darken multipliers.
@@ -177,6 +182,14 @@ var _atmos_anim_time: float = 0.0
 var _process_phase: int = 0
 var _process_frame: int = 0
 var _atmos_smoke_timer: float = 0.0
+## Reactor / generator cooling-tower vapor markers. Populated by
+## _detail_generator; used by _tick_atmospheric_animations to puff
+## white steam on the same cadence the smokestack puffs use.
+var _atmos_steam_tops: Array[Node3D] = []
+var _atmos_steam_timer: float = 0.0
+## Throttle for the periodic spark-burst on damaged buildings.
+## Re-set each fire from _DAMAGE_SPARK_INTERVAL_* keyed by stage.
+var _damage_spark_timer: float = 0.0
 
 
 func _ready() -> void:
@@ -1381,7 +1394,9 @@ func _detail_generator() -> void:
 	# Cooling tower — eight chunky radial fins ringing the core, deeper
 	# and thicker than the previous four-fin version. Real silhouette
 	# from any camera angle, not a thin cross-shape that disappears
-	# at oblique angles.
+	# at oblique angles. Four of the fins also drop a steam marker at
+	# their tip so the atmospheric tick can puff vapor along the
+	# cooling ring.
 	for i: int in 8:
 		var ang: float = float(i) * (PI * 0.25)
 		var fin := MeshInstance3D.new()
@@ -1394,6 +1409,11 @@ func _detail_generator() -> void:
 		fin.rotation.y = -ang
 		fin.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.22, 0.22)))
 		_attach_visual(fin)
+		if i % 2 == 0:
+			var steam_top := Marker3D.new()
+			steam_top.position = Vector3(dx, fs.y + fin_box.size.y + 0.10, dz)
+			_attach_visual(steam_top)
+			_atmos_steam_tops.append(steam_top)
 	# Stacked radiator rings — three horizontal bands around the core
 	# add the slatted-cooling-tower read at every camera angle. These
 	# are thin discs sandwiched between the core and the fins.
@@ -4362,7 +4382,10 @@ func _process(delta: float) -> void:
 				_spawn_smoke_puff(anchor.global_position)
 
 	# Damage fire — each ember has its own phase + speed so the cluster
-	# crackles unevenly. Orange light source flickers with them.
+	# crackles unevenly. Orange light source flickers with them. On top
+	# of the persistent flicker we periodically emit a burst of GPU
+	# sparks at a random ember position so the damage VFX reads as
+	# 'arcing electrical short' instead of 'steady warm lamps'.
 	if _damage_fire and _damage_fire.visible:
 		var avg_brightness: float = 0.0
 		for entry: Dictionary in _damage_embers:
@@ -4378,6 +4401,17 @@ func _process(delta: float) -> void:
 		if _damage_fire_light:
 			var n: int = maxi(_damage_embers.size(), 1)
 			_damage_fire_light.light_energy = clampf(avg_brightness / float(n), 1.5, 4.5)
+		_damage_spark_timer -= delta
+		if _damage_spark_timer <= 0.0:
+			# Spark cadence ramps with damage stage -- light crackle at
+			# stage 1, steady arcing at stage 3.
+			var s: int = clampi(_damage_stage, 1, 3)
+			_damage_spark_timer = randf_range(_DAMAGE_SPARK_INTERVAL_MIN[s], _DAMAGE_SPARK_INTERVAL_MAX[s])
+			if not _damage_embers.is_empty():
+				var pick: Dictionary = _damage_embers[randi() % _damage_embers.size()]
+				var mesh: MeshInstance3D = pick.get("mesh") as MeshInstance3D
+				if is_instance_valid(mesh):
+					_spawn_damage_sparks(mesh.global_position, randi_range(5, 9))
 
 	# Atmospheric idle animations — only after construction completes; sunken
 	# / under-construction buildings stay still.
@@ -5010,12 +5044,25 @@ func _tick_atmospheric_animations(delta: float) -> void:
 				if is_instance_valid(marker):
 					_spawn_smoke_puff(marker.global_position)
 
+	# Cooling-tower steam — same cadence as foundry smoke but
+	# lighter colour + brisker drift so the puffs read as wet
+	# vapor rather than dirty soot.
+	if not _atmos_steam_tops.is_empty():
+		_atmos_steam_timer -= delta
+		if _atmos_steam_timer <= 0.0:
+			_atmos_steam_timer = randf_range(0.55, 1.10)
+			for marker: Node3D in _atmos_steam_tops:
+				if is_instance_valid(marker):
+					_spawn_steam_puff(marker.global_position)
+
 
 func _spawn_smoke_puff(world_pos: Vector3) -> void:
 	## Foundry stack smoke + damaged-building smoke → GPU particle.
 	## Routes through the central emitter which has SMOKE_AMOUNT
 	## particles in its ring buffer; old puffs auto-recycle as new
-	## ones come in. No CPU per-particle update.
+	## ones come in. Emits a small CLUSTER of three puffs per call
+	## at slight offsets so the column reads as a thick plume
+	## rather than a single thin wisp the eye misses at zoom.
 	var _pem_scene: Node = get_tree().current_scene
 	var pem: Node = _pem_scene.get_node_or_null("ParticleEmitterManager") if _pem_scene else null
 	if not pem:
@@ -5023,12 +5070,55 @@ func _spawn_smoke_puff(world_pos: Vector3) -> void:
 	# Slightly darker tint than the missile-trail smoke so building
 	# stack output reads as oil-fed industrial soot instead of rocket
 	# exhaust.
-	var drift: Vector3 = Vector3(
-		randf_range(-0.2, 0.2),
-		randf_range(2.0, 3.2),
-		randf_range(-0.2, 0.2),
-	)
-	pem.emit_smoke(world_pos, drift, Color(0.30, 0.27, 0.24, 0.65))
+	for k: int in 3:
+		var jitter: Vector3 = Vector3(
+			randf_range(-0.30, 0.30),
+			randf_range(0.0, 0.20),
+			randf_range(-0.30, 0.30),
+		)
+		var drift: Vector3 = Vector3(
+			randf_range(-0.28, 0.28),
+			randf_range(2.4, 3.6),
+			randf_range(-0.28, 0.28),
+		)
+		var alpha: float = randf_range(0.65, 0.85)
+		pem.emit_smoke(world_pos + jitter, drift, Color(0.26, 0.23, 0.20, alpha))
+
+
+func _spawn_steam_puff(world_pos: Vector3) -> void:
+	## Reactor / cooling-tower vapor. Reuses the smoke emitter with
+	## a near-white tint and a brisk upward drift so the puffs read
+	## as wet steam rather than dirty soot.
+	var _pem_scene: Node = get_tree().current_scene
+	var pem: Node = _pem_scene.get_node_or_null("ParticleEmitterManager") if _pem_scene else null
+	if not pem:
+		return
+	for k: int in 2:
+		var jitter: Vector3 = Vector3(
+			randf_range(-0.22, 0.22),
+			randf_range(0.0, 0.18),
+			randf_range(-0.22, 0.22),
+		)
+		var drift: Vector3 = Vector3(
+			randf_range(-0.18, 0.18),
+			randf_range(2.6, 3.6),
+			randf_range(-0.18, 0.18),
+		)
+		# Slight bluish-warm tint so steam reads distinct from foundry
+		# soot at the same zoom level.
+		pem.emit_smoke(world_pos + jitter, drift, Color(0.85, 0.88, 0.94, 0.60))
+
+
+func _spawn_damage_sparks(world_pos: Vector3, count: int = 6) -> void:
+	## Quick spark BURST -- routed to PEM.emit_spark so it reads as
+	## crackling shorts rather than a steady warm lamp glow. Used by
+	## the per-tick damage VFX so each visible 'ember' actually pops
+	## sparks at random intervals on top of its persistent flicker.
+	var _pem_scene: Node = get_tree().current_scene
+	var pem: Node = _pem_scene.get_node_or_null("ParticleEmitterManager") if _pem_scene else null
+	if not pem or not pem.has_method("emit_spark"):
+		return
+	pem.call("emit_spark", world_pos, count)
 
 
 func _build_damage_smoke() -> void:
