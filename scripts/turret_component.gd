@@ -224,15 +224,39 @@ func _fire_one_shot(damage: int) -> void:
 		return
 	if not _is_valid_target(_target):
 		return
-	# HQ-defense bonus: HQ MG nests deal +25% damage vs light ground
-	# and light air targets so the corner emplacements remain a real
-	# threat to the early-game scout / drone rush they're meant to
-	# break, even with the Universal role's modest base multipliers.
+	# HQ-defense per-class profile. Ground multipliers tuned so a
+	# light scout rush stings (1.0x) while heavies and structures
+	# barely care (0.6x / 0.3x). Air branch uses a SEPARATE lower
+	# base damage so the HQ caps out at ~20 AA DPS regardless of
+	# which target class is in range -- the corner nests are an
+	# anti-aircraft deterrent, not a flak battery.
 	var final_damage: int = damage
 	if profile == &"hq_defense":
 		var target_armor: StringName = _resolve_target_armor(_target)
-		if target_armor == &"light" or target_armor == &"light_air":
-			final_damage = int(round(float(damage) * 1.25))
+		var base_dmg: float = float(damage)
+		var mult: float = 1.0
+		match target_armor:
+			&"light":
+				mult = 1.0
+			&"medium":
+				mult = 0.8
+			&"heavy":
+				mult = 0.6
+			&"structure":
+				mult = 0.3
+			&"light_air":
+				# AA branch: cap at ~20 DPS. profile damage 14 *
+				# burst 3 / fire 1.0 = 42 ground DPS; the AA cap
+				# is 20 / 42 ~= 0.48 of base, then folded with the
+				# vs-light_air 1.0 multiplier.
+				base_dmg = float(damage) * (20.0 / 42.0)
+				mult = 1.0
+			&"heavy_air":
+				base_dmg = float(damage) * (20.0 / 42.0)
+				mult = 0.4
+			_:
+				mult = 0.8
+		final_damage = int(round(base_dmg * mult))
 	_target.take_damage(final_damage, _building as Node3D)
 
 	var observable: bool = _firing_observable()
