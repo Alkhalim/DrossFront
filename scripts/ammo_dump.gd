@@ -128,53 +128,56 @@ func _build_warning_sign() -> void:
 	pole_mat.roughness = 0.7
 	pole.set_surface_override_material(0, pole_mat)
 	sign_root.add_child(pole)
-	# Hazard-yellow triangular plate -- three rotated boxes form a
-	# rough triangle outline. Using boxes (vs a custom triangle
-	# mesh) keeps this a couple of cheap meshes.
+	# Hazard-yellow triangular plate. Layer order is critical here:
+	# every layer is billboarded (camera-facing), and Godot composites
+	# +Z as 'closer to camera' after the billboard rotation. The
+	# previous build put the black border in FRONT of the plate (z =
+	# +0.02) so the placard read as a solid grey-black triangle from
+	# in-game; spokes were BEHIND the plate (z = -0.04) so the red
+	# burst never showed either. Layered now: border behind, plate
+	# in the middle, spokes in front.
 	var tri_size: float = 0.55
+	# Black hazard outline -- behind the plate.
+	var border := MeshInstance3D.new()
+	var border_mesh := PrismMesh.new()
+	border_mesh.size = Vector3(tri_size * 2.18, tri_size * 1.85, 0.05)
+	border.mesh = border_mesh
+	border.position.z = -0.04
+	var border_mat := StandardMaterial3D.new()
+	border_mat.albedo_color = Color(0.05, 0.05, 0.05, 1.0)
+	border_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	border.set_surface_override_material(0, border_mat)
+	sign_root.add_child(border)
+	# Yellow plate -- middle layer.
 	var plate := MeshInstance3D.new()
 	var plate_mesh := PrismMesh.new()
 	plate_mesh.size = Vector3(tri_size * 2.0, tri_size * 1.7, 0.06)
 	plate.mesh = plate_mesh
-	# Billboard so the triangle stays readable from any camera angle.
+	plate.position.z = 0.0
 	var plate_mat := StandardMaterial3D.new()
 	plate_mat.albedo_color = Color(1.0, 0.85, 0.10, 1.0)
 	plate_mat.emission_enabled = true
 	plate_mat.emission = Color(1.0, 0.80, 0.10, 1.0)
-	plate_mat.emission_energy_multiplier = 0.9
+	plate_mat.emission_energy_multiplier = 1.4
 	plate_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	plate.set_surface_override_material(0, plate_mat)
 	sign_root.add_child(plate)
-	# Red detonation burst centre -- 6-spoke star drawn as overlapping
-	# thin boxes, rotated 60 degrees apart.
+	# Red detonation burst -- in front of the plate.
 	for i: int in 6:
 		var spoke := MeshInstance3D.new()
 		var sb := BoxMesh.new()
 		sb.size = Vector3(0.08, tri_size * 1.0, 0.02)
 		spoke.mesh = sb
 		spoke.rotation.z = float(i) / 6.0 * PI  # 6 spokes = 30deg apart
-		spoke.position.z = -0.04  # nudge in front of the plate
+		spoke.position.z = 0.05  # in front of the plate
 		var spoke_mat := StandardMaterial3D.new()
-		spoke_mat.albedo_color = Color(0.9, 0.10, 0.10, 1.0)
+		spoke_mat.albedo_color = Color(0.95, 0.12, 0.10, 1.0)
 		spoke_mat.emission_enabled = true
 		spoke_mat.emission = Color(1.0, 0.20, 0.15, 1.0)
-		spoke_mat.emission_energy_multiplier = 1.6
+		spoke_mat.emission_energy_multiplier = 2.0
 		spoke_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 		spoke.set_surface_override_material(0, spoke_mat)
 		sign_root.add_child(spoke)
-	# Black hazard-stripe outline at the perimeter -- faint, so the
-	# yellow + red still dominate but the silhouette reads as a
-	# proper warning placard.
-	var border := MeshInstance3D.new()
-	var border_mesh := PrismMesh.new()
-	border_mesh.size = Vector3(tri_size * 2.18, tri_size * 1.85, 0.05)
-	border.mesh = border_mesh
-	border.position.z = 0.02
-	var border_mat := StandardMaterial3D.new()
-	border_mat.albedo_color = Color(0.05, 0.05, 0.05, 1.0)
-	border_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	border.set_surface_override_material(0, border_mat)
-	sign_root.add_child(border)
 
 
 func _build_dynamite_scatter() -> void:
