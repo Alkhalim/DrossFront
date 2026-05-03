@@ -585,6 +585,11 @@ func _pick_weapon_fire_stream(weapon: WeaponResource) -> AudioStream:
 	var rof: StringName = weapon.rof_tier
 	if (rof == &"single" or rof == &"slow" or rof == &"volley") and not _sfx_missile_launch.is_empty():
 		return _pick(_sfx_missile_launch)
+	# Beam-style projectiles (Jackal pulse lasers etc.) always use
+	# the laser sound bank regardless of role/rof so the audio
+	# matches the visible energy beam.
+	if "projectile_style" in weapon and weapon.get("projectile_style") == &"beam":
+		return _pick(_sfx_laser)
 	if role == &"AA" or rof == &"continuous":
 		return _pick(_sfx_laser)
 	if weight >= 0.7 and rapid < 0.3:
