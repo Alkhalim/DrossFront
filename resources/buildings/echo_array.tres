@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+building_name = "EChO Broadcast Array"
+building_id = &"echo_array"
+hp = 1500
+cost_salvage = 1000
+cost_fuel = 90
+build_time = 110.0
+power_consumption = 25
+power_production = 0
+footprint_size = Vector3(6.0, 7.5, 6.0)
+placeholder_color = Color(0.16, 0.16, 0.20, 1)
+is_advanced = true
+prerequisites = [&"advanced_armory"]
+faction_lock = 2
+superweapon_kind = &"echo"
+superweapon_cooldown_sec = 240.0
+superweapon_arming_sec = 10.0
+superweapon_firing_sec = 12.0
+superweapon_radius = 45.0

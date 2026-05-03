@@ -3773,9 +3773,72 @@ func _detail_molot_platform() -> void:
 
 
 func _detail_echo_array() -> void:
-	## Stub -- EChO Broadcast Array detail builder lives in the
-	## next commit.
-	pass
+	## Meridian Protocol EChO superweapon. A tall transmitter mast
+	## with a stack of dish arrays and a pulsing violet beacon at
+	## the tip. Reads as 'broadcast tower' rather than 'gun', sells
+	## the EW identity.
+	var fs: Vector3 = stats.footprint_size
+	# Wide base plinth.
+	var plinth := MeshInstance3D.new()
+	var p_box := BoxMesh.new()
+	p_box.size = Vector3(fs.x * 1.05, fs.y * 0.18, fs.z * 1.05)
+	plinth.mesh = p_box
+	plinth.position = Vector3(0, fs.y * 0.09, 0)
+	plinth.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.14, 0.14, 0.18)))
+	_attach_visual(plinth)
+	# Central tower -- thin tall cylinder rising from the chassis.
+	var tower := MeshInstance3D.new()
+	var t_cyl := CylinderMesh.new()
+	t_cyl.top_radius = fs.x * 0.10
+	t_cyl.bottom_radius = fs.x * 0.16
+	t_cyl.height = fs.y * 1.20
+	t_cyl.radial_segments = 12
+	tower.mesh = t_cyl
+	tower.position = Vector3(0, fs.y + t_cyl.height * 0.5, 0)
+	tower.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.14, 0.14, 0.16)))
+	_attach_visual(tower)
+	# Three radio rings stacked along the tower -- antennas in a
+	# Yagi-style stack.
+	for ring_i: int in 3:
+		var ring := MeshInstance3D.new()
+		var rt := TorusMesh.new()
+		rt.inner_radius = fs.x * 0.22
+		rt.outer_radius = fs.x * 0.30
+		rt.rings = 18
+		rt.ring_segments = 6
+		ring.mesh = rt
+		ring.rotation.x = PI * 0.5
+		ring.position = Vector3(0, fs.y + 0.30 + float(ring_i) * (t_cyl.height * 0.30), 0)
+		var rmat := StandardMaterial3D.new()
+		rmat.albedo_color = SABLE_NEON
+		rmat.emission_enabled = true
+		rmat.emission = SABLE_NEON
+		rmat.emission_energy_multiplier = 1.2
+		rmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		ring.set_surface_override_material(0, rmat)
+		_attach_visual(ring)
+	# Pulse beacon at the tower tip -- bright violet sphere.
+	var beacon := MeshInstance3D.new()
+	var b_sph := SphereMesh.new()
+	b_sph.radius = fs.x * 0.12
+	b_sph.height = fs.x * 0.24
+	beacon.mesh = b_sph
+	beacon.position = Vector3(0, fs.y + t_cyl.height + 0.12, 0)
+	var bm := StandardMaterial3D.new()
+	bm.albedo_color = SABLE_NEON
+	bm.emission_enabled = true
+	bm.emission = SABLE_NEON
+	bm.emission_energy_multiplier = 3.0
+	beacon.set_surface_override_material(0, bm)
+	_attach_visual(beacon)
+	# Real OmniLight at the beacon so the violet glow casts on the
+	# surrounding chassis at night-render passes.
+	var light := OmniLight3D.new()
+	light.light_color = SABLE_NEON
+	light.light_energy = 2.4
+	light.omni_range = fs.x * 1.6 + 4.0
+	light.position = beacon.position
+	_attach_visual(light)
 
 
 func _detail_black_pylon() -> void:
