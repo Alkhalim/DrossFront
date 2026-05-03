@@ -12,6 +12,7 @@ const _TEX_SIZE: int = 256
 
 static var _metal_wear_tex: Texture2D = null
 static var _wall_panel_tex: Texture2D = null
+static var _scorched_ground_tex: Texture2D = null
 
 
 static func get_metal_wear_texture() -> Texture2D:
@@ -90,3 +91,56 @@ static func get_wall_panel_texture() -> Texture2D:
 	img.generate_mipmaps()
 	_wall_panel_tex = ImageTexture.create_from_image(img)
 	return _wall_panel_tex
+
+
+static func get_scorched_ground_texture() -> Texture2D:
+	## Charred-ground texture for wreck / crash-site debris pads.
+	## Mostly-dark base with low-frequency soot variation, sharp
+	## thin crack lines from a high-frequency ridge noise, and
+	## occasional brighter ember speckle so the patch reads as
+	## 'burnt + cracked' instead of a flat painted disc.
+	if _scorched_ground_tex:
+		return _scorched_ground_tex
+	var img := Image.create(_TEX_SIZE, _TEX_SIZE, false, Image.FORMAT_RGBA8)
+	# Soot — broad value variation, biased dark.
+	var soot := FastNoiseLite.new()
+	soot.seed = 419
+	soot.frequency = 0.018
+	soot.fractal_octaves = 4
+	# Cracks — ridge / cellular noise gives sharp dark veins
+	# rather than smooth blobs.
+	var cracks := FastNoiseLite.new()
+	cracks.seed = 853
+	cracks.noise_type = FastNoiseLite.TYPE_CELLULAR
+	cracks.cellular_distance_function = FastNoiseLite.DISTANCE_EUCLIDEAN
+	cracks.cellular_return_type = FastNoiseLite.RETURN_DISTANCE2_DIV
+	cracks.frequency = 0.060
+	# Embers — high-frequency speckle, biased very bright + sparse
+	# so only a handful of pixels per patch glow.
+	var ember := FastNoiseLite.new()
+	ember.seed = 71
+	ember.frequency = 0.34
+	for y: int in _TEX_SIZE:
+		for x: int in _TEX_SIZE:
+			var s_val: float = soot.get_noise_2d(float(x), float(y)) * 0.5 + 0.5
+			var c_val: float = cracks.get_noise_2d(float(x), float(y)) * 0.5 + 0.5
+			# Base value: dark (0.18..0.55) modulated by soot.
+			var v: float = lerp(0.20, 0.55, s_val)
+			# Crack veins darken the base sharply where c_val is low.
+			if c_val < 0.18:
+				v *= lerp(0.25, 0.55, c_val / 0.18)
+			# Mild colour bias toward warm brown so the texture
+			# reads as scorched soil rather than dead grey.
+			var r: float = clampf(v * 1.05, 0.0, 1.0)
+			var g: float = clampf(v * 0.92, 0.0, 1.0)
+			var b: float = clampf(v * 0.78, 0.0, 1.0)
+			# Occasional bright ember pixel (sparse threshold).
+			var e_val: float = ember.get_noise_2d(float(x), float(y)) * 0.5 + 0.5
+			if e_val > 0.92 and v < 0.40:
+				r = lerp(r, 1.0, 0.7)
+				g = lerp(g, 0.55, 0.5)
+				b = lerp(b, 0.18, 0.5)
+			img.set_pixel(x, y, Color(r, g, b, 1.0))
+	img.generate_mipmaps()
+	_scorched_ground_tex = ImageTexture.create_from_image(img)
+	return _scorched_ground_tex

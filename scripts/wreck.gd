@@ -249,21 +249,107 @@ func _build_apex_landmark(base_color: Color, accent_color: Color, max_extent: fl
 		)
 		patch.rotation.y = randf_range(0.0, TAU)
 		patch.scale = Vector3(randf_range(0.78, 1.18), 1.0, randf_range(0.78, 1.18))
-		var p_mat := StandardMaterial3D.new()
-		# Mix slightly different darken values per patch so the
-		# scorched cluster reads as 'sooted + burned ground' rather
-		# than one flat grey shade.
-		var darken: float = randf_range(0.70, 0.92)
-		p_mat.albedo_color = Color(
-			0.06 + randf_range(-0.02, 0.02),
-			0.04 + randf_range(-0.02, 0.02),
-			0.03 + randf_range(-0.01, 0.02),
-			1.0,
-		).darkened(darken - 0.6)
-		p_mat.roughness = 1.0
-		p_mat.metallic = 0.0
-		patch.set_surface_override_material(0, p_mat)
+		patch.set_surface_override_material(0, _make_scorched_ground_mat(randf_range(0.85, 1.10)))
 		add_child(patch)
+	# Extra detail layer — twisted hull shards, low rubble piles,
+	# and a couple of ember sparks scattered around the apex base
+	# so the crash site reads as a proper impact wreck instead of
+	# a smudge with a spire on top.
+	_scatter_apex_debris(max_extent)
+
+
+func _make_scorched_ground_mat(tint_mul: float = 1.0) -> StandardMaterial3D:
+	## Charred-ground material for wreck base patches. Uses the
+	## procedural scorched_ground texture so each patch reads as
+	## cracked + sooted soil instead of a flat painted disc. UV
+	## offset is randomised per call so neighbouring patches don't
+	## tile visibly identical patterns.
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(tint_mul, tint_mul, tint_mul, 1.0)
+	m.albedo_texture = SharedTextures.get_scorched_ground_texture()
+	m.uv1_offset = Vector3(randf(), randf(), 0.0)
+	m.uv1_scale = Vector3(1.8, 1.8, 1.0)
+	m.roughness = 1.0
+	m.metallic = 0.0
+	return m
+
+
+func _scatter_apex_debris(max_extent: float) -> void:
+	## Adds extra small detail around an apex wreck so the crash
+	## site doesn't read as 'one big wedge + a smudge'. Twisted
+	## angular shards, low rubble piles, and a few warm ember
+	## sparks scattered just outside the inner hull mass.
+	var shard_count: int = randi_range(5, 8)
+	for i: int in shard_count:
+		var shard := MeshInstance3D.new()
+		var sb := BoxMesh.new()
+		var sx: float = randf_range(0.20, 0.45)
+		var sy: float = randf_range(0.30, 0.85)
+		var sz: float = randf_range(0.08, 0.22)
+		sb.size = Vector3(sx, sy, sz)
+		shard.mesh = sb
+		var ang: float = randf_range(0.0, TAU)
+		var rad: float = max_extent * randf_range(0.85, 1.45)
+		shard.position = Vector3(cos(ang) * rad, sy * 0.45, sin(ang) * rad)
+		# Lean each shard sharply -- they are jagged scrap, not
+		# tidy posts.
+		shard.rotation = Vector3(
+			randf_range(-0.55, 0.55),
+			randf_range(0.0, TAU),
+			randf_range(-0.55, 0.55),
+		)
+		var col_pick: float = randf()
+		var color: Color
+		if col_pick < 0.55:
+			color = Color(0.18, 0.16, 0.14)
+		elif col_pick < 0.85:
+			color = Color(0.30, 0.22, 0.16)
+		else:
+			color = Color(0.10, 0.09, 0.08)
+		shard.set_surface_override_material(0, _make_wreck_material(color))
+		add_child(shard)
+	# Low rubble lumps -- half-buried hemispheres that fill the
+	# gap between the central hull and the scorch cluster edge.
+	var lump_count: int = randi_range(6, 10)
+	for j: int in lump_count:
+		var lump := MeshInstance3D.new()
+		var sph := SphereMesh.new()
+		var lump_r: float = randf_range(0.22, 0.45)
+		sph.radius = lump_r
+		sph.height = lump_r * 0.85
+		lump.mesh = sph
+		var lang: float = randf_range(0.0, TAU)
+		var lrad: float = max_extent * randf_range(0.55, 1.30)
+		lump.position = Vector3(cos(lang) * lrad, lump_r * 0.30, sin(lang) * lrad)
+		lump.rotation = Vector3(
+			randf_range(-0.45, 0.45),
+			randf_range(0.0, TAU),
+			randf_range(-0.45, 0.45),
+		)
+		lump.scale = Vector3(randf_range(0.85, 1.40), randf_range(0.45, 0.80), randf_range(0.85, 1.40))
+		var l_mat := _make_wreck_material(Color(0.16, 0.13, 0.11).darkened(randf_range(0.0, 0.20)))
+		lump.set_surface_override_material(0, l_mat)
+		add_child(lump)
+	# Ember sparks -- tiny emissive spheres half-sunk into the
+	# scorch ring so the wreck still 'glows' from a distance.
+	var ember_count: int = randi_range(3, 5)
+	for k: int in ember_count:
+		var ember := MeshInstance3D.new()
+		var es := SphereMesh.new()
+		es.radius = 0.10
+		es.height = 0.20
+		ember.mesh = es
+		var eang: float = randf_range(0.0, TAU)
+		var erad: float = max_extent * randf_range(0.40, 1.05)
+		ember.position = Vector3(cos(eang) * erad, 0.05, sin(eang) * erad)
+		var em := StandardMaterial3D.new()
+		em.albedo_color = Color(1.0, 0.55, 0.20, 1.0)
+		em.emission_enabled = true
+		em.emission = Color(1.0, 0.40, 0.10, 1.0)
+		em.emission_energy_multiplier = 2.4
+		em.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		ember.set_surface_override_material(0, em)
+		add_child(ember)
 
 
 func _make_wreck_material(c: Color) -> StandardMaterial3D:
@@ -340,13 +426,16 @@ func _build_satellite_crater(base_color: Color) -> void:
 		# isn't a perfect circle -- the silhouette gains organic edges.
 		patch.rotation.y = randf_range(0.0, TAU)
 		patch.scale = Vector3(randf_range(0.85, 1.15), 1.0, randf_range(0.85, 1.15))
-		var p_mat := StandardMaterial3D.new()
-		p_mat.albedo_color = base_color.darkened(randf_range(0.45, 0.65))
-		p_mat.roughness = 1.0
-		# Patches stay fully opaque -- the previous transparent outer
-		# discs flickered under FogOfWar's dim overlay because the
-		# alpha sort kept switching against neighbouring debris each
-		# fog-recompute tick.
+		# Procedural scorched-ground texture so each disc reads
+		# as cracked + sooted soil rather than a flat painted
+		# patch. Patches stay opaque (the previous transparent
+		# outer discs flickered under FogOfWar's dim overlay
+		# because the alpha sort kept switching against
+		# neighbouring debris each fog-recompute tick).
+		var darken: float = randf_range(0.55, 0.85)
+		var tint: Color = base_color.darkened(darken)
+		var p_mat: StandardMaterial3D = _make_scorched_ground_mat()
+		p_mat.albedo_color = tint
 		patch.set_surface_override_material(0, p_mat)
 		add_child(patch)
 	# Small lumps of charred soil scattered just outside the main
