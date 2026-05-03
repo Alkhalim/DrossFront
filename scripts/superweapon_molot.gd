@@ -1,13 +1,28 @@
 class_name SuperweaponMolot
 extends SuperweaponComponent
-## The Combine's MOLOT artillery superweapon. Fires 20-40 shells in
-## a spread pattern across superweapon_firing_sec inside
-## superweapon_radius. Structures take heavy AS damage; mechs take
-## significant HP damage; light units in the zone are wiped.
+## The Combine's MOLOT artillery superweapon. Across superweapon_firing_sec
+## the platform fires ~SHELLS_PER_SECOND shells per second, each with a
+## random offset inside superweapon_radius. Damage is friendly-fire — every
+## unit, building, and crawler inside SHELL_RADIUS of an impact takes the
+## hit, regardless of allegiance.
+##
+## Each fired shell plays a heavy muzzle blast at the barrel tip, then
+## resolves a delayed impact (SHELL_TRAVEL_SEC later) so the player sees
+## the 'shot fired -> shell rains down' beats land separately.
 
 const SHELLS_PER_SECOND: float = 1.1   # ~33 shells over a 30s firing window
 const SHELL_BASE_DAMAGE: int = 220
 const SHELL_RADIUS: float = 6.0
+const SHELL_TRAVEL_SEC_MIN: float = 1.1
+const SHELL_TRAVEL_SEC_MAX: float = 1.7
+
+
+func _start_firing() -> void:
+	## Snap the turret to face the strike target before the first
+	## shell fires so the barrel visibly points the right way the
+	## moment FIRING begins.
+	super()
+	_aim_turret_at_target()
 
 
 func _firing_tick(delta: float) -> void:
@@ -17,18 +32,71 @@ func _firing_tick(delta: float) -> void:
 	_effect_scratch += delta * SHELLS_PER_SECOND
 	while _effect_scratch >= 1.0:
 		_effect_scratch -= 1.0
-		_drop_shell()
+		_fire_shell()
 
 
-func _drop_shell() -> void:
-	# Random offset inside the radius -- biased toward the edge a
-	# bit so the carpet pattern feels broad rather than crater-piling
-	# the centre.
+func _aim_turret_at_target() -> void:
+	if not _building or not is_instance_valid(_building):
+		return
+	var pivot: Node3D = _building.get("molot_turret_pivot") as Node3D
+	if not pivot:
+		return
+	var to_target: Vector3 = _target_pos - pivot.global_position
+	var horiz_sq: float = to_target.x * to_target.x + to_target.z * to_target.z
+	if horiz_sq < 0.01:
+		return
+	# Pivot is parented under _visual_root which carries a small
+	# random Y-rotation per building. Snapping global_transform
+	# instead of rotation.y bypasses that offset cleanly so the
+	# barrel always points at the target's world position. The
+	# barrel sub-tree was built along +Z so a Basis from +Z toward
+	# the target is what we want.
+	var yaw: float = atan2(to_target.x, to_target.z)
+	pivot.global_transform = Transform3D(
+		Basis(Vector3.UP, yaw),
+		pivot.global_position,
+	)
+
+
+func _fire_shell() -> void:
+	# Random impact inside the superweapon radius -- biased toward
+	# the edge a bit so the carpet pattern feels broad rather than
+	# crater-piling the centre.
 	var ang: float = randf_range(0.0, TAU)
 	var r: float = sqrt(randf_range(0.0, 1.0)) * _radius
 	var impact: Vector3 = _target_pos + Vector3(cos(ang) * r, 0.0, sin(ang) * r)
-	# Damage application -- AS-tagged (anti-structure heavy, light vs
-	# units), splash falloff inside SHELL_RADIUS.
+	# Muzzle blast at the barrel mouth -- big orange flash + smoke
+	# + the heavy-explosion audio bank so the player hears the gun
+	# go off before the shell lands.
+	_spawn_muzzle_blast()
+	# Schedule the impact for SHELL_TRAVEL_SEC_MIN..MAX from now.
+	var travel: float = randf_range(SHELL_TRAVEL_SEC_MIN, SHELL_TRAVEL_SEC_MAX)
+	var timer: SceneTreeTimer = get_tree().create_timer(travel)
+	timer.timeout.connect(_resolve_shell.bind(impact))
+
+
+func _spawn_muzzle_blast() -> void:
+	if not _building or not is_instance_valid(_building):
+		return
+	var muzzle: Node3D = _building.get("molot_muzzle") as Node3D
+	var pos: Vector3 = muzzle.global_position if muzzle else _building.global_position + Vector3(0, 4.0, 0)
+	var scene: Node = get_tree().current_scene if get_tree() else null
+	if scene:
+		var pem: Node = scene.get_node_or_null("ParticleEmitterManager")
+		if pem:
+			pem.call("emit_flash", pos, Color(1.0, 0.65, 0.20, 1.0), 14)
+			pem.call("emit_smoke", pos + Vector3(0, 0.4, 0), Vector3(0, 2.6, 0), Color(0.30, 0.24, 0.20, 0.85))
+			pem.call("emit_spark", pos, 18)
+		var audio: Node = scene.get_node_or_null("AudioManager")
+		if audio and audio.has_method("play_unit_destroyed"):
+			audio.call("play_unit_destroyed", pos, true)
+
+
+func _resolve_shell(impact: Vector3) -> void:
+	# Friendly-fire splash inside SHELL_RADIUS. Hits units, crawlers,
+	# and buildings of any allegiance; the firer's building is the
+	# only excluded target so the platform doesn't blow itself up by
+	# arming a strike on its own footprint.
 	var splash_sq: float = SHELL_RADIUS * SHELL_RADIUS
 	var groups: Array[String] = ["units", "buildings", "crawlers"]
 	for g: String in groups:
@@ -62,20 +130,20 @@ func _drop_shell() -> void:
 			var armor_red: float = CombatTables.get_armor_reduction(target_armor)
 			var dmg: float = float(SHELL_BASE_DAMAGE) * role_mod * (1.0 - armor_red) * falloff
 			node.take_damage(int(dmg), _building)
-	# Visual + audio puff at the impact site.
-	_spawn_shell_vfx(impact)
+	_spawn_impact_vfx(impact)
 
 
-func _spawn_shell_vfx(pos: Vector3) -> void:
+func _spawn_impact_vfx(pos: Vector3) -> void:
 	var scene: Node = get_tree().current_scene if get_tree() else null
 	if not scene:
 		return
 	var pem: Node = scene.get_node_or_null("ParticleEmitterManager")
 	if pem:
-		pem.call("emit_flash", pos + Vector3(0, 1.0, 0), Color(1.0, 0.55, 0.18, 1.0), 6)
-		var smoke_pos: Vector3 = pos + Vector3(0, 0.6, 0)
-		pem.call("emit_smoke", smoke_pos, Vector3(0, 2.4, 0), Color(0.32, 0.24, 0.18, 0.85))
-		pem.call("emit_spark", pos + Vector3(0, 0.5, 0), 8)
+		pem.call("emit_flash", pos + Vector3(0, 1.2, 0), Color(1.0, 0.55, 0.18, 1.0), 18)
+		pem.call("emit_smoke", pos + Vector3(0, 0.6, 0), Vector3(0, 3.0, 0), Color(0.32, 0.24, 0.18, 0.85))
+		pem.call("emit_spark", pos + Vector3(0, 0.5, 0), 22)
+		if pem.has_method("emit_dust"):
+			pem.call("emit_dust", pos, 14, 1.6)
 	var audio: Node = scene.get_node_or_null("AudioManager")
-	if audio and audio.has_method("play_weapon_impact"):
-		audio.call("play_weapon_impact", pos)
+	if audio and audio.has_method("play_unit_destroyed"):
+		audio.call("play_unit_destroyed", pos, true)

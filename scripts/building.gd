@@ -108,6 +108,15 @@ var _visual_root: Node3D = null
 ## Set by _detail_gun_emplacement; read by TurretComponent.
 var turret_pivot: Node3D = null
 
+## MOLOT artillery turret pivot — rotates around Y to face the
+## current strike target. Set by _detail_molot_platform; read by
+## SuperweaponMolot at fire-onset.
+var molot_turret_pivot: Node3D = null
+## Empty Node3D parented to the MOLOT turret pivot at the muzzle
+## brake tip. Used by SuperweaponMolot to spawn the muzzle blast
+## VFX at the correct world position.
+var molot_muzzle: Node3D = null
+
 ## Damage-state visuals. The "smoke" node is just a container of spawn-point
 ## markers — actual smoke is rising puffs spawned from _process. Fire is a
 ## small cluster of independently-flickering embers + an orange OmniLight3D
@@ -3715,8 +3724,16 @@ func _detail_molot_platform() -> void:
 	## Combine MOLOT artillery superweapon. A massive elevated barrel
 	## angled up toward the sky from a heavy octagonal turntable on
 	## top of the chassis. Radiates Combine-industrial 'too big to
-	## fight' energy.
+	## fight' energy. The turntable + cheeks + barrel + brake live
+	## under a single pivot Node3D so SuperweaponMolot can rotate the
+	## whole turret toward the target before firing; `molot_muzzle`
+	## marks the brake tip in the pivot's local frame so the muzzle
+	## blast spawns at the right world position.
 	var fs: Vector3 = stats.footprint_size
+	var pivot: Node3D = Node3D.new()
+	pivot.name = "MolotTurretPivot"
+	_attach_visual(pivot)
+	molot_turret_pivot = pivot
 	# Turntable disc on top of the hull.
 	var disc := MeshInstance3D.new()
 	var d_cyl := CylinderMesh.new()
@@ -3727,7 +3744,7 @@ func _detail_molot_platform() -> void:
 	disc.mesh = d_cyl
 	disc.position = Vector3(0, fs.y + 0.20, 0)
 	disc.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.20, 0.18, 0.16)))
-	_attach_visual(disc)
+	pivot.add_child(disc)
 	# Mount yoke -- two side cheeks bracketing the elevated barrel.
 	for side: int in 2:
 		var sx: float = -1.0 if side == 0 else 1.0
@@ -3737,7 +3754,7 @@ func _detail_molot_platform() -> void:
 		cheek.mesh = cb
 		cheek.position = Vector3(sx * fs.x * 0.22, fs.y + cb.size.y * 0.5 + 0.40, 0.0)
 		cheek.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.20, 0.18)))
-		_attach_visual(cheek)
+		pivot.add_child(cheek)
 	# Big elevated barrel -- tilted up ~30 degrees, mounted between
 	# the cheeks. Long enough that the silhouette dominates the
 	# whole base.
@@ -3760,7 +3777,7 @@ func _detail_molot_platform() -> void:
 	var z_extra: float = cos(ang) * barrel_len * 0.5
 	barrel.position = Vector3(0.0, fs.y + 0.95 + y_extra, z_extra * 0.55)
 	barrel.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.16, 0.14, 0.12)))
-	_attach_visual(barrel)
+	pivot.add_child(barrel)
 	# Muzzle brake at the barrel tip -- chunky ring.
 	var brake := MeshInstance3D.new()
 	var brake_cyl := CylinderMesh.new()
@@ -3776,7 +3793,19 @@ func _detail_molot_platform() -> void:
 		barrel.position.z + cos(ang) * (barrel_len * 0.5 + 0.20),
 	)
 	brake.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.10, 0.09, 0.08)))
-	_attach_visual(brake)
+	pivot.add_child(brake)
+	# Muzzle marker -- empty Node3D one notch beyond the brake tip.
+	# SuperweaponMolot reads its global_position when spawning the
+	# muzzle blast so the flash sits exactly at the barrel mouth.
+	var muzzle: Node3D = Node3D.new()
+	muzzle.name = "MolotMuzzle"
+	muzzle.position = Vector3(
+		brake.position.x,
+		brake.position.y + sin(ang) * 0.40,
+		brake.position.z + cos(ang) * 0.40,
+	)
+	pivot.add_child(muzzle)
+	molot_muzzle = muzzle
 	# Hazard chevrons around the platform -- amber emissive band so
 	# the player + opponent can pick the building out at any zoom.
 	var stripe := MeshInstance3D.new()
