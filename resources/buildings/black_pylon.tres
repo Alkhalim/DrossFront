@@ -4,7 +4,7 @@
 
 [resource]
 script = ExtResource("1")
-building_name = "Black Pylon"
+building_name = "Meridian Mesh Anchor"
 building_id = &"black_pylon"
 hp = 1100
 cost_salvage = 200
