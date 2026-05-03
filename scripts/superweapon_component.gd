@@ -32,6 +32,10 @@ var _last_banner_sec: int = -1
 ## Stable key for the HUD warning banner + minimap pulse pin so we
 ## clear the same entries we set at telegraph time.
 var _telegraph_key: String = ""
+## World-space ground marker (red ring + cross) spawned at the
+## strike location during ARMING and FIRING so both players can
+## see exactly where the shells will land. Freed at COOLDOWN.
+var _target_marker: Node3D = null
 
 
 func _ready() -> void:
@@ -187,6 +191,7 @@ func _firing_tick(_delta: float) -> void:
 func _start_cooldown() -> void:
 	_state = State.COOLDOWN
 	_state_timer = maxf(_cooldown_sec, 0.0)
+	_remove_target_marker()
 
 
 func _emit_telegraph() -> void:
@@ -198,6 +203,7 @@ func _emit_telegraph() -> void:
 	## banner + pin together at that point.
 	_telegraph_key = "superweapon_%d" % get_instance_id()
 	_last_banner_sec = -1
+	_spawn_target_marker()
 	var hud: Node = _find_hud()
 	if hud and hud.has_method("set_persistent_warning"):
 		hud.call(
@@ -223,3 +229,56 @@ func _emit_telegraph() -> void:
 				2,
 				_target_pos,
 			)
+
+
+func _spawn_target_marker() -> void:
+	## Drops a flat ground decal at the strike location. Visible to
+	## both players (it's just a world-space mesh, not gated by fog).
+	## A pulsing red ring sized to the splash radius plus a thin
+	## center cross so the eye reads 'X marks the spot' immediately.
+	var scene: Node = get_tree().current_scene if get_tree() else null
+	if not scene:
+		return
+	_remove_target_marker()
+	var root: Node3D = Node3D.new()
+	root.name = "SuperweaponTargetMarker"
+	root.position = _target_pos + Vector3(0.0, 0.15, 0.0)
+	scene.add_child(root)
+	_target_marker = root
+
+	var ring_mat: StandardMaterial3D = StandardMaterial3D.new()
+	ring_mat.albedo_color = Color(1.0, 0.25, 0.18, 1.0)
+	ring_mat.emission_enabled = true
+	ring_mat.emission = Color(1.0, 0.30, 0.20, 1.0)
+	ring_mat.emission_energy_multiplier = 2.5
+	ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ring_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+
+	var ring_mesh: TorusMesh = TorusMesh.new()
+	ring_mesh.outer_radius = _radius
+	ring_mesh.inner_radius = maxf(_radius - 0.6, 0.1)
+	ring_mesh.material = ring_mat
+	var ring: MeshInstance3D = MeshInstance3D.new()
+	ring.mesh = ring_mesh
+	root.add_child(ring)
+
+	var cross_mat: StandardMaterial3D = ring_mat.duplicate() as StandardMaterial3D
+	var cross_a: BoxMesh = BoxMesh.new()
+	cross_a.size = Vector3(_radius * 1.6, 0.12, 0.4)
+	cross_a.material = cross_mat
+	var bar_a: MeshInstance3D = MeshInstance3D.new()
+	bar_a.mesh = cross_a
+	root.add_child(bar_a)
+	var cross_b: BoxMesh = BoxMesh.new()
+	cross_b.size = Vector3(0.4, 0.12, _radius * 1.6)
+	cross_b.material = cross_mat
+	var bar_b: MeshInstance3D = MeshInstance3D.new()
+	bar_b.mesh = cross_b
+	root.add_child(bar_b)
+
+
+func _remove_target_marker() -> void:
+	if _target_marker and is_instance_valid(_target_marker):
+		_target_marker.queue_free()
+	_target_marker = null

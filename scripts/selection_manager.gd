@@ -120,6 +120,12 @@ func _update_cursor_kind(hovered: Node3D) -> void:
 	# not be globally registered when this script first parses. Order
 	# matches `enum Kind`: 0 DEFAULT 1 ATTACK 2 REPAIR 3 BUILD 4 MOVE.
 	var registry: PlayerRegistry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
+	# Superweapon targeting mode dominates the hover -- always show
+	# the attack reticle so the player can read 'next right-click is
+	# the strike target' instead of normal move-cursor feedback.
+	if _superweapon_targeting and is_instance_valid(_superweapon_targeting):
+		cursor_mgr.set_kind(1)  # ATTACK
+		return
 	if hovered and is_instance_valid(hovered):
 		var owner_id: int = hovered.get("owner_id") as int if "owner_id" in hovered else -1
 		if owner_id >= 0 and owner_id != 0:
