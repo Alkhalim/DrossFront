@@ -41,16 +41,16 @@ var _ai_personality_dropdowns: Dictionary = {}  # player_id → OptionButton
 
 const _MAP_INFO: Dictionary = {
 	MatchSettingsClass.MapId.FOUNDRY_BELT: {
-		"label": "Foundry Belt",
-		"blurb": "Cluttered industrial map.\nMultiple chokepoints, dense salvage,\nApex wreck objective.",
+		"label": "Corridor 7",
+		"blurb": "Numbered industrial transit corridor, contested.\nMultiple chokepoints, dense salvage,\nApex wreck objective.",
 	},
 	MatchSettingsClass.MapId.ASHPLAINS_CROSSING: {
-		"label": "Ashplains Crossing",
-		"blurb": "Volcanic ash flats with one elevated ridge.\nLong sightlines, sparse cover,\nfavours ranged combat.",
+		"label": "The Ashline",
+		"blurb": "Contaminated flatland crossing point.\nLong sightlines, sparse cover,\nfavours ranged combat.",
 	},
 	MatchSettingsClass.MapId.IRON_GATE_CROSSING: {
-		"label": "Iron Gate Pass",
-		"blurb": "Semi-controlled district between corp cores.\nDense ruin clusters favour stealth flanks,\ncentral corridor favours heavy push.",
+		"label": "Gatepoint Rhin",
+		"blurb": "Militarized crossing on the Rhine corridor.\nDense ruin clusters favour stealth flanks,\ncentral corridor favours heavy push.",
 	},
 }
 
