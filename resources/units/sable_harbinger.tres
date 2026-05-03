@@ -43,6 +43,7 @@ cost_fuel = 56
 build_time = 36.0
 built_at = &"advanced_foundry"
 primary_weapon = SubResource("weapon_harbinger_railgun")
+sees_over_buildings = true
 secondary_weapon = SubResource("weapon_drone_swarm")
 mesh_provider_radius = 30.0
 special_description = "Sable heavy drone carrier. Spinal railgun for armored targets, drone bay releases for sustained mid-range pressure, and a 30u Mesh aura provider. Requires Black Pylon to build."

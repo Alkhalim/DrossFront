@@ -168,6 +168,14 @@ func can_target_air() -> bool:
 ## Seconds after the last damage before stealth re-applies.
 @export var stealth_restore_time: float = 4.0
 
+## When true, this unit's vision pierces LOS occluders the same
+## way aircraft and plateau-top observers do. Reserved for very
+## tall mechs (Apex / Harbinger class) and dedicated sensor-mast
+## scouts (Rook Spotter) that the design treats as 'sees over
+## rooftops'. Default false so the average mech still respects
+## rock spines, building blocks, and dense forest.
+@export var sees_over_buildings: bool = false
+
 ## First Strike multiplier -- when > 1.0, the unit's first
 ## attack against any newly-acquired target deals base * mult
 ## damage. Resets per target so a unit firing on a fresh enemy

@@ -420,7 +420,14 @@ func _recompute_visibility() -> void:
 				if node3d.global_position.distance_to(tp) <= TRACKER_AURA_RADIUS:
 					radius *= TRACKER_AURA_BONUS
 					break
-		_stamp_visibility(node3d.global_position, radius, is_elevated, is_air)
+		# Sees-over-buildings flag (Spotter / Apex / Harbinger-tier
+		# tall mechs) bypasses the LOS occluder gate the same way
+		# elevated / aircraft observers do. Routed through the
+		# `observer_elevated` arg so _stamp_visibility's existing
+		# bypass branch picks it up without a second arg.
+		var unit_stats: UnitStatResource = (node.get("stats") as UnitStatResource) if "stats" in node else null
+		var sees_over: bool = unit_stats != null and unit_stats.sees_over_buildings
+		_stamp_visibility(node3d.global_position, radius, is_elevated or sees_over, is_air)
 
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(node):

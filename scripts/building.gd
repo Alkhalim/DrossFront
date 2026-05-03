@@ -3170,6 +3170,31 @@ func _finish_construction() -> void:
 		_collision.disabled = false
 	if _visual_root:
 		_visual_root.position.y = 0.0
+	# Register as a FogOfWar LOS occluder so the structure
+	# physically blocks vision the same way rocks + ruins do.
+	# Aircraft, plateau-top observers, and units flagged
+	# sees_over_buildings (Spotter / Apex / Harbinger) bypass the
+	# gate. Footprint + a clearance fudge so the cells right at
+	# the wall mark as opaque.
+	_register_los_footprint(true)
+
+
+func _register_los_footprint(register: bool) -> void:
+	if not stats:
+		return
+	var fow: Node = get_tree().current_scene.get_node_or_null("FogOfWar") if get_tree() else null
+	if not fow:
+		return
+	# Use the larger of the two XZ extents so a long building
+	# (e.g. armory) still occludes its full silhouette. Half-extent
+	# + a small clearance covers the cells at the wall edge.
+	var occluder_radius: float = maxf(stats.footprint_size.x, stats.footprint_size.z) * 0.5 + 0.3
+	if register:
+		if fow.has_method("register_los_occluder"):
+			fow.call("register_los_occluder", global_position, occluder_radius)
+	else:
+		if fow.has_method("unregister_los_occluder"):
+			fow.call("unregister_los_occluder", global_position, occluder_radius)
 
 
 func _kick_units_out_of_footprint() -> void:
@@ -5104,6 +5129,10 @@ func take_damage(amount: int, _attacker: Node3D = null) -> void:
 		_emit_player_damage_alert()
 	if current_hp <= 0:
 		current_hp = 0
+		# Drop the LOS occluder footprint before the wreck spawns so
+		# vision opens through the now-fallen structure on the next
+		# FOW recompute.
+		_register_los_footprint(false)
 		_spawn_building_wreck()
 		if owner_id == 0:
 			_emit_player_destroyed_alert()
