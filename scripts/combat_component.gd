@@ -715,7 +715,7 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 		# returns. Damage is delivered by the drone on arrival.
 		if weapon.is_drone_release:
 			if hit:
-				_spawn_drone(per_member_dmg, weapon.role_tag)
+				_spawn_drone(per_member_dmg, weapon.role_tag, weapon.drone_variant)
 			continue
 
 		if firing_visible and proj_script:
@@ -818,7 +818,7 @@ func _find_stray_target(aim_pos: Vector3, primary: Node3D, my_owner: int) -> Nod
 	return nearest
 
 
-func _spawn_drone(damage: int, role_tag: StringName) -> void:
+func _spawn_drone(damage: int, role_tag: StringName, variant: StringName = &"default") -> void:
 	## Spawns a Drone tethered to this carrier (the firing unit) that
 	## flies out, fires at the current target, and returns to dock.
 	## Drones live as scene-tree children at scene root so they
@@ -835,6 +835,7 @@ func _spawn_drone(damage: int, role_tag: StringName) -> void:
 	drone.set("damage", damage)
 	drone.set("role_tag", role_tag)
 	drone.set("owner_id", (_unit.get("owner_id") as int) if _unit and "owner_id" in _unit else 0)
+	drone.set("variant", variant)
 	# Prefer a 'DroneBay' Marker3D child of the carrier so drones
 	# launch from a specific bay door on the chassis rather than a
 	# random offset. Falls back to a random offset around the

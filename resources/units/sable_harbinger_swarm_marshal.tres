@@ -20,6 +20,7 @@ range_tier = &"medium"
 rof_tier = &"fast"
 salvo_count = 3
 is_drone_release = true
+drone_variant = &"fast"
 
 [resource]
 script = ExtResource("1")

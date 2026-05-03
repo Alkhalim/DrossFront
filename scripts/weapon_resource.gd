@@ -89,6 +89,13 @@ extends Resource
 ## higher for true swarms). Drones die with the carrier.
 @export var is_drone_release: bool = false
 
+## Drone variant style. Picks the visual the spawned drone wears
+## when is_drone_release is true. Supported: "default" (compact
+## generic drone), "missile" (heavier hull with an underslung
+## missile pod), "fast" (smaller sleeker drone with a brighter
+## thruster). Other values fall through to "default".
+@export var drone_variant: StringName = &"default"
+
 
 ## Bomber-style projectile origin -- when true the projectile spawns
 ## just below the firing aircraft and arcs onto the target instead
