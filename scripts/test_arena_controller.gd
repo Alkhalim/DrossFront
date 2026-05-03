@@ -140,8 +140,18 @@ func _ready() -> void:
 	_apply_map_visuals()
 	_setup_alerts()
 	_setup_player_registry()
+	# Special Operations scenarios reshape the team layout BEFORE
+	# units / AI controllers spawn -- e.g. the proving-ground
+	# scenarios flip the ally to an enemy so the player faces three
+	# hostile AIs instead of two. Done here so subsequent setup paths
+	# read the corrected team_ids.
+	_apply_scenario_team_overrides()
 	_setup_player()
 	_setup_ai()
+	# After bases/AI controllers are in place, seed any scenario-
+	# specific extras (pre-built forward base, full economy preload,
+	# starting army roll-out for the stress test, etc).
+	_apply_scenario_seeding()
 	_setup_fuel_deposits()
 	# Build elevation BEFORE terrain so terrain spawn knows where the
 	# plateau / ramp footprints are and can avoid placing rocks /
@@ -4127,3 +4137,67 @@ func _setup_buildable_buildings() -> void:
 				continue
 			buildable_buildings.append(stat)
 	selection_mgr.set_buildable_buildings(buildable_buildings)
+
+
+## --- Special Operations scenario hooks --------------------------------------
+
+func _scenario_id() -> int:
+	## Read from MatchSettings; default to NONE (0) when the autoload
+	## isn't present (running the arena scene directly from the editor).
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if settings and "scenario" in settings:
+		return settings.get("scenario") as int
+	return 0
+
+
+func _apply_scenario_team_overrides() -> void:
+	## Proving-ground scenarios (Sable / Anvil) brief as "you vs three
+	## AI opponents on the other side". 2v2 mode spawns 4 player slots
+	## by default with player_id 1 as our ally; flip its team_id from
+	## 0 (player team) to 1 (enemy team) so the resulting layout is
+	## 1 player vs 3 hostile AIs while reusing the standard 2v2 player
+	## roster + setup paths.
+	var sid: int = _scenario_id()
+	# Scenario enum: NONE=0, SABLE_PROVING=1, ANVIL_PROVING=2, STRESS_TEST=3
+	if sid != 1 and sid != 2:
+		return
+	var registry: PlayerRegistry = get_node_or_null("PlayerRegistry") as PlayerRegistry
+	if not registry:
+		return
+	var ally_state: PlayerState = registry.get_state(1)
+	if ally_state:
+		ally_state.team_id = 1
+
+
+func _apply_scenario_seeding() -> void:
+	## Per-scenario world post-setup. Stub for now; subsequent commits
+	## fill in pre-built bases, full-economy resource preloads, and
+	## seeded armies per scenario brief.
+	var sid: int = _scenario_id()
+	if sid == 0:
+		return
+	# Common scenario preloads -- every Special Ops mission opens with
+	# a healthy economy on every side so the briefing 'full resources
+	# and economy setup' actually lands.
+	_scenario_preload_resources()
+
+
+func _scenario_preload_resources() -> void:
+	## Prime every player + AI ResourceManager to a comfortable opening
+	## bank so the player isn't waiting for trickle income to actually
+	## play the scenario. Rough target: 1500 salvage / 200 fuel for the
+	## Sable+Anvil proving grounds; the stress test bumps further in
+	## its dedicated path.
+	var registry: PlayerRegistry = get_node_or_null("PlayerRegistry") as PlayerRegistry
+	if not registry:
+		return
+	var roster: Array[Dictionary] = _current_roster()
+	for entry: Dictionary in roster:
+		var pid: int = entry["id"] as int
+		var rm: Node = registry.get_resource_manager(pid)
+		if rm == null:
+			continue
+		if rm.has_method("add_salvage"):
+			rm.call("add_salvage", 1500)
+		if rm.has_method("add_fuel"):
+			rm.call("add_fuel", 200)
