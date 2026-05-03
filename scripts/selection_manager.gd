@@ -672,11 +672,17 @@ func _click_select(event: InputEventMouseButton) -> void:
 					_deselect_building()
 					get_viewport().set_input_as_handled()
 					return
-				# Wreck click → just surface its remaining salvage value.
-				# Doesn't clear other selections; treats the wreck as a
-				# queryable info-only object.
+				# Wreck click -> route through the inspect slot so the
+				# bottom HUD shows a proper persistent panel (salvage
+				# remaining + chip count) instead of the old fade-out
+				# floating label. Also still drops the floating label
+				# at the wreck for in-world feedback.
 				var wreck: Wreck = _raycast_wreck(event.position)
 				if wreck:
+					_inspected_enemy = wreck
+					_clear_selection()
+					_clear_crawler_selection()
+					_deselect_building()
 					_show_wreck_readout(wreck)
 				elif not shift:
 					_clear_selection()

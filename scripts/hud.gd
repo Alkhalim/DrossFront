@@ -1033,6 +1033,24 @@ func _update_enemy_inspect_panel(target: Node3D) -> void:
 	_last_building_id = -1
 	_showing_build_buttons = false
 
+	# Wreck branch -- wrecks have no `stats` resource and no
+	# `owner_id`; they expose `salvage_remaining` (+ optional
+	# `microchip_remaining` for satellite piles). Show a small
+	# read-only panel with the resource counts so the player can
+	# decide whether the pile is worth a Crawler trip.
+	if target is Wreck:
+		var w: Wreck = target as Wreck
+		var w_label: String = "Satellite Pile" if w.is_satellite else "Wreck"
+		_name_label.text = w_label
+		var rows: Array = []
+		rows.append([_stat_chip("Salvage", "%d / %d" % [w.salvage_remaining, w.salvage_value], STAT_LABEL_COLOR_COST_S)])
+		if w.microchip_value > 0:
+			rows.append([_stat_chip("Chips", "%d / %d" % [w.microchip_remaining, w.microchip_value], STAT_LABEL_COLOR_COST_M)])
+		_stats_label.text = _build_stat_sheet(rows)
+		var w_pct: float = float(w.salvage_remaining) / float(maxi(w.salvage_value, 1))
+		_show_progress(w_pct, Color(1.00, 0.55, 0.18, 0.95))
+		return
+
 	# Owner tag — Enemy / Neutral.
 	var owner_id: int = (target.get("owner_id") as int) if "owner_id" in target else -1
 	var owner_label: String = "Enemy"
