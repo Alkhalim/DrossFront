@@ -831,9 +831,11 @@ func _apply_resource_colors() -> void:
 func _build_progress_bar() -> void:
 	# Inserted into the info section under the queue label; visibility toggled per selection.
 	_progress_bar = ProgressBar.new()
-	# Slim bar — roughly a third of the previous height/width so it doesn't
-	# dominate the bottom panel.
-	_progress_bar.custom_minimum_size = Vector2(120, 4)
+	# Slim bar -- halved from the previous 120u to 60u so the train
+	# progress doesn't stretch deep into the panel + cause layout
+	# shifts on the buttons when it shows up.
+	_progress_bar.custom_minimum_size = Vector2(60, 4)
+	_progress_bar.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_progress_bar.show_percentage = false
 	_progress_bar.visible = false
 	if _info_section:
