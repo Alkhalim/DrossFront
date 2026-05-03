@@ -3076,7 +3076,7 @@ func _setup_ground_patches() -> void:
 	for i: int in detail_count:
 		var pos := Vector3(
 			randf_range(-MAP_HALF, MAP_HALF),
-			0.03,
+			0.10,
 			randf_range(-MAP_HALF, MAP_HALF),
 		)
 		# Skip the HQ pads.
@@ -3174,7 +3174,14 @@ func _spawn_soft_patch(pos: Vector3, base_size: float, tint: Color, roughness: f
 	var x_scale: float = randf_range(0.85, 1.25)
 	var z_scale: float = randf_range(0.85, 1.25)
 	patch.mesh = _build_soft_blob_mesh(base_size * 0.5, x_scale, z_scale)
-	patch.position = pos
+	# Lift the patch a touch above the ground plane to clear depth
+	# precision z-fighting at typical RTS camera distances. The
+	# previous 0.025u offset disappeared into the ground at zoom-out
+	# because the perspective projection collapsed both planes onto
+	# the same depth value.
+	var lifted: Vector3 = pos
+	lifted.y = maxf(lifted.y, 0.10)
+	patch.position = lifted
 	patch.rotation.y = randf_range(0.0, TAU)
 
 	var mat := StandardMaterial3D.new()
@@ -3186,6 +3193,15 @@ func _spawn_soft_patch(pos: Vector3, base_size: float, tint: Color, roughness: f
 	mat.vertex_color_use_as_albedo = true
 	mat.roughness = roughness
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED if oil else BaseMaterial3D.SHADING_MODE_PER_PIXEL
+	# Bump render priority so the patch draws after the opaque ground
+	# in the transparency pass even when the renderer's depth sort
+	# tie-breaks the wrong way.
+	mat.render_priority = 2
+	# Disable depth-WRITE so neighbouring transparent patches don't
+	# occlude each other through their own depth output. Depth test
+	# stays on so wrecks / buildings still mask the patches under
+	# their footprint.
+	mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
 	if oil:
 		# Kept for backwards-compat (the recommended path is now
 		# `_spawn_oil_spill`). Subtle emission to fake the wet glint.
