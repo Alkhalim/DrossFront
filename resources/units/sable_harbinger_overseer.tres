@@ -13,10 +13,10 @@ rof_tier = &"slow"
 
 [sub_resource type="Resource" id="weapon_overseer_drone_swarm"]
 script = ExtResource("2")
-weapon_name = "Pulse Repeater Battery"
-role_tag = &"Universal"
-damage_tier = &"moderate"
-range_tier = &"medium"
+weapon_name = "Missile Drone Bay"
+role_tag = &"AA"
+damage_tier = &"high"
+range_tier = &"long"
 rof_tier = &"moderate"
 
 [resource]
@@ -37,4 +37,4 @@ built_at = &"advanced_foundry"
 primary_weapon = SubResource("weapon_overseer_railgun")
 secondary_weapon = SubResource("weapon_overseer_drone_swarm")
 mesh_provider_radius = 42.0
-special_description = "Harbinger Overseer — pure Mesh-aura platform. Extends the aura to 42u and adds a touch of armour. The army's command vehicle; protect it to keep your Sable forces in the Mesh."
+special_description = "Harbinger Overseer — drone-carrier branch upgraded with missile drones (AA-tagged, high damage, long range) for armored / heavy targets. Mesh aura also extends to 42u. The standoff anti-armour carrier."
