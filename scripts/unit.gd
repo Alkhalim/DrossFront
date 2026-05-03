@@ -2275,8 +2275,14 @@ func _apply_hound_ripper_overlay(torso_pivot: Node3D, torso_size: Vector3) -> vo
 
 
 func _apply_bulwark_ironwall_overlay(torso_pivot: Node3D, torso_size: Vector3) -> void:
-	# Reinforced shoulder plating -- two thick angled plates riveted
-	# over the standard shoulders. Reads as 'this one tanks more'.
+	# Heavy-tank tier of Bulwark. Silhouette grows: angled shoulder
+	# plates, a frontal bull-bar, hull skirt around the lower torso,
+	# riveted spine ridge, and a small commander cupola so the unit
+	# reads as 'siege-line tank' at zoom.
+	var dark_steel: StandardMaterial3D = _make_metal_mat(Color(0.32, 0.28, 0.22))
+	var bronze: StandardMaterial3D = _make_metal_mat(Color(0.55, 0.45, 0.18))
+	var charcoal: StandardMaterial3D = _make_metal_mat(Color(0.16, 0.14, 0.12))
+	# Reinforced shoulder plating + rivet strips.
 	for side: int in 2:
 		var sx: float = -1.0 if side == 0 else 1.0
 		var plate := MeshInstance3D.new()
@@ -2285,24 +2291,118 @@ func _apply_bulwark_ironwall_overlay(torso_pivot: Node3D, torso_size: Vector3) -
 		plate.mesh = p_box
 		plate.position = Vector3(sx * torso_size.x * 0.55, torso_size.y * 0.85, 0.0)
 		plate.rotation.z = sx * deg_to_rad(-12.0)
-		plate.set_surface_override_material(0, _make_metal_mat(Color(0.32, 0.28, 0.22)))
+		plate.set_surface_override_material(0, dark_steel)
 		torso_pivot.add_child(plate)
-		# Riveted edge strip along the lower lip of the plate.
 		var rivet_strip := MeshInstance3D.new()
 		var rs_box := BoxMesh.new()
 		rs_box.size = Vector3(0.55, 0.06, 0.06)
 		rivet_strip.mesh = rs_box
 		rivet_strip.position = Vector3(sx * torso_size.x * 0.55, torso_size.y * 0.65, torso_size.z * 0.30)
 		rivet_strip.rotation.z = sx * deg_to_rad(-12.0)
-		rivet_strip.set_surface_override_material(0, _make_metal_mat(Color(0.55, 0.45, 0.18)))
+		rivet_strip.set_surface_override_material(0, bronze)
 		torso_pivot.add_child(rivet_strip)
+		# Side hull skirt -- a thick rectangular plate hanging down
+		# alongside the lower torso so the silhouette widens at hip
+		# height (tank stance).
+		var skirt := MeshInstance3D.new()
+		var sk_box := BoxMesh.new()
+		sk_box.size = Vector3(0.14, torso_size.y * 0.55, torso_size.z * 0.92)
+		skirt.mesh = sk_box
+		skirt.position = Vector3(sx * (torso_size.x * 0.55 + 0.05), torso_size.y * 0.28, 0.0)
+		skirt.set_surface_override_material(0, dark_steel)
+		torso_pivot.add_child(skirt)
+		# Three small side rivets on the skirt.
+		for r: int in 3:
+			var rivet := MeshInstance3D.new()
+			var rv := SphereMesh.new()
+			rv.radius = 0.045
+			rv.height = 0.090
+			rivet.mesh = rv
+			rivet.position = Vector3(
+				sx * (torso_size.x * 0.55 + 0.13),
+				torso_size.y * (0.10 + 0.18 * float(r)),
+				0.0
+			)
+			rivet.set_surface_override_material(0, bronze)
+			torso_pivot.add_child(rivet)
+	# Frontal bull-bar -- a thick angled bar that shields the lower
+	# front of the chassis. Reads as 'made for ramming through
+	# rubble'.
+	var bar := MeshInstance3D.new()
+	var bar_box := BoxMesh.new()
+	bar_box.size = Vector3(torso_size.x * 1.30, 0.18, 0.22)
+	bar.mesh = bar_box
+	bar.position = Vector3(0.0, torso_size.y * 0.20, torso_size.z * 0.55)
+	bar.rotation.x = deg_to_rad(-12.0)
+	bar.set_surface_override_material(0, dark_steel)
+	torso_pivot.add_child(bar)
+	# Two vertical posts connecting the bar to the chassis.
+	for side2: int in 2:
+		var sx2: float = -1.0 if side2 == 0 else 1.0
+		var post := MeshInstance3D.new()
+		var po_box := BoxMesh.new()
+		po_box.size = Vector3(0.10, 0.45, 0.10)
+		post.mesh = po_box
+		post.position = Vector3(sx2 * torso_size.x * 0.50, torso_size.y * 0.32, torso_size.z * 0.50)
+		post.set_surface_override_material(0, charcoal)
+		torso_pivot.add_child(post)
+	# Spine ridge -- riveted bar running front-to-back along the
+	# top of the chassis.
+	var spine := MeshInstance3D.new()
+	var sp_box := BoxMesh.new()
+	sp_box.size = Vector3(0.16, 0.10, torso_size.z * 0.95)
+	spine.mesh = sp_box
+	spine.position = Vector3(0.0, torso_size.y * 1.04, 0.0)
+	spine.set_surface_override_material(0, dark_steel)
+	torso_pivot.add_child(spine)
+	# Spine rivets.
+	for r2: int in 5:
+		var rivet2 := MeshInstance3D.new()
+		var rv2 := SphereMesh.new()
+		rv2.radius = 0.06
+		rv2.height = 0.12
+		rivet2.mesh = rv2
+		rivet2.position = Vector3(
+			0.0,
+			torso_size.y * 1.10,
+			torso_size.z * (-0.42 + 0.21 * float(r2))
+		)
+		rivet2.set_surface_override_material(0, bronze)
+		torso_pivot.add_child(rivet2)
+	# Commander cupola -- small dome on top toward the rear so the
+	# unit reads as 'crewed heavy tank' rather than autonomous walker.
+	var cupola := MeshInstance3D.new()
+	var cu_cyl := CylinderMesh.new()
+	cu_cyl.top_radius = 0.18
+	cu_cyl.bottom_radius = 0.22
+	cu_cyl.height = 0.18
+	cu_cyl.radial_segments = 12
+	cupola.mesh = cu_cyl
+	cupola.position = Vector3(0.0, torso_size.y * 1.18, -torso_size.z * 0.30)
+	cupola.set_surface_override_material(0, charcoal)
+	torso_pivot.add_child(cupola)
+	var hatch := MeshInstance3D.new()
+	var ha_cyl := CylinderMesh.new()
+	ha_cyl.top_radius = 0.14
+	ha_cyl.bottom_radius = 0.14
+	ha_cyl.height = 0.04
+	ha_cyl.radial_segments = 10
+	hatch.mesh = ha_cyl
+	hatch.position = Vector3(0.0, torso_size.y * 1.30, -torso_size.z * 0.30)
+	hatch.set_surface_override_material(0, dark_steel)
+	torso_pivot.add_child(hatch)
 
 
 func _apply_bulwark_siegebreaker_overlay(torso_pivot: Node3D, torso_size: Vector3) -> void:
-	# Long siege barrel mounted along the spine. The Siegebreaker
-	# branch's identity is its big anti-structure cannon, so the
-	# silhouette grows a forward-pointing barrel that protrudes well
-	# past the standard cannons.
+	# Big anti-structure siege piece. Silhouette grows: long forward
+	# barrel with chunky muzzle brake, breech block + recoil sled
+	# mounted on the spine, side rangefinder pod, and a counterweight
+	# crate on the rear so the chassis reads as 'load-bearing siege
+	# rig' rather than just 'mech with an extra gun stuck on'.
+	var dark_steel: StandardMaterial3D = _make_metal_mat(Color(0.18, 0.16, 0.14))
+	var brake_mat: StandardMaterial3D = _make_metal_mat(Color(0.10, 0.09, 0.08))
+	var bronze: StandardMaterial3D = _make_metal_mat(Color(0.55, 0.45, 0.18))
+	# Long siege barrel mounted along the spine.
 	var barrel := MeshInstance3D.new()
 	var b_cyl := CylinderMesh.new()
 	b_cyl.top_radius = 0.14
@@ -2312,7 +2412,7 @@ func _apply_bulwark_siegebreaker_overlay(torso_pivot: Node3D, torso_size: Vector
 	barrel.mesh = b_cyl
 	barrel.rotation.x = PI * 0.5
 	barrel.position = Vector3(0.0, torso_size.y * 0.65, torso_size.z * 0.55)
-	barrel.set_surface_override_material(0, _make_metal_mat(Color(0.18, 0.16, 0.14)))
+	barrel.set_surface_override_material(0, dark_steel)
 	torso_pivot.add_child(barrel)
 	# Muzzle brake -- chunky ring at the barrel tip.
 	var brake := MeshInstance3D.new()
@@ -2324,8 +2424,85 @@ func _apply_bulwark_siegebreaker_overlay(torso_pivot: Node3D, torso_size: Vector
 	brake.mesh = br_cyl
 	brake.rotation.x = PI * 0.5
 	brake.position = Vector3(0.0, torso_size.y * 0.65, torso_size.z * 0.55 + 0.78)
-	brake.set_surface_override_material(0, _make_metal_mat(Color(0.10, 0.09, 0.08)))
+	brake.set_surface_override_material(0, brake_mat)
 	torso_pivot.add_child(brake)
+	# Muzzle brake side vents (3 per side).
+	for vside: int in 2:
+		var vsx: float = -1.0 if vside == 0 else 1.0
+		for v: int in 3:
+			var vent := MeshInstance3D.new()
+			var ve_box := BoxMesh.new()
+			ve_box.size = Vector3(0.04, 0.10, 0.025)
+			vent.mesh = ve_box
+			vent.position = Vector3(
+				vsx * 0.18,
+				torso_size.y * 0.65,
+				torso_size.z * 0.55 + 0.72 + 0.04 * float(v)
+			)
+			vent.set_surface_override_material(0, brake_mat)
+			torso_pivot.add_child(vent)
+	# Breech block -- a chunky box where the barrel meets the chassis.
+	var breech := MeshInstance3D.new()
+	var be_box := BoxMesh.new()
+	be_box.size = Vector3(0.45, 0.42, 0.55)
+	breech.mesh = be_box
+	breech.position = Vector3(0.0, torso_size.y * 0.65, torso_size.z * 0.20)
+	breech.set_surface_override_material(0, dark_steel)
+	torso_pivot.add_child(breech)
+	# Recoil sled -- two parallel rails running back from the breech
+	# along the spine.
+	for side: int in 2:
+		var sx: float = -1.0 if side == 0 else 1.0
+		var rail := MeshInstance3D.new()
+		var ra_box := BoxMesh.new()
+		ra_box.size = Vector3(0.06, 0.08, 0.65)
+		rail.mesh = ra_box
+		rail.position = Vector3(sx * 0.18, torso_size.y * 0.50, -torso_size.z * 0.10)
+		rail.set_surface_override_material(0, brake_mat)
+		torso_pivot.add_child(rail)
+	# Side rangefinder pod -- a small cylindrical pod on the right
+	# shoulder with a small emissive aperture aimed forward.
+	var pod := MeshInstance3D.new()
+	var po_cyl := CylinderMesh.new()
+	po_cyl.top_radius = 0.10
+	po_cyl.bottom_radius = 0.10
+	po_cyl.height = 0.30
+	po_cyl.radial_segments = 10
+	pod.mesh = po_cyl
+	pod.rotation.x = PI * 0.5
+	pod.position = Vector3(torso_size.x * 0.55, torso_size.y * 0.92, torso_size.z * 0.30)
+	pod.set_surface_override_material(0, dark_steel)
+	torso_pivot.add_child(pod)
+	var aperture := MeshInstance3D.new()
+	var ap := SphereMesh.new()
+	ap.radius = 0.05
+	ap.height = 0.10
+	aperture.mesh = ap
+	aperture.position = Vector3(torso_size.x * 0.55, torso_size.y * 0.92, torso_size.z * 0.30 + 0.16)
+	var ap_mat := StandardMaterial3D.new()
+	ap_mat.albedo_color = Color(1.0, 0.80, 0.30)
+	ap_mat.emission_enabled = true
+	ap_mat.emission = Color(1.0, 0.80, 0.30)
+	ap_mat.emission_energy_multiplier = 1.6
+	aperture.set_surface_override_material(0, ap_mat)
+	torso_pivot.add_child(aperture)
+	# Counterweight crate on the rear -- shifts visual weight back so
+	# the long forward barrel doesn't feel front-heavy.
+	var crate := MeshInstance3D.new()
+	var cr_box := BoxMesh.new()
+	cr_box.size = Vector3(0.55, 0.35, 0.30)
+	crate.mesh = cr_box
+	crate.position = Vector3(0.0, torso_size.y * 0.45, -torso_size.z * 0.55)
+	crate.set_surface_override_material(0, dark_steel)
+	torso_pivot.add_child(crate)
+	# Crate handle/strap.
+	var strap := MeshInstance3D.new()
+	var st_box := BoxMesh.new()
+	st_box.size = Vector3(0.05, 0.10, 0.32)
+	strap.mesh = st_box
+	strap.position = Vector3(0.0, torso_size.y * 0.62, -torso_size.z * 0.55)
+	strap.set_surface_override_material(0, bronze)
+	torso_pivot.add_child(strap)
 
 
 func _apply_specter_ghost_overlay(torso_pivot: Node3D, torso_size: Vector3, mats: Array[StandardMaterial3D]) -> void:
@@ -4794,10 +4971,11 @@ func take_damage(amount: int, attacker: Node3D = null) -> void:
 	# aura applies BEFORE armor and member splitting -- the shield
 	# is conceptually a flat-front damage absorber, so it scales the
 	# incoming amount and lets the rest of the resolution stay
-	# unchanged.
-	var combat: Node = get_node_or_null("CombatComponent")
-	if combat and combat.has_method("get_damage_taken_mult"):
-		var taken_mult: float = combat.call("get_damage_taken_mult")
+	# unchanged. Local var name avoids colliding with `combat` later
+	# in the function (retaliation block).
+	var _shield_combat: Node = get_node_or_null("CombatComponent")
+	if _shield_combat and _shield_combat.has_method("get_damage_taken_mult"):
+		var taken_mult: float = _shield_combat.call("get_damage_taken_mult")
 		if taken_mult < 1.0:
 			amount = int(round(float(amount) * taken_mult))
 			if amount <= 0:

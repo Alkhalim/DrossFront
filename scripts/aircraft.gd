@@ -474,14 +474,15 @@ func _v_formation_offsets(n: int, spacing: float) -> Array[Vector3]:
 
 
 func _apply_phalanx_shield_extras() -> void:
-	# Each Shield drone gains a small forward shield-emitter disc --
-	# a flat cyan emissive cylinder mounted in front of the body so
-	# the formation looks like 'eight little defensive screens
-	# floating ahead of their drones'. Pure visual; no real shield
-	# behavior wired to it.
+	# Each Shield drone gains a forward shield-emitter disc PLUS two
+	# smaller side emitters bracketing it (3-emitter cluster), and
+	# darkened armor strips along the body sides so the silhouette
+	# reads tank-bulky vs the Interceptor's needle-thin profile.
+	var shield_tint: Color = Color(0.30, 0.78, 1.0, 1.0)
 	for drone: Node3D in _drone_meshes:
 		if not is_instance_valid(drone):
 			continue
+		# Main forward shield-emitter disc.
 		var disc := MeshInstance3D.new()
 		disc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var d_cyl := CylinderMesh.new()
@@ -493,22 +494,69 @@ func _apply_phalanx_shield_extras() -> void:
 		disc.rotation.x = PI * 0.5
 		disc.position = Vector3(0.0, 0.0, 0.55)
 		var d_mat := StandardMaterial3D.new()
-		d_mat.albedo_color = Color(0.30, 0.78, 1.0, 0.55)
+		d_mat.albedo_color = Color(shield_tint.r, shield_tint.g, shield_tint.b, 0.55)
 		d_mat.emission_enabled = true
-		d_mat.emission = Color(0.30, 0.78, 1.0, 1.0)
+		d_mat.emission = shield_tint
 		d_mat.emission_energy_multiplier = 1.4
 		d_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		d_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 		d_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		disc.set_surface_override_material(0, d_mat)
 		drone.add_child(disc)
+		# Two flanking smaller emitters -- shorter forward reach,
+		# smaller disc, same shield material so the cluster reads
+		# unified.
+		for side: int in 2:
+			var sx: float = -1.0 if side == 0 else 1.0
+			var em := MeshInstance3D.new()
+			em.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var em_cyl := CylinderMesh.new()
+			em_cyl.top_radius = 0.16
+			em_cyl.bottom_radius = 0.16
+			em_cyl.height = 0.03
+			em_cyl.radial_segments = 14
+			em.mesh = em_cyl
+			em.rotation.x = PI * 0.5
+			em.position = Vector3(sx * 0.36, -0.04, 0.40)
+			em.set_surface_override_material(0, d_mat)
+			drone.add_child(em)
+		# Side armor strips -- thin dark plates along the drone body
+		# so the chassis reads heavier than the bare-body Interceptor.
+		var armor_mat: StandardMaterial3D = _aircraft_metal_mat(Color(0.18, 0.20, 0.22))
+		for side2: int in 2:
+			var sx2: float = -1.0 if side2 == 0 else 1.0
+			var strip := MeshInstance3D.new()
+			strip.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var st_box := BoxMesh.new()
+			st_box.size = Vector3(0.08, 0.30, 1.10)
+			strip.mesh = st_box
+			strip.position = Vector3(sx2 * 0.46, 0.0, 0.0)
+			strip.set_surface_override_material(0, armor_mat)
+			drone.add_child(strip)
+		# Top emitter ridge -- a small cyan emissive bar on the spine
+		# so the Shield reads even from above (matters for the
+		# top-down RTS camera).
+		var ridge := MeshInstance3D.new()
+		ridge.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var ri_box := BoxMesh.new()
+		ri_box.size = Vector3(0.08, 0.04, 0.65)
+		ridge.mesh = ri_box
+		ridge.position = Vector3(0.0, 0.20, 0.0)
+		var ri_mat := StandardMaterial3D.new()
+		ri_mat.albedo_color = shield_tint
+		ri_mat.emission_enabled = true
+		ri_mat.emission = shield_tint
+		ri_mat.emission_energy_multiplier = 1.6
+		ri_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		ridge.set_surface_override_material(0, ri_mat)
+		drone.add_child(ridge)
 
 
 func _apply_phalanx_interceptor_extras() -> void:
-	# Each Interceptor drone gains a streamlined sharp nose extension
-	# (long forward wedge) + an extra under-slung gun barrel, so the
-	# formation reads as 'pure dogfighter' vs the Shield's defensive
-	# disc.
+	# Pure dogfighter silhouette: sharp nose, under-slung barrel,
+	# swept wing fins on each side, and an orange afterburner glow at
+	# the tail so the formation reads as 'fast strike wing' vs the
+	# Shield's bulky defensive cluster.
 	for drone: Node3D in _drone_meshes:
 		if not is_instance_valid(drone):
 			continue
@@ -535,6 +583,41 @@ func _apply_phalanx_interceptor_extras() -> void:
 		barrel.position = Vector3(0.0, -0.18, 0.45)
 		barrel.set_surface_override_material(0, _aircraft_metal_mat(Color(0.10, 0.10, 0.10)))
 		drone.add_child(barrel)
+		# Swept wing fins -- one each side, angled back so the
+		# silhouette reads streamlined.
+		var fin_mat: StandardMaterial3D = _aircraft_metal_mat(Color(0.32, 0.28, 0.20))
+		for side: int in 2:
+			var sx: float = -1.0 if side == 0 else 1.0
+			var fin := MeshInstance3D.new()
+			fin.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var f_box := BoxMesh.new()
+			f_box.size = Vector3(0.45, 0.04, 0.22)
+			fin.mesh = f_box
+			fin.position = Vector3(sx * 0.40, 0.02, -0.12)
+			fin.rotation.y = sx * deg_to_rad(-22.0)
+			fin.set_surface_override_material(0, fin_mat)
+			drone.add_child(fin)
+		# Tail afterburner -- a small orange glow at the back of the
+		# drone so the formation reads as 'engines hot, accelerating
+		# to intercept'.
+		var tail := MeshInstance3D.new()
+		tail.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var t_cyl := CylinderMesh.new()
+		t_cyl.top_radius = 0.10
+		t_cyl.bottom_radius = 0.12
+		t_cyl.height = 0.18
+		t_cyl.radial_segments = 12
+		tail.mesh = t_cyl
+		tail.rotation.x = PI * 0.5
+		tail.position = Vector3(0.0, 0.0, -0.65)
+		var t_mat := StandardMaterial3D.new()
+		t_mat.albedo_color = Color(1.0, 0.55, 0.18)
+		t_mat.emission_enabled = true
+		t_mat.emission = Color(1.0, 0.55, 0.18)
+		t_mat.emission_energy_multiplier = 2.4
+		t_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		tail.set_surface_override_material(0, t_mat)
+		drone.add_child(tail)
 
 
 func _apply_fang_hunter_extras() -> void:

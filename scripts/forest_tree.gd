@@ -98,15 +98,15 @@ static func _ensure_shared_assets() -> void:
 	stump.height = STUMP_HEIGHT
 	stump.radial_segments = 12
 	_mesh_trunk_stump = stump
-	# Canopy meshes -- 3 stacked discs with deeper taper so the
-	# silhouette reads as a proper conifer cone instead of a
-	# layered cake. Bottom layer is the widest, top layer almost
-	# pointed.
-	for layer: int in 3:
+	# 4 stacked cones tapering inward; top layer top_radius=0
+	# so the conifer ends in a real point instead of a disc cap.
+	var canopy_bot: Array[float] = [1.00, 0.78, 0.55, 0.32]
+	var canopy_top: Array[float] = [0.78, 0.55, 0.32, 0.00]
+	for layer: int in 4:
 		var dc: CylinderMesh = CylinderMesh.new()
-		dc.top_radius = CANOPY_RADIUS * (0.20 + 0.10 * float(layer))
-		dc.bottom_radius = CANOPY_RADIUS * (0.95 - 0.28 * float(layer))
-		dc.height = CANOPY_HEIGHT * 0.40
+		dc.top_radius = CANOPY_RADIUS * canopy_top[layer]
+		dc.bottom_radius = CANOPY_RADIUS * canopy_bot[layer]
+		dc.height = CANOPY_HEIGHT * 0.32
 		dc.radial_segments = 14
 		_mesh_canopy_layers.append(dc)
 	# Dead-tree branches -- thin angular cylinders rotated outward.
@@ -261,14 +261,18 @@ func _build_healthy() -> void:
 		plate.rotation.y = ang
 		plate.set_surface_override_material(0, bark_dark)
 		add_child(plate)
-	# Canopy -- 3 stacked cones tapering inward.
-	for layer: int in 3:
+	# Canopy -- 4 stacked cones tapering to a point at the top.
+	var canopy_y: float = TRUNK_HEIGHT - 0.20  # start lower so canopy hugs trunk
+	for layer: int in 4:
 		var disc: MeshInstance3D = MeshInstance3D.new()
 		var dc: CylinderMesh = _mesh_canopy_layers[layer]
 		disc.mesh = dc
-		disc.position = Vector3(0, TRUNK_HEIGHT + dc.height * 0.5 + float(layer) * (dc.height * 0.55), 0)
+		disc.position = Vector3(0, canopy_y + dc.height * 0.5, 0)
 		disc.set_surface_override_material(0, canopy_mat)
 		add_child(disc)
+		# Each layer overlaps the one below by ~25% so the silhouette
+		# reads as a continuous cone, not a stack of separated discs.
+		canopy_y += dc.height * 0.75
 	# Lower secondary branches -- 2-3 short downward-tilted twigs
 	# poking out from the trunk just below the canopy. Adds the
 	# fidelity the user wanted (matches building / unit detail
