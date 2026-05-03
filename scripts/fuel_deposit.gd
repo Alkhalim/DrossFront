@@ -39,6 +39,10 @@ var _mesh: Node3D = null  # Container for the pumpjack rig + barrels + pad.
 var _pump_walker: Node3D = null  # Pivot for the pumpjack walking beam — animated.
 var _pump_anim_t: float = 0.0
 var _range_indicator: MeshInstance3D = null
+var _range_mat_cached: StandardMaterial3D = null
+var _range_ring: MeshInstance3D = null
+var _range_ring_mat: StandardMaterial3D = null
+var _range_color_cached: Color = Color(0, 0, 0, 0)
 var _capture_bar_bg: MeshInstance3D = null
 var _capture_bar_fill: MeshInstance3D = null
 var _capture_label: Label3D = null
@@ -242,8 +246,10 @@ func _create_visuals() -> void:
 	_mesh.name = "DepositRig"
 	add_child(_mesh)
 
-	# Concrete pad — low wide cylinder at ground level so the rig
-	# silhouette has a foundation to read against.
+	# Concrete pad — low wide cylinder with the shared wall-panel
+	# texture (slab joints + seams) tinted warm-grey so the pad reads
+	# as poured concrete with worn panel divisions instead of a flat
+	# painted disc.
 	var pad := MeshInstance3D.new()
 	var pad_cyl := CylinderMesh.new()
 	pad_cyl.top_radius = 3.0
@@ -253,10 +259,28 @@ func _create_visuals() -> void:
 	pad.mesh = pad_cyl
 	pad.position.y = 0.125
 	var pad_mat := StandardMaterial3D.new()
-	pad_mat.albedo_color = Color(0.32, 0.30, 0.27, 1.0)
+	pad_mat.albedo_color = Color(0.42, 0.39, 0.35, 1.0)
+	pad_mat.albedo_texture = SharedTextures.get_wall_panel_texture()
+	pad_mat.uv1_scale = Vector3(2.5, 2.5, 1.0)
 	pad_mat.roughness = 0.95
 	pad.set_surface_override_material(0, pad_mat)
 	_mesh.add_child(pad)
+	# Stenciled hazard wedges around the rim -- four short yellow/black
+	# striped wedges on the cardinal compass points so the pad reads
+	# as an industrial work-site, not a grey disc with a derrick on it.
+	var stripe_mat := StandardMaterial3D.new()
+	stripe_mat.albedo_color = Color(0.78, 0.62, 0.10, 1.0)
+	stripe_mat.roughness = 0.7
+	for w: int in 4:
+		var wedge := MeshInstance3D.new()
+		var w_box := BoxMesh.new()
+		w_box.size = Vector3(0.55, 0.02, 0.18)
+		wedge.mesh = w_box
+		var ang: float = float(w) * (PI * 0.5) + PI * 0.25
+		wedge.position = Vector3(cos(ang) * 2.65, 0.252, sin(ang) * 2.65)
+		wedge.rotation.y = -ang
+		wedge.set_surface_override_material(0, stripe_mat)
+		_mesh.add_child(wedge)
 
 	# Wellhead — short pipe stub in the center of the pad. The
 	# walking-beam pump nods over this.
@@ -396,17 +420,43 @@ func _create_visuals() -> void:
 	range_cyl.radial_segments = 48
 	_range_indicator.mesh = range_cyl
 
-	var range_mat := StandardMaterial3D.new()
-	range_mat.albedo_color = Color(0.6, 0.5, 0.3, 0.06)
-	range_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	range_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	_range_indicator.set_surface_override_material(0, range_mat)
+	# Range aura material is cached on the deposit so _update_visuals
+	# can recolor it (owner / contested / neutral) without allocating
+	# fresh materials per frame.
+	_range_mat_cached = StandardMaterial3D.new()
+	_range_mat_cached.albedo_color = Color(NEUTRAL_COLOR.r, NEUTRAL_COLOR.g, NEUTRAL_COLOR.b, 0.10)
+	_range_mat_cached.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_range_mat_cached.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_range_mat_cached.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_range_indicator.set_surface_override_material(0, _range_mat_cached)
 	_range_indicator.position.y = 0.05
 	# UI-style ring -- exclude it from the FOW dim overlay so the
 	# already-translucent material doesn't flicker as visibility
 	# toggles near the edge of LOS.
 	_range_indicator.set_meta("_fow_skip_dim", true)
 	add_child(_range_indicator)
+	# Outer ring of the aura -- a thin emissive band at the radius
+	# edge so the capture circle has a clearly defined boundary
+	# instead of a pure soft fill that fades into the ground.
+	_range_ring = MeshInstance3D.new()
+	var ring_mesh := TorusMesh.new()
+	ring_mesh.inner_radius = capture_radius - 0.18
+	ring_mesh.outer_radius = capture_radius + 0.05
+	ring_mesh.ring_segments = 56
+	ring_mesh.rings = 6
+	_range_ring.mesh = ring_mesh
+	_range_ring_mat = StandardMaterial3D.new()
+	_range_ring_mat.albedo_color = Color(NEUTRAL_COLOR.r, NEUTRAL_COLOR.g, NEUTRAL_COLOR.b, 0.55)
+	_range_ring_mat.emission_enabled = true
+	_range_ring_mat.emission = NEUTRAL_COLOR
+	_range_ring_mat.emission_energy_multiplier = 0.9
+	_range_ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_range_ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_range_ring_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_range_ring.set_surface_override_material(0, _range_ring_mat)
+	_range_ring.position.y = 0.06
+	_range_ring.set_meta("_fow_skip_dim", true)
+	add_child(_range_ring)
 
 	# Owner flag indicator (small pillar on top)
 	_owner_indicator = MeshInstance3D.new()
@@ -479,6 +529,16 @@ func _update_visuals() -> void:
 		_flag_color_cached = color
 		_flag_mat_cached.albedo_color = color
 		_flag_mat_cached.emission = color
+
+	# Capture aura tint -- mirrors the flag colour so the player can
+	# tell at a glance whose deposit they're standing on without
+	# clicking it. Cached compare so we only repaint on owner /
+	# contested transitions.
+	if _range_mat_cached and _range_ring_mat and color != _range_color_cached:
+		_range_color_cached = color
+		_range_mat_cached.albedo_color = Color(color.r, color.g, color.b, 0.10)
+		_range_ring_mat.albedo_color = Color(color.r, color.g, color.b, 0.55)
+		_range_ring_mat.emission = color
 
 	# Capture label -- compare-and-skip on the formatted string so
 	# the Label3D's text setter (which trips a re-render of the
