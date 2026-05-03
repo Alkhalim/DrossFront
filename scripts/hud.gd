@@ -2402,9 +2402,15 @@ func _attack_bonus_chips(stats: UnitStatResource) -> Array:
 	# and which it should avoid. Computed per-call so every unit reads
 	# its own scale -- a Switchblade's 'best' chip is a different
 	# absolute value than a Bulwark's 'best'.
+	var weapon_air_mult: float = stats.primary_weapon.air_damage_mult
 	var mults: Array[float] = []
 	for i: int in classes.size():
-		mults.append(CombatTables.get_role_modifier(role_tag, classes[i]))
+		var m: float = CombatTables.get_role_modifier(role_tag, classes[i])
+		# Air rows fold in the per-weapon air scalar so the displayed
+		# multiplier matches what the gun actually does to airframes.
+		if classes[i] == &"light_air" or classes[i] == &"heavy_air":
+			m *= weapon_air_mult
+		mults.append(m)
 	var lo: float = mults[0]
 	var hi: float = mults[0]
 	for m: float in mults:
@@ -4018,7 +4024,10 @@ func _compute_dps_vs(stat: UnitStatResource, armor_class: StringName) -> float:
 		var raw: float = _weapon_dps(weapon) * float(stat.squad_size)
 		var role_mod: float = CombatTables.get_role_modifier(weapon.role_tag, armor_class)
 		var armor_red: float = CombatTables.get_armor_reduction(armor_class)
-		dps += raw * role_mod * (1.0 - armor_red)
+		# Per-weapon air scalar -- mirrors the combat path so the
+		# displayed Air DPS matches actual output.
+		var air_mult: float = weapon.air_damage_mult if is_air_query else 1.0
+		dps += raw * role_mod * (1.0 - armor_red) * air_mult
 	return dps
 
 

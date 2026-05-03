@@ -69,6 +69,19 @@ extends Resource
 ## missile / rocket secondaries stay air-skipping).
 @export var can_hit_air: bool = false
 
+## Per-weapon air damage scalar (multiplied into the damage rolled
+## against an aircraft target -- skipped for ground hits). Default
+## 1.0 = no per-weapon adjustment. Used to clamp the effective air
+## DPS on weapons that pre-date a role-mult buff: e.g. the AP role
+## got a 5x light-air buff; existing AP+can_hit_air weapons set this
+## to 0.2 to preserve their original true air output, while new AP
+## weapons (Hammerhead Escort) leave it at 1.0 to take the full
+## buff. Display layer (HUD attack-bonus chips + DPS readout)
+## folds this into the displayed multiplier so the player sees the
+## real number, not just the role mult.
+@export_range(0.0, 1.0, 0.01) var air_damage_mult: float = 1.0
+
+
 ## Buckshot / scatter-fire flag. When true, CombatComponent fires the
 ## weapon as a cone of pellets per shot instead of a single
 ## projectile. Damage is still applied once per shot (the visual is

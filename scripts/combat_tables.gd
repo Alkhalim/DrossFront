@@ -64,17 +64,18 @@ const ARMOR_MAP: Dictionary = {
 ## AAir weapons are essentially the only way to reliably hit Light/Heavy Air.
 const ROLE_VS_ARMOR: Dictionary = {
 	&"AP": {
-		# AP pivots to a "light-armor specialist" role: full damage
-		# vs unarmored / light ground AND light air (1.0x), nerfed
-		# vs medium ground (0.7 -> 0.4) so AP doesn't double as a
-		# generalist mid-armor cracker, and still poor vs heavy.
-		# The light_air buff (0.2 -> 1.0) only matters for AP
-		# weapons that have opted into can_hit_air; ground-only AP
-		# units are unaffected. Anti-building stays at 0.4 so
-		# chaingun spam can't melt structures.
+		# AP = light-armor specialist: full damage vs unarmored /
+		# light / light air (1.0x), weak vs medium / heavy ground,
+		# moderate vs heavy air. The original AP role had a 2:1
+		# light_air-to-heavy_air ratio (0.2 / 0.1); preserved here at
+		# 1.0 / 0.5. Existing AP weapons that opted into can_hit_air
+		# carry an `air_damage_mult` of 0.2 so their TRUE air output
+		# stays at the pre-rebalance value (0.2 * 5 boost = 1.0x net).
+		# New AP weapons (e.g. Hammerhead Escort pintle) leave
+		# air_damage_mult at 1.0 to take the full air buff.
 		&"unarmored": 1.0, &"light": 1.0, &"medium": 0.4,
 		&"heavy": 0.3, &"structure": 0.4,
-		&"light_air": 1.0, &"heavy_air": 0.1,
+		&"light_air": 1.0, &"heavy_air": 0.5,
 	},
 	&"AA": {
 		&"unarmored": 0.8, &"light": 0.5, &"medium": 0.8,

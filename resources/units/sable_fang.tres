@@ -13,6 +13,7 @@ damage_tier = &"low"
 range_tier = &"medium"
 rof_tier = &"fast"
 can_hit_air = true
+air_damage_mult = 0.2
 
 [resource]
 script = ExtResource("1")

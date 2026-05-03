@@ -556,7 +556,15 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	# multiplier (1.0 when no friendly aura is up); applied late so
 	# armor and accuracy still gate the result the same way.
 	var damage_buff: float = get_damage_buff_mult()
-	var damage_per_member: float = float(base_damage) * role_mod * dir_mod * elevation_mod * accuracy * (1.0 - armor_reduction) * damage_buff
+	# Per-weapon air scalar (default 1.0). Lets specific weapons clamp
+	# their effective air output without changing the role-vs-armor
+	# table -- e.g. existing AP+can_hit_air weapons set this to 0.2
+	# so the AP role's light-air buff doesn't 5x their air damage.
+	var air_mult: float = 1.0
+	var is_air_target: bool = (target_armor == &"light_air" or target_armor == &"heavy_air")
+	if is_air_target:
+		air_mult = weapon.air_damage_mult
+	var damage_per_member: float = float(base_damage) * role_mod * dir_mod * elevation_mod * accuracy * (1.0 - armor_reduction) * damage_buff * air_mult
 	var per_member_dmg: int = maxi(int(damage_per_member), 1)
 
 	# Fire one projectile per alive squad member, originating at the actual
