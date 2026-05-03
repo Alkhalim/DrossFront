@@ -35,6 +35,14 @@ const GARRISON_FIRE_RATE_MULT: float = 1.2
 ## pellets in a tight cone instead of the standard projectile, with
 ## damage scaled by the queued multiplier. Cleared after the buffed
 ## shot fires.
+## First-strike per-target tracking. Stores the instance_id of the
+## target this combat last opened fire on; the next time the unit
+## fires at a DIFFERENT target, the shot picks up the
+## stats.first_strike_bonus multiplier. Used by Hound (Ripper) to
+## sell the close-range alpha-strike identity. 0 = haven't fired
+## at anything yet, so the first ever shot also takes the bonus.
+var _first_strike_target_id: int = 0
+
 var _glowing_volley_mult: float = 0.0
 const GLOWING_VOLLEY_PELLETS: int = 5
 const GLOWING_VOLLEY_SPREAD_RAD: float = 0.10  # tight cone, ~5.7 deg
@@ -590,6 +598,17 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	# Cleared once the buffed shot has been resolved further down.
 	if is_primary and _glowing_volley_mult > 0.0:
 		damage_per_member *= _glowing_volley_mult
+	# First-strike bonus -- when this unit has a first_strike_bonus
+	# stat AND the current target is different from the one we last
+	# fired at, the opening shot picks up the multiplier. Records the
+	# new target id so subsequent shots on the same target are
+	# normal-damage. Skipped for secondary weapons so the bonus only
+	# fires once per acquisition rather than once per weapon.
+	if stats and stats.first_strike_bonus > 1.0 and is_primary:
+		var target_id: int = _current_target.get_instance_id()
+		if target_id != _first_strike_target_id:
+			damage_per_member *= stats.first_strike_bonus
+			_first_strike_target_id = target_id
 	var per_member_dmg: int = maxi(int(damage_per_member), 1)
 
 	# Fire one projectile per alive squad member, originating at the actual

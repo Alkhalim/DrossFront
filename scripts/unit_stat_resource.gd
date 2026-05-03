@@ -152,6 +152,15 @@ func can_target_air() -> bool:
 ## Seconds after the last damage before stealth re-applies.
 @export var stealth_restore_time: float = 4.0
 
+## First Strike multiplier -- when > 1.0, the unit's first
+## attack against any newly-acquired target deals base * mult
+## damage. Resets per target so a unit firing on a fresh enemy
+## always gets the buffed opening shot. Used by Hound (Ripper) to
+## sell the close-range alpha-strike identity. Default 1.0 = no
+## bonus.
+@export_range(1.0, 3.0, 0.05) var first_strike_bonus: float = 1.0
+
+
 @export_group("Aircraft")
 ## V3 §"Pillar 3" — when true the unit spawns as an aircraft (extends
 ## Aircraft scene, uses simple flight movement instead of NavigationAgent3D
