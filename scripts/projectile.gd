@@ -92,6 +92,17 @@ static func create(from: Vector3, to: Vector3, role_tag: StringName, rof_tier: S
 			var dist: float = from.distance_to(to)
 			proj._total_flight_time = maxf(dist / 12.0, 0.5)
 			proj._arc_height = clampf(dist * 0.25, 2.0, 8.0)
+		"bomb":
+			# Heavy aerial bomb -- finned cylindrical body. Reuses the
+			# missile arc trajectory so the bomb visibly drops + tumbles
+			# onto the target. Slightly slower flight than a missile so
+			# the silhouette reads at zoom.
+			proj._create_bomb_mesh(color)
+			proj._is_missile = true
+			var bdist: float = from.distance_to(to)
+			proj._total_flight_time = maxf(bdist / 9.0, 0.7)
+			# Lower arc than a missile -- bombs fall, they don't soar.
+			proj._arc_height = clampf(bdist * 0.10, 0.5, 3.0)
 		"beam":
 			proj._create_beam_mesh(color, proj.start_pos, proj.target_pos)
 			proj.speed = 999.0
@@ -135,6 +146,65 @@ func _create_bullet_mesh(color: Color) -> void:
 	mat.emission_energy_multiplier = 3.0
 	_mesh.set_surface_override_material(0, mat)
 	add_child(_mesh)
+
+
+func _create_bomb_mesh(color: Color) -> void:
+	## Heavy aerial bomb -- chunky cylindrical body with a tail-fin
+	## cluster on the back. Distinct from missiles (which are slimmer
+	## and emissive) so a player can tell at a glance which projectile
+	## came from a Carpet Bombard vs a missile barrage.
+	_mesh = MeshInstance3D.new()
+	_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var body_cyl := CylinderMesh.new()
+	body_cyl.top_radius = 0.05
+	body_cyl.bottom_radius = 0.18
+	body_cyl.height = 0.65
+	body_cyl.radial_segments = 12
+	_mesh.mesh = body_cyl
+	# Default cylinder is along +Y. Rotate so the bomb's nose leads
+	# the trajectory along local -Z.
+	_mesh.rotation.x = -PI / 2
+	var body_mat := StandardMaterial3D.new()
+	body_mat.albedo_color = Color(0.18, 0.16, 0.14, 1.0)
+	body_mat.metallic = 0.4
+	body_mat.roughness = 0.65
+	_mesh.set_surface_override_material(0, body_mat)
+	add_child(_mesh)
+	# Tail-fin cluster -- four slim plates radiating around the back
+	# end. Re-uses the body material so they read as part of the
+	# bomb chassis.
+	for fin_i: int in 4:
+		var fin := MeshInstance3D.new()
+		fin.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var fin_box := BoxMesh.new()
+		fin_box.size = Vector3(0.20, 0.02, 0.18)
+		fin.mesh = fin_box
+		fin.rotation.z = float(fin_i) * (TAU / 4.0)
+		# Sit the fin cluster at the bomb's back (local +Y on the
+		# unrotated mesh -> +Z on the rotated parent, but the fin is
+		# parented under the rotated _mesh so its local +Y is the
+		# back). Cleaner: parent to _mesh so it inherits the rotation.
+		fin.position = Vector3(0.0, 0.30, 0.0)
+		fin.set_surface_override_material(0, body_mat)
+		_mesh.add_child(fin)
+	# Stencil stripe near the nose -- thin emissive band so the bomb
+	# isn't lost against dark terrain. Faint warning yellow.
+	var stripe := MeshInstance3D.new()
+	stripe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var stripe_cyl := CylinderMesh.new()
+	stripe_cyl.top_radius = 0.19
+	stripe_cyl.bottom_radius = 0.19
+	stripe_cyl.height = 0.05
+	stripe_cyl.radial_segments = 12
+	stripe.mesh = stripe_cyl
+	stripe.position = Vector3(0.0, -0.20, 0.0)
+	var stripe_mat := StandardMaterial3D.new()
+	stripe_mat.albedo_color = Color(1.0, 0.78, 0.20, 1.0)
+	stripe_mat.emission_enabled = true
+	stripe_mat.emission = Color(1.0, 0.78, 0.20, 1.0)
+	stripe_mat.emission_energy_multiplier = 0.8
+	stripe.set_surface_override_material(0, stripe_mat)
+	_mesh.add_child(stripe)
 
 
 func _create_missile_mesh(color: Color) -> void:

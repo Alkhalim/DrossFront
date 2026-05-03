@@ -2095,12 +2095,14 @@ func _fire_barrage_missile(target: Node3D, damage: int, side_x: float, spread_of
 
 
 func _ability_carpet_bombard() -> bool:
-	## Hammerhead Bomber's heavy bomb drop. One bomb spawns just below
-	## the bomber, arcs onto the current target, and detonates for ~650
-	## damage at impact (70% of a gun emplacement's HP) -- AS-tagged so
-	## structures eat the full hit while units shrug off most of it via
-	## the role-vs-armor multiplier table. Splash falls off linearly
-	## inside ability_radius. Skipped silently if no target.
+	## Hammerhead Bomber's heavy bomb drop. THREE bombs spawn just
+	## below the bomber, each one staggered slightly along the
+	## bomber's heading so they read as a 'stick' of carpet bombs
+	## hitting in a line. Total payload (~650 dmg, AS-tagged) is split
+	## across the three impacts; structures still eat the full
+	## anti-structure multiplier on every hit, while units shrug off
+	## most of each one via the AS role-vs-armor table. Skipped
+	## silently if no target.
 	if not _combat:
 		return false
 	var target: Node3D = _combat.get("_current_target") as Node3D
@@ -2108,36 +2110,63 @@ func _ability_carpet_bombard() -> bool:
 		return false
 	if "alive_count" in target and (target.get("alive_count") as int) <= 0:
 		return false
-	# Bomb spawn just below the bomber so the visual reads as 'opens
-	# bomb bay, drops payload'. Arcs onto the target via the missile
-	# trajectory. Role tag AS so the same anti-structure multipliers
-	# the regular Cluster Bomb Bay uses apply here too.
-	var spawn_pos: Vector3 = global_position + Vector3(0.0, -3.5, 0.0)
-	if spawn_pos.y < 0.5:
-		spawn_pos.y = 0.5
-	var aim_pos: Vector3 = target.global_position
+	const BOMB_COUNT: int = 3
+	# Total payload preserved at 650 across the stick; split evenly so
+	# each bomb deals ~217 base. The damage application below
+	# repeats the splash math per bomb so a target that catches all
+	# three takes the full 650.
+	const BOMBARD_TOTAL: int = 650
+	var per_bomb: int = int(round(float(BOMBARD_TOTAL) / float(BOMB_COUNT)))
+	# Stick length -- bombs walk along the bomber's heading so the
+	# carpet read is 'a row of impacts', not three bombs stacking on
+	# the same crater.
+	const STICK_LENGTH: float = 3.6
+	var heading: Vector3 = -global_transform.basis.z
+	heading.y = 0.0
+	if heading.length_squared() < 0.001:
+		heading = Vector3.FORWARD
+	heading = heading.normalized()
 	var faction: int = 0
 	var settings: Node = get_node_or_null("/root/MatchSettings")
 	if settings and "player_faction" in settings and (owner_id == 0):
 		faction = settings.get("player_faction") as int
-	var proj: Projectile = Projectile.create(
-		spawn_pos,
-		aim_pos,
-		&"AS",
-		&"slow",
-		&"missile",
-		faction,
-	)
-	if proj:
-		get_tree().current_scene.add_child(proj)
-	# Apply splash damage on impact -- approximated as 'happens now'
-	# rather than waiting for the projectile to land, since the
-	# missile-style projectile is purely cosmetic (no per-frame hit
-	# check). The role multiplier delivers the 'big vs structure /
-	# small vs unit' ratio without us having to fan out per-class
-	# branching here.
-	const BOMBARD_BASE: int = 650
 	var splash_radius: float = stats.ability_radius if stats.ability_radius > 0.0 else 5.0
+	# Per-bomb splash a touch smaller than the umbrella ability radius
+	# so the three impacts feel like distinct craters that overlap on
+	# a clustered target rather than one giant blast.
+	var per_bomb_radius: float = splash_radius * 0.75
+	for b: int in BOMB_COUNT:
+		# t goes -1, 0, 1 across the stick (BOMB_COUNT == 3); the
+		# corresponding bomb spawns at the bomber-X offset and lands
+		# offset along the heading.
+		var t: float = (float(b) - float(BOMB_COUNT - 1) * 0.5) / float(maxi(BOMB_COUNT - 1, 1))
+		var lateral: Vector3 = heading * t * STICK_LENGTH * 0.5
+		var spawn_pos: Vector3 = global_position + lateral + Vector3(0.0, -3.5, 0.0)
+		if spawn_pos.y < 0.5:
+			spawn_pos.y = 0.5
+		# Each bomb aims at a point along the same stick centred on
+		# the target, so the visual line of impacts crosses the
+		# target.
+		var aim_pos: Vector3 = target.global_position + heading * t * STICK_LENGTH * 0.5
+		var proj: Projectile = Projectile.create(
+			spawn_pos,
+			aim_pos,
+			&"AS",
+			&"slow",
+			&"bomb",
+			faction,
+		)
+		if proj:
+			get_tree().current_scene.add_child(proj)
+		# Splash damage per bomb. Mirrors the regular AS bomb math --
+		# structures take the full hit, units take the AS-vs-armor
+		# fraction. Targets caught in multiple impact circles take
+		# the sum, which is exactly the desired carpet-bomb behavior.
+		_apply_carpet_bomb_splash(aim_pos, per_bomb, per_bomb_radius)
+	return true
+
+
+func _apply_carpet_bomb_splash(aim_pos: Vector3, base_damage: int, splash_radius: float) -> void:
 	var splash_radius_sq: float = splash_radius * splash_radius
 	var groups: Array[String] = ["units", "buildings", "crawlers"]
 	for g: String in groups:
@@ -2155,23 +2184,19 @@ func _ability_carpet_bombard() -> bool:
 			if dist_sq > splash_radius_sq:
 				continue
 			var falloff: float = clampf(1.0 - sqrt(dist_sq) / splash_radius * 0.6, 0.4, 1.0)
-			# Apply AS role multiplier so structures take the full hit
-			# and units take a small fraction (matches the regular bomb
-			# bay's damage profile).
 			var target_armor: StringName = &"medium"
-			if n3.has_method("get") and "stats" in n3:
+			if "stats" in n3:
 				var ts: Variant = n3.get("stats")
 				if typeof(ts) == TYPE_OBJECT and is_instance_valid(ts):
 					var unit_stats: UnitStatResource = ts as UnitStatResource
 					if unit_stats:
 						target_armor = unit_stats.armor_class
-				if n3.is_in_group("buildings"):
-					target_armor = &"structure"
+			if n3.is_in_group("buildings"):
+				target_armor = &"structure"
 			var role_mod: float = CombatTables.get_role_modifier(&"AS", target_armor)
 			var armor_red: float = CombatTables.get_armor_reduction(target_armor)
-			var dmg: float = float(BOMBARD_BASE) * role_mod * (1.0 - armor_red) * falloff
+			var dmg: float = float(base_damage) * role_mod * (1.0 - armor_red) * falloff
 			n3.take_damage(int(dmg), self)
-	return true
 
 
 func get_member_positions() -> Array[Vector3]:
