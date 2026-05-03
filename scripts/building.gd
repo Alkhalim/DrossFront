@@ -4342,15 +4342,26 @@ func _process(delta: float) -> void:
 	if _is_selected:
 		_update_selection_bars()
 	else:
-		# Damaged-but-unselected buildings still display the HP bar
-		# so the player sees harm without having to re-select. Bar
-		# is built lazily on first damage and torn down once the
-		# building has been fully repaired.
-		if is_damaged():
+		# Bars are rendered above the building any time it has
+		# something the player should be aware of: damage taken,
+		# units in production, or research / branch commit in
+		# progress. HP bar lives until the building is fully
+		# repaired; production bar lives until the queue or
+		# research finishes.
+		var damaged: bool = is_damaged()
+		var producing: bool = _is_producing_or_researching()
+		if damaged or producing:
 			if not _sel_hp_fill or not is_instance_valid(_sel_hp_fill):
 				_build_selection_bars()
-				_remove_production_bar_only()
+				if not producing:
+					_remove_production_bar_only()
+			elif producing and (not _sel_prod_bg or not is_instance_valid(_sel_prod_bg)):
+				_build_production_bar(_bar_width, _sel_hp_bg.position.y - 0.40)
 			_update_damaged_hp_bar()
+			if producing:
+				_update_unselected_production_bar()
+			elif _sel_prod_bg and is_instance_valid(_sel_prod_bg):
+				_remove_production_bar_only()
 		elif _sel_hp_fill and is_instance_valid(_sel_hp_fill):
 			_remove_selection_bars()
 
@@ -4613,7 +4624,11 @@ func _build_selection_bars() -> void:
 		_bar_width = bar_w
 		_update_selection_bars()
 		return
-	# HP background (dark) + fill (red->green by ratio).
+	# HP background (dark) + fill (red->green by ratio). All four
+	# bar meshes set no_depth_test so the building's own geometry
+	# (radar dishes, smokestacks, spires) doesn't slice through the
+	# bar from oblique camera angles, and render_priority bumps
+	# them above sibling transparent meshes.
 	_sel_hp_bg = MeshInstance3D.new()
 	var hp_bg_mesh := BoxMesh.new()
 	hp_bg_mesh.size = Vector3(bar_w, 0.16, 0.32)
@@ -4622,6 +4637,8 @@ func _build_selection_bars() -> void:
 	var hp_bg_mat := StandardMaterial3D.new()
 	hp_bg_mat.albedo_color = Color(0.10, 0.10, 0.12, 0.85)
 	hp_bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	hp_bg_mat.no_depth_test = true
+	hp_bg_mat.render_priority = 8
 	_sel_hp_bg.set_surface_override_material(0, hp_bg_mat)
 	add_child(_sel_hp_bg)
 	_sel_hp_fill = MeshInstance3D.new()
@@ -4634,6 +4651,8 @@ func _build_selection_bars() -> void:
 	_sel_hp_mat.emission = Color(0.30, 0.85, 0.30, 1.0)
 	_sel_hp_mat.emission_energy_multiplier = 0.9
 	_sel_hp_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_sel_hp_mat.no_depth_test = true
+	_sel_hp_mat.render_priority = 9
 	_sel_hp_fill.set_surface_override_material(0, _sel_hp_mat)
 	add_child(_sel_hp_fill)
 	# Production bar (yellow). Selection-only: built only when the
@@ -4659,18 +4678,25 @@ func _build_production_bar(bar_w: float, prod_y: float) -> void:
 	var pb_bg_mat := StandardMaterial3D.new()
 	pb_bg_mat.albedo_color = Color(0.10, 0.10, 0.12, 0.85)
 	pb_bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	pb_bg_mat.no_depth_test = true
+	pb_bg_mat.render_priority = 8
 	_sel_prod_bg.set_surface_override_material(0, pb_bg_mat)
 	add_child(_sel_prod_bg)
 	_sel_prod_fill = MeshInstance3D.new()
 	var pb_fill_mesh := BoxMesh.new()
 	pb_fill_mesh.size = Vector3(1.0, 0.18, 0.32)
 	_sel_prod_fill.mesh = pb_fill_mesh
+	# Production fill uses the standard 'progress blue' tint so
+	# build / research / queued reads consistently across every UI
+	# surface (HUD progress bar, in-world bar, action buttons).
 	_sel_prod_mat = StandardMaterial3D.new()
-	_sel_prod_mat.albedo_color = Color(1.0, 0.78, 0.20, 0.95)
+	_sel_prod_mat.albedo_color = Color(0.30, 0.65, 1.0, 0.95)
 	_sel_prod_mat.emission_enabled = true
-	_sel_prod_mat.emission = Color(1.0, 0.78, 0.20, 1.0)
-	_sel_prod_mat.emission_energy_multiplier = 1.1
+	_sel_prod_mat.emission = Color(0.30, 0.65, 1.0, 1.0)
+	_sel_prod_mat.emission_energy_multiplier = 1.2
 	_sel_prod_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_sel_prod_mat.no_depth_test = true
+	_sel_prod_mat.render_priority = 9
 	_sel_prod_fill.set_surface_override_material(0, _sel_prod_mat)
 	add_child(_sel_prod_fill)
 
@@ -4685,6 +4711,65 @@ func _remove_selection_bars() -> void:
 	_sel_prod_bg = null
 	_sel_prod_fill = null
 	_sel_prod_mat = null
+
+
+func _is_producing_or_researching() -> bool:
+	## Anything the player should see a 'this building is busy'
+	## progress bar for: a queued unit, an armory branch commit, or
+	## an active research project on this armory.
+	if not is_constructed:
+		return false
+	if not _build_queue.is_empty():
+		return true
+	if stats and (stats.building_id == &"basic_armory" or stats.building_id == &"advanced_armory"):
+		var scene: Node = get_tree().current_scene if get_tree() else null
+		if scene:
+			var rm: Node = scene.get_node_or_null("ResearchManager")
+			if rm and rm.has_method("is_in_progress") and rm.call("is_in_progress"):
+				return true
+			var bcm: Node = scene.get_node_or_null("BranchCommitManager")
+			if bcm and bcm.has_method("is_committing") and bcm.call("is_committing"):
+				return true
+	return false
+
+
+func _current_production_progress() -> float:
+	## Returns 0..1 for whichever progress source is active. Mirrors
+	## the HUD selection-panel logic so the in-world bar fills at the
+	## same rate as the panel readout.
+	if not _build_queue.is_empty():
+		var unit_stats: UnitStatResource = _build_queue[0]
+		var build_t: float = maxf(unit_stats.build_time, 0.01)
+		return clampf(_build_progress / build_t, 0.0, 1.0)
+	if stats and (stats.building_id == &"basic_armory" or stats.building_id == &"advanced_armory"):
+		var scene: Node = get_tree().current_scene if get_tree() else null
+		if scene:
+			var rm: Node = scene.get_node_or_null("ResearchManager")
+			if rm and rm.has_method("is_in_progress") and rm.call("is_in_progress"):
+				if rm.has_method("get_progress"):
+					return clampf(rm.call("get_progress") as float, 0.0, 1.0)
+			var bcm: Node = scene.get_node_or_null("BranchCommitManager")
+			if bcm and bcm.has_method("is_committing") and bcm.call("is_committing"):
+				if bcm.has_method("get_commit_progress"):
+					return clampf(bcm.call("get_commit_progress") as float, 0.0, 1.0)
+	return 0.0
+
+
+func _update_unselected_production_bar() -> void:
+	## Fill-width refresh for the production bar when the building
+	## is producing/researching but NOT selected. Selection-bar tick
+	## handles the same fill plus visibility toggling for queued
+	## states; this path skips that gating because the caller
+	## already knows the bar should be visible.
+	if not _sel_prod_bg or not _sel_prod_fill:
+		return
+	_sel_prod_bg.visible = true
+	_sel_prod_fill.visible = true
+	var ratio: float = _current_production_progress()
+	var p_fill_w: float = _bar_width * ratio
+	var half_w: float = _bar_width * 0.5
+	_sel_prod_fill.scale.x = maxf(p_fill_w, 0.01)
+	_sel_prod_fill.position = Vector3(-half_w + p_fill_w * 0.5, _sel_prod_bg.position.y, 0)
 
 
 func _update_damaged_hp_bar() -> void:
