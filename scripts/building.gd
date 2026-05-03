@@ -3083,6 +3083,21 @@ func _is_foundation_clear() -> bool:
 ## doesn't issue a fresh command_move to every blocker every frame.
 var _evacuate_blockers_at_msec: int = 0
 
+## Throttle (msec) for the unselected-building bar-state check.
+## is_damaged() + _is_producing_or_researching() ran every frame
+## on every building -- multiplied across 50+ buildings that's
+## ~6000 redundant checks per second. Re-evaluating at 4Hz is
+## visually indistinguishable but a meaningful per-frame win.
+var _bar_state_check_at_msec: int = 0
+const _BAR_STATE_CHECK_INTERVAL_MS: int = 250
+
+## Camera distance beyond which a building skips its cosmetic
+## tick (atmospheric pulse, damage VFX, smoke timers). Selection
+## + progress bars still tick because those are the player's
+## explicit interaction points.
+const _BUILDING_ANIM_CULL_DIST_SQ: float = 110.0 * 110.0
+var _bldg_camera_cached: Camera3D = null
+
 
 func _evacuate_foundation_blockers() -> void:
 	## Walks any friendly / allied unit standing inside the
@@ -4444,43 +4459,66 @@ func _process(delta: float) -> void:
 			_last_build_tick_time_msec = now_msec
 			_update_progress_bar()
 
-	# Selection-bar refresh (HP + production fill). Cheap when not
-	# selected (early-out) so this stays outside the cosmetic stagger.
+	# Selection-bar refresh. Selected buildings update every frame
+	# so the HP / production fill stays smooth under the player's
+	# eye; unselected buildings throttle the state-change check to
+	# 4Hz because is_damaged + is_producing on every building per
+	# frame was a measurable chunk of the per-frame script cost.
 	if _is_selected:
 		_update_selection_bars()
 	else:
-		# Bars are rendered above the building any time it has
-		# something the player should be aware of: damage taken,
-		# units in production, or research / branch commit in
-		# progress. HP bar lives until the building is fully
-		# repaired; production bar lives until the queue or
-		# research finishes.
-		var damaged: bool = is_damaged()
-		var producing: bool = _is_producing_or_researching()
-		if damaged or producing:
-			if not _sel_hp_fill or not is_instance_valid(_sel_hp_fill):
-				_build_selection_bars()
-				if not producing:
+		var bar_now_msec: int = Time.get_ticks_msec()
+		if bar_now_msec >= _bar_state_check_at_msec:
+			_bar_state_check_at_msec = bar_now_msec + _BAR_STATE_CHECK_INTERVAL_MS
+			# Bars rendered above the building any time it has
+			# something the player should be aware of: damage taken,
+			# units in production, or research / branch commit in
+			# progress. HP bar lives until the building is fully
+			# repaired; production bar lives until the queue or
+			# research finishes.
+			var damaged: bool = is_damaged()
+			var producing: bool = _is_producing_or_researching()
+			if damaged or producing:
+				if not _sel_hp_fill or not is_instance_valid(_sel_hp_fill):
+					_build_selection_bars()
+					if not producing:
+						_remove_production_bar_only()
+				elif producing and (not _sel_prod_bg or not is_instance_valid(_sel_prod_bg)):
+					_build_production_bar(_bar_width, _sel_hp_bg.position.y - 0.40)
+				_update_damaged_hp_bar()
+				if producing:
+					_update_unselected_production_bar()
+				elif _sel_prod_bg and is_instance_valid(_sel_prod_bg):
 					_remove_production_bar_only()
-			elif producing and (not _sel_prod_bg or not is_instance_valid(_sel_prod_bg)):
-				_build_production_bar(_bar_width, _sel_hp_bg.position.y - 0.40)
-			_update_damaged_hp_bar()
-			if producing:
-				_update_unselected_production_bar()
-			elif _sel_prod_bg and is_instance_valid(_sel_prod_bg):
-				_remove_production_bar_only()
+			elif _sel_hp_fill and is_instance_valid(_sel_hp_fill):
+				_remove_selection_bars()
 		elif _sel_hp_fill and is_instance_valid(_sel_hp_fill):
-			_remove_selection_bars()
+			# Off-throttle ticks still keep an existing bar in sync
+			# (cheap mesh-scale write) so the visual stays smooth.
+			_update_damaged_hp_bar()
+			if _sel_prod_bg and is_instance_valid(_sel_prod_bg):
+				_update_unselected_production_bar()
 
-	# Half-frame stagger for the cosmetic / damage-VFX work. Buildings
-	# don't need 60 Hz redraws — smoke timers, ember flicker, foundry
-	# glow loops all read fine at 30 Hz. Phase is set at _enter_tree
-	# (instance-id parity) so a base of buildings all running their
-	# loops in lockstep doesn't all spike on the same physics frame.
+	# Quarter-frame stagger for the cosmetic / damage-VFX work.
+	# Buildings don't need 60Hz redraws -- smoke timers, ember
+	# flicker, foundry glow loops all read fine at ~15Hz. The
+	# 4-frame stagger spreads the cost across frames so a base of
+	# 50+ buildings doesn't all spike on the same physics frame.
+	# Phase is set at _enter_tree (instance-id parity) for the
+	# stagger.
 	_process_frame += 1
-	if (_process_frame & 1) != _process_phase:
+	if (_process_frame & 3) != (_process_phase & 3):
 		return
-	delta *= 2.0
+	delta *= 4.0
+	# Distance-cull cosmetic ticks for buildings far from the
+	# camera. The player can't see embers / smoke / glow pulses
+	# at zoom-out range anyway, so spending script time on them
+	# is wasted work.
+	if not _bldg_camera_cached or not is_instance_valid(_bldg_camera_cached):
+		_bldg_camera_cached = get_viewport().get_camera_3d() if get_viewport() else null
+	if _bldg_camera_cached:
+		if global_position.distance_squared_to(_bldg_camera_cached.global_position) > _BUILDING_ANIM_CULL_DIST_SQ:
+			return
 	# Always-on damage VFX animation, even when nothing is in production.
 	_atmos_anim_time += delta
 	# Damage smoke — spawn rising sphere puffs at random anchors. Soft,
