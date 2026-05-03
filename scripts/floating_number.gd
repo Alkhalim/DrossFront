@@ -14,7 +14,7 @@ const COLOR_HEAL: Color = Color(0.60, 1.00, 0.55, 1.0)      # bright green
 const COLOR_DAMAGE: Color = Color(1.00, 0.30, 0.25, 1.0)    # red
 
 
-static func spawn(scene: Node, world_pos: Vector3, text: String, color: Color, lift: float = 1.6, dur: float = 1.4) -> void:
+static func spawn(scene: Node, world_pos: Vector3, text: String, color: Color, lift: float = 1.6, dur: float = 1.4, scale_mult: float = 1.0) -> void:
 	## Spawns one floating Label3D at world_pos that drifts up by
 	## `lift` units over `dur` seconds while fading to alpha 0, then
 	## frees itself. Skipped silently when `scene` is null so the
@@ -29,8 +29,8 @@ static func spawn(scene: Node, world_pos: Vector3, text: String, color: Color, l
 	# (Label3D's fixed_size still respects pixel_size as the world
 	# scale). Tuned small -- previous 18 / 0.003 still read as a
 	# banner over standard zoom.
-	label.font_size = 14
-	label.pixel_size = 0.0009
+	label.font_size = int(14.0 * scale_mult)
+	label.pixel_size = 0.0009 * scale_mult
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.fixed_size = true
 	label.no_depth_test = true

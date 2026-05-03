@@ -226,6 +226,9 @@ func _generate_fuel(delta: float) -> void:
 				global_position + Vector3(0.0, 2.4, 0.0),
 				"+%d F" % amount,
 				FloatingNumber.COLOR_FUEL,
+				1.6,
+				1.4,
+				1.5,
 			)
 
 

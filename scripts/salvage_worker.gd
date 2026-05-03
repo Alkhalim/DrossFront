@@ -453,6 +453,9 @@ func _return_to_yard(delta: float) -> void:
 					drop_pos,
 					"+%d S" % _carried_salvage,
 					FloatingNumber.COLOR_SALVAGE,
+					1.6,
+					1.4,
+					1.5,
 				)
 			if _carried_microchips > 0:
 				FloatingNumber.spawn(
@@ -460,6 +463,9 @@ func _return_to_yard(delta: float) -> void:
 					drop_pos + Vector3(0.0, 0.5, 0.0),
 					"+%d M" % _carried_microchips,
 					FloatingNumber.COLOR_MICROCHIPS,
+					1.6,
+					1.4,
+					1.5,
 				)
 		_carried_salvage = 0
 		_carried_microchips = 0
