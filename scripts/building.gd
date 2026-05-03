@@ -78,6 +78,17 @@ var _progress_bar: MeshInstance3D = null
 var _progress_mat: StandardMaterial3D = null
 var _progress_label: Label3D = null
 var _bar_width: float = 0.0
+## Selection-only floating bars: HP always visible while selected,
+## production bar visible only when the building has units queued.
+## Kept separate from the construction progress bar so the
+## construction bar can hand off to these once is_constructed flips
+## true without duplicating geometry.
+var _sel_hp_bg: MeshInstance3D = null
+var _sel_hp_fill: MeshInstance3D = null
+var _sel_hp_mat: StandardMaterial3D = null
+var _sel_prod_bg: MeshInstance3D = null
+var _sel_prod_fill: MeshInstance3D = null
+var _sel_prod_mat: StandardMaterial3D = null
 ## Per-frame construction stats so the progress label can show
 ## current worker count and an estimated remaining time. The dicts
 ## are flipped in _process so a builder still counts even if it
@@ -3865,6 +3876,11 @@ func _process(delta: float) -> void:
 			_last_build_tick_time_msec = now_msec
 			_update_progress_bar()
 
+	# Selection-bar refresh (HP + production fill). Cheap when not
+	# selected (early-out) so this stays outside the cosmetic stagger.
+	if _is_selected:
+		_update_selection_bars()
+
 	# Half-frame stagger for the cosmetic / damage-VFX work. Buildings
 	# don't need 60 Hz redraws — smoke timers, ember flicker, foundry
 	# glow loops all read fine at 30 Hz. Phase is set at _enter_tree
@@ -4052,6 +4068,7 @@ func select_building() -> void:
 		return
 	_is_selected = true
 	_update_selection_visual()
+	_build_selection_bars()
 
 
 func deselect_building() -> void:
@@ -4059,6 +4076,7 @@ func deselect_building() -> void:
 		return
 	_is_selected = false
 	_update_selection_visual()
+	_remove_selection_bars()
 
 
 func _update_selection_visual() -> void:
@@ -4075,6 +4093,108 @@ func _update_selection_visual() -> void:
 ## that blends with their own color so they don't all flash green.
 const _SELECT_TINT: Color = Color(0.25, 0.85, 0.35)
 const _SELECT_ENERGY_FLOOR: float = 0.45
+
+
+func _build_selection_bars() -> void:
+	## Floating HP + production bars above the selected building.
+	## HP bar always renders while selected; production bar only when
+	## units are queued. Lazy-built so unselected buildings don't pay
+	## the geometry cost.
+	if not stats:
+		return
+	var bar_w: float = stats.footprint_size.x
+	var hp_y: float = stats.footprint_size.y * 1.5 + 1.6
+	var prod_y: float = hp_y - 0.40
+	# HP background (dark) + fill (red->green by ratio).
+	_sel_hp_bg = MeshInstance3D.new()
+	var hp_bg_mesh := BoxMesh.new()
+	hp_bg_mesh.size = Vector3(bar_w, 0.16, 0.32)
+	_sel_hp_bg.mesh = hp_bg_mesh
+	_sel_hp_bg.position = Vector3(0, hp_y, 0)
+	var hp_bg_mat := StandardMaterial3D.new()
+	hp_bg_mat.albedo_color = Color(0.10, 0.10, 0.12, 0.85)
+	hp_bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_sel_hp_bg.set_surface_override_material(0, hp_bg_mat)
+	add_child(_sel_hp_bg)
+	_sel_hp_fill = MeshInstance3D.new()
+	var hp_fill_mesh := BoxMesh.new()
+	hp_fill_mesh.size = Vector3(1.0, 0.20, 0.36)
+	_sel_hp_fill.mesh = hp_fill_mesh
+	_sel_hp_mat = StandardMaterial3D.new()
+	_sel_hp_mat.albedo_color = Color(0.30, 0.85, 0.30, 0.95)
+	_sel_hp_mat.emission_enabled = true
+	_sel_hp_mat.emission = Color(0.30, 0.85, 0.30, 1.0)
+	_sel_hp_mat.emission_energy_multiplier = 0.9
+	_sel_hp_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_sel_hp_fill.set_surface_override_material(0, _sel_hp_mat)
+	add_child(_sel_hp_fill)
+	# Production bar (yellow). Visibility flips per-frame based on
+	# the build queue.
+	_sel_prod_bg = MeshInstance3D.new()
+	var pb_bg_mesh := BoxMesh.new()
+	pb_bg_mesh.size = Vector3(bar_w, 0.14, 0.28)
+	_sel_prod_bg.mesh = pb_bg_mesh
+	_sel_prod_bg.position = Vector3(0, prod_y, 0)
+	var pb_bg_mat := StandardMaterial3D.new()
+	pb_bg_mat.albedo_color = Color(0.10, 0.10, 0.12, 0.85)
+	pb_bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_sel_prod_bg.set_surface_override_material(0, pb_bg_mat)
+	add_child(_sel_prod_bg)
+	_sel_prod_fill = MeshInstance3D.new()
+	var pb_fill_mesh := BoxMesh.new()
+	pb_fill_mesh.size = Vector3(1.0, 0.18, 0.32)
+	_sel_prod_fill.mesh = pb_fill_mesh
+	_sel_prod_mat = StandardMaterial3D.new()
+	_sel_prod_mat.albedo_color = Color(1.0, 0.78, 0.20, 0.95)
+	_sel_prod_mat.emission_enabled = true
+	_sel_prod_mat.emission = Color(1.0, 0.78, 0.20, 1.0)
+	_sel_prod_mat.emission_energy_multiplier = 1.1
+	_sel_prod_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_sel_prod_fill.set_surface_override_material(0, _sel_prod_mat)
+	add_child(_sel_prod_fill)
+	_bar_width = bar_w
+	_update_selection_bars()
+
+
+func _remove_selection_bars() -> void:
+	for n: Node in [_sel_hp_bg, _sel_hp_fill, _sel_prod_bg, _sel_prod_fill]:
+		if n and is_instance_valid(n):
+			n.queue_free()
+	_sel_hp_bg = null
+	_sel_hp_fill = null
+	_sel_hp_mat = null
+	_sel_prod_bg = null
+	_sel_prod_fill = null
+	_sel_prod_mat = null
+
+
+func _update_selection_bars() -> void:
+	if not _sel_hp_fill or not _is_selected:
+		return
+	# HP fill width + tint.
+	var hp_max: int = effective_max_hp() if has_method("effective_max_hp") else stats.hp
+	var ratio: float = clampf(float(current_hp) / float(maxi(hp_max, 1)), 0.0, 1.0)
+	var fill_w: float = _bar_width * ratio
+	var half_w: float = _bar_width * 0.5
+	_sel_hp_fill.scale.x = maxf(fill_w, 0.01)
+	_sel_hp_fill.position = Vector3(-half_w + fill_w * 0.5, _sel_hp_bg.position.y, 0)
+	if _sel_hp_mat:
+		var r: float = clampf(1.0 - ratio, 0.10, 0.95)
+		var g: float = clampf(ratio, 0.10, 0.95)
+		_sel_hp_mat.albedo_color = Color(r, g, 0.20, 0.95)
+		_sel_hp_mat.emission = Color(r, g, 0.20, 1.0)
+	# Production bar — visible iff something is queued, fill = current
+	# unit's progress / build_time.
+	var producing: bool = is_constructed and not _build_queue.is_empty()
+	_sel_prod_bg.visible = producing
+	_sel_prod_fill.visible = producing
+	if producing:
+		var unit_stats: UnitStatResource = _build_queue[0]
+		var build_t: float = maxf(unit_stats.build_time, 0.01)
+		var prod_ratio: float = clampf(_build_progress / build_t, 0.0, 1.0)
+		var p_fill_w: float = _bar_width * prod_ratio
+		_sel_prod_fill.scale.x = maxf(p_fill_w, 0.01)
+		_sel_prod_fill.position = Vector3(-half_w + p_fill_w * 0.5, _sel_prod_bg.position.y, 0)
 
 
 func _apply_select_glow(node: Node) -> void:
