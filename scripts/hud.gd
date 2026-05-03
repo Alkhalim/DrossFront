@@ -2245,6 +2245,11 @@ func _rebuild_production_buttons(building: Building) -> void:
 	# unlocked unit). Locked entries render as a disabled greyed
 	# button with a 'Locked: needs <building>' annotation in the
 	# label and tooltip.
+	# Buildings still under construction can't queue units. Render the
+	# whole roster as greyed-out informational so the player can read
+	# what they're going to be able to train, but the buttons reject
+	# clicks until the building completes.
+	var construction_locked: bool = not building.is_constructed
 	var unlocked_idx: int = 0
 	for unit_stat: UnitStatResource in producible_all:
 		var unlocked: bool = building.is_unit_unlocked(unit_stat) if building.has_method("is_unit_unlocked") else true
@@ -2263,6 +2268,9 @@ func _rebuild_production_buttons(building: Building) -> void:
 			btn.pressed.connect(_on_production_button.bind(capture_idx))
 			var chip_refs: Dictionary = _attach_cost_widget(btn, unit_stat.cost_salvage, unit_stat.cost_fuel, unit_stat.population)
 			_action_buttons.append({ "button": btn, "kind": "produce", "stat": unit_stat, "chips": chip_refs })
+			if construction_locked:
+				btn.disabled = true
+				btn.tooltip_text = "%s — building is still under construction." % u_display
 			unlocked_idx += 1
 		else:
 			var prereq: StringName = unit_stat.unlock_prerequisite
