@@ -11,7 +11,7 @@ damage_tier = &"very_high"
 range_tier = &"medium"
 rof_tier = &"slow"
 base_accuracy = 0.87
-damage_value = 133
+damage_value = 173
 structure_damage_mult = 3.0
 can_damage_trees = true
 
