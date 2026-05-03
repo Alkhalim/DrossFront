@@ -17,6 +17,7 @@ bomb_drop = true
 [resource]
 script = ExtResource("1")
 unit_name = "Hammerhead (Bomber)"
+display_name = "VA-H \"Hammerhead\" (Bomber)"
 unit_class = &"aircraft"
 hp_total = 1320
 hp_per_unit = 1320

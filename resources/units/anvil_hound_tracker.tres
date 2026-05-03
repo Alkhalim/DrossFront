@@ -15,6 +15,7 @@ can_hit_air = true
 [resource]
 script = ExtResource("1")
 unit_name = "Hound — Tracker"
+display_name = "KV-3R Mainline (Tracker)"
 unit_class = &"medium"
 hp_total = 1560
 hp_per_unit = 520

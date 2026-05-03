@@ -5,6 +5,7 @@
 [resource]
 script = ExtResource("1")
 unit_name = "Salvage Crawler"
+display_name = "VA-7 Heavy Crawler"
 unit_class = &"crawler"
 hp_total = 800
 hp_per_unit = 800

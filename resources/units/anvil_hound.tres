@@ -25,6 +25,7 @@ rof_tier = &"slow"
 [resource]
 script = ExtResource("1")
 unit_name = "Hound"
+display_name = "KV-3 Mainline"
 unit_class = &"medium"
 hp_total = 1560
 hp_per_unit = 520

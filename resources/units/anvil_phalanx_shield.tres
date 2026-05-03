@@ -15,6 +15,7 @@ base_accuracy = 0.84
 [resource]
 script = ExtResource("1")
 unit_name = "Phalanx (Shield)"
+display_name = "VA-P Drone Pack (Shield)"
 unit_class = &"aircraft"
 hp_total = 920
 hp_per_unit = 115

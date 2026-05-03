@@ -24,6 +24,7 @@ base_accuracy = 0.92
 [resource]
 script = ExtResource("1")
 unit_name = "Bulwark (Ironwall)"
+display_name = "KV-7A Bulwark (Ironwall)"
 unit_class = &"heavy"
 hp_total = 2820
 hp_per_unit = 1410

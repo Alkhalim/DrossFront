@@ -18,6 +18,7 @@ rof_seconds_value = 0.28
 [resource]
 script = ExtResource("1")
 unit_name = "Phalanx Drone"
+display_name = "VA-P Drone Pack (Phalanx)"
 unit_class = &"aircraft"
 hp_total = 720
 hp_per_unit = 90

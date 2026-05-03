@@ -26,6 +26,7 @@ base_accuracy = 0.92
 [resource]
 script = ExtResource("1")
 unit_name = "Rook (Sapper)"
+display_name = "KV-1D Scout (Sapper)"
 unit_class = &"light"
 hp_total = 1188
 hp_per_unit = 297

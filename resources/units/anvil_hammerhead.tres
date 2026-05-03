@@ -19,6 +19,7 @@ base_accuracy = 0.78
 [resource]
 script = ExtResource("1")
 unit_name = "Hammerhead Gunship"
+display_name = "VA-H Gunship \"Hammerhead\""
 unit_class = &"aircraft"
 hp_total = 1900
 hp_per_unit = 1900

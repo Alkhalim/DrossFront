@@ -24,6 +24,7 @@ is_shotgun = true
 [resource]
 script = ExtResource("1")
 unit_name = "Hound — Ripper"
+display_name = "KV-3B Mainline (Ripper)"
 unit_class = &"medium"
 hp_total = 1920
 hp_per_unit = 640

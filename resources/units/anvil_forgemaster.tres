@@ -26,6 +26,7 @@ base_accuracy = 0.90
 [resource]
 script = ExtResource("1")
 unit_name = "Forgemaster"
+display_name = "KV-C Coordinator (Forgemaster)"
 unit_class = &"heavy"
 hp_total = 1100
 hp_per_unit = 1100

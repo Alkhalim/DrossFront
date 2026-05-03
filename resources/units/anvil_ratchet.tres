@@ -16,6 +16,7 @@ base_accuracy = 0.85
 [resource]
 script = ExtResource("1")
 unit_name = "Ratchet"
+display_name = "KV-0 Field Engineer"
 unit_class = &"engineer"
 hp_total = 720
 hp_per_unit = 144

@@ -17,6 +17,7 @@ air_damage_mult = 0.2
 [resource]
 script = ExtResource("1")
 unit_name = "Rook (Spotter)"
+display_name = "KV-1S Scout (Spotter)"
 unit_class = &"light"
 hp_total = 1104
 hp_per_unit = 276
