@@ -59,7 +59,7 @@ const ROF_STYLES: Dictionary = {
 }
 
 
-static func create(from: Vector3, to: Vector3, role_tag: StringName, rof_tier: StringName = &"moderate", style_override: StringName = &"", shooter_faction: int = 0) -> Projectile:
+static func create(from: Vector3, to: Vector3, role_tag: StringName, rof_tier: StringName = &"moderate", style_override: StringName = &"", shooter_faction: int = 0, damage_tier: StringName = &"moderate") -> Projectile:
 	var proj := Projectile.new()
 	# Only lift the spawn point off the ground when the caller passed
 	# a low-y position (e.g. unit center / member position). Muzzle
@@ -109,7 +109,19 @@ static func create(from: Vector3, to: Vector3, role_tag: StringName, rof_tier: S
 			# Lower arc than a missile -- bombs fall, they don't soar.
 			proj._arc_height = clampf(bdist * 0.10, 0.5, 3.0)
 		"beam":
-			proj._create_beam_mesh(color, proj.start_pos, proj.target_pos)
+			# Beam thickness scales with damage tier so an engineer's
+			# low-power cutting laser doesn't render at the same width
+			# as a Pulsefont sidearm. Very-low / low damage -> 0.4x
+			# width; moderate -> 1.0x; higher tiers -> 1.2x.
+			var beam_width: float = 1.0
+			match damage_tier:
+				&"very_low":
+					beam_width = 0.35
+				&"low":
+					beam_width = 0.55
+				&"high", &"very_high", &"extreme":
+					beam_width = 1.2
+			proj._create_beam_mesh(color, proj.start_pos, proj.target_pos, beam_width)
 			proj.speed = 999.0
 		_:
 			proj._create_bullet_mesh(color)
@@ -256,7 +268,7 @@ func _create_missile_mesh(color: Color) -> void:
 	_emit_trail = true
 
 
-func _create_beam_mesh(color: Color, from: Vector3, to: Vector3) -> void:
+func _create_beam_mesh(color: Color, from: Vector3, to: Vector3, width_scale: float = 1.0) -> void:
 	var dir: Vector3 = to - from
 	var length: float = dir.length()
 
@@ -265,7 +277,7 @@ func _create_beam_mesh(color: Color, from: Vector3, to: Vector3) -> void:
 	_mesh = MeshInstance3D.new()
 	_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var core := BoxMesh.new()
-	core.size = Vector3(0.06, 0.06, maxf(length, 0.1))
+	core.size = Vector3(0.06 * width_scale, 0.06 * width_scale, maxf(length, 0.1))
 	_mesh.mesh = core
 	var core_mat := StandardMaterial3D.new()
 	var core_color: Color = color.lerp(Color(1.0, 1.0, 1.0, 1.0), 0.6)
@@ -284,7 +296,7 @@ func _create_beam_mesh(color: Color, from: Vector3, to: Vector3) -> void:
 	var halo := MeshInstance3D.new()
 	halo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var halo_box := BoxMesh.new()
-	halo_box.size = Vector3(0.20, 0.20, maxf(length, 0.1))
+	halo_box.size = Vector3(0.20 * width_scale, 0.20 * width_scale, maxf(length, 0.1))
 	halo.mesh = halo_box
 	var halo_mat := StandardMaterial3D.new()
 	halo_mat.albedo_color = Color(color.r, color.g, color.b, 0.45)

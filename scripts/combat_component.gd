@@ -782,7 +782,7 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 						pellet.set_glow_boost(3.0, Color(1.0, 0.85, 0.20, 1.0))
 					get_tree().current_scene.add_child(pellet)
 			else:
-				var proj: Node3D = proj_script.create(fire_pos, aim_pos, weapon.role_tag, weapon.rof_tier, weapon.projectile_style, _shooter_faction_id())
+				var proj: Node3D = proj_script.create(fire_pos, aim_pos, weapon.role_tag, weapon.rof_tier, weapon.projectile_style, _shooter_faction_id(), weapon.damage_tier)
 				get_tree().current_scene.add_child(proj)
 
 	# Muzzle flash on each member — colored by the weapon's role.
