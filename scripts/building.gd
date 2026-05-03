@@ -839,9 +839,19 @@ func _build_hq_corner_mg_nest(corner: Vector3) -> Node3D:
 	_attach_visual(post)
 
 	# Tracking pivot at the top of the post. Each nest gets its own.
+	# Default rotation points the barrel OUTWARD from the HQ centre
+	# (the local -Z forward direction must align with the corner's
+	# radial direction). TurretComponent captures pivot.rotation.y
+	# as its idle rest pose on first tick, so this also dictates
+	# where the gun returns to when nothing is in range.
 	var pivot := Node3D.new()
 	pivot.name = "MGNestPivot"
 	pivot.position = Vector3(corner.x, corner.y + 0.80, corner.z)
+	# Solve for the yaw that aligns local -Z with the outward radial
+	# direction (corner.x, corner.z). Falls back to identity if the
+	# corner is somehow at origin.
+	if absf(corner.x) > 0.01 or absf(corner.z) > 0.01:
+		pivot.rotation.y = atan2(-corner.x, -corner.z)
 	_attach_visual(pivot)
 
 	# Horizontal swivel cradle -- a short box cradling the barrel,
