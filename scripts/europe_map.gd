@@ -1,278 +1,315 @@
 extends Control
 ## Stylized tactical map of Europe used by the Campaigns selection
-## screen. Draws a coastline silhouette of mainland Europe + the
-## major peripheral landmasses (British Isles, Ireland, Iceland,
-## Scandinavia treated as a separate sweep, Iberia, Italy, Greece,
-## Turkey horn, Russian east edge), country-border hint lines,
-## major rivers, named city dots, and a faint compass-grid overlay.
-## Stump buttons are positioned absolutely by the caller using
-## get_marker_position(key); this control just paints the backdrop.
+## screen. All coastline points + city positions land at their real
+## lat/lon, normalized to a bounding box that covers Iceland in the
+## NW, North Cape in the N, the Caspian shoulder in the E, and the
+## Mediterranean in the S. The polygon coordinates were derived from
+## real geographic vertices and converted via _ll() so the silhouette
+## matches what the player expects when they look at Europe.
 
-## Map render size. Tuned to fill the center of a typical 1280x720
-## or larger main-menu viewport without exceeding it; the campaigns
-## screen now anchors this Control full-rect and the map paints
-## inside its own intrinsic size, so the dimensions here directly
-## drive how much screen space the map takes.
-const MAP_SIZE := Vector2(1180, 760)
+## Map render size. The campaigns screen anchors this Control
+## full-rect; the map paints inside its own intrinsic size, so this
+## directly drives how much screen space the map takes.
+const MAP_SIZE := Vector2(1280, 800)
+
+# Bounding box (lon_west, lon_east, lat_south, lat_north).
+const LON_W: float = -25.0
+const LON_E: float = 45.0
+const LAT_S: float = 35.0
+const LAT_N: float = 72.0
+
+
+static func _ll(lon: float, lat: float) -> Vector2:
+	## Real (longitude, latitude) -> normalized 0..1 coordinates on
+	## the map. Y is inverted because screen Y grows downward.
+	return Vector2(
+		(lon - LON_W) / (LON_E - LON_W),
+		1.0 - (lat - LAT_S) / (LAT_N - LAT_S),
+	)
+
+
+# --- Palette --------------------------------------------------------
 
 const WATER := Color(0.06, 0.10, 0.16, 1.0)
 const WATER_DEEP := Color(0.04, 0.07, 0.12, 1.0)
-const LAND := Color(0.18, 0.20, 0.18, 1.0)
-const LAND_HIGH := Color(0.22, 0.24, 0.21, 1.0)  # subtle inland tint
+const LAND := Color(0.20, 0.22, 0.20, 1.0)
 const LAND_OUTLINE := Color(0.55, 0.65, 0.50, 0.90)
-const BORDER := Color(0.40, 0.50, 0.42, 0.45)
+const BORDER := Color(0.42, 0.52, 0.44, 0.50)
 const RIVER := Color(0.30, 0.55, 0.78, 0.65)
-const GRID := Color(0.42, 0.55, 0.50, 0.16)
+const GRID := Color(0.42, 0.55, 0.50, 0.14)
 const ACCENT := Color(0.95, 0.65, 0.28, 0.55)
-const CITY_DOT := Color(0.80, 0.85, 0.45, 0.95)
-const CITY_LABEL := Color(0.85, 0.92, 0.65, 0.85)
-const SEA_LABEL := Color(0.55, 0.75, 0.95, 0.70)
+const CITY_DOT := Color(0.85, 0.90, 0.55, 0.95)
+const CITY_LABEL := Color(0.88, 0.94, 0.70, 0.90)
+const SEA_LABEL := Color(0.55, 0.78, 0.95, 0.65)
 
-## Marker site keys -> normalized (0..1) positions on the map.
-## Approximate latitude/longitude landings:
-##   uk      = London
-##   germany = Berlin
-##   russia  = Moscow
-##   italy   = Rome
-##   cern    = Geneva (Switzerland) -- the Special Operations site
-##
-## `var` rather than `const`: GDScript's compile-time const evaluator
-## rejects `Vector2(...)` constructor calls inside Dictionary / Packed
-## array literals. Computed once at script load, never mutated.
+
+# --- Marker positions (driven by real city coordinates) ------------
+
 var MARKERS: Dictionary = {
-	"uk":      Vector2(0.225, 0.395),
-	"germany": Vector2(0.510, 0.450),
-	"russia":  Vector2(0.840, 0.305),
-	"italy":   Vector2(0.515, 0.735),
-	"cern":    Vector2(0.435, 0.580),
+	"uk":      _ll(-0.13,  51.51),  # London
+	"germany": _ll(13.40,  52.52),  # Berlin
+	"russia":  _ll(37.62,  55.75),  # Moscow
+	"italy":   _ll(12.50,  41.90),  # Rome
+	"cern":    _ll( 6.14,  46.20),  # Geneva (CERN)
 }
 
-## Mainland Europe coastline polygon, walked clockwise from the
-## Iberian south tip. Higher vertex density than the original draft
-## so the recognisable landmarks (Iberian peninsula, French Atlantic
-## coast, Italian boot, Greek Aegean fingers, Black Sea horn,
-## Russian east edge, North Cape, Baltic finger, Brittany) all land
-## clearly on the silhouette.
+
+# --- Coastlines ----------------------------------------------------
+
+## Mainland Europe + Anatolia + Caucasus + Russian heartland walked
+## clockwise from the Strait of Gibraltar. Vertices are real coastal
+## landmarks; intermediate points keep the silhouette readable
+## without flooding the polygon with noise.
 var MAIN_LAND: PackedVector2Array = PackedVector2Array([
-	# Iberian south coast (Strait of Gibraltar -> Murcia)
-	Vector2(0.13, 0.84),
-	Vector2(0.18, 0.80),
-	Vector2(0.22, 0.79),
-	Vector2(0.27, 0.78),
-	Vector2(0.31, 0.74),
-	Vector2(0.34, 0.71),
-	# Southern France / Cote d'Azur
-	Vector2(0.39, 0.69),
-	Vector2(0.41, 0.66),
-	Vector2(0.43, 0.66),
-	Vector2(0.46, 0.69),
-	# Italy -- Genoa, Rome, heel, toe of the boot
-	Vector2(0.49, 0.66),
-	Vector2(0.49, 0.71),
-	Vector2(0.51, 0.74),
-	Vector2(0.54, 0.78),
-	Vector2(0.55, 0.82),
-	Vector2(0.56, 0.85),
-	Vector2(0.57, 0.83),
-	Vector2(0.55, 0.78),
-	Vector2(0.55, 0.74),
-	Vector2(0.55, 0.70),
-	# Adriatic coast -- former Yugoslavia
-	Vector2(0.58, 0.69),
-	Vector2(0.60, 0.69),
-	Vector2(0.62, 0.71),
-	Vector2(0.63, 0.74),
-	# Greek peninsula + Aegean fingers
-	Vector2(0.64, 0.76),
-	Vector2(0.65, 0.79),
-	Vector2(0.66, 0.81),
-	Vector2(0.66, 0.78),
-	Vector2(0.67, 0.76),
-	Vector2(0.68, 0.74),
-	# Turkish horn (Bosphorus -> Black Sea south coast)
-	Vector2(0.70, 0.72),
-	Vector2(0.73, 0.71),
-	Vector2(0.76, 0.70),
-	Vector2(0.80, 0.69),
-	Vector2(0.84, 0.66),
+	# Iberian south + east coasts
+	_ll(-5.6, 36.0),    # Strait of Gibraltar
+	_ll(-2.9, 36.7),    # Almeria
+	_ll(-0.5, 38.3),    # Alicante
+	_ll( 1.0, 41.0),    # Tarragona
+	_ll( 3.2, 42.4),    # Roses / French border
+	# French Mediterranean coast
+	_ll( 5.4, 43.3),    # Marseille
+	_ll( 7.3, 43.7),    # Nice
+	# Italian Riviera + Genoa
+	_ll( 8.9, 44.4),    # Genoa
+	# Tuscany / Lazio coast down to Rome
+	_ll(11.2, 43.5),    # Pisa
+	_ll(12.4, 41.9),    # Rome
+	# Naples + heel of the boot
+	_ll(14.3, 40.8),    # Naples
+	_ll(17.9, 40.6),    # Brindisi (heel)
+	_ll(15.6, 38.1),    # Reggio (toe)
+	_ll(18.0, 39.8),    # Lecce
+	# Adriatic east coast (Slovenia / Croatia)
+	_ll(13.9, 44.9),    # Pula
+	_ll(15.2, 44.1),    # Zadar
+	_ll(16.4, 43.5),    # Split
+	_ll(18.1, 42.6),    # Dubrovnik
+	# Albanian + Greek west coast
+	_ll(19.3, 41.3),    # Durres
+	_ll(20.8, 38.3),    # Patras
+	_ll(23.7, 37.0),    # Cape Maleas
+	# Aegean fingers
+	_ll(23.7, 37.98),   # Athens (Piraeus)
+	_ll(24.5, 38.4),    # Aegean fjord
+	_ll(26.1, 38.4),    # Izmir bay
+	# Anatolia (Turkey) south + east
+	_ll(28.0, 36.7),    # Marmaris
+	_ll(31.0, 36.8),    # Antalya
+	_ll(34.7, 36.6),    # Adana
+	_ll(36.2, 36.6),    # Iskenderun
 	# Caucasus shoulder
-	Vector2(0.87, 0.62),
-	Vector2(0.90, 0.60),
-	# Russian east edge -- straight south-to-north strip
-	Vector2(0.94, 0.52),
-	Vector2(0.97, 0.40),
-	Vector2(0.97, 0.28),
-	Vector2(0.95, 0.18),
-	# Arctic / White Sea coastline (Murmansk inset)
-	Vector2(0.91, 0.12),
-	Vector2(0.85, 0.10),
-	Vector2(0.80, 0.12),
-	Vector2(0.74, 0.10),
-	Vector2(0.70, 0.12),
-	# North Cape -- Norway's tip
-	Vector2(0.63, 0.07),
-	Vector2(0.60, 0.05),
-	Vector2(0.57, 0.07),
-	# Norwegian fjord coastline + Bergen / Stavanger arc
-	Vector2(0.54, 0.12),
-	Vector2(0.52, 0.18),
-	Vector2(0.50, 0.24),
-	Vector2(0.49, 0.30),
+	_ll(41.5, 41.5),    # Batumi
+	_ll(45.0, 41.7),    # Caspian shoulder (clipped to E edge)
+	# Russian east edge -- straight up
+	_ll(45.0, 50.0),
+	_ll(45.0, 60.0),
+	# Arctic / Barents Sea coast
+	_ll(43.0, 67.0),    # Severodvinsk hint
+	_ll(38.0, 68.5),    # Murmansk approach
+	_ll(33.1, 68.97),   # Murmansk
+	_ll(28.5, 69.5),    # Norwegian-Russian border
+	# North Cape + Norwegian fjord coast
+	_ll(25.8, 71.17),   # North Cape
+	_ll(20.0, 70.0),    # Hammerfest area
+	_ll(18.96, 69.65),  # Tromso
+	_ll(14.0, 67.5),    # Bodo region
+	_ll(10.5, 63.43),   # Trondheim
+	_ll( 5.32, 60.39),  # Bergen
+	_ll( 5.73, 58.97),  # Stavanger
 	# Skagerrak / Denmark stub
-	Vector2(0.47, 0.34),
-	Vector2(0.46, 0.35),
-	Vector2(0.45, 0.36),
-	Vector2(0.43, 0.36),
-	Vector2(0.42, 0.34),
-	Vector2(0.41, 0.32),
-	# North Sea coast (Netherlands -> Belgium)
-	Vector2(0.39, 0.36),
-	Vector2(0.36, 0.40),
-	Vector2(0.33, 0.44),
-	Vector2(0.30, 0.48),
-	# Brittany
-	Vector2(0.27, 0.52),
-	Vector2(0.25, 0.55),
-	Vector2(0.23, 0.55),
-	Vector2(0.22, 0.58),
-	# Bay of Biscay -- French SW coast
-	Vector2(0.21, 0.62),
-	Vector2(0.19, 0.65),
-	# Iberia north coast (Bilbao / Cantabria)
-	Vector2(0.18, 0.68),
-	Vector2(0.16, 0.71),
-	Vector2(0.14, 0.74),
-	# Iberia west (Portugal coast)
-	Vector2(0.13, 0.78),
-	Vector2(0.13, 0.81),
+	_ll( 8.0,  58.0),   # Norway south
+	_ll(10.7, 57.7),    # Skagen (Denmark tip)
+	_ll( 8.5, 55.0),    # Esbjerg (Denmark west)
+	# North Sea coast (Germany / Netherlands / Belgium)
+	_ll( 8.8, 53.55),   # Hamburg approach
+	_ll( 7.0, 53.5),    # Bremerhaven
+	_ll( 4.9, 52.37),   # Amsterdam
+	_ll( 3.7, 51.4),    # Belgian coast
+	# French Atlantic coast
+	_ll( 1.6, 50.95),   # Calais
+	_ll(-1.6, 49.65),   # Cherbourg
+	_ll(-4.49, 48.39),  # Brest
+	_ll(-2.16, 47.28),  # Saint-Nazaire
+	_ll(-1.55, 46.16),  # La Rochelle
+	# Bay of Biscay -> Iberia north
+	_ll(-1.5, 43.5),    # Biarritz
+	_ll(-2.93, 43.26),  # Bilbao
+	_ll(-7.0, 43.7),    # Galicia north corner
+	_ll(-9.27, 42.88),  # Cape Finisterre
+	# Iberia west (Portugal)
+	_ll(-9.14, 38.72),  # Lisbon
+	_ll(-8.99, 37.02),  # Cape Saint Vincent
+	# Back to Strait of Gibraltar
+	_ll(-7.0, 36.4),
 ])
 
-## Sweden / Finland eastern landmass -- treated as a separate
-## polygon since the Bothnian Gulf cuts the Scandinavian sweep into
-## two distinct silhouettes at this scale.
+## Sweden / Finland separated by the Bothnian Gulf -- treated as a
+## distinct landmass at this scale.
 var SWEDEN_FINLAND: PackedVector2Array = PackedVector2Array([
-	Vector2(0.55, 0.30),
-	Vector2(0.57, 0.24),
-	Vector2(0.59, 0.18),
-	Vector2(0.62, 0.14),
-	Vector2(0.64, 0.16),
-	Vector2(0.66, 0.20),
-	Vector2(0.66, 0.26),
-	Vector2(0.65, 0.30),
-	Vector2(0.62, 0.34),
-	Vector2(0.59, 0.36),
-	Vector2(0.56, 0.34),
+	_ll(11.3, 58.4),    # Gothenburg
+	_ll(11.6, 56.4),    # Skane south
+	_ll(12.6, 56.0),    # Malmo
+	_ll(14.5, 56.2),    # Karlskrona
+	_ll(17.0, 57.0),    # Kalmar
+	_ll(18.07, 59.33),  # Stockholm
+	_ll(20.0, 63.0),    # Bothnian Gulf west
+	# Finland sweep
+	_ll(21.5, 65.7),    # Lulea
+	_ll(24.0, 65.9),    # Tornio (Finland-Sweden border)
+	_ll(25.5, 65.0),    # Oulu
+	_ll(28.0, 64.0),
+	_ll(30.0, 62.5),
+	_ll(28.0, 60.6),    # Helsinki bay
+	_ll(24.95, 60.17),  # Helsinki
+	_ll(22.0, 60.0),    # Turku
+	# Bothnian Gulf east coast
+	_ll(21.5, 62.0),
+	_ll(20.0, 60.5),
+	# Back to Stockholm via the Baltic
+	_ll(18.0, 58.5),
+	_ll(15.0, 58.5),
+	_ll(13.0, 58.0),
 ])
 
-## Great Britain -- Land's End to John o' Groats with the bulge
-## around Wales and the Scottish coast indents.
+## Great Britain (Scotland + England + Wales).
 var BRITISH_ISLES: PackedVector2Array = PackedVector2Array([
-	Vector2(0.18, 0.42),
-	Vector2(0.19, 0.39),
-	Vector2(0.21, 0.36),
-	Vector2(0.22, 0.32),
-	Vector2(0.23, 0.28),
-	Vector2(0.25, 0.28),
-	Vector2(0.26, 0.32),
-	Vector2(0.27, 0.36),
-	Vector2(0.27, 0.40),
-	Vector2(0.26, 0.44),
-	Vector2(0.24, 0.46),
-	Vector2(0.22, 0.46),
-	Vector2(0.20, 0.45),
+	_ll(-5.71, 50.07),  # Land's End
+	_ll(-4.20, 50.40),  # Plymouth
+	_ll(-1.40, 50.74),  # Portsmouth
+	_ll( 1.31, 51.13),  # Dover
+	_ll( 1.85, 52.50),  # East Anglia
+	_ll(-1.45, 53.83),  # Hull / Yorkshire
+	_ll(-1.20, 55.00),  # Newcastle
+	_ll(-2.10, 56.50),  # St Andrews
+	_ll(-3.19, 55.95),  # Edinburgh
+	_ll(-2.50, 57.50),  # Aberdeen
+	_ll(-3.07, 58.64),  # John o'Groats
+	_ll(-5.00, 58.62),  # Cape Wrath
+	_ll(-5.50, 56.70),  # West Highlands
+	_ll(-5.10, 54.65),  # Kintyre
+	_ll(-3.60, 54.20),  # Cumbrian coast
+	_ll(-4.50, 53.30),  # North Wales
+	_ll(-5.20, 51.70),  # West Wales / Pembroke
+	_ll(-3.50, 51.50),  # Bristol Channel
 ])
 
 ## Ireland.
 var IRELAND: PackedVector2Array = PackedVector2Array([
-	Vector2(0.13, 0.36),
-	Vector2(0.15, 0.34),
-	Vector2(0.17, 0.34),
-	Vector2(0.18, 0.37),
-	Vector2(0.18, 0.41),
-	Vector2(0.16, 0.43),
-	Vector2(0.13, 0.42),
-	Vector2(0.12, 0.39),
+	_ll(-10.27, 51.99),  # Kerry SW
+	_ll(-8.50,  51.85),  # Cork
+	_ll(-6.27,  52.20),  # Wexford
+	_ll(-6.27,  53.35),  # Dublin
+	_ll(-6.20,  54.60),  # Belfast
+	_ll(-7.30,  55.35),  # Malin Head
+	_ll(-9.04,  53.27),  # Galway
+	_ll(-10.10, 52.50),  # Brandon Bay
 ])
 
-## Iceland -- a small island sitting up in the NW corner.
+## Iceland.
 var ICELAND: PackedVector2Array = PackedVector2Array([
-	Vector2(0.06, 0.18),
-	Vector2(0.10, 0.16),
-	Vector2(0.12, 0.18),
-	Vector2(0.12, 0.22),
-	Vector2(0.09, 0.23),
-	Vector2(0.06, 0.21),
+	_ll(-22.90, 64.10),  # Reykjavik area
+	_ll(-21.50, 65.60),  # Akureyri approach
+	_ll(-17.34, 66.05),  # Husavik
+	_ll(-14.50, 65.50),  # East fjords
+	_ll(-13.50, 64.30),  # Hofn
+	_ll(-19.00, 63.40),  # Vik
+	_ll(-22.50, 63.80),  # Keflavik
 ])
 
-## Sicily / Sardinia / Crete / Cyprus / Corsica.
+## Mediterranean / Aegean / Black-Sea islands -- single-vertex dots.
 var ISLAND_DOTS: PackedVector2Array = PackedVector2Array([
-	Vector2(0.51, 0.86),  # Sicily
-	Vector2(0.46, 0.78),  # Sardinia
-	Vector2(0.46, 0.74),  # Corsica
-	Vector2(0.66, 0.84),  # Crete
-	Vector2(0.74, 0.78),  # Cyprus
+	_ll(14.27, 37.50),  # Sicily
+	_ll( 9.10, 40.10),  # Sardinia
+	_ll( 9.20, 42.20),  # Corsica
+	_ll(25.00, 35.30),  # Crete
+	_ll(33.50, 35.00),  # Cyprus
+	_ll(28.20, 36.40),  # Rhodes
+	_ll(-3.50, 39.50),  # placeholder for Balearics? (Mallorca is at 2.65E, 39.57N)
+	_ll( 2.65, 39.57),  # Mallorca
 ])
 
-## Country-border hint lines -- pairs (start, end) drawn faintly so
-## the silhouette doesn't read as one undifferentiated landmass.
-## Each consecutive pair is one segment. Stylised, not surveyed.
+## Country-border hint segments (start, end pairs). Stylised, not
+## surveyed. Drawn as faint dashed lines so the silhouette doesn't
+## read as one undifferentiated landmass.
 var BORDERS: PackedVector2Array = PackedVector2Array([
 	# France-Spain (Pyrenees)
-	Vector2(0.31, 0.66), Vector2(0.41, 0.66),
+	_ll(-1.5, 43.3), _ll(3.2, 42.4),
+	# France-Italy (Alps W)
+	_ll(7.0, 43.9), _ll(8.0, 46.5),
 	# France-Germany (Rhine)
-	Vector2(0.46, 0.46), Vector2(0.48, 0.62),
-	# Germany-Poland-Czechia
-	Vector2(0.49, 0.36), Vector2(0.55, 0.46),
-	# Switzerland-Austria-Italy (Alps arc)
-	Vector2(0.43, 0.58), Vector2(0.50, 0.62),
-	Vector2(0.50, 0.62), Vector2(0.54, 0.66),
-	# Poland-Belarus-Ukraine
-	Vector2(0.55, 0.46), Vector2(0.66, 0.45),
-	# Russian western border
-	Vector2(0.66, 0.32), Vector2(0.72, 0.50),
-	Vector2(0.72, 0.50), Vector2(0.75, 0.62),
-	# Balkans
-	Vector2(0.55, 0.66), Vector2(0.62, 0.70),
+	_ll(8.2, 47.7), _ll(8.2, 51.0),
+	# Germany-Czechia / Austria
+	_ll(8.2, 48.0), _ll(13.5, 49.0),
+	_ll(13.5, 49.0), _ll(17.0, 48.5),
+	# Italy-Austria (Brenner)
+	_ll(8.0, 46.5), _ll(13.5, 46.7),
+	# Germany-Poland (Oder)
+	_ll(13.5, 49.0), _ll(14.5, 53.5),
+	# Poland-Belarus / Ukraine
+	_ll(23.0, 54.0), _ll(23.6, 51.5),
+	_ll(23.6, 51.5), _ll(22.5, 49.0),
+	# Russia western border
+	_ll(28.0, 60.0), _ll(35.0, 51.0),
+	_ll(35.0, 51.0), _ll(45.0, 49.0),
+	# Balkans (rough)
+	_ll(19.3, 42.5), _ll(22.0, 42.0),
+	_ll(22.0, 42.0), _ll(26.0, 41.5),
 ])
 
-## Major rivers -- polylines, ~3 vertices each. The shape carries
-## the river identity (Rhine vertical, Danube westeast, Volga long
-## diagonal etc).
+## Major rivers (polylines).
 var RIVERS: Array = [
-	# Rhine: Switzerland north to Rotterdam
-	PackedVector2Array([Vector2(0.43, 0.59), Vector2(0.45, 0.50), Vector2(0.45, 0.42), Vector2(0.42, 0.38)]),
-	# Danube: Black Forest east to the Black Sea delta
-	PackedVector2Array([Vector2(0.46, 0.52), Vector2(0.52, 0.54), Vector2(0.59, 0.58), Vector2(0.65, 0.62), Vector2(0.71, 0.65)]),
-	# Volga: arc from north of Moscow southeast to the Caspian
-	PackedVector2Array([Vector2(0.82, 0.30), Vector2(0.86, 0.40), Vector2(0.92, 0.48), Vector2(0.93, 0.55)]),
-	# Thames hint
-	PackedVector2Array([Vector2(0.20, 0.42), Vector2(0.23, 0.41), Vector2(0.26, 0.40)]),
+	# Rhine: Lake Constance -> Rotterdam
+	PackedVector2Array([_ll(9.0, 47.5), _ll(7.6, 47.6), _ll(7.6, 49.5), _ll(6.6, 51.2), _ll(4.5, 51.9)]),
+	# Danube: Black Forest -> Black Sea delta
+	PackedVector2Array([_ll(8.2, 48.0), _ll(11.6, 48.4), _ll(16.4, 48.2), _ll(19.0, 47.5), _ll(21.0, 45.3), _ll(28.7, 45.2)]),
+	# Volga: source NW of Moscow -> Caspian
+	PackedVector2Array([_ll(33.0, 57.0), _ll(37.0, 56.5), _ll(43.0, 56.3), _ll(47.0, 53.5)]),
+	# Dnieper / Dnipro
+	PackedVector2Array([_ll(31.0, 55.0), _ll(31.5, 50.4), _ll(34.6, 47.0), _ll(32.6, 46.4)]),
+	# Thames
+	PackedVector2Array([_ll(-1.7, 51.7), _ll(-0.5, 51.5), _ll(0.7, 51.5)]),
+	# Po: Italian plain
+	PackedVector2Array([_ll(7.5, 45.0), _ll(10.5, 45.1), _ll(12.5, 44.9)]),
 ]
 
-## City dots + labels.
+## City dots + labels. All at real lat/lon.
 var CITIES: Array = [
-	{"pos": Vector2(0.225, 0.395), "label": "London"},
-	{"pos": Vector2(0.405, 0.485), "label": "Paris"},
-	{"pos": Vector2(0.510, 0.450), "label": "Berlin"},
-	{"pos": Vector2(0.435, 0.580), "label": "Geneva"},
-	{"pos": Vector2(0.515, 0.735), "label": "Rome"},
-	{"pos": Vector2(0.620, 0.475), "label": "Warsaw"},
-	{"pos": Vector2(0.840, 0.305), "label": "Moscow"},
-	{"pos": Vector2(0.660, 0.685), "label": "Athens"},
-	{"pos": Vector2(0.755, 0.715), "label": "Istanbul"},
-	{"pos": Vector2(0.610, 0.180), "label": "Oslo"},
-	{"pos": Vector2(0.290, 0.700), "label": "Madrid"},
+	{"pos": _ll(-0.13, 51.51), "label": "London"},
+	{"pos": _ll(-3.70, 40.42), "label": "Madrid"},
+	{"pos": _ll(-9.14, 38.72), "label": "Lisbon"},
+	{"pos": _ll(2.35,  48.86), "label": "Paris"},
+	{"pos": _ll(6.14,  46.20), "label": "Geneva"},
+	{"pos": _ll(8.55,  47.37), "label": "Zurich"},
+	{"pos": _ll(13.40, 52.52), "label": "Berlin"},
+	{"pos": _ll(4.90,  52.37), "label": "Amsterdam"},
+	{"pos": _ll(12.50, 41.90), "label": "Rome"},
+	{"pos": _ll(16.37, 48.21), "label": "Vienna"},
+	{"pos": _ll(14.42, 50.08), "label": "Prague"},
+	{"pos": _ll(21.01, 52.23), "label": "Warsaw"},
+	{"pos": _ll(30.52, 50.45), "label": "Kyiv"},
+	{"pos": _ll(37.62, 55.75), "label": "Moscow"},
+	{"pos": _ll(30.34, 59.94), "label": "St Petersburg"},
+	{"pos": _ll(23.73, 37.98), "label": "Athens"},
+	{"pos": _ll(28.98, 41.01), "label": "Istanbul"},
+	{"pos": _ll(18.07, 59.33), "label": "Stockholm"},
+	{"pos": _ll(10.75, 59.91), "label": "Oslo"},
+	{"pos": _ll(12.57, 55.68), "label": "Copenhagen"},
+	{"pos": _ll(24.95, 60.17), "label": "Helsinki"},
+	{"pos": _ll(-21.94, 64.13), "label": "Reykjavik"},
+	{"pos": _ll(-6.27, 53.35), "label": "Dublin"},
 ]
 
-## Sea-name labels positioned over open water -- sells the map as
-## a real chart.
+## Sea / ocean labels.
 var SEA_LABELS: Array = [
-	{"pos": Vector2(0.10, 0.50), "label": "Atlantic"},
-	{"pos": Vector2(0.16, 0.27), "label": "North Sea"},
-	{"pos": Vector2(0.43, 0.15), "label": "Norwegian Sea"},
-	{"pos": Vector2(0.40, 0.86), "label": "Mediterranean"},
-	{"pos": Vector2(0.78, 0.74), "label": "Black Sea"},
-	{"pos": Vector2(0.86, 0.18), "label": "Barents Sea"},
+	{"pos": _ll(-15.0, 50.0), "label": "ATLANTIC"},
+	{"pos": _ll( 4.0, 56.0), "label": "NORTH SEA"},
+	{"pos": _ll( 5.0, 64.0), "label": "NORWEGIAN SEA"},
+	{"pos": _ll(40.0, 70.0), "label": "BARENTS SEA"},
+	{"pos": _ll( 5.0, 39.0), "label": "MEDITERRANEAN"},
+	{"pos": _ll(34.0, 43.5), "label": "BLACK SEA"},
+	{"pos": _ll(20.0, 58.0), "label": "BALTIC"},
+	{"pos": _ll(43.0, 44.5), "label": "CASPIAN"},
 ]
 
 
@@ -282,12 +319,12 @@ func _ready() -> void:
 
 func _draw() -> void:
 	var rect := Rect2(Vector2.ZERO, MAP_SIZE)
-	# Sea backdrop -- vertical gradient via two stacked rects gives
-	# a faint 'deeper north' feel without a real shader.
+	# Sea backdrop -- slightly deeper colour in the north for chart
+	# depth.
 	draw_rect(rect, WATER, true)
-	draw_rect(Rect2(Vector2.ZERO, Vector2(MAP_SIZE.x, MAP_SIZE.y * 0.4)), WATER_DEEP)
-	# Faint coordinate grid -- 16 cols x 12 rows.
-	var cols: int = 16
+	draw_rect(Rect2(Vector2.ZERO, Vector2(MAP_SIZE.x, MAP_SIZE.y * 0.35)), WATER_DEEP)
+	# Faint coordinate grid -- 14 cols x 12 rows.
+	var cols: int = 14
 	var rows: int = 12
 	for c: int in cols + 1:
 		var x: float = float(c) / float(cols) * MAP_SIZE.x
@@ -303,40 +340,46 @@ func _draw() -> void:
 	_draw_land(ICELAND)
 	# Mediterranean / nearby island dots.
 	for p: Vector2 in ISLAND_DOTS:
-		draw_circle(p * MAP_SIZE, 4.0, LAND)
-		draw_arc(p * MAP_SIZE, 4.0, 0.0, TAU, 18, LAND_OUTLINE, 1.5)
-	# Country-border hint lines, drawn dashed-style (every other
-	# segment skipped) so they read as political lines, not coast.
+		draw_circle(p * MAP_SIZE, 4.5, LAND)
+		draw_arc(p * MAP_SIZE, 4.5, 0.0, TAU, 18, LAND_OUTLINE, 1.5)
+	# Country-border hint lines, drawn dashed.
 	var i: int = 0
 	while i + 1 < BORDERS.size():
 		var a: Vector2 = BORDERS[i] * MAP_SIZE
 		var b: Vector2 = BORDERS[i + 1] * MAP_SIZE
-		_draw_dashed_line(a, b, BORDER, 1.2, 6.0, 4.0)
+		_draw_dashed_line(a, b, BORDER, 1.2, 7.0, 5.0)
 		i += 2
-	# Rivers -- thin pale-blue polylines.
+	# Rivers.
 	for r2: PackedVector2Array in RIVERS:
 		var pts := PackedVector2Array()
 		for p2: Vector2 in r2:
 			pts.append(p2 * MAP_SIZE)
-		draw_polyline(pts, RIVER, 1.6)
-	# Sea-name labels.
+		draw_polyline(pts, RIVER, 1.7)
+	# Sea labels.
 	var font: Font = ThemeDB.fallback_font
 	for s: Dictionary in SEA_LABELS:
 		var pos: Vector2 = (s["pos"] as Vector2) * MAP_SIZE
 		var lbl: String = s["label"] as String
-		var size_v: Vector2 = font.get_string_size(lbl, HORIZONTAL_ALIGNMENT_CENTER, -1.0, 11)
+		var size_v: Vector2 = font.get_string_size(lbl, HORIZONTAL_ALIGNMENT_CENTER, -1.0, 13)
 		draw_string(font, pos - size_v * 0.5, lbl,
-			HORIZONTAL_ALIGNMENT_CENTER, -1.0, 11, SEA_LABEL)
-	# City dots + labels.
+			HORIZONTAL_ALIGNMENT_CENTER, -1.0, 13, SEA_LABEL)
+	# City dots + labels. Right-side cities label to the left so
+	# they don't bleed off the edge.
 	for c2: Dictionary in CITIES:
 		var p3: Vector2 = (c2["pos"] as Vector2) * MAP_SIZE
-		draw_circle(p3, 3.5, CITY_DOT)
-		draw_arc(p3, 5.5, 0.0, TAU, 16, CITY_DOT, 1.0)
+		draw_circle(p3, 3.6, CITY_DOT)
+		draw_arc(p3, 5.6, 0.0, TAU, 16, CITY_DOT, 1.0)
 		var lbl2: String = c2["label"] as String
-		draw_string(font, p3 + Vector2(8.0, 4.0), lbl2,
-			HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12, CITY_LABEL)
+		var anchor_left: bool = p3.x < MAP_SIZE.x * 0.85
+		if anchor_left:
+			draw_string(font, p3 + Vector2(8.0, 4.0), lbl2,
+				HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12, CITY_LABEL)
+		else:
+			var ts: Vector2 = font.get_string_size(lbl2, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12)
+			draw_string(font, p3 + Vector2(-8.0 - ts.x, 4.0), lbl2,
+				HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12, CITY_LABEL)
 	# Compass rose on the bottom-right corner.
-	_draw_compass(Vector2(MAP_SIZE.x - 64.0, MAP_SIZE.y - 64.0), 30.0)
+	_draw_compass(Vector2(MAP_SIZE.x - 70.0, MAP_SIZE.y - 70.0), 32.0)
 	# Outer frame.
 	draw_rect(rect, ACCENT, false, 2.0)
 
@@ -345,13 +388,7 @@ func _draw_land(poly_norm: PackedVector2Array) -> void:
 	var pts: PackedVector2Array = PackedVector2Array()
 	for p: Vector2 in poly_norm:
 		pts.append(p * MAP_SIZE)
-	# Two-tone fill -- darker outer ring (shoreline) + lighter
-	# inner. Approximated by drawing the fill twice with a slight
-	# inward offset on the second pass; cheap, gives a subtle
-	# 'inland is brighter' depth cue.
 	draw_colored_polygon(pts, LAND)
-	# Coastline outline -- thicker than before so the silhouette
-	# reads cleanly against the dark water at menu zoom.
 	for i: int in pts.size():
 		var a: Vector2 = pts[i]
 		var b: Vector2 = pts[(i + 1) % pts.size()]
@@ -372,14 +409,12 @@ func _draw_dashed_line(a: Vector2, b: Vector2, col: Color, width: float, dash_le
 
 
 func _draw_compass(centre: Vector2, radius: float) -> void:
-	# Outer ring + N/S/E/W ticks + bearing labels.
 	draw_arc(centre, radius, 0.0, TAU, 36, ACCENT, 1.4)
 	draw_arc(centre, radius * 0.55, 0.0, TAU, 28, ACCENT, 0.9)
 	for i: int in 4:
 		var ang: float = float(i) * (PI * 0.5) - PI * 0.5
 		var dir := Vector2(cos(ang), sin(ang))
 		draw_line(centre + dir * (radius * 0.6), centre + dir * radius, ACCENT, 1.4)
-	# 'N' tick longer + label glyph above it.
 	draw_line(centre + Vector2(0.0, -radius), centre + Vector2(0.0, -radius - 8.0), ACCENT, 2.0)
 	var font: Font = ThemeDB.fallback_font
 	draw_string(font, centre + Vector2(-4.0, -radius - 12.0), "N",
@@ -388,7 +423,7 @@ func _draw_compass(centre: Vector2, radius: float) -> void:
 
 func get_marker_position(key: String) -> Vector2:
 	## Returns the pixel position of a marker key inside this control's
-	## local coordinate space. Caller is responsible for centering the
-	## marker widget on this point.
+	## local coordinate space. Caller centers the marker widget on this
+	## point.
 	var norm: Vector2 = MARKERS.get(key, Vector2(0.5, 0.5)) as Vector2
 	return norm * MAP_SIZE
