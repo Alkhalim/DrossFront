@@ -56,6 +56,17 @@ const EXPANSION_MIN_FRIENDLY_DIST: float = 38.0
 const EXPANSION_MAX_ENEMY_DIST: float = 25.0
 var _expansion_timer: float = 0.0
 
+## Oil-contest dispatch -- every OIL_CONTEST_INTERVAL seconds the AI
+## picks a fuel deposit (neutral preferred, otherwise enemy-held) near
+## its base and detaches a small attack-move detachment to claim it.
+## Keeps the AI from leaving deposits to the player by default. The
+## per-tick chance scales with aggression so Hard contests almost
+## every interval while Easy only sometimes bothers.
+const OIL_CONTEST_INTERVAL: float = 18.0
+const OIL_CONTEST_PREFERRED_RADIUS: float = 110.0
+const OIL_CONTEST_DETACHMENT_SIZE: int = 3
+var _oil_contest_timer: float = 0.0
+
 var _salvage_accumulator: float = 0.0
 
 ## --- Per-match strategy variation ---------------------------------------
@@ -322,6 +333,13 @@ func _process(delta: float) -> void:
 		if _expansion_timer >= EXPANSION_INTERVAL:
 			_expansion_timer = 0.0
 			_try_expansion_yard()
+		# Oil contest: try to claim / re-flip nearby deposits. Skipped
+		# in SETUP (no army yet) and REBUILD (just got wiped).
+		if _state != AIState.SETUP:
+			_oil_contest_timer += delta
+			if _oil_contest_timer >= OIL_CONTEST_INTERVAL:
+				_oil_contest_timer = 0.0
+				_try_contest_oil()
 
 	match _state:
 		AIState.ECONOMY:
