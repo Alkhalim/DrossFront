@@ -18,6 +18,13 @@ extends Resource
 ## Armor class: "unarmored", "light", "medium", "heavy", "apex", "structure"
 @export var armor_class: StringName = &"light"
 
+## Aircraft only: when true the unit's idle + attack movement
+## switches to bomber behaviour -- circles its loiter point when
+## idle, and circles its combat target dropping bombs instead of
+## hovering and firing missiles. Default false; set on the
+## Hammerhead Bomber branch.
+@export var bomber_behaviour: bool = false
+
 ## Speed tier: "static", "very_slow", "slow", "moderate", "fast", "very_fast"
 @export var speed_tier: StringName = &"moderate"
 
