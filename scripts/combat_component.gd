@@ -404,54 +404,43 @@ func _find_nearest_enemy(max_range: float) -> Node3D:
 	# right-click an aircraft to forced-target it.
 	var ground_only: bool = not stats.can_target_air()
 
-	# Check enemy units
-	var all_units: Array[Node] = get_tree().get_nodes_in_group("units")
-	for node: Node in all_units:
+	# Spatial-index lookup: return only the entities in the buckets
+	# covering max_range around `my_pos` instead of walking the
+	# whole units + buildings groups. Caller-side hostility / armor
+	# / range filters still apply because the index includes
+	# friendlies + freed handles + entities outside the precise
+	# radius (rebuild lag).
+	var idx: SpatialIndex = SpatialIndex.get_instance(get_tree().current_scene)
+	var candidates: Array = idx.nearby(my_pos, max_range) if idx else []
+	for node: Node in candidates:
+		if not is_instance_valid(node):
+			continue
+		# `node` may be a unit OR a building -- both expose
+		# take_damage + owner_id. Skip non-targetable entries.
 		if not node.has_method("take_damage"):
 			continue
-		var node_owner: int = node.get("owner_id")
-		if not _is_hostile(my_owner, node_owner):
-			continue
-		var node_alive: int = node.get("alive_count")
-		if node_alive <= 0:
-			continue
-		if ground_only and node.is_in_group("aircraft"):
-			continue
-		# V3 stealth — auto-target ignores stealth-capable units that
-		# aren't currently revealed. The player can still manually
-		# right-click them to engage; this only gates the autonomous
-		# "find nearest enemy" pass.
-		if "stealth_revealed" in node and not (node.get("stealth_revealed") as bool):
-			var their_stats: UnitStatResource = node.get("stats") as UnitStatResource
-			if their_stats and their_stats.is_stealth_capable:
-				continue
-		var d: float = my_pos.distance_to(node.global_position)
-		if d <= max_range and d < nearest_dist:
-			nearest_dist = d
-			nearest = node as Node3D
-
-	# Check enemy buildings
-	var all_buildings: Array[Node] = get_tree().get_nodes_in_group("buildings")
-	for node: Node in all_buildings:
-		if not node.has_method("take_damage"):
-			continue
-		# Auto-target opt-out — destructible neutral structures (ammo
-		# dumps, etc.) sit in the "buildings" group so a right-click
-		# can still target them, but the player shouldn't have squads
-		# autonomously chip them down on patrol. Right-click → forced
-		# target bypasses this list entirely.
+		# Auto-target opt-out for destructible neutral structures.
 		if "auto_targetable" in node and not node.get("auto_targetable"):
 			continue
-		# Pre-start foundations -- the placing engineer hasn't reached
-		# them yet, so they don't physically exist for opponents.
-		# Don't auto-acquire them.
+		# Pre-start foundations -- engineer hasn't reached them yet.
 		if "construction_started" in node and not (node.get("construction_started") as bool):
 			if "is_constructed" in node and not (node.get("is_constructed") as bool):
 				continue
 		var node_owner: int = node.get("owner_id")
 		if not _is_hostile(my_owner, node_owner):
 			continue
-		var d: float = my_pos.distance_to(node.global_position)
+		# Alive check only applies to units (alive_count field).
+		if "alive_count" in node and (node.get("alive_count") as int) <= 0:
+			continue
+		if ground_only and node.is_in_group("aircraft"):
+			continue
+		# V3 stealth -- auto-target ignores stealth-capable units
+		# that aren't currently revealed.
+		if "stealth_revealed" in node and not (node.get("stealth_revealed") as bool):
+			var their_stats: UnitStatResource = node.get("stats") as UnitStatResource
+			if their_stats and their_stats.is_stealth_capable:
+				continue
+		var d: float = my_pos.distance_to((node as Node3D).global_position)
 		if d <= max_range and d < nearest_dist:
 			nearest_dist = d
 			nearest = node as Node3D
@@ -879,26 +868,29 @@ func _find_stray_target(aim_pos: Vector3, primary: Node3D, my_owner: int) -> Nod
 	## a missed shot lands near a different enemy.
 	var nearest: Node3D = null
 	var nearest_dist: float = STRAY_HIT_RADIUS
-	for group_name in ["units", "buildings"]:
-		for node: Node in get_tree().get_nodes_in_group(group_name):
-			if not is_instance_valid(node) or node == primary:
-				continue
-			if not node.has_method("take_damage"):
-				continue
-			if "auto_targetable" in node and not node.get("auto_targetable"):
-				continue
-			var node_owner: int = node.get("owner_id") as int
-			if not _is_hostile(my_owner, node_owner):
-				continue
-			if "alive_count" in node and (node.get("alive_count") as int) <= 0:
-				continue
-			var n3: Node3D = node as Node3D
-			if not n3:
-				continue
-			var d: float = aim_pos.distance_to(n3.global_position)
-			if d < nearest_dist:
-				nearest_dist = d
-				nearest = n3
+	# Spatial-index narrow-phase. Replaces the old groups walk for
+	# the same O(N)->O(K) win the main targeting path got.
+	var idx: SpatialIndex = SpatialIndex.get_instance(get_tree().current_scene)
+	var candidates: Array = idx.nearby(aim_pos, STRAY_HIT_RADIUS) if idx else []
+	for node: Node in candidates:
+		if not is_instance_valid(node) or node == primary:
+			continue
+		if not node.has_method("take_damage"):
+			continue
+		if "auto_targetable" in node and not node.get("auto_targetable"):
+			continue
+		var node_owner: int = node.get("owner_id") as int
+		if not _is_hostile(my_owner, node_owner):
+			continue
+		if "alive_count" in node and (node.get("alive_count") as int) <= 0:
+			continue
+		var n3: Node3D = node as Node3D
+		if not n3:
+			continue
+		var d: float = aim_pos.distance_to(n3.global_position)
+		if d < nearest_dist:
+			nearest_dist = d
+			nearest = n3
 	return nearest
 
 
