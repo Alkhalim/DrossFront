@@ -110,6 +110,20 @@ func try_activate(target_pos: Vector3) -> bool:
 	_state = State.ARMING
 	_state_timer = _arming_sec
 	_emit_telegraph()
+	# Reveal the strike area for the OWNER for the duration of the
+	# arming window plus the firing window plus a short tail. The
+	# player who committed the superweapon should be able to see
+	# what their strike actually hits without leaving a unit on the
+	# target. Only does anything for player_id 0 (the local human's
+	# FOW); enemy launches don't get free vision.
+	if _building.get("owner_id") == 0:
+		var fow: FogOfWar = get_tree().current_scene.get_node_or_null("FogOfWar") as FogOfWar
+		if fow and fow.has_method("reveal_area"):
+			# Generous radius so the player sees the splash + a buffer
+			# (incoming threats running in / out of the strike).
+			var reveal_radius: float = maxf(_radius * 1.4, 24.0)
+			var reveal_duration: float = _arming_sec + _firing_sec + 4.0
+			fow.call("reveal_area", _target_pos, reveal_radius, reveal_duration)
 	return true
 
 
