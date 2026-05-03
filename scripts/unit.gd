@@ -537,6 +537,20 @@ func _build_squad_visuals() -> void:
 		click_area.add_child(member_col)
 	add_child(click_area)
 
+	# Drone bay marker -- combat_component looks up a 'DroneBay'
+	# Marker3D child on the carrier and launches drones from it
+	# instead of a random offset. Carriers (currently the Harbinger
+	# family) get a marker positioned just above and behind the
+	# squad so drones visibly leave the chassis from a real bay.
+	var prev_bay: Node = get_node_or_null("DroneBay")
+	if prev_bay:
+		prev_bay.queue_free()
+	if stats.unit_name.findn("Harbinger") >= 0:
+		var bay := Marker3D.new()
+		bay.name = "DroneBay"
+		bay.position = Vector3(0.0, total_h + 0.3, -torso_size.z * 0.5)
+		add_child(bay)
+
 
 func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_color: Color) -> Dictionary:
 	## Builds one mech member and returns references to its animatable parts.

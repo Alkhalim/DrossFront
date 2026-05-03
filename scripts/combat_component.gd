@@ -835,12 +835,17 @@ func _spawn_drone(damage: int, role_tag: StringName) -> void:
 	drone.set("damage", damage)
 	drone.set("role_tag", role_tag)
 	drone.set("owner_id", (_unit.get("owner_id") as int) if _unit and "owner_id" in _unit else 0)
-	# Spawn just outside the carrier's chassis so the launch reads as
-	# 'drone leaves the bay' rather than 'drone teleports out of
-	# nowhere'.
-	var spawn_offset: Vector3 = Vector3(randf_range(-1.5, 1.5), 1.5, randf_range(-1.5, 1.5))
+	# Prefer a 'DroneBay' Marker3D child of the carrier so drones
+	# launch from a specific bay door on the chassis rather than a
+	# random offset. Falls back to a random offset around the
+	# carrier when the marker is missing.
+	var bay_marker: Node3D = _unit.get_node_or_null("DroneBay") as Node3D
 	get_tree().current_scene.add_child(drone)
-	drone.global_position = _unit.global_position + spawn_offset
+	if bay_marker and is_instance_valid(bay_marker):
+		drone.global_position = bay_marker.global_position
+	else:
+		var spawn_offset: Vector3 = Vector3(randf_range(-1.5, 1.5), 1.5, randf_range(-1.5, 1.5))
+		drone.global_position = _unit.global_position + spawn_offset
 
 
 func _shooter_faction_id() -> int:
