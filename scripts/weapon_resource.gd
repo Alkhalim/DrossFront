@@ -81,6 +81,15 @@ extends Resource
 ## real number, not just the role mult.
 @export_range(0.0, 1.0, 0.01) var air_damage_mult: float = 1.0
 
+## Per-weapon override for the structure damage multiplier. When >
+## 0, replaces the role-vs-structure entry from CombatTables for
+## this specific weapon (combat_component reads it in the damage
+## assembly). Used to give a single weapon a custom anti-structure
+## ratio without shifting the global AS table -- e.g. WRAITH bomb
+## bay sets this to 3.0 to override AS's 2.5 against buildings.
+## Default -1 = fall through to CombatTables.ROLE_VS_ARMOR.
+@export var structure_damage_mult: float = -1.0
+
 
 ## Drone-bay weapon flag. When true, each "shot" of this weapon
 ## spawns a Drone instead of a regular projectile -- the drone

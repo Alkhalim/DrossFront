@@ -555,6 +555,12 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	# Role vs armor modifier
 	var target_armor: StringName = _get_target_armor()
 	var role_mod: float = CombatTables.get_role_modifier(weapon.role_tag, target_armor)
+	# Per-weapon structure-mult override -- when set positive on a
+	# weapon, replaces the role-vs-structure multiplier for that
+	# specific weapon (e.g. WRAITH's bomb bay overrides AS's 2.5x
+	# with 3.0x). Default -1 = use the role table.
+	if target_armor == &"structure" and weapon.structure_damage_mult > 0.0:
+		role_mod = weapon.structure_damage_mult
 
 	# Armor flat reduction — prefer the target's resolved_armor_reduction()
 	# (honors per-unit numeric override), fall back to the armor_class
