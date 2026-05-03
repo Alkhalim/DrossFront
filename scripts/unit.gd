@@ -168,6 +168,10 @@ var _stuck_timer: float = 0.0
 ## that a freshly-blocked path resolves in the same beat the
 ## player notices it stopping.
 var _zero_move_repath_at_msec: int = 0
+## Throttle (msec) for the ramp-stuck self-rescue so we don't
+## re-issue command_move every frame while the deflection ladder
+## is also tweaking the agent.
+var _ramp_rescue_at_msec: int = 0
 
 ## Movement-aware collision shrink. While the unit is actively
 ## moving, the leader collision box is rescaled to
@@ -3374,6 +3378,40 @@ func stop() -> void:
 	has_move_order = false
 
 
+func _try_ramp_stuck_rescue() -> bool:
+	## When wedged on a ramp, command_move toward the far short-end
+	## midpoint of the ramp's clearance rect (i.e. the side opposite
+	## the unit's current position along the rect's long axis). The
+	## ramp is whichever direction the rect is longer, so the long
+	## axis = traversal direction. Returns true when a rescue move
+	## actually fired so the caller can throttle.
+	var arena: Node = get_tree().current_scene if get_tree() else null
+	if not arena or not arena.has_method("get_ramp_clearance_at"):
+		return false
+	var rect: Rect2 = arena.call("get_ramp_clearance_at", global_position) as Rect2
+	if rect.size.length_squared() < 0.01:
+		return false  # not on a ramp
+	# Long axis = traversal direction. Short-end midpoints sit at
+	# the rect's two narrow edges along that axis.
+	var long_axis_x: bool = rect.size.x >= rect.size.y
+	var end_a_xz: Vector2
+	var end_b_xz: Vector2
+	if long_axis_x:
+		end_a_xz = Vector2(rect.position.x, rect.position.y + rect.size.y * 0.5)
+		end_b_xz = Vector2(rect.position.x + rect.size.x, rect.position.y + rect.size.y * 0.5)
+	else:
+		end_a_xz = Vector2(rect.position.x + rect.size.x * 0.5, rect.position.y)
+		end_b_xz = Vector2(rect.position.x + rect.size.x * 0.5, rect.position.y + rect.size.y)
+	# Pick the end farther from the unit's current XZ -- that's the
+	# 'exit' the unit hasn't reached yet.
+	var here: Vector2 = Vector2(global_position.x, global_position.z)
+	var pick_a: bool = here.distance_squared_to(end_a_xz) > here.distance_squared_to(end_b_xz)
+	var target_xz: Vector2 = end_a_xz if pick_a else end_b_xz
+	var target: Vector3 = Vector3(target_xz.x, global_position.y, target_xz.y)
+	command_move(target, false)
+	return true
+
+
 func _update_movement_collision() -> void:
 	## Switch the leader collision box between full-size (at rest)
 	## and shrunk (moving). Allows squads to pass through each
@@ -4096,6 +4134,14 @@ func _physics_process(delta: float) -> void:
 			_zero_move_repath_at_msec = now_msec + 500
 	if actual_move < expected_move:
 		_stuck_timer += delta
+		# 0.6s — ramp self-rescue. Side-to-side wiggle from the
+		# deflection ladder doesn't actually clear a ramp; the unit
+		# just paces the slope. Detect 'stuck on a ramp' and re-aim
+		# at the far end of the ramp's clearance rect so the unit
+		# physically traverses the slope instead.
+		if _stuck_timer >= 0.6 and now_msec >= _ramp_rescue_at_msec:
+			if _try_ramp_stuck_rescue():
+				_ramp_rescue_at_msec = now_msec + 1200
 		# 0.25s — first sidestep, ~50°. Light corner / shoulder bump.
 		if _stuck_timer >= 0.25 and now_msec >= _deflect_until_msec:
 			_deflect_sign = 1.0 if (get_instance_id() % 2) == 0 else -1.0

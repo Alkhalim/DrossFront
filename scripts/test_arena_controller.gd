@@ -34,6 +34,17 @@ var _pending_ground_vertex_marks: Array[Vector2] = []
 var _pending_ramp_clearance: Array[Rect2] = []
 
 
+func get_ramp_clearance_at(pos: Vector3) -> Rect2:
+	## Returns the ramp clearance rect containing this XZ position, or
+	## an empty Rect2 if not on a ramp. Unit stuck-rescue uses this to
+	## detect 'wedged on a ramp slope' and command a move to the far
+	## end of the ramp instead of wiggling in place.
+	for rect: Rect2 in _pending_ramp_clearance:
+		if rect.has_point(Vector2(pos.x, pos.z)):
+			return rect
+	return Rect2()
+
+
 func _ready() -> void:
 	# Navmesh debug overlay — TEMPORARILY ON while diagnosing the
 	# "invisible wall" reports. Renders walkable cells as colored
