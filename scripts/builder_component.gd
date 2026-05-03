@@ -183,7 +183,7 @@ func _process_repair(delta: float) -> bool:
 	if stats and "repair_rate" in stats:
 		rate *= float(stats.get("repair_rate"))
 	if _repair_target.has_method("heal"):
-		_repair_target.heal(rate * delta)
+		_repair_target.heal(rate * delta, _unit)
 	return true
 
 

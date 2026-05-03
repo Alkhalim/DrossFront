@@ -1038,9 +1038,28 @@ func is_damaged() -> bool:
 	return alive_count > 0 and stats != null and current_hp < stats.hp_total
 
 
-func heal(amount: float) -> void:
+## Diminishing-returns bookkeeping for stacked repairs.
+var _healers_this_tick: Dictionary = {}
+var _last_heal_tick_msec: int = 0
+const _HEAL_TICK_MS: int = 250
+
+
+func heal(amount: float, healer: Node = null) -> void:
 	if alive_count <= 0 or not stats:
 		return
+	var now_ms: int = Time.get_ticks_msec()
+	if now_ms - _last_heal_tick_msec >= _HEAL_TICK_MS:
+		_healers_this_tick.clear()
+		_last_heal_tick_msec = now_ms
+	if healer:
+		var hid: int = healer.get_instance_id()
+		if not _healers_this_tick.has(hid):
+			var idx: int = _healers_this_tick.size()
+			var factor: float = maxf(1.0 - float(idx) * 0.1, 0.1)
+			amount *= factor
+			_healers_this_tick[hid] = factor
+		else:
+			amount *= (_healers_this_tick[hid] as float)
 	if current_hp >= stats.hp_total:
 		return
 	current_hp = mini(stats.hp_total, current_hp + int(ceil(amount)))

@@ -4445,12 +4445,37 @@ func get_total_hp() -> int:
 	return total
 
 
-func heal(amount: float) -> void:
+## Diminishing-returns bookkeeping for stacked repairs. Each healer
+## that contributes within the same ~250ms window gets a smaller
+## factor (1, 0.9, 0.8, ... floor 0.1) so 10 engineers wrenching on
+## one wounded squad don't add up to 10x throughput.
+var _healers_this_tick: Dictionary = {}
+var _last_heal_tick_msec: int = 0
+const _HEAL_TICK_MS: int = 250
+
+
+func heal(amount: float, healer: Node = null) -> void:
 	## Restore HP across surviving squad members up to per-member cap.
 	## Used by Ratchet auto-repair. Heals members evenly; dead members
-	## stay dead — repair doesn't resurrect.
+	## stay dead — repair doesn't resurrect. Multiple engineers
+	## healing the same target in the same tick get diminishing
+	## returns -- 100% / 90% / 80% / ... floored at 10%.
 	if alive_count <= 0 or not stats:
 		return
+	# Diminishing-returns scaling on the input amount.
+	var now_ms: int = Time.get_ticks_msec()
+	if now_ms - _last_heal_tick_msec >= _HEAL_TICK_MS:
+		_healers_this_tick.clear()
+		_last_heal_tick_msec = now_ms
+	if healer:
+		var hid: int = healer.get_instance_id()
+		if not _healers_this_tick.has(hid):
+			var idx: int = _healers_this_tick.size()
+			var factor: float = maxf(1.0 - float(idx) * 0.1, 0.1)
+			amount *= factor
+			_healers_this_tick[hid] = factor
+		else:
+			amount *= (_healers_this_tick[hid] as float)
 	var per_member_cap: int = stats.hp_per_unit
 	var remaining: int = int(ceil(amount))
 	if remaining <= 0:

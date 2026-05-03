@@ -4431,12 +4431,35 @@ func _restore_select_glow(node: Node) -> void:
 		_restore_select_glow(child)
 
 
-func heal(amount: float) -> void:
+## Diminishing-returns bookkeeping for stacked repairs. Mirrors the
+## construction _builders_this_tick scheme: each healer in the same
+## ~250ms window picks up a smaller factor so 10 engineers can't
+## repair 10x faster than 1.
+var _healers_this_tick: Dictionary = {}
+var _last_heal_tick_msec: int = 0
+const _HEAL_TICK_MS: int = 250
+
+
+func heal(amount: float, healer: Node = null) -> void:
 	## Restore HP up to the building's max — used by Ratchet auto-repair.
 	## Floats so a 0.5/sec accumulation works across frames; we cast back
-	## to int when applying.
+	## to int when applying. Multiple engineers healing in the same
+	## tick get diminishing returns (1 / 0.9 / 0.8 / ... floor 0.1).
 	if not is_constructed or not stats:
 		return
+	var now_ms: int = Time.get_ticks_msec()
+	if now_ms - _last_heal_tick_msec >= _HEAL_TICK_MS:
+		_healers_this_tick.clear()
+		_last_heal_tick_msec = now_ms
+	if healer:
+		var hid: int = healer.get_instance_id()
+		if not _healers_this_tick.has(hid):
+			var idx: int = _healers_this_tick.size()
+			var factor: float = maxf(1.0 - float(idx) * 0.1, 0.1)
+			amount *= factor
+			_healers_this_tick[hid] = factor
+		else:
+			amount *= (_healers_this_tick[hid] as float)
 	var max_hp: int = effective_max_hp()
 	if current_hp >= max_hp:
 		return
