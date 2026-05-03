@@ -2986,6 +2986,14 @@ func _branch_delta_summary(base_stats: UnitStatResource, branch_stats: UnitStatR
 		var dps_a_b: float = _compute_dps_vs(base_stats, &"light_air")
 		var dps_a_n: float = _compute_dps_vs(branch_stats, &"light_air")
 		_emit_branch_delta(pros, cons, "Air DPS", dps_a_n - dps_a_b, dps_a_b, 0)
+	# Primary weapon range delta -- a branch that bumps range_tier
+	# (Switchblade Dogfighter medium -> long, Specter Ghost medium ->
+	# long, etc.) is a meaningful upgrade that doesn't show up in
+	# the DPS calc. Surface it so the player reads the change.
+	if base_stats.primary_weapon and branch_stats.primary_weapon:
+		var b_range: float = base_stats.primary_weapon.resolved_range()
+		var n_range: float = branch_stats.primary_weapon.resolved_range()
+		_emit_branch_delta(pros, cons, "Range", n_range - b_range, b_range, 0)
 
 	# Role-vs-armor mult shifts. Surfaces the "vs Heavy 0.3 -> 0.5"
 	# kind of change the previous tooltip never showed -- meaningful
