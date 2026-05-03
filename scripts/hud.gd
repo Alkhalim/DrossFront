@@ -1028,7 +1028,7 @@ func _update_enemy_inspect_panel(target: Node3D) -> void:
 	var hp_max: int = stats.hp_total if stats else hp_now
 
 	if stats:
-		_name_label.text = "%s (%s)" % [stats.unit_name, owner_label]
+		_name_label.text = "%s (%s)" % [stats.get_display_name(), owner_label]
 		# Same stat sheet as a friendly unit, but with cost / pop chips
 		# omitted — the player can't act on enemy stats. Damage (DPS
 		# vs Gnd / DPS vs Air) explicitly included so the player can
@@ -1745,8 +1745,9 @@ func _refresh_queue_icons(building: Building) -> void:
 		btn.custom_minimum_size = _QUEUE_ICON_SLOT_SIZE
 		# First-letter stand-in icon — readable enough for placeholder UI.
 		var label: String = "?"
-		if unit_stat.unit_name.length() > 0:
-			label = unit_stat.unit_name.substr(0, 1)
+		var display: String = unit_stat.get_display_name()
+		if display.length() > 0:
+			label = display.substr(0, 1)
 		# In-progress slot gets a "·" prefix so the player can see which
 		# one is mid-build vs queued.
 		if i == 0:
@@ -1756,7 +1757,7 @@ func _refresh_queue_icons(building: Building) -> void:
 		if unit_stat.cost_fuel > 0:
 			cost_text += " %dF" % unit_stat.cost_fuel
 		btn.tooltip_text = "%s (%s)\nClick to cancel and refund." % [
-			unit_stat.unit_name, cost_text,
+			unit_stat.get_display_name(), cost_text,
 		]
 		var captured_index: int = i
 		var captured_building: Building = building
@@ -2060,9 +2061,10 @@ func _rebuild_production_buttons(building: Building) -> void:
 		btn.size_flags_horizontal = Control.SIZE_FILL
 		btn.size_flags_vertical = Control.SIZE_FILL
 
+		var u_display: String = unit_stat.get_display_name()
 		if unlocked:
 			var hotkey: String = hotkeys[unlocked_idx] if unlocked_idx < hotkeys.size() else str(unlocked_idx + 1)
-			_set_label_button(btn, "[%s]" % hotkey, unit_stat.unit_name)
+			_set_label_button(btn, "[%s]" % hotkey, u_display)
 			btn.tooltip_text = _unit_tooltip(unit_stat)
 			var capture_idx: int = unlocked_idx
 			btn.pressed.connect(_on_production_button.bind(capture_idx))
@@ -2072,9 +2074,9 @@ func _rebuild_production_buttons(building: Building) -> void:
 		else:
 			var prereq: StringName = unit_stat.unlock_prerequisite
 			var prereq_label: String = _building_display_name(String(prereq))
-			_set_label_button(btn, "Locked", "%s\nneeds %s" % [unit_stat.unit_name, prereq_label])
+			_set_label_button(btn, "Locked", "%s\nneeds %s" % [u_display, prereq_label])
 			btn.disabled = true
-			btn.tooltip_text = "%s — locked.\nBuild a %s to unlock." % [unit_stat.unit_name, prereq_label]
+			btn.tooltip_text = "%s — locked.\nBuild a %s to unlock." % [u_display, prereq_label]
 			btn.modulate = Color(0.7, 0.7, 0.7, 0.85)
 		_button_grid.add_child(btn)
 
@@ -2847,7 +2849,7 @@ func _make_armory_row(base_stats: UnitStatResource, bcm: Node, cost_suffix: Stri
 	# Name label — short header so the player can read the row's
 	# subject before scanning the branch buttons.
 	var name_lbl := Label.new()
-	name_lbl.text = base_stats.unit_name
+	name_lbl.text = base_stats.get_display_name()
 	name_lbl.custom_minimum_size = Vector2(110, 0)
 	name_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	name_lbl.add_theme_color_override("font_color", Color(0.85, 0.82, 0.70, 1.0))
@@ -3697,7 +3699,7 @@ func _update_unit_panel(units: Array[Node3D]) -> void:
 	if units.size() == 1:
 		var unit: Node3D = units[0]
 		if unit.stats:
-			_name_label.text = "%s — %s" % [unit.stats.unit_name, _role_hint_for(unit.stats)]
+			_name_label.text = "%s — %s" % [unit.stats.get_display_name(), _role_hint_for(unit.stats)]
 			var hp_pct: float = float(unit.get_total_hp()) / float(maxi(unit.stats.hp_total, 1))
 			_stats_label.text = _build_unit_stat_sheet(unit, true)
 			# Use HP bar to mirror the on-world HP — quick eyeball read in the panel.

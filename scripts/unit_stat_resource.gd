@@ -3,8 +3,24 @@ extends Resource
 ## Defines a unit type's base stats. One per unit class (not per instance).
 ## Branch variants are separate UnitStatResource files.
 
-## Display name shown in UI.
+## Stable identifier used by code paths that dispatch on unit type
+## (overlay builders, ability dispatch, etc.). Player-facing UI
+## should use display_name instead, falling back to unit_name when
+## display_name is empty.
 @export var unit_name: String = ""
+
+## Display name shown in UI -- production buttons, unit panels,
+## tooltips. When empty, callers fall back to unit_name. Used to
+## decouple the player-facing reflavoring (e.g. 'KV-0 Field
+## Engineer') from the internal type identifier ('Ratchet') the
+## overlay / ability dispatch logic still matches on.
+@export var display_name: String = ""
+
+
+func get_display_name() -> String:
+	if display_name != "":
+		return display_name
+	return unit_name
 
 ## Unit role for production/categorization: "engineer", "light", "medium", "heavy", "apex"
 @export var unit_class: StringName = &"light"
