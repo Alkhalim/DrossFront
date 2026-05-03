@@ -3258,62 +3258,56 @@ func _setup_ground_patches() -> void:
 	var biomes: Array[Dictionary]
 	if _is_iron_gate():
 		# Iron Gate winter zone — packed slush + exposed asphalt
-		# under uneven snowpack. Big mottled patches break the
-		# otherwise-uniform pale ground into a textured wintry
-		# read. Mirrored across z=0 so the symmetry holds.
+		# under uneven snowpack. Each biome carries a distinct
+		# texture key so the wintry ground reads as several real
+		# surfaces (snow, asphalt scorch, iron stain, mud) instead
+		# of one flat shader.
 		biomes = [
-			# Cleared road / vehicle-track zone running through the
-			# centre — darker exposed asphalt where the snow's been
-			# trampled or plowed.
-			{"pos": Vector3(0.0, 0.025, 0.0), "size": 60.0, "tint": Color(0.18, 0.20, 0.22, 0.55), "rough": 1.0},
-			# Slush drift zones flanking the spawns — slightly warmer
-			# tone so they read as melted-and-refrozen, not fresh.
-			{"pos": Vector3(0.0, 0.025, 80.0), "size": 80.0, "tint": Color(0.45, 0.48, 0.50, 0.45), "rough": 1.0},
-			{"pos": Vector3(0.0, 0.025, -80.0), "size": 80.0, "tint": Color(0.45, 0.48, 0.50, 0.45), "rough": 1.0},
-			# Iron-stained patches around the central ruins — the
-			# rust + cold mix that gives the map its name.
-			{"pos": Vector3(48.0, 0.025, 30.0), "size": 35.0, "tint": Color(0.30, 0.20, 0.16, 0.55), "rough": 1.0},
-			{"pos": Vector3(-48.0, 0.025, -30.0), "size": 35.0, "tint": Color(0.30, 0.20, 0.16, 0.55), "rough": 1.0},
+			# Cleared road / vehicle-track zone -- exposed dark
+			# asphalt under trampled-down snow.
+			{"pos": Vector3(0.0, 0.025, 0.0), "size": 60.0, "tint": Color(0.30, 0.32, 0.34, 0.65), "rough": 1.0, "tex": "scorched"},
+			# Slush drift zones flanking the spawns -- packed snow.
+			{"pos": Vector3(0.0, 0.025, 80.0), "size": 80.0, "tint": Color(0.85, 0.88, 0.92, 0.65), "rough": 1.0, "tex": "snow"},
+			{"pos": Vector3(0.0, 0.025, -80.0), "size": 80.0, "tint": Color(0.85, 0.88, 0.92, 0.65), "rough": 1.0, "tex": "snow"},
+			# Iron-stained patches around the central ruins.
+			{"pos": Vector3(48.0, 0.025, 30.0), "size": 35.0, "tint": Color(0.45, 0.30, 0.22, 0.65), "rough": 1.0, "tex": "metal"},
+			{"pos": Vector3(-48.0, 0.025, -30.0), "size": 35.0, "tint": Color(0.45, 0.30, 0.22, 0.65), "rough": 1.0, "tex": "metal"},
 			# Far-flank dirt-windswept zones where the snow's been
-			# scoured off entirely.
-			{"pos": Vector3(95.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.22, 0.20, 0.16, 0.55), "rough": 1.0},
-			{"pos": Vector3(-95.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.22, 0.20, 0.16, 0.55), "rough": 1.0},
+			# scoured off entirely -- exposed mud.
+			{"pos": Vector3(95.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.36, 0.30, 0.22, 0.60), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(-95.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.36, 0.30, 0.22, 0.60), "rough": 1.0, "tex": "mud"},
 		]
 	elif _is_ashplains():
 		biomes = [
-			# Pale-ash drift zones either side of the central ridge —
-			# wash out a wide swath of the open ground so it reads as
-			# "ash plains", not "grey field". Pushed warmer + more
-			# saturated so the sand has actual desert character.
-			{"pos": Vector3(0.0, 0.025, 60.0), "size": 90.0, "tint": Color(0.55, 0.42, 0.24, 0.62), "rough": 1.0},
-			{"pos": Vector3(0.0, 0.025, -60.0), "size": 90.0, "tint": Color(0.55, 0.42, 0.24, 0.62), "rough": 1.0},
-			# Volcanic scar that crosses the central deposit area —
-			# darker than the rest, marks where the heaviest fighting
-			# tends to happen.
-			{"pos": Vector3(0.0, 0.025, 0.0), "size": 55.0, "tint": Color(0.08, 0.06, 0.05, 0.70), "rough": 1.0},
-			# Bleached bone-white salt-flat patches — distinctive
-			# wasteland read.
-			{"pos": Vector3(50.0, 0.025, 95.0), "size": 38.0, "tint": Color(0.78, 0.72, 0.55, 0.50), "rough": 1.0},
-			{"pos": Vector3(-50.0, 0.025, -95.0), "size": 38.0, "tint": Color(0.78, 0.72, 0.55, 0.50), "rough": 1.0},
-			# Cracked-earth dark zones — deep ferrous-rust tone that
-			# breaks up the warm sand belt.
-			{"pos": Vector3(70.0, 0.025, 30.0), "size": 42.0, "tint": Color(0.22, 0.13, 0.08, 0.65), "rough": 1.0},
-			{"pos": Vector3(-70.0, 0.025, -30.0), "size": 42.0, "tint": Color(0.22, 0.13, 0.08, 0.65), "rough": 1.0},
-			# Far-flank dust patches.
-			{"pos": Vector3(115.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.52, 0.40, 0.22, 0.55), "rough": 1.0},
-			{"pos": Vector3(-115.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.52, 0.40, 0.22, 0.55), "rough": 1.0},
+			# Pale-ash drift zones -- sand-textured.
+			{"pos": Vector3(0.0, 0.025, 60.0), "size": 90.0, "tint": Color(0.65, 0.50, 0.30, 0.65), "rough": 1.0, "tex": "sand"},
+			{"pos": Vector3(0.0, 0.025, -60.0), "size": 90.0, "tint": Color(0.65, 0.50, 0.30, 0.65), "rough": 1.0, "tex": "sand"},
+			# Volcanic scar -- scorched-earth texture.
+			{"pos": Vector3(0.0, 0.025, 0.0), "size": 55.0, "tint": Color(0.18, 0.13, 0.10, 0.75), "rough": 1.0, "tex": "scorched"},
+			# Bleached bone-white salt-flat patches -- cracked mud
+			# texture in a pale tone.
+			{"pos": Vector3(50.0, 0.025, 95.0), "size": 38.0, "tint": Color(0.85, 0.80, 0.60, 0.55), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(-50.0, 0.025, -95.0), "size": 38.0, "tint": Color(0.85, 0.80, 0.60, 0.55), "rough": 1.0, "tex": "mud"},
+			# Cracked-earth dark zones -- ferrous rust on cracked mud.
+			{"pos": Vector3(70.0, 0.025, 30.0), "size": 42.0, "tint": Color(0.32, 0.20, 0.12, 0.70), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(-70.0, 0.025, -30.0), "size": 42.0, "tint": Color(0.32, 0.20, 0.12, 0.70), "rough": 1.0, "tex": "mud"},
+			# Far-flank dust patches -- fine sand drift.
+			{"pos": Vector3(115.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.58, 0.44, 0.26, 0.55), "rough": 1.0, "tex": "sand"},
+			{"pos": Vector3(-115.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.58, 0.44, 0.26, 0.55), "rough": 1.0, "tex": "sand"},
 		]
 	else:
 		biomes = [
-			# Soot scar across the contested mid (ash-grey).
-			{"pos": Vector3(0.0, 0.025, 0.0), "size": 70.0, "tint": Color(0.09, 0.09, 0.10, 0.55), "rough": 1.0},
-			# Sand drift on the east flank (warm ochre).
-			{"pos": Vector3(95.0, 0.025, 35.0), "size": 55.0, "tint": Color(0.32, 0.26, 0.18, 0.50), "rough": 0.95},
-			# Sand drift on the west flank (mirror).
-			{"pos": Vector3(-95.0, 0.025, -35.0), "size": 55.0, "tint": Color(0.30, 0.24, 0.17, 0.50), "rough": 0.95},
-			# Dried-mud zones near the back-doors (slate-tan).
-			{"pos": Vector3(70.0, 0.025, -75.0), "size": 50.0, "tint": Color(0.21, 0.17, 0.13, 0.55), "rough": 0.95},
-			{"pos": Vector3(-70.0, 0.025, 75.0), "size": 50.0, "tint": Color(0.21, 0.17, 0.13, 0.55), "rough": 0.95},
+			# Soot scar across the contested mid -- scorched ground.
+			{"pos": Vector3(0.0, 0.025, 0.0), "size": 70.0, "tint": Color(0.16, 0.14, 0.14, 0.65), "rough": 1.0, "tex": "scorched"},
+			# Sand drift on the east flank.
+			{"pos": Vector3(95.0, 0.025, 35.0), "size": 55.0, "tint": Color(0.40, 0.30, 0.20, 0.55), "rough": 0.95, "tex": "sand"},
+			{"pos": Vector3(-95.0, 0.025, -35.0), "size": 55.0, "tint": Color(0.38, 0.28, 0.18, 0.55), "rough": 0.95, "tex": "sand"},
+			# Dried-mud zones near the back-doors.
+			{"pos": Vector3(70.0, 0.025, -75.0), "size": 50.0, "tint": Color(0.30, 0.24, 0.18, 0.65), "rough": 0.95, "tex": "mud"},
+			{"pos": Vector3(-70.0, 0.025, 75.0), "size": 50.0, "tint": Color(0.30, 0.24, 0.18, 0.65), "rough": 0.95, "tex": "mud"},
+			# Industrial rust stain -- iron-tinged metal texture.
+			{"pos": Vector3(0.0, 0.025, 75.0), "size": 40.0, "tint": Color(0.42, 0.26, 0.18, 0.55), "rough": 0.95, "tex": "metal"},
+			{"pos": Vector3(0.0, 0.025, -75.0), "size": 40.0, "tint": Color(0.42, 0.26, 0.18, 0.55), "rough": 0.95, "tex": "metal"},
 		]
 	for b: Dictionary in biomes:
 		_spawn_soft_patch(
@@ -3322,6 +3316,7 @@ func _setup_ground_patches() -> void:
 			b["tint"] as Color,
 			b["rough"] as float,
 			false,
+			b.get("tex", "") as String,
 		)
 
 	# Small detail patches — denser than before so the eye reads the
@@ -3425,7 +3420,7 @@ func _setup_ground_patches() -> void:
 				_spawn_soft_patch(pos, randf_range(3.5, 6.5), Color(0.22, 0.22, 0.24, randf_range(0.45, 0.65)), 0.95, false)
 
 
-func _spawn_soft_patch(pos: Vector3, base_size: float, tint: Color, roughness: float, oil: bool) -> void:
+func _spawn_soft_patch(pos: Vector3, base_size: float, tint: Color, roughness: float, oil: bool, texture_key: String = "") -> void:
 	# Soft-edged organic patch built from a triangle-fan ArrayMesh with
 	# vertex-color alpha (1 at center → 0 at perimeter). The fade is
 	# entirely driven by per-vertex interpolation, so we don't depend on
@@ -3472,8 +3467,40 @@ func _spawn_soft_patch(pos: Vector3, base_size: float, tint: Color, roughness: f
 		mat.emission = Color(0.18, 0.12, 0.22, 1.0)
 		mat.emission_energy_multiplier = 0.35
 
+	# Per-biome ground texture. The translucent vertex-color blob
+	# always carries the soft alpha falloff; layering a real albedo
+	# texture on top makes each biome read as a distinct surface
+	# (sand grain, dried mud cracks, scorched earth, packed snow)
+	# instead of every patch sharing one flat shader.
+	if texture_key != "":
+		var tex: Texture2D = _resolve_biome_texture(texture_key)
+		if tex:
+			mat.albedo_texture = tex
+			# UV scale tuned so a ~50u biome patch shows ~3-4 tiles of
+			# the texture -- detail reads at typical RTS zoom without
+			# becoming a repeating grid.
+			mat.uv1_scale = Vector3(4.0, 4.0, 1.0)
+			mat.uv1_offset = Vector3(randf(), randf(), 0.0)
 	patch.material_override = mat
 	add_child(patch)
+
+
+func _resolve_biome_texture(key: String) -> Texture2D:
+	## Maps biome key strings to the SharedTextures generators.
+	## Unknown keys return null so the caller falls back to a plain
+	## tinted patch.
+	match key:
+		"sand":
+			return SharedTextures.get_sand_dunes_texture()
+		"mud":
+			return SharedTextures.get_cracked_mud_texture()
+		"snow":
+			return SharedTextures.get_packed_snow_texture()
+		"scorched":
+			return SharedTextures.get_scorched_ground_texture()
+		"metal":
+			return SharedTextures.get_metal_wear_texture()
+	return null
 
 
 func _build_soft_blob_mesh(base_radius: float, x_scale: float, z_scale: float) -> ArrayMesh:
