@@ -814,8 +814,19 @@ func _modal_difficulty(diffs: Dictionary) -> int:
 
 
 func _on_bus_volume_changed(db: float, bus_name: String) -> void:
+	## Slider position drives both the bus volume and the bus mute
+	## flag. The slider's minimum (-40 dB) was nominally "muted" but
+	## still passed audio at ~1%; calling set_bus_mute when the
+	## slider sits at its minimum guarantees full silence so a player
+	## who drags Music to 0 actually gets no music. Any position
+	## above the minimum re-enables audio at the requested level.
 	var idx: int = AudioServer.get_bus_index(bus_name)
-	if idx >= 0:
+	if idx < 0:
+		return
+	if db <= -40.0:
+		AudioServer.set_bus_mute(idx, true)
+	else:
+		AudioServer.set_bus_mute(idx, false)
 		AudioServer.set_bus_volume_db(idx, db)
 
 
