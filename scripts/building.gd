@@ -3815,6 +3815,67 @@ func _detail_molot_platform() -> void:
 	stripe.position = Vector3(0, fs.y * 0.12, 0)
 	stripe.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.55, 0.10), 1.4))
 	_attach_visual(stripe)
+	# Recoil cylinders flanking the breech behind the cheeks so the
+	# barrel reads as supported by real artillery hardware. Two
+	# stubby cylinders parallel to the barrel angle.
+	for side: int in 2:
+		var sx: float = -1.0 if side == 0 else 1.0
+		var recoil := MeshInstance3D.new()
+		var rc := CylinderMesh.new()
+		rc.top_radius = 0.18
+		rc.bottom_radius = 0.22
+		rc.height = barrel_len * 0.55
+		rc.radial_segments = 12
+		recoil.mesh = rc
+		recoil.rotation = barrel.rotation
+		recoil.position = Vector3(
+			sx * fs.x * 0.18,
+			barrel.position.y - 0.30,
+			barrel.position.z * 0.65,
+		)
+		recoil.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.14, 0.12, 0.11)))
+		pivot.add_child(recoil)
+	# Glowing breech port -- a small orange emissive disc behind the
+	# breech that pulses through the firing visual via SuperweaponMolot
+	# (visible from the firer's side as the 'this thing is hot' tell).
+	var breech := MeshInstance3D.new()
+	var bg := CylinderMesh.new()
+	bg.top_radius = fs.x * 0.09
+	bg.bottom_radius = fs.x * 0.09
+	bg.height = 0.10
+	bg.radial_segments = 12
+	breech.mesh = bg
+	breech.rotation = barrel.rotation
+	breech.position = Vector3(0.0, fs.y + 0.95, -0.20)
+	breech.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.45, 0.10), 2.4))
+	pivot.add_child(breech)
+	# Ammo crates stacked at the back corners of the platform --
+	# ammunition for the gun, sells the artillery role.
+	for i: int in 4:
+		var cx: float = -fs.x * 0.40 if (i % 2) == 0 else fs.x * 0.40
+		var cz: float = -fs.z * 0.42 + float(i / 2) * 0.85
+		var crate := MeshInstance3D.new()
+		var cb := BoxMesh.new()
+		cb.size = Vector3(0.85, 0.55, 0.70)
+		crate.mesh = cb
+		crate.position = Vector3(cx, fs.y + 0.55 * 0.5 + 0.05, cz)
+		crate.rotation.y = randf_range(-0.18, 0.18)
+		crate.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.28, 0.22, 0.16)))
+		_attach_visual(crate)
+	# Buttress legs at the four corners of the chassis to root the
+	# silhouette to the ground -- artillery this big shouldn't look
+	# like it could roll away.
+	for i: int in 4:
+		var bx: float = (-1.0 if (i % 2) == 0 else 1.0) * fs.x * 0.50
+		var bz: float = (-1.0 if i < 2 else 1.0) * fs.z * 0.50
+		var leg := MeshInstance3D.new()
+		var lb := BoxMesh.new()
+		lb.size = Vector3(0.45, fs.y * 0.85, 0.45)
+		leg.mesh = lb
+		leg.position = Vector3(bx, lb.size.y * 0.5, bz)
+		leg.rotation.y = atan2(bx, bz)
+		leg.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.17, 0.15)))
+		_attach_visual(leg)
 
 
 func _detail_echo_array() -> void:
@@ -3884,6 +3945,87 @@ func _detail_echo_array() -> void:
 	light.omni_range = fs.x * 1.6 + 4.0
 	light.position = beacon.position
 	_attach_visual(light)
+	# Paired satellite dishes mounted on side pylons -- two short
+	# masts coming off the chassis with a tilted dish at the tip,
+	# pointing slightly inward + upward. Sells the 'broadcast'
+	# identity at any zoom level.
+	for side: int in 2:
+		var sx: float = -1.0 if side == 0 else 1.0
+		var mast := MeshInstance3D.new()
+		var mc := CylinderMesh.new()
+		mc.top_radius = 0.10
+		mc.bottom_radius = 0.16
+		mc.height = fs.y * 0.55
+		mc.radial_segments = 8
+		mast.mesh = mc
+		mast.position = Vector3(sx * fs.x * 0.35, fs.y + mc.height * 0.5, fs.z * 0.30)
+		mast.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.16, 0.16, 0.18)))
+		_attach_visual(mast)
+		var dish := MeshInstance3D.new()
+		var dc := CylinderMesh.new()
+		dc.top_radius = 0.05
+		dc.bottom_radius = fs.x * 0.32
+		dc.height = 0.18
+		dc.radial_segments = 16
+		dish.mesh = dc
+		dish.rotation = Vector3(deg_to_rad(-25.0), deg_to_rad(-15.0 * sx), 0.0)
+		dish.position = Vector3(
+			sx * fs.x * 0.35,
+			fs.y + mc.height + 0.20,
+			fs.z * 0.30 + 0.05,
+		)
+		dish.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.22, 0.28)))
+		_attach_visual(dish)
+		# Pulse point at the dish hub — small violet emissive node
+		# so the dishes read as 'live' rather than dead hardware.
+		var hub := MeshInstance3D.new()
+		var hb := SphereMesh.new()
+		hb.radius = 0.10
+		hb.height = 0.20
+		hub.mesh = hb
+		hub.position = dish.position
+		var hm := StandardMaterial3D.new()
+		hm.albedo_color = SABLE_NEON
+		hm.emission_enabled = true
+		hm.emission = SABLE_NEON
+		hm.emission_energy_multiplier = 2.4
+		hub.set_surface_override_material(0, hm)
+		_attach_visual(hub)
+	# Buttress struts at the four corners -- diagonal beams from
+	# the chassis up to the lower tower so the array reads as
+	# braced against atmospheric wind / recoil from the broadcast.
+	for i: int in 4:
+		var bx: float = (-1.0 if (i % 2) == 0 else 1.0) * fs.x * 0.42
+		var bz: float = (-1.0 if i < 2 else 1.0) * fs.z * 0.42
+		var strut := MeshInstance3D.new()
+		var sb := BoxMesh.new()
+		sb.size = Vector3(0.20, fs.y * 0.55, 0.20)
+		strut.mesh = sb
+		strut.position = Vector3(bx * 0.6, fs.y + sb.size.y * 0.45, bz * 0.6)
+		strut.rotation = Vector3(
+			deg_to_rad(20.0) * signf(bz),
+			0.0,
+			deg_to_rad(-20.0) * signf(bx),
+		)
+		strut.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.15, 0.15, 0.20)))
+		_attach_visual(strut)
+	# Cable spool / equipment cluster at the chassis base -- a
+	# squat box with a vent grille, gives the building ground-level
+	# detail beyond a flat plinth.
+	var bunker := MeshInstance3D.new()
+	var bnk := BoxMesh.new()
+	bnk.size = Vector3(fs.x * 0.55, fs.y * 0.30, fs.z * 0.45)
+	bunker.mesh = bnk
+	bunker.position = Vector3(0, fs.y * 0.18 + bnk.size.y * 0.5, -fs.z * 0.30)
+	bunker.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.12, 0.12, 0.16)))
+	_attach_visual(bunker)
+	var grille := MeshInstance3D.new()
+	var gb := BoxMesh.new()
+	gb.size = Vector3(bnk.size.x * 0.7, 0.06, 0.04)
+	grille.mesh = gb
+	grille.position = bunker.position + Vector3(0, 0.02, bnk.size.z * 0.5 + 0.02)
+	grille.set_surface_override_material(0, _detail_emissive_mat(SABLE_NEON, 1.6))
+	_attach_visual(grille)
 
 
 func _detail_black_pylon() -> void:
