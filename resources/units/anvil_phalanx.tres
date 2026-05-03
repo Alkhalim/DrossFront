@@ -40,4 +40,4 @@ branch_a_stats = ExtResource("3")
 branch_b_stats = ExtResource("4")
 is_aircraft = true
 flight_altitude = 5.5
-flight_speed = 16.0
+flight_speed = 12.0
