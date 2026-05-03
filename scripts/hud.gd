@@ -2406,7 +2406,9 @@ func _role_matchup_chips(role_tag: StringName) -> Array:
 	## to surface their role multipliers without requiring a
 	## UnitStatResource. Anti-air roles drop the ground-class chips so
 	## SAMs read as 'air specialist', and ground roles drop air chips
-	## so the row stays compact.
+	## so the row stays compact. Multipliers carry the same red->yellow
+	## ->green gradient as the unit attack-bonus row so the player can
+	## spot a turret's best/worst matchup at a glance.
 	var out: Array = []
 	if role_tag == &"":
 		return out
@@ -2418,9 +2420,22 @@ func _role_matchup_chips(role_tag: StringName) -> Array:
 	else:
 		classes = [&"light", &"medium", &"heavy", &"structure"]
 		labels = ["Lt", "Md", "Hv", "Struct"]
+	var mults: Array[float] = []
 	for i: int in classes.size():
-		var mult: float = CombatTables.get_role_modifier(role_tag, classes[i])
-		out.append(_stat_chip("vs " + labels[i], "%.1fx" % mult, STAT_LABEL_COLOR_DAMAGE))
+		mults.append(CombatTables.get_role_modifier(role_tag, classes[i]))
+	var lo: float = mults[0]
+	var hi: float = mults[0]
+	for m: float in mults:
+		if m < lo:
+			lo = m
+		if m > hi:
+			hi = m
+	for i: int in classes.size():
+		var color_hex: String = _gradient_value_color(mults[i], lo, hi)
+		out.append(_stat_chip_value_colored(
+			"vs " + labels[i], "%.1fx" % mults[i],
+			STAT_LABEL_COLOR_DAMAGE, color_hex,
+		))
 	return out
 
 
