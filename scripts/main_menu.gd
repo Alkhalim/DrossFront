@@ -28,6 +28,14 @@ var _tactical_bg: Control = null
 ## Brief white-flash overlay used during the command-center screen
 ## transition (Campaigns / back). Hidden until a transition fires.
 var _transition_flash: ColorRect = null
+## Camera-sweep overlay -- a dark vertical bar that slides across
+## the screen during the radar -> Europe-map transition, mimicking
+## the operator physically turning toward another monitor.
+var _camera_sweep: ColorRect = null
+## Refs to the stump buttons so the campaigns transition can stagger
+## them in with a per-button "ping" tween once the map fills the
+## screen.
+var _campaign_stumps: Array[Button] = []
 
 # Setup-screen state — populated by the radio buttons / faction picks.
 var _selected_mode: int = MatchSettingsClass.Mode.ONE_V_ONE
