@@ -169,6 +169,18 @@ var _stuck_timer: float = 0.0
 ## player notices it stopping.
 var _zero_move_repath_at_msec: int = 0
 
+## Movement-aware collision shrink. While the unit is actively
+## moving, the leader collision box is rescaled to
+## MOVING_COLLISION_SCALE of its rest-state XZ extent so squads
+## can pass through each other on the way to a destination. At
+## rest (and when stopped) the shape returns to full size so
+## stacked units physically separate.
+var _movement_collision_shape: BoxShape3D = null
+var _movement_collision_rest_size: Vector3 = Vector3.ZERO
+var _movement_collision_currently_moving: bool = false
+const MOVING_COLLISION_SCALE: float = 0.55
+const MOVING_VELOCITY_THRESHOLD_SQ: float = 1.0
+
 ## V3 Stealth — see UnitStatResource.is_stealth_capable. `is_revealed`
 ## is true while an enemy is within detection range OR the unit took
 ## damage in the last `stealth_restore_time` seconds. Auto-targeting
@@ -522,6 +534,14 @@ func _build_squad_visuals() -> void:
 		col_shape.size = Vector3(leader_box, total_h, leader_box)
 		col_node.shape = col_shape
 		col_node.position.y = total_h / 2.0
+		# Cache the rest-state size + shape ref so the per-frame
+		# move-shrink can resize cheaply without re-allocating.
+		# Moving units shrink to MOVING_COLLISION_SCALE of their
+		# rest-state XZ extent so squads can pass through each other
+		# in transit while still reading as solid bodies at rest.
+		_movement_collision_shape = col_shape
+		_movement_collision_rest_size = col_shape.size
+		_movement_collision_currently_moving = false
 
 	# Per-member click area -- the body's collision shape only covers
 	# the leader (intentional for movement so heavies thread narrow
@@ -3354,6 +3374,29 @@ func stop() -> void:
 	has_move_order = false
 
 
+func _update_movement_collision() -> void:
+	## Switch the leader collision box between full-size (at rest)
+	## and shrunk (moving). Allows squads to pass through each
+	## other in transit while still reading as solid bodies once
+	## stopped. Only writes when the moving state actually changes
+	## so the BoxShape3D stays cheap.
+	if not _movement_collision_shape:
+		return
+	var moving: bool = (velocity.x * velocity.x + velocity.z * velocity.z) > MOVING_VELOCITY_THRESHOLD_SQ
+	if moving == _movement_collision_currently_moving:
+		return
+	_movement_collision_currently_moving = moving
+	if moving:
+		var rest: Vector3 = _movement_collision_rest_size
+		_movement_collision_shape.size = Vector3(
+			rest.x * MOVING_COLLISION_SCALE,
+			rest.y,
+			rest.z * MOVING_COLLISION_SCALE,
+		)
+	else:
+		_movement_collision_shape.size = _movement_collision_rest_size
+
+
 func apply_emp_paralysis(duration: float) -> void:
 	## Public hook used by Meridian's EChO override. Stacks by max so
 	## a fresh short cast can't clip the tail of a longer one. Halts
@@ -4018,6 +4061,11 @@ func _physics_process(delta: float) -> void:
 	# falling toward the floor while moving horizontally.
 	velocity.x = direction.x * _move_speed
 	velocity.z = direction.z * _move_speed
+
+	# Shrink the leader collision box while moving so squads can
+	# pass through each other in transit. At rest the box snaps
+	# back to its full size so stacked mechs physically separate.
+	_update_movement_collision()
 
 	var prev_pos: Vector3 = global_position
 	move_and_slide()

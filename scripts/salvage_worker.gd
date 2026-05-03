@@ -62,8 +62,12 @@ func _ready() -> void:
 	add_to_group("owner_%d" % owner_id)
 
 	# Make the worker collidable as a unit so enemies can shoot it.
+	# Mask now includes the unit layer (bit 2) so other units can't
+	# walk straight through workers and stack on top of them at the
+	# yard / wreck. CharacterBody3D collision keeps them physically
+	# separated; nav avoidance still routes around them.
 	collision_layer = 2  # unit layer
-	collision_mask = 1   # ground
+	collision_mask = 3   # ground + units
 
 	# Round-robin half-frame stagger across worker fleet.
 	_phase = int(get_instance_id() & 1)

@@ -116,10 +116,11 @@ func _ready() -> void:
 	# Collision: layer 2 (units, so click-select raycasts find it) AND
 	# layer 4 (obstacles, so other units' mask=5 actually collides with
 	# the chassis). Without the layer 4 bit, mechs walked straight
-	# through the Crawler. Mask = 5 (ground + obstacles) so the Crawler
-	# itself bumps into terrain / buildings the same way mechs do.
+	# through the Crawler. Mask = 7 (ground + units + obstacles) so the
+	# Crawler now also bumps into other units / workers / crawlers
+	# instead of being able to drive straight through them.
 	collision_layer = 6
-	collision_mask = 5
+	collision_mask = 7
 
 	_build_visuals()
 	_build_collision()
