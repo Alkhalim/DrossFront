@@ -82,6 +82,14 @@ extends Resource
 @export_range(0.0, 1.0, 0.01) var air_damage_mult: float = 1.0
 
 
+## Drone-bay weapon flag. When true, each "shot" of this weapon
+## spawns a Drone instead of a regular projectile -- the drone
+## flies out from the carrier, fires once at the target, and
+## returns. Drone count per fire = salvo_count (default 1; set
+## higher for true swarms). Drones die with the carrier.
+@export var is_drone_release: bool = false
+
+
 ## Bomber-style projectile origin -- when true the projectile spawns
 ## just below the firing aircraft and arcs onto the target instead
 ## of leaving from the chassis center. Reads as 'opens bomb bay,

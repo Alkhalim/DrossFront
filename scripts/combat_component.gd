@@ -665,7 +665,11 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 
 	for i: int in shots:
 		var hit: bool = randf() < hit_chance
-		if hit:
+		# Drone-release weapons defer damage to the drone's arrival
+		# at the target, so the per-shot damage stays in sync with
+		# the visible drone striking. Regular weapons apply damage
+		# at fire-time so projectiles can be cosmetic.
+		if hit and not weapon.is_drone_release:
 			_current_target.take_damage(per_member_dmg, _unit)
 
 		# Pick a per-shot aim point: distribute shots across the live members
@@ -704,6 +708,15 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 				var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager") if get_tree() else null
 				if audio and audio.has_method("play_miss"):
 					audio.call("play_miss", aim_pos)
+
+		# Drone-release weapons skip the regular projectile path
+		# entirely -- each shot in the salvo spawns one Drone that
+		# flies out of the carrier, fires once at the target, and
+		# returns. Damage is delivered by the drone on arrival.
+		if weapon.is_drone_release:
+			if hit:
+				_spawn_drone(per_member_dmg, weapon.role_tag)
+			continue
 
 		if firing_visible and proj_script:
 			var fire_pos: Vector3 = _unit.global_position
@@ -803,6 +816,31 @@ func _find_stray_target(aim_pos: Vector3, primary: Node3D, my_owner: int) -> Nod
 				nearest_dist = d
 				nearest = n3
 	return nearest
+
+
+func _spawn_drone(damage: int, role_tag: StringName) -> void:
+	## Spawns a Drone tethered to this carrier (the firing unit) that
+	## flies out, fires at the current target, and returns to dock.
+	## Drones live as scene-tree children at scene root so they
+	## don't get queue_freed when the carrier moves -- they look up
+	## the carrier each frame instead.
+	var drone_script: GDScript = load("res://scripts/drone.gd") as GDScript
+	if not drone_script:
+		return
+	if not _current_target or not is_instance_valid(_current_target):
+		return
+	var drone: Node3D = drone_script.new()
+	drone.set("carrier", _unit)
+	drone.set("target", _current_target)
+	drone.set("damage", damage)
+	drone.set("role_tag", role_tag)
+	drone.set("owner_id", (_unit.get("owner_id") as int) if _unit and "owner_id" in _unit else 0)
+	# Spawn just outside the carrier's chassis so the launch reads as
+	# 'drone leaves the bay' rather than 'drone teleports out of
+	# nowhere'.
+	var spawn_offset: Vector3 = Vector3(randf_range(-1.5, 1.5), 1.5, randf_range(-1.5, 1.5))
+	get_tree().current_scene.add_child(drone)
+	drone.global_position = _unit.global_position + spawn_offset
 
 
 func _shooter_faction_id() -> int:

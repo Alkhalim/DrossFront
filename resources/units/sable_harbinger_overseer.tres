@@ -18,6 +18,8 @@ role_tag = &"AA"
 damage_tier = &"high"
 range_tier = &"long"
 rof_tier = &"moderate"
+salvo_count = 2
+is_drone_release = true
 
 [resource]
 script = ExtResource("1")

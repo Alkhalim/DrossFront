@@ -20,6 +20,8 @@ role_tag = &"Universal"
 damage_tier = &"moderate"
 range_tier = &"medium"
 rof_tier = &"moderate"
+salvo_count = 2
+is_drone_release = true
 
 [resource]
 script = ExtResource("1")
