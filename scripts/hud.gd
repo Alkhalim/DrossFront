@@ -2900,31 +2900,20 @@ func _make_branch_styled_tooltip(base_stats: UnitStatResource, branch_stats: Uni
 
 
 func _branch_delta_summary(base_stats: UnitStatResource, branch_stats: UnitStatResource) -> String:
-	## Builds a compact pros/cons readout for a branch upgrade:
-	## "+ HP +120 (+12%)" / "- Speed -2 u/s" lines, plus the branch's
-	## special_description on the bottom if it diverges from the base.
-	## Returns plain text with [color] BBCode tags so the parent
-	## RichTextLabel renders the +/- in green / red.
+	## Compact pros/cons readout for a branch upgrade. Player-facing
+	## numbers only -- no per-shot damage / RoF (those don't survive
+	## the role/armor math), no squad-size deltas (mechanic was
+	## scrapped), no narrative blurb (lived in the resource for the
+	## old verbose pass; the deltas alone tell the upgrade story).
 	if not base_stats or not branch_stats:
 		return ""
 	var pros: PackedStringArray = PackedStringArray()
 	var cons: PackedStringArray = PackedStringArray()
 
-	# HP
+	# HP / armor / speed / sight -- the survivability + mobility levers.
 	_emit_branch_delta(pros, cons, "HP", float(branch_stats.hp_total - base_stats.hp_total), float(base_stats.hp_total), 0)
-	# Squad size
-	if branch_stats.squad_size != base_stats.squad_size:
-		var sd: int = branch_stats.squad_size - base_stats.squad_size
-		var s_line: String = "Squad %+d" % sd
-		if sd > 0:
-			pros.append(s_line)
-		else:
-			cons.append(s_line)
-	# Speed
 	_emit_branch_delta(pros, cons, "Speed", branch_stats.resolved_speed() - base_stats.resolved_speed(), base_stats.resolved_speed(), 1)
-	# Sight
 	_emit_branch_delta(pros, cons, "Sight", branch_stats.resolved_sight_radius() - base_stats.resolved_sight_radius(), base_stats.resolved_sight_radius(), 1)
-	# Armor reduction (% scale)
 	var arm_d: float = branch_stats.resolved_armor_reduction() - base_stats.resolved_armor_reduction()
 	if absf(arm_d) > 0.005:
 		var arm_line: String = "Armor %+d%%" % int(round(arm_d * 100.0))
@@ -2932,18 +2921,50 @@ func _branch_delta_summary(base_stats: UnitStatResource, branch_stats: UnitStatR
 			pros.append(arm_line)
 		else:
 			cons.append(arm_line)
-	# Weapon -- damage, range, RoF (lower = faster).
+
+	# Effective DPS deltas. Ground readout against medium armor (the
+	# canonical mech bucket); air readout against light_air, and only
+	# when at least one variant can engage air. Captures damage + RoF
+	# + role-mult shifts in a single number the player actually cares
+	# about, instead of three separate per-shot deltas that don't
+	# add up to anything intuitive.
+	var dps_g_b: float = _compute_dps_vs(base_stats, &"medium")
+	var dps_g_n: float = _compute_dps_vs(branch_stats, &"medium")
+	_emit_branch_delta(pros, cons, "Ground DPS", dps_g_n - dps_g_b, dps_g_b, 0)
+	if base_stats.can_target_air() or branch_stats.can_target_air():
+		var dps_a_b: float = _compute_dps_vs(base_stats, &"light_air")
+		var dps_a_n: float = _compute_dps_vs(branch_stats, &"light_air")
+		_emit_branch_delta(pros, cons, "Air DPS", dps_a_n - dps_a_b, dps_a_b, 0)
+
+	# Role-vs-armor mult shifts. Surfaces the "vs Heavy 0.3 -> 0.5"
+	# kind of change the previous tooltip never showed -- meaningful
+	# when a branch retags from AP to Universal etc.
 	if base_stats.primary_weapon and branch_stats.primary_weapon:
-		_emit_branch_delta(pros, cons, "Damage", float(branch_stats.primary_weapon.resolved_damage() - base_stats.primary_weapon.resolved_damage()), float(base_stats.primary_weapon.resolved_damage()), 0)
-		_emit_branch_delta(pros, cons, "Range", branch_stats.primary_weapon.resolved_range() - base_stats.primary_weapon.resolved_range(), base_stats.primary_weapon.resolved_range(), 1)
-		# RoF: lower seconds-between-shots = better.
-		var rof_d: float = branch_stats.primary_weapon.resolved_rof_seconds() - base_stats.primary_weapon.resolved_rof_seconds()
-		if absf(rof_d) > 0.01:
-			var rof_line: String = "Fire rate %+.2fs cd" % (-rof_d)
-			if rof_d < 0.0:
-				pros.append(rof_line)
+		var b_role: StringName = base_stats.primary_weapon.role_tag
+		var n_role: StringName = branch_stats.primary_weapon.role_tag
+		var classes: Array[StringName] = [&"light", &"medium", &"heavy", &"structure", &"light_air", &"heavy_air"]
+		var labels: Array[String] = ["vs Lt", "vs Md", "vs Hv", "vs Struct", "vs LtAir", "vs HvAir"]
+		for i: int in classes.size():
+			var bm: float = CombatTables.get_role_modifier(b_role, classes[i])
+			var nm: float = CombatTables.get_role_modifier(n_role, classes[i])
+			if absf(nm - bm) < 0.05:
+				continue
+			var mult_line: String = "%s %.1fx -> %.1fx" % [labels[i], bm, nm]
+			if nm > bm:
+				pros.append(mult_line)
 			else:
-				cons.append(rof_line)
+				cons.append(mult_line)
+
+	# Ability gain / change. Branches that introduce a new active
+	# (System Crash, Missile Barrage, etc.) advertise it in the
+	# plus column so the player isn't blindsided by a hotkey that
+	# wasn't on the base unit.
+	if branch_stats.ability_name != "" and base_stats.ability_name == "":
+		pros.append("Gains ability: %s" % branch_stats.ability_name)
+	elif branch_stats.ability_name != base_stats.ability_name and branch_stats.ability_name != "":
+		pros.append("Ability: %s -> %s" % [base_stats.ability_name, branch_stats.ability_name])
+	elif branch_stats.ability_name == "" and base_stats.ability_name != "":
+		cons.append("Loses ability: %s" % base_stats.ability_name)
 
 	var lines: PackedStringArray = PackedStringArray()
 	for p: String in pros:
@@ -2952,10 +2973,6 @@ func _branch_delta_summary(base_stats: UnitStatResource, branch_stats: UnitStatR
 		lines.append("[color=#ff6e6e]- %s[/color]" % c)
 	if lines.is_empty():
 		lines.append("[color=#aaaaaa]No stat differences.[/color]")
-	# Tail: branch-specific blurb only when it deviates from base.
-	if branch_stats.special_description != "" and branch_stats.special_description != base_stats.special_description:
-		lines.append("")
-		lines.append(branch_stats.special_description)
 	return "\n".join(lines)
 
 
