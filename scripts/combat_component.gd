@@ -44,6 +44,12 @@ const GARRISON_FIRE_RATE_MULT: float = 1.2
 var _first_strike_target_id: int = 0
 
 var _glowing_volley_mult: float = 0.0
+## When true, the queued glowing volley fires as a 5-pellet shotgun
+## salvo (Harbinger Heavy Volley). When false, it fires as a SINGLE
+## buffed primary shot with the glow VFX (Hound Ripper Glowing Shot
+## -- the autocannon doesn't make sense as buckshot). Default true
+## for back-compat with the Heavy Volley callers.
+var _glowing_pellet_mode: bool = true
 const GLOWING_VOLLEY_PELLETS: int = 5
 const GLOWING_VOLLEY_SPREAD_RAD: float = 0.10  # tight cone, ~5.7 deg
 
@@ -53,10 +59,15 @@ const GLOWING_VOLLEY_SPREAD_RAD: float = 0.10  # tight cone, ~5.7 deg
 var _active_drones: Array[Node3D] = []
 
 
-func queue_glowing_volley(damage_mult: float) -> void:
+func queue_glowing_volley(damage_mult: float, pellet_mode: bool = true) -> void:
 	## Caller (an active ability) tags the next primary fire to come
-	## out as a glowing pellet salvo at `damage_mult` damage.
+	## out as a glowing salvo at `damage_mult` damage. pellet_mode
+	## true splits the buffed shot across 5 shotgun pellets (Heavy
+	## Volley); pellet_mode false keeps the existing shot count and
+	## just buffs the damage + adds the glow VFX (Hound Ripper
+	## Glowing Shot autocannon).
 	_glowing_volley_mult = damage_mult
+	_glowing_pellet_mode = pellet_mode
 ## Cached PlayerRegistry — used to ask "is my owner allied with this owner?"
 ## instead of comparing raw owner_ids. Falls back to the raw compare when
 ## the registry isn't present, so headless / test scenes keep working.
@@ -638,8 +649,11 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	# (active ability) also routes through the pellet branch -- it's a
 	# one-shot 5-pellet salvo with bonus damage and a glowing emissive.
 	var is_glowing_volley: bool = is_primary and _glowing_volley_mult > 0.0
-	var is_shotgun: bool = is_glowing_volley
-	if not is_glowing_volley:
+	# Glowing-volley pellet mode (Heavy Volley) forces shotgun
+	# spread; pellet_mode false (Glowing Shot) keeps the weapon's
+	# normal shot count and just adds the damage buff + glow.
+	var is_shotgun: bool = is_glowing_volley and _glowing_pellet_mode
+	if not is_shotgun:
 		if "is_shotgun" in weapon and weapon.get("is_shotgun"):
 			is_shotgun = true
 		elif weapon.weapon_name:
@@ -647,7 +661,7 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	var SHOTGUN_PELLETS: int = 9
 	var SHOTGUN_SPREAD_RAD: float = 0.26  # ~15 degrees
 	const SHOTGUN_PELLET_RANGE: float = 14.0
-	if is_glowing_volley:
+	if is_glowing_volley and _glowing_pellet_mode:
 		SHOTGUN_PELLETS = GLOWING_VOLLEY_PELLETS
 		SHOTGUN_SPREAD_RAD = GLOWING_VOLLEY_SPREAD_RAD
 
@@ -783,6 +797,12 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 					get_tree().current_scene.add_child(pellet)
 			else:
 				var proj: Node3D = proj_script.create(fire_pos, aim_pos, weapon.role_tag, weapon.rof_tier, weapon.projectile_style, _shooter_faction_id(), weapon.damage_tier)
+				# Glowing Shot (single-projectile glowing-volley path):
+				# tint the slug bright warning-yellow so the player
+				# reads "this shot is the buffed one" without it being
+				# a multi-pellet visual like Heavy Volley.
+				if is_glowing_volley and not _glowing_pellet_mode and proj.has_method("set_glow_boost"):
+					proj.call("set_glow_boost", 3.0, Color(1.0, 0.85, 0.20, 1.0))
 				get_tree().current_scene.add_child(proj)
 
 	# Muzzle flash on each member — colored by the weapon's role.
@@ -802,11 +822,14 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 		if audio and audio.has_method("play_weapon_fire"):
 			audio.play_weapon_fire(weapon, _unit.global_position)
 
-	# Heavy Volley is a one-shot buff -- clear the multiplier now
-	# that the buffed primary shot has fired so the next ordinary
-	# shot returns to normal damage / spread.
+	# Glowing Volley / Glowing Shot is a one-shot buff -- clear the
+	# multiplier now that the buffed primary shot has fired so the
+	# next ordinary shot returns to normal damage / spread. Reset
+	# pellet_mode to its default so a future ability cast doesn't
+	# inherit the previous caller's flag.
 	if is_glowing_volley:
 		_glowing_volley_mult = 0.0
+		_glowing_pellet_mode = true
 
 
 ## Stray-shot landing radius. A miss that drifts within this many

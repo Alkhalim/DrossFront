@@ -3484,6 +3484,8 @@ func trigger_ability() -> bool:
 			fired = _ability_garrison()
 		"Heavy Volley":
 			fired = _ability_heavy_volley()
+		"Glowing Shot":
+			fired = _ability_glowing_shot()
 		_:
 			# Unknown ability name on stats — don't crash, just
 			# refuse to fire so the player notices.
@@ -3614,9 +3616,25 @@ func _ability_heavy_volley() -> bool:
 	var combat: Node = get_combat()
 	if not combat:
 		return false
-	if not ("queue_glowing_volley" in combat) and not combat.has_method("queue_glowing_volley"):
+	if not combat.has_method("queue_glowing_volley"):
 		return false
-	combat.call("queue_glowing_volley", 2.0)
+	combat.call("queue_glowing_volley", 2.0, true)
+	return true
+
+
+func _ability_glowing_shot() -> bool:
+	## Hound Ripper's Glowing Shot. Flags the combat component so
+	## the NEXT primary-weapon shot deals +50% damage and renders
+	## as a glowing yellow tracer. Single shot rather than a
+	## pellet salvo (the autocannon stays the autocannon, just
+	## brighter + harder hitting). Autocast on cooldown handled by
+	## CombatComponent's per-tick autocast trigger.
+	var combat: Node = get_combat()
+	if not combat:
+		return false
+	if not combat.has_method("queue_glowing_volley"):
+		return false
+	combat.call("queue_glowing_volley", 1.5, false)
 	return true
 
 
