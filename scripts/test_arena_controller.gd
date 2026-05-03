@@ -1297,6 +1297,17 @@ func _spawn_ai_player(player_id: int, display_name: String) -> void:
 	_spawn_ai_unit(rook_stats, anchor + fwd * 3.0 - right * 2.0, player_id)
 	_spawn_ai_unit(rook_stats, anchor + fwd * 3.0 + right * 2.0, player_id)
 
+	# Starter Crawler -- mirrors the player's starter so AI economy
+	# isn't gated by having to build one before any salvage flows.
+	# Placed just behind the starter army on the AI's side of the
+	# HQ so the workers immediately walk into the contested mid.
+	var crawler_scene: PackedScene = load("res://scenes/salvage_crawler.tscn") as PackedScene
+	if crawler_scene:
+		var ai_crawler: Node3D = crawler_scene.instantiate() as Node3D
+		ai_crawler.set("owner_id", player_id)
+		add_child(ai_crawler)
+		ai_crawler.global_position = hq_pos + fwd * 11.0
+
 	# Controller
 	var ai_script: GDScript = load("res://scripts/ai_controller.gd") as GDScript
 	var ai_ctrl: Node = ai_script.new()

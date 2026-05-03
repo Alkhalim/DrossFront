@@ -32,9 +32,11 @@ func _resolve_team_color() -> Color:
 		return registry.get_perspective_color(owner_id)
 	return SalvageCrawler._color_for(owner_id)
 const ARRIVE_THRESHOLD: float = 1.4
-## Crawler's worker harvest radius (matches the doc's 45 world units; doc
-## phrasing is "450m" but our prototype scales to ~10x smaller).
-const HARVEST_RADIUS: float = 45.0
+## Crawler's worker harvest radius. Pulled in 12% from the original
+## 45u to 39.6u per balance request -- crawlers were reaching too far
+## into the contested mid; the smaller leash forces the player to
+## actually advance the crawler to push the front line.
+const HARVEST_RADIUS: float = 39.6
 ## Wrecks above this size are too tough to crush — Crawler bumps into them.
 const CRUSH_MAX_WRECK_SIZE: float = 1.3
 ## Salvage absorbed when crushing a wreck (per doc: 25%).
@@ -80,7 +82,7 @@ enum AnchorState { OFF, DEPLOYING, ANCHORED, UNDEPLOYING }
 const ANCHOR_DEPLOY_TIME: float = 5.0
 const ANCHOR_ARMOR_BONUS: float = 0.5      # +50% damage reduction multiplier
 const ANCHOR_WORKER_BONUS: float = 0.25    # +25% effective workers (we add a worker slot)
-const ANCHOR_RANGE_BONUS: float = 0.25     # +25% harvest radius
+const ANCHOR_RANGE_BONUS: float = 0.30     # +30% harvest radius while deployed
 const _BASE_MAX_WORKERS: int = 4
 const _BASE_HARVEST_RADIUS: float = HARVEST_RADIUS
 

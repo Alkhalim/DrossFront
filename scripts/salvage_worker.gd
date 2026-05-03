@@ -95,9 +95,13 @@ func _build_visuals() -> void:
 		_build_visuals_anvil(team)
 
 	# --- Collision shape (shared) ---
+	# Shrunk from the original 0.6x0.7x0.8 footprint so workers don't
+	# log-jam at the crawler dropoff under unit-vs-unit collision.
+	# The previous box was wider than the dropoff target's clearance
+	# so two workers approaching from different angles got wedged.
 	var col := CollisionShape3D.new()
 	var shape := BoxShape3D.new()
-	shape.size = Vector3(0.6, 0.7, 0.8)
+	shape.size = Vector3(0.42, 0.7, 0.55)
 	col.shape = shape
 	col.position.y = 0.35
 	add_child(col)
