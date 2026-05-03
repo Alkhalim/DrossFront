@@ -29,6 +29,70 @@ var _felled: bool = false
 var _trunk: MeshInstance3D = null
 var _canopy: MeshInstance3D = null
 
+## Shared mesh + material palette for forest trees. The previous
+## per-instance allocations were ~2000 unique materials on
+## Schwarzwald (4 per tree x 500+ trees), which broke renderer
+## batching and dropped framerate on the map. Sharing collapses
+## every tree to one of a handful of trunk/canopy materials so
+## the renderer can batch the lot into a few draw calls.
+static var _shared_trunk_mesh: CylinderMesh = null
+static var _shared_trunk_mats: Array[StandardMaterial3D] = []
+static var _shared_canopy_meshes: Array[CylinderMesh] = []  # one per layer
+static var _shared_canopy_mats: Array[StandardMaterial3D] = []
+static var _shared_collision_shape: CylinderShape3D = null
+
+
+static func _ensure_shared_assets() -> void:
+	if _shared_trunk_mesh != null:
+		return
+	# Trunk mesh -- single CylinderMesh shared by every tree.
+	var trunk: CylinderMesh = CylinderMesh.new()
+	trunk.top_radius = TRUNK_RADIUS * 0.65
+	trunk.bottom_radius = TRUNK_RADIUS
+	trunk.height = TRUNK_HEIGHT
+	trunk.radial_segments = 10
+	_shared_trunk_mesh = trunk
+	# Canopy meshes -- 3 layers, one shared mesh per layer.
+	for layer: int in 3:
+		var dc: CylinderMesh = CylinderMesh.new()
+		dc.top_radius = CANOPY_RADIUS * (0.45 - 0.10 * float(layer))
+		dc.bottom_radius = CANOPY_RADIUS * (0.95 - 0.18 * float(layer))
+		dc.height = CANOPY_HEIGHT * 0.45
+		dc.radial_segments = 12
+		_shared_canopy_meshes.append(dc)
+	# Trunk + canopy material palettes -- 4 variants each so a
+	# forest reads as varied at zoom without breaking batching.
+	var trunk_palette: Array[Color] = [
+		Color(0.20, 0.13, 0.07, 1.0),
+		Color(0.17, 0.11, 0.06, 1.0),
+		Color(0.15, 0.10, 0.05, 1.0),
+		Color(0.22, 0.14, 0.08, 1.0),
+	]
+	for c: Color in trunk_palette:
+		var m: StandardMaterial3D = StandardMaterial3D.new()
+		m.albedo_color = c
+		m.roughness = 1.0
+		m.metallic = 0.0
+		_shared_trunk_mats.append(m)
+	var canopy_palette: Array[Color] = [
+		Color(0.13, 0.30, 0.15, 1.0),
+		Color(0.10, 0.27, 0.13, 1.0),
+		Color(0.15, 0.33, 0.17, 1.0),
+		Color(0.11, 0.25, 0.12, 1.0),
+	]
+	for c2: Color in canopy_palette:
+		var m2: StandardMaterial3D = StandardMaterial3D.new()
+		m2.albedo_color = c2
+		m2.roughness = 1.0
+		m2.metallic = 0.0
+		_shared_canopy_mats.append(m2)
+	# Shared collision shape too -- the trunk shape is identical
+	# per tree.
+	var col: CylinderShape3D = CylinderShape3D.new()
+	col.radius = TRUNK_RADIUS * 1.1
+	col.height = TRUNK_HEIGHT
+	_shared_collision_shape = col
+
 
 func _ready() -> void:
 	add_to_group("trees")
@@ -47,61 +111,38 @@ func _ready() -> void:
 
 
 func _build_visual() -> void:
-	# Trunk -- tall narrow cylinder in dark warm brown.
+	_ensure_shared_assets()
+	# Pick one of the four trunk + canopy materials at random per
+	# tree so a forest reads as varied at zoom without breaking
+	# renderer batching (Godot batches contiguous instances that
+	# share the same mesh + material).
+	var trunk_mat: StandardMaterial3D = _shared_trunk_mats[randi() % _shared_trunk_mats.size()]
+	var canopy_mat: StandardMaterial3D = _shared_canopy_mats[randi() % _shared_canopy_mats.size()]
+	# Trunk -- shared mesh + chosen palette material.
 	_trunk = MeshInstance3D.new()
-	var trunk_cyl: CylinderMesh = CylinderMesh.new()
-	trunk_cyl.top_radius = TRUNK_RADIUS * 0.65
-	trunk_cyl.bottom_radius = TRUNK_RADIUS
-	trunk_cyl.height = TRUNK_HEIGHT
-	trunk_cyl.radial_segments = 10
-	_trunk.mesh = trunk_cyl
+	_trunk.mesh = _shared_trunk_mesh
 	_trunk.position = Vector3(0, TRUNK_HEIGHT * 0.5, 0)
-	var trunk_mat: StandardMaterial3D = StandardMaterial3D.new()
-	# Slight per-instance jitter so a forest doesn't look stamped.
-	trunk_mat.albedo_color = Color(
-		0.18 + randf_range(-0.04, 0.04),
-		0.12 + randf_range(-0.03, 0.03),
-		0.07 + randf_range(-0.02, 0.02),
-		1.0,
-	)
-	trunk_mat.roughness = 1.0
-	trunk_mat.metallic = 0.0
 	_trunk.set_surface_override_material(0, trunk_mat)
 	add_child(_trunk)
-	# Canopy -- wide flat cone at the top, three stacked discs of
-	# varying width so the silhouette reads as a layered conifer.
+	# Canopy -- 3 stacked discs sharing the layer mesh + chosen
+	# canopy material across every tree.
 	_canopy = MeshInstance3D.new()
 	add_child(_canopy)
 	for layer: int in 3:
 		var disc: MeshInstance3D = MeshInstance3D.new()
-		var dc: CylinderMesh = CylinderMesh.new()
-		dc.top_radius = CANOPY_RADIUS * (0.45 - 0.10 * float(layer))
-		dc.bottom_radius = CANOPY_RADIUS * (0.95 - 0.18 * float(layer))
-		dc.height = CANOPY_HEIGHT * 0.45
-		dc.radial_segments = 12
+		var dc: CylinderMesh = _shared_canopy_meshes[layer]
 		disc.mesh = dc
 		disc.position = Vector3(0, TRUNK_HEIGHT + dc.height * 0.5 + float(layer) * (dc.height * 0.55), 0)
-		var c_mat: StandardMaterial3D = StandardMaterial3D.new()
-		c_mat.albedo_color = Color(
-			0.12 + randf_range(-0.03, 0.03),
-			0.30 + randf_range(-0.05, 0.05),
-			0.14 + randf_range(-0.03, 0.03),
-			1.0,
-		)
-		c_mat.roughness = 1.0
-		c_mat.metallic = 0.0
-		disc.set_surface_override_material(0, c_mat)
+		disc.set_surface_override_material(0, canopy_mat)
 		_canopy.add_child(disc)
 	# Random Y rotation per instance so the whole forest doesn't
 	# face the same direction.
 	rotation.y = randf_range(0.0, TAU)
 	# Hard collision cylinder around the trunk (a unit can't walk
-	# through a tree; canopy is cosmetic only).
+	# through a tree; canopy is cosmetic only). Shape is shared
+	# across every tree.
 	var col: CollisionShape3D = CollisionShape3D.new()
-	var col_cyl: CylinderShape3D = CylinderShape3D.new()
-	col_cyl.radius = TRUNK_RADIUS * 1.1
-	col_cyl.height = TRUNK_HEIGHT
-	col.shape = col_cyl
+	col.shape = _shared_collision_shape
 	col.position = Vector3(0, TRUNK_HEIGHT * 0.5, 0)
 	add_child(col)
 	# No NavigationObstacle3D per tree -- a Schwarzwald-density
