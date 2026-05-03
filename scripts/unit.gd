@@ -4214,8 +4214,15 @@ func _physics_process(delta: float) -> void:
 		if speed_xz > 0.05:
 			var scroll: float = speed_xz * delta * 1.4
 			for rib_data: Dictionary in _courier_track_ribs:
-				var node: Node3D = rib_data["node"] as Node3D
-				if not is_instance_valid(node):
+				# Untyped read first -- the typed `as Node3D` cast
+				# itself errors when rib_data["node"] points at a
+				# queue_freed Node, before the is_instance_valid
+				# guard ever runs.
+				var node_v: Variant = rib_data.get("node", null)
+				if node_v == null or not is_instance_valid(node_v):
+					continue
+				var node: Node3D = node_v as Node3D
+				if not node:
 					continue
 				var seg_len: float = rib_data["length"] as float
 				node.position.z -= scroll
