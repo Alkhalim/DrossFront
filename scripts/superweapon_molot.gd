@@ -139,11 +139,70 @@ func _spawn_impact_vfx(pos: Vector3) -> void:
 		return
 	var pem: Node = scene.get_node_or_null("ParticleEmitterManager")
 	if pem:
-		pem.call("emit_flash", pos + Vector3(0, 1.2, 0), Color(1.0, 0.55, 0.18, 1.0), 18)
-		pem.call("emit_smoke", pos + Vector3(0, 0.6, 0), Vector3(0, 3.0, 0), Color(0.32, 0.24, 0.18, 0.85))
-		pem.call("emit_spark", pos + Vector3(0, 0.5, 0), 22)
+		pem.call("emit_flash", pos + Vector3(0, 1.2, 0), Color(1.0, 0.55, 0.18, 1.0), 32)
+		pem.call("emit_smoke", pos + Vector3(0, 0.6, 0), Vector3(0, 3.5, 0), Color(0.32, 0.24, 0.18, 0.92))
+		pem.call("emit_spark", pos + Vector3(0, 0.5, 0), 36)
 		if pem.has_method("emit_dust"):
-			pem.call("emit_dust", pos, 14, 1.6)
+			pem.call("emit_dust", pos, 22, 1.8)
+	# Big explicit fireball -- a sphere mesh that flashes bright,
+	# scales up, and fades to nothing across ~0.9s. Sits on top of
+	# the particle burst as the unmissable 'a shell hit here' read
+	# in case the GPU particle bank is starved.
+	_spawn_impact_fireball(scene, pos)
+	# Brief vertical orange pillar so the impact reads even when
+	# the camera is zoomed far out -- a stretched cylinder visible
+	# above any unit-level visual clutter.
+	_spawn_impact_pillar(scene, pos)
 	var audio: Node = scene.get_node_or_null("AudioManager")
 	if audio and audio.has_method("play_unit_destroyed"):
 		audio.call("play_unit_destroyed", pos, true)
+
+
+func _spawn_impact_fireball(scene: Node, pos: Vector3) -> void:
+	var ball: MeshInstance3D = MeshInstance3D.new()
+	var sph: SphereMesh = SphereMesh.new()
+	sph.radius = 1.8
+	sph.height = 3.6
+	ball.mesh = sph
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 0.55, 0.18, 1.0)
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.42, 0.10, 1.0)
+	mat.emission_energy_multiplier = 4.5
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ball.set_surface_override_material(0, mat)
+	ball.position = pos + Vector3(0, 1.6, 0)
+	scene.add_child(ball)
+	var tween: Tween = ball.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(ball, "scale", Vector3(2.4, 2.4, 2.4), 0.85)
+	tween.tween_property(mat, "albedo_color:a", 0.0, 0.85)
+	tween.tween_property(mat, "emission_energy_multiplier", 0.0, 0.85)
+	tween.chain().tween_callback(ball.queue_free)
+
+
+func _spawn_impact_pillar(scene: Node, pos: Vector3) -> void:
+	var pillar: MeshInstance3D = MeshInstance3D.new()
+	var cyl: CylinderMesh = CylinderMesh.new()
+	cyl.top_radius = 0.6
+	cyl.bottom_radius = 1.4
+	cyl.height = 9.0
+	cyl.radial_segments = 12
+	pillar.mesh = cyl
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 0.50, 0.16, 0.85)
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.40, 0.08, 1.0)
+	mat.emission_energy_multiplier = 3.5
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	pillar.set_surface_override_material(0, mat)
+	pillar.position = pos + Vector3(0, cyl.height * 0.5, 0)
+	scene.add_child(pillar)
+	var tween: Tween = pillar.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(mat, "albedo_color:a", 0.0, 0.65)
+	tween.tween_property(mat, "emission_energy_multiplier", 0.0, 0.65)
+	tween.chain().tween_callback(pillar.queue_free)
