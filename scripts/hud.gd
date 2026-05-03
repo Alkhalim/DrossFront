@@ -844,15 +844,17 @@ func _apply_resource_colors() -> void:
 
 
 func _build_progress_bar() -> void:
-	# Inserted into the info section under the queue label; visibility toggled per selection.
+	# Inserted into the info section under the queue label. The bar
+	# stays in the layout permanently (always visible = true) so
+	# toggling between idle and 'training' doesn't shift the unit
+	# action buttons up + down. When idle, modulate.a drops to 0 so
+	# the bar reads as 'no slot in flight' without yanking the
+	# layout. Bar height bumped 4 -> 8 for readability.
 	_progress_bar = ProgressBar.new()
-	# Slim bar -- halved from the previous 120u to 60u so the train
-	# progress doesn't stretch deep into the panel + cause layout
-	# shifts on the buttons when it shows up.
-	_progress_bar.custom_minimum_size = Vector2(60, 4)
-	_progress_bar.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_progress_bar.custom_minimum_size = Vector2(120, 8)
+	_progress_bar.size_flags_horizontal = Control.SIZE_FILL
 	_progress_bar.show_percentage = false
-	_progress_bar.visible = false
+	_progress_bar.modulate.a = 0.0
 	if _info_section:
 		_info_section.add_child(_progress_bar)
 
@@ -1282,7 +1284,9 @@ func _build_queue_tooltip(building: Building) -> String:
 func _show_progress(pct: float, fill_color: Color) -> void:
 	if not _progress_bar:
 		return
-	_progress_bar.visible = true
+	# Bar stays in the layout always; modulate is what swings between
+	# 'visible' and 'hidden' so the surrounding buttons don't shift.
+	_progress_bar.modulate.a = 1.0
 	_progress_bar.value = clampf(pct, 0.0, 1.0) * 100.0
 	# Override fill color per call so the bar matches the task (build vs commit vs spawn).
 	var fill_sb: StyleBoxFlat = _progress_bar.get_theme_stylebox("fill") as StyleBoxFlat
@@ -1294,7 +1298,11 @@ func _show_progress(pct: float, fill_color: Color) -> void:
 
 func _hide_progress() -> void:
 	if _progress_bar:
-		_progress_bar.visible = false
+		# Drop alpha to 0 instead of toggling visibility so the
+		# layout slot stays reserved -- otherwise the unit action
+		# buttons jump up the moment training finishes.
+		_progress_bar.modulate.a = 0.0
+		_progress_bar.value = 0.0
 		_progress_bar.tooltip_text = ""
 
 
