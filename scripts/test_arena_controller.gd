@@ -442,6 +442,26 @@ func _apply_map_visuals() -> void:
 			env3.background_color = Color(0.16, 0.18, 0.20, 1.0)
 			env3.ambient_light_color = Color(0.45, 0.50, 0.55, 1.0)
 			env3.ambient_light_energy = 0.65
+	elif _is_schwarzwald():
+		# Schwarzwald — dense forest floor. Cool greens + dark loam
+		# tint so the cleared corridors read as 'paths through the
+		# canopy' rather than mid-grey ground. Sun stays warm but
+		# softer (filtered by canopy), fill light is mossy-cool.
+		if ground:
+			var gmat_sw: StandardMaterial3D = ground.get_surface_override_material(0) as StandardMaterial3D
+			if gmat_sw:
+				gmat_sw.albedo_color = Color(0.55, 0.62, 0.42, 1.0)
+		if dir_light:
+			dir_light.light_color = Color(0.92, 0.88, 0.72, 1.0)
+			dir_light.light_energy = 0.95
+		if fill_light:
+			fill_light.light_color = Color(0.45, 0.62, 0.45, 1.0)
+			fill_light.light_energy = 0.55
+		if world_env and world_env.environment:
+			var env_sw: Environment = world_env.environment
+			env_sw.background_color = Color(0.10, 0.16, 0.10, 1.0)
+			env_sw.ambient_light_color = Color(0.35, 0.45, 0.32, 1.0)
+			env_sw.ambient_light_energy = 0.65
 	else:
 		# Foundry Belt — cool grey industrial. Restore the .tscn
 		# defaults explicitly so switching back from Ashplains during
@@ -507,6 +527,14 @@ func _is_iron_gate() -> bool:
 	# MapId.IRON_GATE_CROSSING == 2. V3 §Pillar 6 — asymmetric-test
 	# map emphasising concealment and flanking.
 	return _map_id() == 2
+
+
+func _is_schwarzwald() -> bool:
+	# MapId.SCHWARZWALD == 3. Forest-funnelled chokepoint map: dense
+	# tree fields cover the bulk of the playable area, leaving cleared
+	# corridors between facing players. Trees are LOS occluders + nav
+	# obstacles, fellable by heavy / slow weapons only.
+	return _map_id() == 3
 
 
 func _current_roster() -> Array[Dictionary]:
@@ -1591,6 +1619,9 @@ func _setup_terrain() -> void:
 	if _is_iron_gate():
 		_setup_terrain_iron_gate()
 		return
+	if _is_schwarzwald():
+		_setup_terrain_schwarzwald()
+		return
 	_setup_terrain_foundry_belt()
 
 
@@ -1894,7 +1925,117 @@ func _setup_terrain_ashplains() -> void:
 			_spawn_neutral_building(reactor_stats, rp, randf_range(-PI, PI))
 
 
-func _decorate_ruin_block(root: Node3D, piece_size: Vector3, center_offset: Vector3 = Vector3.ZERO, add_roof_details: bool = true) -> void:
+func _setup_terrain_schwarzwald() -> void:
+	## Schwarzwald — dense forest funnelled by chokepoint corridors.
+	## The map is dominated by tree fields covering most of the
+	## playable area, with cleared corridors carved out between
+	## facing players. Trees are LOS occluders + nav obstacles
+	## (Tree class registers itself with FogOfWar on _ready) and
+	## drop a small salvage payout when felled by heavy weapons.
+	##
+	## Layout: 1v1 = single central corridor running N/S between
+	## the two HQs. 2v2 = two corridors, one per facing pair (NE
+	## allies share a corridor with their SE opponents on the right
+	## flank; NW with SW on the left). The forest fills the
+	## non-corridor area + the corners.
+	const MAP_HALF: float = 130.0
+	const HQ_CLEAR_RADIUS: float = 20.0
+	# Corridor halfwidths control how wide the cleared lanes are;
+	# large enough that a Bulwark squad fits comfortably without
+	# clipping trees on either flank.
+	const CORRIDOR_HALF_WIDTH: float = 18.0
+	# Tree density expressed as average grid spacing (smaller = denser).
+	const TREE_GRID_STEP: float = 4.5
+	const TREE_JITTER: float = 1.7
+
+	var corridor_centres_x: Array[float] = []
+	if _is_2v2():
+		# Two corridors: left/right flanks aligned with the facing
+		# allied pair. Centres at +/- 60u from the map midline.
+		corridor_centres_x = [-60.0, 60.0]
+	else:
+		# 1v1 — single central corridor down the middle.
+		corridor_centres_x = [0.0]
+
+	var hq_positions: Array[Vector3] = []
+	for r: Dictionary in _current_roster():
+		var pid: int = r["id"] as int
+		hq_positions.append(_hq_position_for(pid))
+	# Also clear a smaller radius around upcoming fuel deposit
+	# positions so a deposit isn't half-buried inside the canopy.
+	# _setup_fuel_deposits runs after this, so we reach into the
+	# same position helpers it uses.
+	var deposit_positions: Array[Vector3]
+	if _is_2v2():
+		deposit_positions = _deposit_positions_2v2()
+	else:
+		deposit_positions = _deposit_positions_1v1()
+	const DEPOSIT_CLEAR_RADIUS: float = 9.0
+
+	# A handful of tall rock pillars at the corridor mouths so the
+	# choke read is reinforced by hard cover rather than tree-only
+	# silhouettes (and so heavies have something to peek around at
+	# the choke entrances).
+	for cx: float in corridor_centres_x:
+		for cz_sign: float in [1.0, -1.0]:
+			var rock_z: float = cz_sign * 35.0
+			_spawn_terrain_piece(
+				Vector3(cx - CORRIDOR_HALF_WIDTH - 2.0, 0.0, rock_z),
+				Vector3(3.2, 3.0, 3.2),
+				"rock",
+			)
+			_spawn_terrain_piece(
+				Vector3(cx + CORRIDOR_HALF_WIDTH + 2.0, 0.0, rock_z),
+				Vector3(3.0, 3.2, 3.0),
+				"rock",
+			)
+
+	# Tree field. Walk a jittered grid; drop a tree whenever the cell
+	# is OUTSIDE every corridor and clear of every HQ + ramp.
+	var tree_script: GDScript = load("res://scripts/forest_tree.gd") as GDScript
+	if not tree_script:
+		return
+	var x: float = -MAP_HALF
+	while x <= MAP_HALF:
+		var z: float = -MAP_HALF
+		while z <= MAP_HALF:
+			var px: float = x + randf_range(-TREE_JITTER, TREE_JITTER)
+			var pz: float = z + randf_range(-TREE_JITTER, TREE_JITTER)
+			z += TREE_GRID_STEP
+			# Skip cells inside any corridor (cleared lanes).
+			var inside_corridor: bool = false
+			for cx2: float in corridor_centres_x:
+				if absf(px - cx2) <= CORRIDOR_HALF_WIDTH:
+					inside_corridor = true
+					break
+			if inside_corridor:
+				continue
+			# Skip cells inside any HQ clearance circle.
+			var pos: Vector3 = Vector3(px, 0.0, pz)
+			var too_close_to_hq: bool = false
+			for hq_pos: Vector3 in hq_positions:
+				if pos.distance_to(hq_pos) <= HQ_CLEAR_RADIUS:
+					too_close_to_hq = true
+					break
+			if too_close_to_hq:
+				continue
+			# Skip cells too close to fuel deposits.
+			var too_close_to_deposit: bool = false
+			for dp: Vector3 in deposit_positions:
+				if pos.distance_to(dp) <= DEPOSIT_CLEAR_RADIUS:
+					too_close_to_deposit = true
+					break
+			if too_close_to_deposit:
+				continue
+			# Skip ramp clearance + plateau footprints (none placed
+			# on Schwarzwald yet, but cheap insurance for later).
+			if _overlaps_plateau_footprint(pos, Vector3(2.0, 0.0, 2.0), 0.5):
+				continue
+			var tree: Node3D = tree_script.new() as Node3D
+			tree.position = pos
+			add_child(tree)
+		x += TREE_GRID_STEP
+
 	## Adds building-character details (windows, antennae, half-collapsed
 	## corner) to a ruin block of `piece_size` centered at `center_offset`
 	## within `root`. Pass center_offset = Vector3.ZERO for the base block,
@@ -2394,6 +2535,12 @@ func _spawn_terrain_piece(pos: Vector3, piece_size: Vector3, kind: String) -> vo
 func _setup_elevation() -> void:
 	if _is_ashplains():
 		_setup_elevation_ashplains()
+		return
+	if _is_schwarzwald():
+		# Schwarzwald is intentionally flat -- the map's identity is
+		# the forest funneling, not high-ground play. Skip plateau
+		# spawn entirely; subsequent terrain pass drops the trees +
+		# rocks at ground level.
 		return
 	_setup_elevation_foundry_belt()
 

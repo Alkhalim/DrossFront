@@ -52,6 +52,10 @@ const _MAP_INFO: Dictionary = {
 		"label": "Gatepoint Rhin",
 		"blurb": "Militarized crossing on the Rhine corridor.\nDense ruin clusters favour stealth flanks,\ncentral corridor favours heavy push.",
 	},
+	MatchSettingsClass.MapId.SCHWARZWALD: {
+		"label": "Schwarzwald",
+		"blurb": "Dense forest carved by chokepoint corridors.\nTrees block sight + movement, drop salvage when felled.\nHeavy / slow weapons clear vegetation; rapid fire bounces off.",
+	},
 }
 
 
@@ -275,6 +279,7 @@ func _build_map_section(parent: Container) -> void:
 		MatchSettingsClass.MapId.FOUNDRY_BELT,
 		MatchSettingsClass.MapId.ASHPLAINS_CROSSING,
 		MatchSettingsClass.MapId.IRON_GATE_CROSSING,
+		MatchSettingsClass.MapId.SCHWARZWALD,
 	]:
 		var info: Dictionary = _MAP_INFO[map_id_v] as Dictionary
 		_map_dropdown.add_item(info["label"] as String, map_id_v)

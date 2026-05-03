@@ -12,7 +12,11 @@ enum Mode { ONE_V_ONE, TWO_V_TWO }
 ## and minimal cover — tests heavy mech / ranged combat.
 ## V3 §"Pillar 6" — Iron Gate Crossing is the asymmetric-test map
 ## with mixed terrain emphasising concealment and flanking.
-enum MapId { FOUNDRY_BELT, ASHPLAINS_CROSSING, IRON_GATE_CROSSING }
+## SCHWARZWALD adds a dense-forest map (V3 §"Pillar 6" addendum).
+## Trees act as nav obstacles + LOS occluders, fellable by heavy /
+## slow weapons; the map funnels combat through chokepoint gaps
+## carved out of the canopy.
+enum MapId { FOUNDRY_BELT, ASHPLAINS_CROSSING, IRON_GATE_CROSSING, SCHWARZWALD }
 ## V3 introduces Sable as the second playable faction. Two factions are
 ## enough to validate the asymmetric architecture (Pillar 1 of the V3
 ## scope); Synod / Inheritors come later.
@@ -111,6 +115,7 @@ func get_map_label() -> String:
 	match map_id:
 		MapId.ASHPLAINS_CROSSING: return "The Ashline"
 		MapId.IRON_GATE_CROSSING: return "Gatepoint Rhin"
+		MapId.SCHWARZWALD: return "Schwarzwald"
 		_: return "Corridor 7"
 
 

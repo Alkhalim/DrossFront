@@ -1,4 +1,4 @@
-class_name Tree
+class_name ForestTree
 extends StaticBody3D
 ## Destructible map decoration. Acts as a nav obstacle and FogOfWar
 ## LOS occluder until felled by sufficiently heavy weapons fire.
@@ -98,6 +98,15 @@ func _build_visual() -> void:
 	col.shape = col_cyl
 	col.position = Vector3(0, TRUNK_HEIGHT * 0.5, 0)
 	add_child(col)
+	# Navigation obstacle so agents route around trees via RVO
+	# without baking a hole into the static navmesh per tree (a
+	# Schwarzwald-density forest would otherwise blow up the
+	# triangulation pass at startup).
+	var obstacle: NavigationObstacle3D = NavigationObstacle3D.new()
+	obstacle.radius = TRUNK_RADIUS * 1.4
+	obstacle.affect_navigation_mesh = false
+	obstacle.avoidance_enabled = true
+	add_child(obstacle)
 
 
 func take_damage(amount: int, attacker: Node3D = null) -> void:
