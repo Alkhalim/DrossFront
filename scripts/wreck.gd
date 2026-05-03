@@ -218,24 +218,52 @@ func _build_apex_landmark(base_color: Color, accent_color: Color, max_extent: fl
 	glow.position = Vector3(ember.position.x, wreck_size.y * 0.9, ember.position.z)
 	add_child(glow)
 
-	# Scorch ring — flat disc-like dark mark on the ground out past
-	# the wreck footprint, drawing the eye toward this spot from the
-	# minimap and from any forward camera angle.
-	var ring := MeshInstance3D.new()
-	var ring_mesh := QuadMesh.new()
+	# Scorch field — cluster of overlapping cylinder patches at
+	# random offsets + sizes so the outline reads as organic
+	# scorched ground rather than a single flat rectangle. Mirrors
+	# the satellite-crater pattern used elsewhere; uses opaque
+	# cylinders (no transparency) so the dim overlay applied by
+	# FogOfWar can't catch the edges and produce the flicker the
+	# old TRANSPARENCY_ALPHA QuadMesh suffered from.
 	var ring_extent: float = max_extent * 1.6
-	ring_mesh.size = Vector2(ring_extent * 2.0, ring_extent * 2.0)
-	ring.mesh = ring_mesh
-	ring.rotation.x = -PI * 0.5
-	ring.position.y = 0.02
-	var ring_mat := StandardMaterial3D.new()
-	ring_mat.albedo_color = Color(0.06, 0.04, 0.03, 0.88)
-	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	ring_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	ring_mat.no_depth_test = false
-	ring_mat.roughness = 1.0
-	ring.set_surface_override_material(0, ring_mat)
-	add_child(ring)
+	var patch_count: int = randi_range(7, 11)
+	for i: int in patch_count:
+		var patch := MeshInstance3D.new()
+		var p_cyl := CylinderMesh.new()
+		# Anchor patch dominates the silhouette; offshoots ring
+		# around the centre to break the outline.
+		var radius: float = ring_extent * (0.95 if i == 0 else randf_range(0.32, 0.70))
+		p_cyl.top_radius = radius
+		p_cyl.bottom_radius = radius
+		# Slightly thicker than the satellite version so the patches
+		# clear nearby ground decoration and don't z-fight terrain.
+		p_cyl.height = randf_range(0.06, 0.10)
+		p_cyl.radial_segments = 18
+		patch.mesh = p_cyl
+		var off_ang: float = randf_range(0.0, TAU)
+		var off_r: float = ring_extent * randf_range(0.0, 0.65) if i > 0 else 0.0
+		patch.position = Vector3(
+			cos(off_ang) * off_r,
+			0.04 + randf_range(0.0, 0.03),
+			sin(off_ang) * off_r,
+		)
+		patch.rotation.y = randf_range(0.0, TAU)
+		patch.scale = Vector3(randf_range(0.78, 1.18), 1.0, randf_range(0.78, 1.18))
+		var p_mat := StandardMaterial3D.new()
+		# Mix slightly different darken values per patch so the
+		# scorched cluster reads as 'sooted + burned ground' rather
+		# than one flat grey shade.
+		var darken: float = randf_range(0.70, 0.92)
+		p_mat.albedo_color = Color(
+			0.06 + randf_range(-0.02, 0.02),
+			0.04 + randf_range(-0.02, 0.02),
+			0.03 + randf_range(-0.01, 0.02),
+			1.0,
+		).darkened(darken - 0.6)
+		p_mat.roughness = 1.0
+		p_mat.metallic = 0.0
+		patch.set_surface_override_material(0, p_mat)
+		add_child(patch)
 
 
 func _make_wreck_material(c: Color) -> StandardMaterial3D:
@@ -315,11 +343,10 @@ func _build_satellite_crater(base_color: Color) -> void:
 		var p_mat := StandardMaterial3D.new()
 		p_mat.albedo_color = base_color.darkened(randf_range(0.45, 0.65))
 		p_mat.roughness = 1.0
-		# Slight transparency on the outer patches so their edges fade
-		# into the ground rather than terminating in a hard rim.
-		if i > 0:
-			p_mat.albedo_color.a = randf_range(0.75, 0.92)
-			p_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		# Patches stay fully opaque -- the previous transparent outer
+		# discs flickered under FogOfWar's dim overlay because the
+		# alpha sort kept switching against neighbouring debris each
+		# fog-recompute tick.
 		patch.set_surface_override_material(0, p_mat)
 		add_child(patch)
 	# Small lumps of charred soil scattered just outside the main
