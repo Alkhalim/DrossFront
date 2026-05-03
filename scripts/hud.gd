@@ -65,6 +65,13 @@ var _pause_overlay: Control = null
 @onready var _fuel_label: Label = $TopBar/FuelLabel as Label
 @onready var _microchips_label: Label = $TopBar/MicrochipsLabel as Label
 @onready var _power_label: Label = $TopBar/PowerLabel as Label
+## Trailing percent label sitting next to the main Power readout.
+## Always visible, colored independently of `_power_label` so the
+## name + value stay neutral while just the % number swings between
+## comfortable green and deficit red. Built lazily by
+## `_build_power_widget` and animated red-pulse via the per-frame
+## `_update_top_bar` tick.
+var _power_pct_label: Label = null
 @onready var _pop_label: Label = $TopBar/PopLabel as Label
 
 ## Power widget — built in _ready by `_build_power_widget`. Replaces the bare
@@ -504,9 +511,17 @@ func _build_power_widget() -> void:
 	col.mouse_filter = Control.MOUSE_FILTER_PASS
 	col.add_theme_constant_override("separation", 1)
 
-	# Move the existing label into the column.
+	# Move the existing label into the column. Wrap it in an HBox
+	# so a sibling percent label can sit immediately to its right
+	# without disturbing the existing layout / column placement.
 	top_bar.remove_child(_power_label)
-	col.add_child(_power_label)
+	var label_row := HBoxContainer.new()
+	label_row.add_theme_constant_override("separation", 6)
+	label_row.add_child(_power_label)
+	_power_pct_label = Label.new()
+	_power_pct_label.add_theme_color_override("font_color", Color(0.55, 0.95, 0.55, 1.0))
+	label_row.add_child(_power_pct_label)
+	col.add_child(label_row)
 
 	_power_bar = ProgressBar.new()
 	_power_bar.custom_minimum_size = Vector2(140, 5)
@@ -871,20 +886,37 @@ func _update_resource_display() -> void:
 		var chips_cap: int = ResourceManager.MICROCHIPS_CAP
 		_microchips_label.text = "Chips  %d / %d" % [chips_now, chips_cap]
 
-	# Power — bar shows consumption-vs-production load. Color shifts green→
-	# yellow→red as the load grows, with an extra red flag when in deficit.
+	# Power — bar shows consumption-vs-production load. The label
+	# itself stays the neutral COLOR_POWER tint always; only the
+	# trailing percent number swings between green (comfortable)
+	# and red (insufficient). The percent number pulses while in
+	# deficit so the UI nags the player without changing the main
+	# label colour.
 	var produced: int = _resource_manager.power_production
 	var consumed: int = _resource_manager.power_consumption
 	var has_deficit: bool = consumed > produced
 	var efficiency: float = _resource_manager.get_power_efficiency()
-	var eff_str: String = ""
-	if efficiency < 1.0:
-		eff_str = "  (%d%%)" % int(efficiency * 100.0)
-	_power_label.text = "Power  %d / %d%s" % [produced, consumed, eff_str]
-	_power_label.add_theme_color_override(
-		"font_color",
-		COLOR_WARN if has_deficit else COLOR_POWER
-	)
+	_power_label.text = "Power  %d / %d" % [produced, consumed]
+	_power_label.add_theme_color_override("font_color", COLOR_POWER)
+	if _power_pct_label:
+		var pct: int = int(round(efficiency * 100.0))
+		_power_pct_label.text = "(%d%%)" % pct
+		# Greenish when comfortable, red when in deficit. Distinct
+		# green from the population pop-cap green so the player can
+		# tell the two stats apart at a glance.
+		var ok_color: Color = Color(0.55, 0.95, 0.55, 1.0)
+		var bad_color: Color = Color(1.00, 0.30, 0.25, 1.0)
+		if has_deficit:
+			_power_pct_label.add_theme_color_override("font_color", bad_color)
+			# Sin-driven pulse on alpha so the deficit number
+			# breathes ~1.4 Hz; alpha clamp keeps it readable
+			# even at the trough.
+			var t: float = float(Time.get_ticks_msec()) / 1000.0
+			var a: float = 0.55 + 0.45 * (0.5 + 0.5 * sin(t * 8.8))
+			_power_pct_label.modulate.a = a
+		else:
+			_power_pct_label.add_theme_color_override("font_color", ok_color)
+			_power_pct_label.modulate.a = 1.0
 
 	# Bar value = load ratio (consumption / production), capped so deficit
 	# pegs the bar at full but recolors red.
