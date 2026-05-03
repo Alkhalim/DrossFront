@@ -620,6 +620,26 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 		"turret": _turret = building
 
 
+func notify_pre_seeded_building(key: String, building: Node) -> void:
+	## Called by scenario / campaign seeding paths that place a
+	## ready-built base around the AI before _process starts. Marks
+	## the matching `_buildings_placed` slot so the AI's normal build
+	## flow doesn't try to re-place that structure on top, and points
+	## the role-specific reference (`_generator`, `_foundry`, etc) at
+	## the seeded building so production / power / yard tracking
+	## treats it as if the AI had built it itself.
+	if key == "" or not is_instance_valid(building):
+		return
+	_buildings_placed[key] = true
+	match key:
+		"foundry": _foundry = building
+		"adv_foundry": _adv_foundry = building
+		"generator": _generator = building
+		"generator2": _generator2 = building
+		"salvage_yard": _salvage_yard = building
+		"turret": _turret = building
+
+
 func _maintain_engineers() -> void:
 	## Keep at least one Ratchet engineer alive. Built at the HQ, just like
 	## the player builds them. Without this the AI permanently loses build

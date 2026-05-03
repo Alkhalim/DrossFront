@@ -4225,6 +4225,23 @@ func _apply_scenario_seeding() -> void:
 	# starved while the 20-unit army actually starts shooting.
 	if sid == 3:
 		_scenario_extra_stress_preload()
+	# Force-refresh power + population caps. Both managers normally
+	# get notified via construction_complete signals, but the seeded
+	# buildings spawn with is_constructed = true so those signals
+	# never fire -- without this kick the player opens the match
+	# with their HQ-only baseline cap (50 pop) while 12-20 units are
+	# already on the field, producing a "population over cap" red
+	# alarm and stalled production queues.
+	var registry2: PlayerRegistry = get_node_or_null("PlayerRegistry") as PlayerRegistry
+	if registry2:
+		for entry2: Dictionary in _current_roster():
+			var rm2: Node = registry2.get_resource_manager(entry2["id"] as int)
+			if rm2 == null:
+				continue
+			if rm2.has_method("update_power"):
+				rm2.call("update_power")
+			if rm2.has_method("update_population_cap"):
+				rm2.call("update_population_cap")
 
 
 func _scenario_extra_stress_preload() -> void:
@@ -4310,11 +4327,60 @@ func _scenario_seed_base_for_player(player_id: int) -> void:
 	# -Z corners face +Z. Flip the offset's Z so the base wraps the
 	# HQ on the inward side either way.
 	var facing_sign: float = -1.0 if hq_pos.z > 0.0 else 1.0
+	# AI-tracking keys parallel to _SCENARIO_BASE_PATHS so we can
+	# call notify_pre_seeded_building on the AI for each spawned
+	# structure. Without this the AI's _buildings_placed dict stays
+	# empty and its build flow tries to drop a generator/foundry/yard
+	# on top of the seeded ones.
+	var ai_keys: Array[String] = [
+		"generator", "foundry", "salvage_yard",
+		"adv_foundry", "aerodrome", "armory",
+	]
+	var ai_ctrl: Node = _find_ai_controller_for(player_id)
 	for i: int in _SCENARIO_BASE_PATHS.size():
 		var path: String = _SCENARIO_BASE_PATHS[i]
 		var offset: Vector3 = _SCENARIO_BASE_OFFSETS[i]
 		offset.z *= facing_sign
 		_spawn_tutorial_enemy_building(path, hq_pos + offset, rm as ResourceManager, player_id)
+		if ai_ctrl and ai_ctrl.has_method("notify_pre_seeded_building"):
+			# Lookup the just-spawned building by position so the
+			# AI controller can register it. _spawn_tutorial_enemy_building
+			# adds the node to the scene root, so the lookup is a
+			# simple "what was placed there" call.
+			var bldg: Node = _find_building_at_pos(hq_pos + offset, player_id)
+			if bldg:
+				ai_ctrl.call("notify_pre_seeded_building", ai_keys[i], bldg)
+
+
+func _find_ai_controller_for(player_id: int) -> Node:
+	## Returns the AIController node that owns `player_id`, or null
+	## for the human (player_id 0). AI controllers are children of
+	## the arena root; each carries an `owner_id` field.
+	if player_id == 0:
+		return null
+	for child: Node in get_children():
+		if child is AIController:
+			if (child.get("owner_id") as int) == player_id:
+				return child
+	return null
+
+
+func _find_building_at_pos(pos: Vector3, player_id: int) -> Node:
+	## Scans the buildings group for a structure within 1u of `pos`
+	## owned by `player_id`. Used by the scenario seeder to grab the
+	## handle on the building it just spawned so the AI controller
+	## can register it.
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var b: Node3D = node as Node3D
+		if not b:
+			continue
+		if (b.get("owner_id") as int) != player_id:
+			continue
+		if b.global_position.distance_to(pos) < 1.0:
+			return b
+	return null
 
 
 func _scenario_seed_army_for_player(player_id: int, faction: int, count: int) -> void:
