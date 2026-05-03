@@ -826,6 +826,75 @@ func _dispatch_crawler_defenders(crawler_pos: Vector3) -> void:
 ## a Salvage Yard there. Returns silently when no good candidate exists
 ## (no engineer free, no resources, no safe spot) — the next interval
 ## will retry.
+func _try_contest_oil() -> void:
+	## Looks for the nearest fuel deposit that's neutral or held by an
+	## enemy, biased toward deposits NEAR the AI's base, and detaches
+	## a small attack-move group to capture / contest it. Per-tick
+	## probability scales with the AI's aggression multiplier so Hard
+	## (~1.8) almost always rolls in, Easy (~0.75) often skips, and
+	## Normal (~1.15) usually does it but not always.
+	if not _hq or not is_instance_valid(_hq):
+		return
+	# Aggression-driven dispatch chance. clampf so a future tuning
+	# bump above 2.0 doesn't always succeed (we still want a tick of
+	# variance).
+	var roll: float = randf()
+	if roll > clampf(_agg_mul * 0.6, 0.25, 0.95):
+		return
+	var hq_pos: Vector3 = _hq.global_position
+	var deposits: Array[Node] = get_tree().get_nodes_in_group("fuel_deposits")
+	if deposits.is_empty():
+		return
+	# Score deposits by (1 / (distance + 1)) with a hard cap at the
+	# preferred radius so the AI stays nearby. Neutral deposits get a
+	# slight score bonus over enemy-held (cheaper to flip).
+	var best: Node3D = null
+	var best_score: float = 0.0
+	for d_node: Node in deposits:
+		if not is_instance_valid(d_node):
+			continue
+		var dep: Node3D = d_node as Node3D
+		if not dep:
+			continue
+		var dep_owner: int = (dep.get("owner_id") as int) if "owner_id" in dep else -1
+		if dep_owner == owner_id:
+			continue  # already ours
+		var dist: float = hq_pos.distance_to(dep.global_position)
+		if dist > OIL_CONTEST_PREFERRED_RADIUS:
+			continue
+		var score: float = 1.0 / (dist + 1.0)
+		if dep_owner < 0:
+			score *= 1.4  # neutral: easier flip
+		if score > best_score:
+			best_score = score
+			best = dep
+	if not best:
+		return
+	# Pick a small detachment from idle / non-engaged units. We don't
+	# want to gut the main army, so cap to OIL_CONTEST_DETACHMENT_SIZE
+	# and skip engineers.
+	var detachment: Array[Node] = []
+	for unit: Node in _units:
+		if detachment.size() >= OIL_CONTEST_DETACHMENT_SIZE:
+			break
+		if not is_instance_valid(unit):
+			continue
+		if unit.has_method("get_builder") and unit.get("get_builder"):
+			continue
+		# Skip units that already have a forced attack target -- they're
+		# busy. Pull from "available" pool instead.
+		var c: Node = unit.get_node_or_null("CombatComponent")
+		if c and c.get("forced_target"):
+			continue
+		detachment.append(unit)
+	if detachment.is_empty():
+		return
+	for unit: Node in detachment:
+		var combat: Node = unit.get_node_or_null("CombatComponent")
+		if combat and combat.has_method("command_attack_move"):
+			combat.command_attack_move(best.global_position)
+
+
 func _try_expansion_yard() -> void:
 	if not is_instance_valid(_hq) or not _hq.get("is_constructed"):
 		return
