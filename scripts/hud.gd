@@ -2054,7 +2054,7 @@ func _rebuild_production_buttons(building: Building) -> void:
 		var unlocked: bool = building.is_unit_unlocked(unit_stat) if building.has_method("is_unit_unlocked") else true
 
 		var btn := Button.new()
-		btn.custom_minimum_size = Vector2(108, 70)
+		btn.custom_minimum_size = Vector2(124, 80)
 		btn.size_flags_horizontal = Control.SIZE_FILL
 		btn.size_flags_vertical = Control.SIZE_FILL
 
@@ -2212,7 +2212,7 @@ func _append_hq_upgrade_buttons(building: Building) -> void:
 
 func _make_hq_upgrade_button(building: Building, title: String, blurb: String, cost_s: int, cost_f: int, apply_cb: Callable) -> Button:
 	var btn := _StyledTooltipButton.new()
-	btn.custom_minimum_size = Vector2(108, 70)
+	btn.custom_minimum_size = Vector2(124, 80)
 	btn.size_flags_horizontal = Control.SIZE_FILL
 	btn.size_flags_vertical = Control.SIZE_FILL
 	_set_label_button(btn, "", title)
@@ -2626,8 +2626,13 @@ func _attach_cost_widget(btn: Button, salvage: int, fuel: int, pop: int) -> Dict
 	hbox.add_theme_constant_override("separation", 6)
 	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hbox.offset_top = -16
-	hbox.offset_bottom = -3
+	# Pinned to the bottom edge so the button text up top has more
+	# breathing room. With the new 80px button height the strip
+	# claims the bottom 14px and the label sits in the upper 66px,
+	# avoiding the icons-collide-with-text issue at the previous
+	# 70px height.
+	hbox.offset_top = -14
+	hbox.offset_bottom = -2
 	btn.add_child(hbox)
 	var refs: Dictionary = {}
 	if salvage > 0:
@@ -3744,7 +3749,7 @@ func _rebuild_build_buttons() -> void:
 		btn.bstat = bstat
 		btn.prereqs_ok = prereqs_ok
 		btn.hud = self
-		btn.custom_minimum_size = Vector2(108, 70)
+		btn.custom_minimum_size = Vector2(124, 80)
 		btn.size_flags_horizontal = Control.SIZE_FILL
 		btn.size_flags_vertical = Control.SIZE_FILL
 		var prefix: String = "[%d]" % (visible_index + 1) if prereqs_ok else "[Locked]"
@@ -3895,12 +3900,11 @@ func _clear_buttons() -> void:
 	for child: Node in _button_grid.get_children():
 		child.queue_free()
 	_action_buttons.clear()
-	# Reset column count to the standard 3 so panels other than the
-	# Armory (which switches to columns=1 for its row layout) get
-	# the original grid back. Without this, the next panel rebuild
-	# would inherit the armory's single-column layout.
+	# Reset column count to 4 so build/training panels have room for
+	# longer unit/building names (4 columns x 2 rows = 8 slots).
+	# Armory still flips to columns=1 for its branch-row layout.
 	if _button_grid:
-		_button_grid.columns = 3
+		_button_grid.columns = 4
 	# Hide the build tab row when leaving build mode (production /
 	# armory / turret button rebuilds reach this same path).
 	if _build_tab_row and is_instance_valid(_build_tab_row):

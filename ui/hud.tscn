@@ -104,7 +104,7 @@ text = ""
 
 [node name="ActionSection" type="VBoxContainer" parent="BottomPanel/HBox"]
 layout_mode = 2
-custom_minimum_size = Vector2(380, 0)
+custom_minimum_size = Vector2(540, 0)
 
 [node name="ActionLabel" type="Label" parent="BottomPanel/HBox/ActionSection"]
 layout_mode = 2
@@ -112,6 +112,6 @@ text = ""
 
 [node name="ButtonGrid" type="GridContainer" parent="BottomPanel/HBox/ActionSection"]
 layout_mode = 2
-columns = 3
+columns = 4
 theme_override_constants/h_separation = 4
 theme_override_constants/v_separation = 4
