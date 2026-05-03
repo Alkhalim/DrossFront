@@ -5,11 +5,12 @@
 
 [sub_resource type="Resource" id="weapon_widow_needles"]
 script = ExtResource("2")
-weapon_name = "Coilgun Needles"
+weapon_name = "Long Pulse Lasers"
 role_tag = &"AP"
 damage_tier = &"moderate"
 range_tier = &"long"
 rof_tier = &"fast"
+projectile_style = &"beam"
 base_accuracy = 0.92
 can_hit_air = true
 air_damage_mult = 0.2

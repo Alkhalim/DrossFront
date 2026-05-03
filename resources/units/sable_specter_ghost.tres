@@ -5,10 +5,10 @@
 
 [sub_resource type="Resource" id="weapon_pulse_repeater_ghost"]
 script = ExtResource("2")
-weapon_name = "Light Pulse Repeater"
+weapon_name = "Long Pulse Repeater"
 role_tag = &"AP"
 damage_tier = &"low"
-range_tier = &"medium"
+range_tier = &"long"
 rof_tier = &"rapid"
 base_accuracy = 0.90
 can_hit_air = true
@@ -33,4 +33,4 @@ primary_weapon = SubResource("weapon_pulse_repeater_ghost")
 is_stealth_capable = true
 detection_radius = 80.0
 stealth_restore_time = 4.0
-special_description = "Specter Ghost branch — sustained mobile camouflage with no stationary requirement. Slightly faster + tougher than the base Specter at the cost of any Mesh contribution. Reads as an autonomous scout."
+special_description = "Specter Ghost branch — Long Pulse Repeater extends shooting range so the Ghost can pick targets from outside their detection bubble. Slightly faster + tougher than the base Specter; no Mesh contribution."

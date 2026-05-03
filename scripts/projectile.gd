@@ -148,6 +148,23 @@ func _create_bullet_mesh(color: Color) -> void:
 	add_child(_mesh)
 
 
+func set_glow_boost(mult: float, tint: Color = Color(1.0, 0.78, 0.20, 1.0)) -> void:
+	## Brightens this projectile's mesh emission and shifts its
+	## albedo toward the supplied tint. Used by ability paths
+	## (Heavy Volley) to make a buffed shot read as glowing
+	## pellets at zoom. Safe to call on any style -- if there's no
+	## _mesh yet (called pre-_ready) the next physics frame's
+	## render still picks up the override material.
+	if not _mesh or not is_instance_valid(_mesh):
+		return
+	var mat: StandardMaterial3D = _mesh.get_surface_override_material(0) as StandardMaterial3D
+	if not mat:
+		return
+	mat.albedo_color = mat.albedo_color.lerp(tint, 0.7)
+	mat.emission = tint
+	mat.emission_energy_multiplier = mat.emission_energy_multiplier * maxf(mult, 1.0)
+
+
 func _create_bomb_mesh(color: Color) -> void:
 	## Heavy aerial bomb -- chunky cylindrical body with a tail-fin
 	## cluster on the back. Distinct from missiles (which are slimmer

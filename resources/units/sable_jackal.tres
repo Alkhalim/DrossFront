@@ -7,11 +7,12 @@
 
 [sub_resource type="Resource" id="weapon_jackal_smg"]
 script = ExtResource("2")
-weapon_name = "Twin Pulse SMGs"
+weapon_name = "Twin Pulse Lasers"
 role_tag = &"AP"
 damage_tier = &"moderate"
 range_tier = &"medium"
 rof_tier = &"fast"
+projectile_style = &"beam"
 can_hit_air = true
 air_damage_mult = 0.2
 
@@ -40,7 +41,7 @@ build_time = 22.5
 built_at = &"basic_foundry"
 primary_weapon = SubResource("weapon_jackal_smg")
 secondary_weapon = SubResource("weapon_jump_rockets")
-special_description = "Sable fast skirmisher with jump jets — hops over short obstacles to flank."
+special_description = "Sable fast skirmisher with twin pulse lasers and jump jets — hops over short obstacles to flank. Lasers replace standard projectile fire so a Jackal squad reads as 'laser line' at range."
 branch_a_name = "Striker"
 branch_b_name = "Widow"
 branch_a_stats = ExtResource("3")

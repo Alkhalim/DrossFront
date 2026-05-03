@@ -29,6 +29,21 @@ var _damage_mult_value: float = 1.0
 var _garrison_active: bool = false
 const GARRISON_DAMAGE_MULT: float = 1.5
 const GARRISON_FIRE_RATE_MULT: float = 1.2
+
+## Glowing-volley flag (Harbinger Swarm Marshal's Heavy Volley
+## ability). When > 0 the next primary-weapon fire spawns N glowing
+## pellets in a tight cone instead of the standard projectile, with
+## damage scaled by the queued multiplier. Cleared after the buffed
+## shot fires.
+var _glowing_volley_mult: float = 0.0
+const GLOWING_VOLLEY_PELLETS: int = 5
+const GLOWING_VOLLEY_SPREAD_RAD: float = 0.10  # tight cone, ~5.7 deg
+
+
+func queue_glowing_volley(damage_mult: float) -> void:
+	## Caller (an active ability) tags the next primary fire to come
+	## out as a glowing pellet salvo at `damage_mult` damage.
+	_glowing_volley_mult = damage_mult
 ## Cached PlayerRegistry — used to ask "is my owner allied with this owner?"
 ## instead of comparing raw owner_ids. Falls back to the raw compare when
 ## the registry isn't present, so headless / test scenes keep working.
@@ -565,6 +580,11 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	if is_air_target:
 		air_mult = weapon.air_damage_mult
 	var damage_per_member: float = float(base_damage) * role_mod * dir_mod * elevation_mod * accuracy * (1.0 - armor_reduction) * damage_buff * air_mult
+	# Heavy Volley boost — applied here so it stacks with all other
+	# damage modifiers (Mesh, garrison buff, role mult, armor red).
+	# Cleared once the buffed shot has been resolved further down.
+	if is_primary and _glowing_volley_mult > 0.0:
+		damage_per_member *= _glowing_volley_mult
 	var per_member_dmg: int = maxi(int(damage_per_member), 1)
 
 	# Fire one projectile per alive squad member, originating at the actual
@@ -587,15 +607,22 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	# is applied once per shot (same as any other weapon), but the visual is
 	# a cone of pellets so a Ripper volley reads as buckshot, not a slug.
 	# Detection prefers the explicit `is_shotgun` flag on the resource;
-	# falls back to a name match for any pre-flag tres files.
-	var is_shotgun: bool = false
-	if "is_shotgun" in weapon and weapon.get("is_shotgun"):
-		is_shotgun = true
-	elif weapon.weapon_name:
-		is_shotgun = weapon.weapon_name.to_lower().find("shotgun") != -1
-	const SHOTGUN_PELLETS: int = 9
-	const SHOTGUN_SPREAD_RAD: float = 0.26  # ~15 degrees
+	# falls back to a name match for any pre-flag tres files. Heavy Volley
+	# (active ability) also routes through the pellet branch -- it's a
+	# one-shot 5-pellet salvo with bonus damage and a glowing emissive.
+	var is_glowing_volley: bool = is_primary and _glowing_volley_mult > 0.0
+	var is_shotgun: bool = is_glowing_volley
+	if not is_glowing_volley:
+		if "is_shotgun" in weapon and weapon.get("is_shotgun"):
+			is_shotgun = true
+		elif weapon.weapon_name:
+			is_shotgun = weapon.weapon_name.to_lower().find("shotgun") != -1
+	var SHOTGUN_PELLETS: int = 9
+	var SHOTGUN_SPREAD_RAD: float = 0.26  # ~15 degrees
 	const SHOTGUN_PELLET_RANGE: float = 14.0
+	if is_glowing_volley:
+		SHOTGUN_PELLETS = GLOWING_VOLLEY_PELLETS
+		SHOTGUN_SPREAD_RAD = GLOWING_VOLLEY_SPREAD_RAD
 
 	# V3 §Pillar 5 — per-shot hit roll. Squad-strength + Mesh + base
 	# weapon accuracy combine into a final hit chance, modified by
@@ -707,7 +734,12 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 					pellet_target.y = aim_pos.y
 					# Force "fast" tier so Projectile renders these as bullet
 					# slugs regardless of the parent weapon's classification.
-					var pellet: Node3D = proj_script.create(fire_pos, pellet_target, weapon.role_tag, &"fast", &"", _shooter_faction_id())
+					var pellet: Projectile = proj_script.create(fire_pos, pellet_target, weapon.role_tag, &"fast", &"", _shooter_faction_id())
+					if is_glowing_volley:
+						# Bright warning-yellow tint + 3x emission so the
+						# Heavy Volley salvo unmistakably reads as the
+						# buffed shot, not regular fire.
+						pellet.set_glow_boost(3.0, Color(1.0, 0.85, 0.20, 1.0))
 					get_tree().current_scene.add_child(pellet)
 			else:
 				var proj: Node3D = proj_script.create(fire_pos, aim_pos, weapon.role_tag, weapon.rof_tier, weapon.projectile_style, _shooter_faction_id())
@@ -729,6 +761,12 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 		var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
 		if audio and audio.has_method("play_weapon_fire"):
 			audio.play_weapon_fire(weapon, _unit.global_position)
+
+	# Heavy Volley is a one-shot buff -- clear the multiplier now
+	# that the buffed primary shot has fired so the next ordinary
+	# shot returns to normal damage / spread.
+	if is_glowing_volley:
+		_glowing_volley_mult = 0.0
 
 
 ## Stray-shot landing radius. A miss that drifts within this many

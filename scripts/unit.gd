@@ -3259,6 +3259,8 @@ func trigger_ability() -> bool:
 			fired = _ability_reactor_surge()
 		"Garrison":
 			fired = _ability_garrison()
+		"Heavy Volley":
+			fired = _ability_heavy_volley()
 		_:
 			# Unknown ability name on stats — don't crash, just
 			# refuse to fire so the player notices.
@@ -3379,6 +3381,20 @@ func _ability_reactor_surge() -> bool:
 			hits += 1
 	_spawn_pulse_visual(stats.ability_radius, Color(1.0, 0.5, 0.2))
 	return hits > 0 or true
+
+
+func _ability_heavy_volley() -> bool:
+	## Harbinger Swarm Marshal's Heavy Volley. Flags the combat
+	## component so the NEXT primary-weapon shot fires as a glowing
+	## 5-pellet salvo at 2x damage. Cooldown gates re-trigger; the
+	## flag clears on the buffed shot (or harmlessly on next cast).
+	var combat: Node = get_combat()
+	if not combat:
+		return false
+	if not ("queue_glowing_volley" in combat) and not combat.has_method("queue_glowing_volley"):
+		return false
+	combat.call("queue_glowing_volley", 2.0)
+	return true
 
 
 func _ability_garrison() -> bool:

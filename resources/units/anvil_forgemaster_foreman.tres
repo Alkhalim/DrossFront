@@ -43,6 +43,5 @@ ability_hotkey = "D"
 ability_cooldown = 41.0
 ability_radius = 22.0
 ability_duration = 5.0
-ability_autocast = true
-ability_description = "Heal friendly mechs within 22u for 156 HP/s over 5s (780 total). Autocasts in combat. The army-wide medic upgrade."
+ability_description = "Heal friendly mechs within 22u for 156 HP/s over 5s (780 total). The army-wide medic upgrade."
 special_description = "Forgemaster Foreman branch — bigger Factory Pulse radius and a heavier heal tick. Same Skyspike AA battery as the base, lighter Riveter for self-defense. The army-wide medic build."

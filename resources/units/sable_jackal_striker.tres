@@ -5,11 +5,12 @@
 
 [sub_resource type="Resource" id="weapon_striker_cannons"]
 script = ExtResource("2")
-weapon_name = "Heavy Pulse Cannons"
+weapon_name = "Heavy Pulse Lasers"
 role_tag = &"AP"
 damage_tier = &"high"
 range_tier = &"medium"
 rof_tier = &"moderate"
+projectile_style = &"beam"
 base_accuracy = 0.85
 
 [resource]
