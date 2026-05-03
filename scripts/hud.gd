@@ -861,9 +861,22 @@ func _build_progress_bar() -> void:
 
 ## --- Resource bar ---
 
+## Resource display throttle (msec). Resource counters tick at
+## game-second timescales -- 60Hz updates were re-allocating the
+## label format strings + walking add_theme_color_override every
+## frame for values that hadn't changed. ~10Hz is faster than the
+## eye can read.
+const _RESOURCE_REFRESH_MS: int = 100
+var _resource_refresh_at_msec: int = 0
+
+
 func _update_resource_display() -> void:
 	if not _resource_manager:
 		return
+	var now_msec: int = Time.get_ticks_msec()
+	if now_msec < _resource_refresh_at_msec:
+		return
+	_resource_refresh_at_msec = now_msec + _RESOURCE_REFRESH_MS
 	# Resource counters get a 30s rolling-average income suffix so the
 	# player can read economy health at a glance without watching the
 	# numbers tick.
