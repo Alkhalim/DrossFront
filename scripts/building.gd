@@ -2885,10 +2885,26 @@ func advance_construction(amount: float, builder: Node = null) -> void:
 	# FOW visibility + auto-target acquisition start treating the foundation
 	# as a real structure. Pre-start foundations are placement intent only.
 	construction_started = true
-	_construction_progress += amount
-	_build_amount_this_tick += amount
+	# Diminishing returns: 1st builder this tick contributes 100%,
+	# each additional builder contributes 10% less than the previous,
+	# floored at 10%. So 1 / 0.9 / 0.8 / 0.7 / ... / 0.1 / 0.1 / 0.1.
+	# Tracking key: builder instance_id this tick. Index = current
+	# distinct-builders count BEFORE adding this one.
+	var scaled: float = amount
 	if builder:
-		_builders_this_tick[builder.get_instance_id()] = true
+		var builder_id: int = builder.get_instance_id()
+		if not _builders_this_tick.has(builder_id):
+			var index: int = _builders_this_tick.size()
+			var factor: float = maxf(1.0 - float(index) * 0.1, 0.1)
+			scaled = amount * factor
+			_builders_this_tick[builder_id] = factor
+		else:
+			# Same builder calling multiple times in the tick -- reuse
+			# the factor we assigned them on the first call so the
+			# whole frame stays consistent.
+			scaled = amount * (_builders_this_tick[builder_id] as float)
+	_construction_progress += scaled
+	_build_amount_this_tick += scaled
 	_update_progress_bar()
 	_update_construction_rise()
 	if _construction_progress >= stats.build_time:
