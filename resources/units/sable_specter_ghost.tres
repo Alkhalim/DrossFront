@@ -17,6 +17,7 @@ air_damage_mult = 0.2
 [resource]
 script = ExtResource("1")
 unit_name = "Specter (Ghost)"
+display_name = "SHADE Scout (Ghost)"
 unit_class = &"light"
 hp_total = 960
 hp_per_unit = 240

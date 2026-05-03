@@ -16,6 +16,7 @@ rof_tier = &"fast"
 [resource]
 script = ExtResource("1")
 unit_name = "Switchblade Interceptor"
+display_name = "BLADE Interceptor"
 unit_class = &"aircraft"
 hp_total = 950
 hp_per_unit = 475

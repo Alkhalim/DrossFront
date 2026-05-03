@@ -17,6 +17,7 @@ base_accuracy = 0.85
 [resource]
 script = ExtResource("1")
 unit_name = "Jackal (Striker)"
+display_name = "JACKAL (Striker)"
 unit_class = &"medium"
 hp_total = 1620
 hp_per_unit = 540

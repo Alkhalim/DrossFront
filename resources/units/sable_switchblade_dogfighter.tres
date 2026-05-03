@@ -15,6 +15,7 @@ base_accuracy = 0.94
 [resource]
 script = ExtResource("1")
 unit_name = "Switchblade (Dogfighter)"
+display_name = "BLADE Interceptor (Dogfighter)"
 unit_class = &"aircraft"
 hp_total = 1020
 hp_per_unit = 510

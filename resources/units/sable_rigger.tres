@@ -16,6 +16,7 @@ base_accuracy = 0.85
 [resource]
 script = ExtResource("1")
 unit_name = "Rigger"
+display_name = "MPR Field Specialist"
 unit_class = &"engineer"
 hp_total = 680
 hp_per_unit = 136

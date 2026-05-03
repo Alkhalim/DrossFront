@@ -20,6 +20,7 @@ air_damage_mult = 0.2
 [resource]
 script = ExtResource("1")
 unit_name = "Jackal"
+display_name = "JACKAL Strike Platform"
 unit_class = &"medium"
 hp_total = 1482
 hp_per_unit = 494

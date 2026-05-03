@@ -16,6 +16,7 @@ can_hit_air = true
 [resource]
 script = ExtResource("1")
 unit_name = "Fang (Hunter)"
+display_name = "FANG Drone Pack (Hunter)"
 unit_class = &"aircraft"
 hp_total = 700
 hp_per_unit = 70

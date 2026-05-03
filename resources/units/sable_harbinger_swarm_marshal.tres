@@ -26,6 +26,7 @@ max_active_drones = 6
 [resource]
 script = ExtResource("1")
 unit_name = "Harbinger (Swarm Marshal)"
+display_name = "NODE Command Carrier (Swarm Marshal)"
 unit_class = &"heavy"
 hp_total = 2080
 hp_per_unit = 1040

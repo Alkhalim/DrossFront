@@ -19,6 +19,7 @@ air_damage_mult = 0.2
 [resource]
 script = ExtResource("1")
 unit_name = "Jackal (Widow)"
+display_name = "JACKAL (Widow)"
 unit_class = &"medium"
 hp_total = 1380
 hp_per_unit = 460

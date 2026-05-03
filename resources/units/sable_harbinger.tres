@@ -28,6 +28,7 @@ max_active_drones = 4
 [resource]
 script = ExtResource("1")
 unit_name = "Harbinger"
+display_name = "NODE Command Carrier"
 unit_class = &"heavy"
 hp_total = 2080
 hp_per_unit = 1040

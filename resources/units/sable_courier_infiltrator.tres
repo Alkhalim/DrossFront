@@ -15,6 +15,7 @@ base_accuracy = 0.84
 [resource]
 script = ExtResource("1")
 unit_name = "Courier (Infiltrator)"
+display_name = "RELAY Transport (Infiltrator)"
 unit_class = &"transport"
 hp_total = 1280
 hp_per_unit = 1280

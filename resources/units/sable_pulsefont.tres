@@ -16,6 +16,7 @@ base_accuracy = 0.95
 [resource]
 script = ExtResource("1")
 unit_name = "Pulsefont"
+display_name = "SIGNAL Coordinator"
 unit_class = &"medium"
 hp_total = 980
 hp_per_unit = 980

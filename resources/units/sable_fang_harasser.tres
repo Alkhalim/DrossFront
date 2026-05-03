@@ -17,6 +17,7 @@ air_damage_mult = 0.2
 [resource]
 script = ExtResource("1")
 unit_name = "Fang (Harasser)"
+display_name = "FANG Drone Pack (Harasser)"
 unit_class = &"aircraft"
 hp_total = 580
 hp_per_unit = 58
