@@ -28,4 +28,4 @@ cost_fuel = 13
 build_time = 24.5
 built_at = &"basic_foundry"
 primary_weapon = SubResource("weapon_autocannons")
-special_description = "Recon-support refit. Sight Very Long. Autocast Smoke when squad takes >25% HP damage. +15% sight radius for all Anvil units within 250m."
+special_description = "Recon-support refit. Very-long sight extends Anvil scouting range; pair with siege units to spot for them."

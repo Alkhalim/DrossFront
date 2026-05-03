@@ -31,4 +31,4 @@ build_time = 16.0
 built_at = &"basic_foundry"
 primary_weapon = SubResource("weapon_spotter_mg")
 detection_radius = 200.0
-special_description = "Rook Spotter — replaces one MG with a sensor mast. Extreme sight range + 200u stealth-detection radius. The Anvil counter to Sable stealth: park a Spotter squad on a flank and any concealed Specter passing through becomes targetable. Squad-strength accuracy bonus bumped to +18% (the spec's Target Paint analogue)."
+special_description = "Rook Spotter — replaces one MG with a sensor mast. Extreme sight range + 200u stealth-detection radius. The Anvil counter to Sable stealth: park a Spotter squad on a flank and any concealed Specter passing through becomes targetable."

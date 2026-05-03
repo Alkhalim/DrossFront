@@ -43,5 +43,6 @@ ability_hotkey = "D"
 ability_cooldown = 28.0
 ability_radius = 18.0
 ability_duration = 6.0
-ability_description = "Friendly mechs within 18u gain +30% damage for 6s."
+ability_autocast = true
+ability_description = "Friendly mechs within 18u gain +30% damage for 6s. Autocasts in combat."
 special_description = "Forgemaster Reactor branch — pulls the heal ring offline and overdrives nearby mechs' weapons instead. Riveter steps up to moderate damage; Skyspike AA stays. The frontline-DPS build."

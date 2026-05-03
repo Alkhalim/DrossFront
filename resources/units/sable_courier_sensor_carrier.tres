@@ -15,7 +15,7 @@ base_accuracy = 0.84
 [resource]
 script = ExtResource("1")
 unit_name = "Courier (Sensor Carrier)"
-unit_class = &"medium"
+unit_class = &"transport"
 hp_total = 1320
 hp_per_unit = 1320
 armor_class = &"medium"

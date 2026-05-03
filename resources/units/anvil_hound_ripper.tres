@@ -38,4 +38,4 @@ build_time = 24.5
 built_at = &"basic_foundry"
 primary_weapon = SubResource("weapon_autocannons")
 secondary_weapon = SubResource("weapon_shotgun")
-special_description = "Close-range brawler. Shoulder shotgun array replaces missiles. HP 640/unit. First Strike: +50% damage on first attack."
+special_description = "Close-range brawler. Shoulder shotgun array replaces the AT missile rack. Tougher chassis (640 HP / unit) so the Ripper survives the close approach."
