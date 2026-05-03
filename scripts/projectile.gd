@@ -61,7 +61,12 @@ const ROF_STYLES: Dictionary = {
 
 static func create(from: Vector3, to: Vector3, role_tag: StringName, rof_tier: StringName = &"moderate", style_override: StringName = &"", shooter_faction: int = 0) -> Projectile:
 	var proj := Projectile.new()
-	var fire_y: float = from.y + 1.0
+	# Only lift the spawn point off the ground when the caller passed
+	# a low-y position (e.g. unit center / member position). Muzzle
+	# positions returned by Unit.get_muzzle_positions are already at
+	# barrel height, so lifting them by +1u was making lasers (and
+	# any other beam-style projectile) render visibly above the gun.
+	var fire_y: float = from.y if from.y >= 0.5 else from.y + 1.0
 	proj.start_pos = Vector3(from.x, fire_y, from.z)
 	proj.target_pos = Vector3(to.x, to.y + 0.8, to.z)
 	# Use `position` (local) here — the projectile isn't in the tree yet,
