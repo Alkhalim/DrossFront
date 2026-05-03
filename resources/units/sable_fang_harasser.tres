@@ -33,6 +33,6 @@ built_at = &"aerodrome"
 primary_weapon = SubResource("weapon_harasser_repeater")
 is_aircraft = true
 flight_altitude = 5.5
-flight_speed = 22.0
+flight_speed = 16.5
 special_description = "Fang Harasser — fast (22 u/s) high-ROF light pulse repeaters tuned for picking off enemy salvage workers + Crawler escorts. Lower HP, lower pop cost, much higher mobility. Reads as the economy-disruption build."
 passive_description = "Economy Disruption Loadout — high-ROF light pulse repeaters and 22 u/s top speed for picking off enemy workers + Crawler escorts."
