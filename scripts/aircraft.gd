@@ -354,8 +354,20 @@ func _build_visuals() -> void:
 	match stats.unit_name:
 		"Phalanx Drone":
 			_build_drone_swarm(8, _team_color(), Color(0.45, 0.42, 0.36), 0.7, true)
+		"Phalanx (Shield)":
+			_build_drone_swarm(8, _team_color(), Color(0.45, 0.42, 0.36), 0.7, true)
+			_apply_phalanx_shield_extras()
+		"Phalanx (Interceptor)":
+			_build_drone_swarm(8, _team_color(), Color(0.45, 0.42, 0.36), 0.7, true)
+			_apply_phalanx_interceptor_extras()
 		"Fang Drone":
 			_build_drone_swarm(10, _team_color(), Color(0.10, 0.11, 0.13), 0.55, false)
+		"Fang (Hunter)":
+			_build_drone_swarm(10, _team_color(), Color(0.10, 0.11, 0.13), 0.55, false)
+			_apply_fang_hunter_extras()
+		"Fang (Harasser)":
+			_build_drone_swarm(10, _team_color(), Color(0.10, 0.11, 0.13), 0.55, false)
+			_apply_fang_harasser_extras()
 		"Hammerhead Gunship", "Hammerhead (Bomber)", "Hammerhead (Escort)":
 			# All Hammerhead variants share the gunship hull build so
 			# the branches read as the same airframe with different
@@ -443,6 +455,125 @@ func _v_formation_offsets(n: int, spacing: float) -> Array[Vector3]:
 			arr.append(Vector3(-x, 0.0, z))
 			arr.append(Vector3(+x, 0.0, z))
 	return arr
+
+
+func _apply_phalanx_shield_extras() -> void:
+	# Each Shield drone gains a small forward shield-emitter disc --
+	# a flat cyan emissive cylinder mounted in front of the body so
+	# the formation looks like 'eight little defensive screens
+	# floating ahead of their drones'. Pure visual; no real shield
+	# behavior wired to it.
+	for drone: Node3D in _drone_meshes:
+		if not is_instance_valid(drone):
+			continue
+		var disc := MeshInstance3D.new()
+		disc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var d_cyl := CylinderMesh.new()
+		d_cyl.top_radius = 0.32
+		d_cyl.bottom_radius = 0.32
+		d_cyl.height = 0.04
+		d_cyl.radial_segments = 18
+		disc.mesh = d_cyl
+		disc.rotation.x = PI * 0.5
+		disc.position = Vector3(0.0, 0.0, 0.55)
+		var d_mat := StandardMaterial3D.new()
+		d_mat.albedo_color = Color(0.30, 0.78, 1.0, 0.55)
+		d_mat.emission_enabled = true
+		d_mat.emission = Color(0.30, 0.78, 1.0, 1.0)
+		d_mat.emission_energy_multiplier = 1.4
+		d_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		d_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		d_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		disc.set_surface_override_material(0, d_mat)
+		drone.add_child(disc)
+
+
+func _apply_phalanx_interceptor_extras() -> void:
+	# Each Interceptor drone gains a streamlined sharp nose extension
+	# (long forward wedge) + an extra under-slung gun barrel, so the
+	# formation reads as 'pure dogfighter' vs the Shield's defensive
+	# disc.
+	for drone: Node3D in _drone_meshes:
+		if not is_instance_valid(drone):
+			continue
+		# Sharp nose wedge.
+		var nose := MeshInstance3D.new()
+		nose.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var n_box := BoxMesh.new()
+		n_box.size = Vector3(0.18, 0.10, 0.55)
+		nose.mesh = n_box
+		nose.position = Vector3(0.0, -0.02, 0.55)
+		nose.rotation.x = deg_to_rad(-6.0)
+		nose.set_surface_override_material(0, _aircraft_metal_mat(Color(0.42, 0.38, 0.30)))
+		drone.add_child(nose)
+		# Under-slung gun barrel.
+		var barrel := MeshInstance3D.new()
+		barrel.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var b_cyl := CylinderMesh.new()
+		b_cyl.top_radius = 0.04
+		b_cyl.bottom_radius = 0.05
+		b_cyl.height = 0.40
+		b_cyl.radial_segments = 8
+		barrel.mesh = b_cyl
+		barrel.rotation.x = PI * 0.5
+		barrel.position = Vector3(0.0, -0.18, 0.45)
+		barrel.set_surface_override_material(0, _aircraft_metal_mat(Color(0.10, 0.10, 0.10)))
+		drone.add_child(barrel)
+
+
+func _apply_fang_hunter_extras() -> void:
+	# Each Hunter drone grows a tall sensor needle on its top with a
+	# violet-emissive tip. Reads as the long-sight tracking variant
+	# vs the Harasser's twin-gun loadout.
+	for drone: Node3D in _drone_meshes:
+		if not is_instance_valid(drone):
+			continue
+		var needle := MeshInstance3D.new()
+		needle.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var n_box := BoxMesh.new()
+		n_box.size = Vector3(0.03, 0.32, 0.03)
+		needle.mesh = n_box
+		needle.position = Vector3(0.0, 0.20, 0.0)
+		needle.set_surface_override_material(0, _aircraft_metal_mat(Color(0.10, 0.10, 0.13)))
+		drone.add_child(needle)
+		# Violet tip light.
+		var tip := MeshInstance3D.new()
+		tip.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var t_sph := SphereMesh.new()
+		t_sph.radius = 0.05
+		t_sph.height = 0.10
+		tip.mesh = t_sph
+		tip.position = Vector3(0.0, 0.40, 0.0)
+		var t_mat := StandardMaterial3D.new()
+		t_mat.albedo_color = SABLE_NEON_PALE
+		t_mat.emission_enabled = true
+		t_mat.emission = SABLE_NEON_PALE
+		t_mat.emission_energy_multiplier = 2.0
+		tip.set_surface_override_material(0, t_mat)
+		drone.add_child(tip)
+
+
+func _apply_fang_harasser_extras() -> void:
+	# Each Harasser drone gains twin extra forward gun barrels
+	# bracketing the body. Sells the 'salvage-disrupt repeater'
+	# economy-disruption identity with a visible forward bristle.
+	for drone: Node3D in _drone_meshes:
+		if not is_instance_valid(drone):
+			continue
+		for side: int in 2:
+			var sx: float = -1.0 if side == 0 else 1.0
+			var barrel := MeshInstance3D.new()
+			barrel.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var b_cyl := CylinderMesh.new()
+			b_cyl.top_radius = 0.025
+			b_cyl.bottom_radius = 0.030
+			b_cyl.height = 0.35
+			b_cyl.radial_segments = 8
+			barrel.mesh = b_cyl
+			barrel.rotation.x = PI * 0.5
+			barrel.position = Vector3(sx * 0.18, -0.05, 0.42)
+			barrel.set_surface_override_material(0, _aircraft_metal_mat(Color(0.06, 0.06, 0.08)))
+			drone.add_child(barrel)
 
 
 func _build_anvil_drone(parent: Node3D, team: Color, body_color: Color, s: float) -> void:
