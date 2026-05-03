@@ -1965,10 +1965,12 @@ func _setup_terrain_schwarzwald() -> void:
 	# to lay down a base. The previous 20u barely cleared the HQ
 	# itself + a foundry; 38u opens up an actual building plot.
 	const HQ_CLEAR_RADIUS: float = 38.0
-	# Corridor halfwidths control how wide the cleared lanes are;
-	# large enough that a Bulwark squad fits comfortably without
-	# clipping trees on either flank.
-	const CORRIDOR_HALF_WIDTH: float = 18.0
+	# Corridor halfwidths control how wide the cleared lanes are.
+	# Tightened to ~2/3 of the previous 18u so the chokepoint
+	# actually feels like a chokepoint -- a Bulwark squad still
+	# fits but the player can't simply spread their army across
+	# the corridor and walk past the choke.
+	const CORRIDOR_HALF_WIDTH: float = 12.0
 	# Tree density. Step ~3.4u is just under TRUNK_RADIUS * 2 for a
 	# trunk of 1.05u + a small jitter buffer -- units (collision
 	# radius ~1.5u) cannot squeeze between adjacent trunks, so the

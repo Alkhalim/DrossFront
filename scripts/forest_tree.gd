@@ -18,15 +18,22 @@ enum Variant { HEALTHY, DEAD, STUMP }
 const TREE_HP: int = 80
 const TREE_SALVAGE_DROP_MIN: int = 4
 const TREE_SALVAGE_DROP_MAX: int = 9
-## Trunk radius is the on-the-ground footprint -- sized so units
-## (~1.5u radius) can't slip between adjacent trees on the spawn
-## grid step (3.4u). Forest is meant to actually block movement,
-## not just slow it; tighter trunks make the chokepoints real.
-const TRUNK_RADIUS: float = 1.05
-const TRUNK_HEIGHT: float = 3.4
-const STUMP_HEIGHT: float = 1.4
-const CANOPY_RADIUS: float = 1.8
-const CANOPY_HEIGHT: float = 2.6
+## Visual trunk radius -- intentionally slim so trees read as tall
+## conifers, not stubby mushroom bases. Collision is wider (see
+## TRUNK_COLLISION_RADIUS below) so the forest physically blocks
+## movement even though the trunks LOOK narrow.
+const TRUNK_RADIUS_VISUAL: float = 0.42
+const TRUNK_HEIGHT: float = 5.4
+const STUMP_HEIGHT: float = 1.6
+## Collision radius is much wider than the visual trunk so adjacent
+## trees on the spawn grid (3.4u step + 1.1u jitter) overlap their
+## collision boxes. Result: no gap between adjacent trunks larger
+## than ~0.4u, which is smaller than even a moving-shrunk mech's
+## collision footprint -- the forest actually walls movement off
+## instead of letting squads weave between trunks.
+const TRUNK_COLLISION_RADIUS: float = 1.55
+const CANOPY_RADIUS: float = 1.95
+const CANOPY_HEIGHT: float = 3.0
 ## Cell radius the tree occupies for FogOfWar's LOS occluder grid.
 ## A single trunk shouldn't block a whole 4u cell on its own; we
 ## still register so dense clusters (a forest) stack into a real
@@ -49,6 +56,8 @@ static var _mesh_trunk_dead: CylinderMesh = null
 static var _mesh_trunk_stump: CylinderMesh = null
 static var _mesh_canopy_layers: Array[CylinderMesh] = []  # 3 layers
 static var _mesh_dead_branch: CylinderMesh = null
+static var _mesh_root_flare: CylinderMesh = null
+static var _mesh_bark_plate: BoxMesh = null
 # Shared material palettes.
 static var _mats_trunk: Array[StandardMaterial3D] = []
 static var _mats_trunk_dead: Array[StandardMaterial3D] = []
@@ -62,42 +71,69 @@ static func _ensure_shared_assets() -> void:
 	if _shared_assets_built:
 		return
 	_shared_assets_built = true
-	# Healthy trunk -- standard tall cylinder.
+	# Healthy trunk -- tall slim cylinder with a subtle taper. Real
+	# conifer profile (was a stubby mushroom-base flare before).
+	# 12 radial segments so the silhouette reads as round, not
+	# polygonal, at building-detail fidelity.
 	var trunk: CylinderMesh = CylinderMesh.new()
-	trunk.top_radius = TRUNK_RADIUS * 0.55
-	trunk.bottom_radius = TRUNK_RADIUS
+	trunk.top_radius = TRUNK_RADIUS_VISUAL * 0.78
+	trunk.bottom_radius = TRUNK_RADIUS_VISUAL
 	trunk.height = TRUNK_HEIGHT
-	trunk.radial_segments = 10
+	trunk.radial_segments = 12
 	_mesh_trunk_full = trunk
-	# Dead trunk -- slightly thinner (no bark mass), same height.
+	# Dead trunk -- slim, slightly thinner at the top, near
+	# straight cylinder. Same height as healthy so the silhouettes
+	# align in a mixed forest.
 	var dead: CylinderMesh = CylinderMesh.new()
-	dead.top_radius = TRUNK_RADIUS * 0.40
-	dead.bottom_radius = TRUNK_RADIUS * 0.85
+	dead.top_radius = TRUNK_RADIUS_VISUAL * 0.62
+	dead.bottom_radius = TRUNK_RADIUS_VISUAL * 0.88
 	dead.height = TRUNK_HEIGHT
-	dead.radial_segments = 8
+	dead.radial_segments = 10
 	_mesh_trunk_dead = dead
-	# Stump -- short snapped trunk, wider at the base.
+	# Stump -- short snapped trunk, slightly wider so the broken
+	# cap reads at zoom.
 	var stump: CylinderMesh = CylinderMesh.new()
-	stump.top_radius = TRUNK_RADIUS * 0.85
-	stump.bottom_radius = TRUNK_RADIUS * 1.10
+	stump.top_radius = TRUNK_RADIUS_VISUAL * 1.10
+	stump.bottom_radius = TRUNK_RADIUS_VISUAL * 1.30
 	stump.height = STUMP_HEIGHT
-	stump.radial_segments = 10
+	stump.radial_segments = 12
 	_mesh_trunk_stump = stump
-	# Canopy meshes -- 3 stacked discs.
+	# Canopy meshes -- 3 stacked discs with deeper taper so the
+	# silhouette reads as a proper conifer cone instead of a
+	# layered cake. Bottom layer is the widest, top layer almost
+	# pointed.
 	for layer: int in 3:
 		var dc: CylinderMesh = CylinderMesh.new()
-		dc.top_radius = CANOPY_RADIUS * (0.45 - 0.10 * float(layer))
-		dc.bottom_radius = CANOPY_RADIUS * (0.95 - 0.18 * float(layer))
-		dc.height = CANOPY_HEIGHT * 0.45
-		dc.radial_segments = 12
+		dc.top_radius = CANOPY_RADIUS * (0.20 + 0.10 * float(layer))
+		dc.bottom_radius = CANOPY_RADIUS * (0.95 - 0.28 * float(layer))
+		dc.height = CANOPY_HEIGHT * 0.40
+		dc.radial_segments = 14
 		_mesh_canopy_layers.append(dc)
 	# Dead-tree branches -- thin angular cylinders rotated outward.
 	var br: CylinderMesh = CylinderMesh.new()
-	br.top_radius = 0.05
-	br.bottom_radius = 0.12
-	br.height = 1.6
+	br.top_radius = 0.04
+	br.bottom_radius = 0.08
+	br.height = 1.4
 	br.radial_segments = 6
 	_mesh_dead_branch = br
+	# Root flare -- a stubby disc that sits at the base of healthy
+	# + dead trunks so the foot reads as roots flaring into the
+	# ground rather than a pole stuck in a hole.
+	if _mesh_root_flare == null:
+		var rf: CylinderMesh = CylinderMesh.new()
+		rf.top_radius = TRUNK_RADIUS_VISUAL * 1.05
+		rf.bottom_radius = TRUNK_RADIUS_VISUAL * 1.65
+		rf.height = 0.30
+		rf.radial_segments = 12
+		_mesh_root_flare = rf
+	# Bark plate -- a thin tall vertical strip applied to the
+	# trunk side at random rotations so bark detail breaks up the
+	# perfectly-round trunk silhouette. 2-3 plates per healthy
+	# tree.
+	if _mesh_bark_plate == null:
+		var bp: BoxMesh = BoxMesh.new()
+		bp.size = Vector3(0.07, TRUNK_HEIGHT * 0.78, 0.04)
+		_mesh_bark_plate = bp
 	# Trunk material palette -- muted dark browns. Dieselpunk
 	# wasteland forest, not a National Park brochure.
 	var trunk_palette: Array[Color] = [
@@ -143,13 +179,17 @@ static func _ensure_shared_assets() -> void:
 		mc.roughness = 1.0
 		mc.metallic = 0.0
 		_mats_canopy.append(mc)
-	# Collision shapes shared per trunk size.
+	# Collision shapes -- decoupled from the visual trunk radius.
+	# The collision is intentionally MUCH wider than the visible
+	# trunk so adjacent trees on the spawn grid overlap their
+	# collision boxes and units physically can't slip between
+	# them. Visually the trunks still read as slim conifers.
 	var col_full: CylinderShape3D = CylinderShape3D.new()
-	col_full.radius = TRUNK_RADIUS
+	col_full.radius = TRUNK_COLLISION_RADIUS
 	col_full.height = TRUNK_HEIGHT
 	_shape_trunk_full = col_full
 	var col_stump: CylinderShape3D = CylinderShape3D.new()
-	col_stump.radius = TRUNK_RADIUS * 1.05
+	col_stump.radius = TRUNK_COLLISION_RADIUS
 	col_stump.height = STUMP_HEIGHT
 	_shape_trunk_stump = col_stump
 
@@ -190,11 +230,38 @@ func _build_visual() -> void:
 func _build_healthy() -> void:
 	var trunk_mat: StandardMaterial3D = _mats_trunk[randi() % _mats_trunk.size()]
 	var canopy_mat: StandardMaterial3D = _mats_canopy[randi() % _mats_canopy.size()]
+	# Trunk -- tall slim cylinder.
 	var trunk: MeshInstance3D = MeshInstance3D.new()
 	trunk.mesh = _mesh_trunk_full
 	trunk.position = Vector3(0, TRUNK_HEIGHT * 0.5, 0)
 	trunk.set_surface_override_material(0, trunk_mat)
 	add_child(trunk)
+	# Root flare -- wider stub at the base so the trunk reads as
+	# anchored in soil rather than a pole stuck in a hole.
+	var flare: MeshInstance3D = MeshInstance3D.new()
+	flare.mesh = _mesh_root_flare
+	flare.position = Vector3(0, 0.15, 0)
+	flare.set_surface_override_material(0, trunk_mat)
+	add_child(flare)
+	# Bark plates -- 2-3 thin vertical strips at random rotations
+	# so the trunk silhouette breaks up the perfect cylinder. Use
+	# a slightly darker variant of the trunk palette so the plates
+	# read as bark ridges, not paint stripes.
+	var bark_dark: StandardMaterial3D = _mats_trunk[(randi() + 2) % _mats_trunk.size()]
+	var plate_count: int = randi_range(2, 3)
+	for i: int in plate_count:
+		var plate: MeshInstance3D = MeshInstance3D.new()
+		plate.mesh = _mesh_bark_plate
+		var ang: float = randf_range(0.0, TAU)
+		plate.position = Vector3(
+			cos(ang) * TRUNK_RADIUS_VISUAL * 0.95,
+			TRUNK_HEIGHT * 0.42,
+			sin(ang) * TRUNK_RADIUS_VISUAL * 0.95,
+		)
+		plate.rotation.y = ang
+		plate.set_surface_override_material(0, bark_dark)
+		add_child(plate)
+	# Canopy -- 3 stacked cones tapering inward.
 	for layer: int in 3:
 		var disc: MeshInstance3D = MeshInstance3D.new()
 		var dc: CylinderMesh = _mesh_canopy_layers[layer]
@@ -202,6 +269,20 @@ func _build_healthy() -> void:
 		disc.position = Vector3(0, TRUNK_HEIGHT + dc.height * 0.5 + float(layer) * (dc.height * 0.55), 0)
 		disc.set_surface_override_material(0, canopy_mat)
 		add_child(disc)
+	# Lower secondary branches -- 2-3 short downward-tilted twigs
+	# poking out from the trunk just below the canopy. Adds the
+	# fidelity the user wanted (matches building / unit detail
+	# pass) without breaking the silhouette.
+	var twig_count: int = randi_range(2, 3)
+	for j: int in twig_count:
+		var twig: MeshInstance3D = MeshInstance3D.new()
+		twig.mesh = _mesh_dead_branch
+		var tang: float = randf_range(0.0, TAU)
+		var ttilt: float = randf_range(deg_to_rad(60.0), deg_to_rad(85.0))
+		twig.rotation = Vector3(ttilt, tang, 0.0)
+		twig.position = Vector3(0.0, TRUNK_HEIGHT * 0.78 + randf_range(-0.2, 0.2), 0.0)
+		twig.set_surface_override_material(0, trunk_mat)
+		add_child(twig)
 	_add_full_collision()
 
 
@@ -212,6 +293,13 @@ func _build_dead() -> void:
 	trunk.position = Vector3(0, TRUNK_HEIGHT * 0.5, 0)
 	trunk.set_surface_override_material(0, dead_mat)
 	add_child(trunk)
+	# Dead trees still have a small root flare -- the trunk
+	# rotted but the base remained.
+	var flare: MeshInstance3D = MeshInstance3D.new()
+	flare.mesh = _mesh_root_flare
+	flare.position = Vector3(0, 0.15, 0)
+	flare.set_surface_override_material(0, dead_mat)
+	add_child(flare)
 	# A handful of angular bare branches sticking out the upper
 	# half of the trunk. 4-6 branches at random rotations + tilts.
 	var branch_count: int = randi_range(3, 6)
