@@ -22,6 +22,8 @@ var _root_vbox: VBoxContainer = null
 var _main_buttons: VBoxContainer = null
 var _setup_panel: VBoxContainer = null
 var _settings_panel: VBoxContainer = null
+var _campaigns_panel: VBoxContainer = null
+var _scenarios_panel: VBoxContainer = null
 
 # Setup-screen state — populated by the radio buttons / faction picks.
 var _selected_mode: int = MatchSettingsClass.Mode.ONE_V_ONE
@@ -177,6 +179,8 @@ func _build_layout() -> void:
 	_build_main_buttons()
 	_build_setup_panel()
 	_build_settings_panel()
+	_build_campaigns_panel()
+	_build_scenarios_panel()
 
 
 func _build_main_buttons() -> void:
@@ -186,10 +190,11 @@ func _build_main_buttons() -> void:
 	_root_vbox.add_child(_main_buttons)
 
 	for entry: Dictionary in [
-		{ "label": "Play",     "callback": Callable(self, "_on_play_pressed") },
-		{ "label": "Tutorial", "callback": Callable(self, "_on_tutorial_pressed") },
-		{ "label": "Settings", "callback": Callable(self, "_on_settings_pressed") },
-		{ "label": "Quit",     "callback": Callable(self, "_on_quit_pressed") },
+		{ "label": "Play",      "callback": Callable(self, "_on_play_pressed") },
+		{ "label": "Campaigns", "callback": Callable(self, "_on_campaigns_pressed") },
+		{ "label": "Tutorial",  "callback": Callable(self, "_on_tutorial_pressed") },
+		{ "label": "Settings",  "callback": Callable(self, "_on_settings_pressed") },
+		{ "label": "Quit",      "callback": Callable(self, "_on_quit_pressed") },
 	]:
 		var btn := Button.new()
 		btn.text = entry["label"] as String
@@ -671,18 +676,50 @@ func _show_main() -> void:
 	_main_buttons.visible = true
 	_setup_panel.visible = false
 	_settings_panel.visible = false
+	if _campaigns_panel:
+		_campaigns_panel.visible = false
+	if _scenarios_panel:
+		_scenarios_panel.visible = false
 
 
 func _show_setup() -> void:
 	_main_buttons.visible = false
 	_setup_panel.visible = true
 	_settings_panel.visible = false
+	if _campaigns_panel:
+		_campaigns_panel.visible = false
+	if _scenarios_panel:
+		_scenarios_panel.visible = false
 
 
 func _show_settings() -> void:
 	_main_buttons.visible = false
 	_setup_panel.visible = false
 	_settings_panel.visible = true
+	if _campaigns_panel:
+		_campaigns_panel.visible = false
+	if _scenarios_panel:
+		_scenarios_panel.visible = false
+
+
+func _show_campaigns() -> void:
+	_main_buttons.visible = false
+	_setup_panel.visible = false
+	_settings_panel.visible = false
+	if _campaigns_panel:
+		_campaigns_panel.visible = true
+	if _scenarios_panel:
+		_scenarios_panel.visible = false
+
+
+func _show_scenarios() -> void:
+	_main_buttons.visible = false
+	_setup_panel.visible = false
+	_settings_panel.visible = false
+	if _campaigns_panel:
+		_campaigns_panel.visible = false
+	if _scenarios_panel:
+		_scenarios_panel.visible = true
 
 
 ## --- Toggle / dropdown handlers ---
@@ -724,11 +761,15 @@ func _apply_map_dropdown_state() -> void:
 
 func _on_play_pressed() -> void:
 	MatchSettings.tutorial_mode = false
+	# Reset any scenario flag a previous Special Ops launch may have
+	# set so the standard Play path always lands in a vanilla skirmish.
+	MatchSettings.scenario = MatchSettingsClass.Scenario.NONE
 	_show_setup()
 
 
 func _on_tutorial_pressed() -> void:
 	MatchSettings.tutorial_mode = true
+	MatchSettings.scenario = MatchSettingsClass.Scenario.NONE
 	# Tutorial: Anvil player, Sable enclave as the southern (uh,
 	# northern — +Z) target. enemy_faction flips to SABLE so the
 	# enclave's HQ + emplacements + SAM build with the Sable
@@ -747,6 +788,10 @@ func _on_tutorial_pressed() -> void:
 
 func _on_settings_pressed() -> void:
 	_show_settings()
+
+
+func _on_campaigns_pressed() -> void:
+	_show_campaigns()
 
 
 func _on_quit_pressed() -> void:
@@ -1357,3 +1402,166 @@ func _build_tactical_background() -> Control:
 	if script:
 		bg.set_script(script)
 	return bg
+
+
+## --- Campaigns + Special Operations ----------------------------------------
+
+func _build_campaigns_panel() -> void:
+	## Skeleton -- the Europe map + stumps land in a follow-up commit.
+	## This commit just puts the Campaigns page on its own panel with a
+	## Back button so navigation works end to end.
+	_campaigns_panel = VBoxContainer.new()
+	_campaigns_panel.add_theme_constant_override("separation", 14)
+	_campaigns_panel.alignment = BoxContainer.ALIGNMENT_CENTER
+	_campaigns_panel.visible = false
+	_root_vbox.add_child(_campaigns_panel)
+
+	var heading := Label.new()
+	heading.text = "Campaigns"
+	heading.add_theme_font_size_override("font_size", 24)
+	heading.add_theme_color_override("font_color", COLOR_SUBTITLE)
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_campaigns_panel.add_child(heading)
+
+	var hint := Label.new()
+	hint.text = "Map of Europe coming soon. Pick a deployment site:"
+	hint.add_theme_font_size_override("font_size", 14)
+	hint.add_theme_color_override("font_color", COLOR_HINT)
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_campaigns_panel.add_child(hint)
+
+	# Placeholder stumps -- 4 disabled campaigns + the live Special Ops
+	# entry. Special Ops opens its own scenarios panel.
+	var stump_row := HBoxContainer.new()
+	stump_row.add_theme_constant_override("separation", 12)
+	stump_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	_campaigns_panel.add_child(stump_row)
+
+	for label_str: String in ["Western Front", "Northern Front", "Eastern Front", "Southern Front"]:
+		var stub := Button.new()
+		stub.text = label_str
+		stub.custom_minimum_size = Vector2(160, 80)
+		stub.disabled = true
+		stub.tooltip_text = "Campaign coming soon."
+		stump_row.add_child(stub)
+
+	var specops_btn := Button.new()
+	specops_btn.text = "Special\nOperations"
+	specops_btn.custom_minimum_size = Vector2(180, 80)
+	specops_btn.pressed.connect(_show_scenarios)
+	stump_row.add_child(specops_btn)
+
+	var back := Button.new()
+	back.text = "Back"
+	back.custom_minimum_size = Vector2(160, 36)
+	back.pressed.connect(_show_main)
+	_campaigns_panel.add_child(back)
+
+
+func _build_scenarios_panel() -> void:
+	## Three Special Operations scenario cards. Each card sets up
+	## MatchSettings (faction, mode, scenario flag) and launches the
+	## arena scene; TestArenaController reads MatchSettings.scenario
+	## and seeds the match accordingly.
+	_scenarios_panel = VBoxContainer.new()
+	_scenarios_panel.add_theme_constant_override("separation", 12)
+	_scenarios_panel.alignment = BoxContainer.ALIGNMENT_CENTER
+	_scenarios_panel.visible = false
+	_root_vbox.add_child(_scenarios_panel)
+
+	var heading := Label.new()
+	heading.text = "Special Operations"
+	heading.add_theme_font_size_override("font_size", 24)
+	heading.add_theme_color_override("font_color", COLOR_SUBTITLE)
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_scenarios_panel.add_child(heading)
+
+	var subtitle := Label.new()
+	subtitle.text = "CERN Black-Site Proving Grounds"
+	subtitle.add_theme_font_size_override("font_size", 14)
+	subtitle.add_theme_color_override("font_color", COLOR_HINT)
+	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_scenarios_panel.add_child(subtitle)
+
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(0, 8)
+	_scenarios_panel.add_child(spacer)
+
+	var scenario_defs: Array[Dictionary] = [
+		{
+			"id": MatchSettingsClass.Scenario.SPECOPS_SABLE_PROVING,
+			"title": "Sable Proving Ground",
+			"blurb": "Play Sable. Established base + full economy.\nThree Anvil opponents with parity setups.\nTest Sable's full toolkit at scale.",
+		},
+		{
+			"id": MatchSettingsClass.Scenario.SPECOPS_ANVIL_PROVING,
+			"title": "Anvil Proving Ground",
+			"blurb": "Play Anvil. Same parity setup, mirrored.\nThree Sable opponents, full economy on every side.\nTest the Directive's discipline.",
+		},
+		{
+			"id": MatchSettingsClass.Scenario.SPECOPS_STRESS_TEST,
+			"title": "Iron Curtain — Stress Test",
+			"blurb": "250-pop army, decent base, AI ally vs 2 enemies.\nEveryone starts at full pop on a battlefield of\nscattered terrain. Test what the engine can hold.",
+		},
+	]
+	for sdef: Dictionary in scenario_defs:
+		var card := PanelContainer.new()
+		card.custom_minimum_size = Vector2(420, 100)
+		_scenarios_panel.add_child(card)
+		var card_vbox := VBoxContainer.new()
+		card_vbox.add_theme_constant_override("separation", 4)
+		card.add_child(card_vbox)
+		var t := Label.new()
+		t.text = sdef["title"] as String
+		t.add_theme_font_size_override("font_size", 18)
+		t.add_theme_color_override("font_color", COLOR_TITLE)
+		card_vbox.add_child(t)
+		var b := Label.new()
+		b.text = sdef["blurb"] as String
+		b.add_theme_font_size_override("font_size", 13)
+		b.add_theme_color_override("font_color", Color(0.8, 0.85, 0.9, 1.0))
+		card_vbox.add_child(b)
+		var launch := Button.new()
+		launch.text = "Deploy"
+		launch.custom_minimum_size = Vector2(140, 32)
+		var sid: int = sdef["id"] as int
+		launch.pressed.connect(_on_scenario_pressed.bind(sid))
+		card_vbox.add_child(launch)
+
+	var back := Button.new()
+	back.text = "Back"
+	back.custom_minimum_size = Vector2(160, 36)
+	back.pressed.connect(_show_campaigns)
+	_scenarios_panel.add_child(back)
+
+
+func _on_scenario_pressed(scenario_id: int) -> void:
+	## Configures MatchSettings for the picked scenario and starts the
+	## arena. The arena controller reads MatchSettings.scenario and
+	## post-processes its standard setup with the scenario's seeded
+	## state (pre-built bases, full economy, scattered terrain, etc).
+	MatchSettings.tutorial_mode = false
+	MatchSettings.ai_personalities = {}
+	MatchSettings.ai_difficulties = {}
+	MatchSettings.ai_factions = {}
+	MatchSettings.scenario = scenario_id as MatchSettingsClass.Scenario
+	match scenario_id:
+		MatchSettingsClass.Scenario.SPECOPS_SABLE_PROVING:
+			MatchSettings.mode = MatchSettingsClass.Mode.TWO_V_TWO
+			MatchSettings.player_faction = MatchSettingsClass.FactionId.SABLE
+			MatchSettings.enemy_faction = MatchSettingsClass.FactionId.ANVIL
+			MatchSettings.difficulty = MatchSettingsClass.Difficulty.HARD
+			MatchSettings.map_id = MatchSettingsClass.MapId.FOUNDRY_BELT
+		MatchSettingsClass.Scenario.SPECOPS_ANVIL_PROVING:
+			MatchSettings.mode = MatchSettingsClass.Mode.TWO_V_TWO
+			MatchSettings.player_faction = MatchSettingsClass.FactionId.ANVIL
+			MatchSettings.enemy_faction = MatchSettingsClass.FactionId.SABLE
+			MatchSettings.difficulty = MatchSettingsClass.Difficulty.HARD
+			MatchSettings.map_id = MatchSettingsClass.MapId.FOUNDRY_BELT
+		MatchSettingsClass.Scenario.SPECOPS_STRESS_TEST:
+			MatchSettings.mode = MatchSettingsClass.Mode.TWO_V_TWO
+			MatchSettings.player_faction = MatchSettingsClass.FactionId.ANVIL
+			MatchSettings.enemy_faction = MatchSettingsClass.FactionId.SABLE
+			MatchSettings.difficulty = MatchSettingsClass.Difficulty.HARD
+			MatchSettings.map_id = MatchSettingsClass.MapId.IRON_GATE_CROSSING
+	_start_match()
