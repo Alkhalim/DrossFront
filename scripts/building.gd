@@ -2280,14 +2280,17 @@ func _detail_sam_site() -> void:
 		tip.set_surface_override_material(0, tip_mat)
 		rack_pivot.add_child(tip)
 
-	# Radar dish — tall mast with a small dish on top, behind the launcher.
+	# Radar dish — short mast with a small dish on top, mounted on
+	# the turret pivot so it swings with the launcher rather than
+	# staring fixed off the back of the chassis. Local-space coords
+	# below are relative to `pivot` (centred on the launcher base).
 	var mast := MeshInstance3D.new()
 	var mast_box := BoxMesh.new()
-	mast_box.size = Vector3(0.1, fs.y * 0.6, 0.1)
+	mast_box.size = Vector3(0.10, fs.y * 0.45, 0.10)
 	mast.mesh = mast_box
-	mast.position = Vector3(0, fs.y + fs.y * 0.4, -fs.z * 0.4)
+	mast.position = Vector3(0, mast_box.size.y * 0.5, -fs.z * 0.32)
 	mast.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.18, 0.20)))
-	_attach_visual(mast)
+	pivot.add_child(mast)
 
 	var dish := MeshInstance3D.new()
 	var dish_cyl := CylinderMesh.new()
@@ -2295,7 +2298,7 @@ func _detail_sam_site() -> void:
 	dish_cyl.bottom_radius = 0.55
 	dish_cyl.height = 0.08
 	dish.mesh = dish_cyl
-	dish.position = Vector3(0, fs.y + fs.y * 0.7, -fs.z * 0.4)
+	dish.position = Vector3(0, mast_box.size.y + 0.12, -fs.z * 0.32)
 	dish.rotation.x = deg_to_rad(-30.0)
 	var dish_mat := StandardMaterial3D.new()
 	dish_mat.albedo_color = Color(0.30, 0.30, 0.34, 1.0)
@@ -2303,7 +2306,7 @@ func _detail_sam_site() -> void:
 	dish_mat.emission = Color(0.55, 0.85, 1.0, 1.0)
 	dish_mat.emission_energy_multiplier = 0.35
 	dish.set_surface_override_material(0, dish_mat)
-	_attach_visual(dish)
+	pivot.add_child(dish)
 
 
 func _detail_gun_emplacement() -> void:
@@ -2367,23 +2370,63 @@ func rebuild_turret_visual(profile: StringName) -> void:
 
 	match profile:
 		&"anti_light":
-			# Quad short barrels (rotary autocannon look).
-			for i: int in 4:
-				var ang: float = float(i) / 4.0 * TAU
-				var bx: float = cos(ang) * 0.07
-				var by: float = sin(ang) * 0.07
+			# Six-barrel rotary minigun bundle wrapped in a slim
+			# cylindrical housing -- reads unmistakably as 'minigun'
+			# rather than 'four random sticks'. Barrels orbit a
+			# central spindle so the cluster silhouettes as one
+			# rotating unit at zoom.
+			var spindle := MeshInstance3D.new()
+			var sp_cyl := CylinderMesh.new()
+			sp_cyl.top_radius = 0.05
+			sp_cyl.bottom_radius = 0.05
+			sp_cyl.height = fs.x * 0.7
+			spindle.mesh = sp_cyl
+			spindle.rotation.x = -PI / 2
+			spindle.position = Vector3(0, arm_y, -sp_cyl.height * 0.5 - 0.05)
+			spindle.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.10, 0.10, 0.10)))
+			turret_pivot.add_child(spindle)
+			for i: int in 6:
+				var ang: float = float(i) / 6.0 * TAU
+				var bx: float = cos(ang) * 0.10
+				var by: float = sin(ang) * 0.10
 				var b := MeshInstance3D.new()
 				var bc := CylinderMesh.new()
-				bc.top_radius = 0.045
-				bc.bottom_radius = 0.045
-				bc.height = fs.x * 0.7
+				bc.top_radius = 0.038
+				bc.bottom_radius = 0.038
+				bc.height = fs.x * 0.78
 				b.mesh = bc
 				b.rotation.x = -PI / 2
 				b.position = Vector3(bx, arm_y + by, -bc.height * 0.5 - 0.05)
 				b.set_surface_override_material(0, dark)
 				turret_pivot.add_child(b)
+			# Front muzzle ring binding the barrel cluster -- thin
+			# cylinder around the bundle so the front face reads as
+			# a finished gun rather than six loose tubes.
+			var muzzle_ring := MeshInstance3D.new()
+			var mr_cyl := CylinderMesh.new()
+			mr_cyl.top_radius = 0.18
+			mr_cyl.bottom_radius = 0.18
+			mr_cyl.height = 0.12
+			muzzle_ring.mesh = mr_cyl
+			muzzle_ring.rotation.x = -PI / 2
+			muzzle_ring.position = Vector3(0, arm_y, -fs.x * 0.78 - 0.05)
+			muzzle_ring.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.16, 0.16, 0.16)))
+			turret_pivot.add_child(muzzle_ring)
+			# Rear gearbox housing (the bulky receiver behind the
+			# spinning barrels) so the silhouette has the classic
+			# minigun receiver-then-barrels read.
+			var receiver := MeshInstance3D.new()
+			var rcv_box := BoxMesh.new()
+			rcv_box.size = Vector3(0.42, 0.34, 0.32)
+			receiver.mesh = rcv_box
+			receiver.position = Vector3(0, arm_y, 0.0)
+			receiver.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.18, 0.18)))
+			turret_pivot.add_child(receiver)
 		&"anti_heavy":
-			# Single thick howitzer barrel + chunky muzzle brake.
+			# Single thick howitzer barrel + faceted block muzzle
+			# brake + chunky breech block at the rear so the
+			# silhouette reads as 'angular siege piece' instead of
+			# 'tube with a ring on the end'.
 			var b := MeshInstance3D.new()
 			var bc := CylinderMesh.new()
 			bc.top_radius = 0.16
@@ -2394,17 +2437,38 @@ func rebuild_turret_visual(profile: StringName) -> void:
 			b.position = Vector3(0, arm_y, -bc.height * 0.5 - 0.05)
 			b.set_surface_override_material(0, dark)
 			turret_pivot.add_child(b)
-			# Muzzle brake — fat ring at the tip.
-			var muzzle := MeshInstance3D.new()
-			var mc := CylinderMesh.new()
-			mc.top_radius = 0.24
-			mc.bottom_radius = 0.22
-			mc.height = 0.16
-			muzzle.mesh = mc
-			muzzle.rotation.x = -PI / 2
-			muzzle.position = Vector3(0, arm_y, -bc.height - 0.13)
-			muzzle.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.1, 0.1, 0.1)))
-			turret_pivot.add_child(muzzle)
+			# Faceted block muzzle brake -- a wide rectangular slab
+			# replacing the old round ring so the muzzle reads as
+			# 'anti-heavy' at any zoom. Two side vents poke out the
+			# left/right of the brake for the unmistakable ported-
+			# muzzle silhouette.
+			var brake := MeshInstance3D.new()
+			var brake_box := BoxMesh.new()
+			brake_box.size = Vector3(0.62, 0.42, 0.22)
+			brake.mesh = brake_box
+			brake.position = Vector3(0, arm_y, -bc.height - 0.16)
+			brake.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.10, 0.10, 0.10)))
+			turret_pivot.add_child(brake)
+			for vent_side: int in 2:
+				var vsx: float = -1.0 if vent_side == 0 else 1.0
+				var vent := MeshInstance3D.new()
+				var v_box := BoxMesh.new()
+				v_box.size = Vector3(0.20, 0.18, 0.14)
+				vent.mesh = v_box
+				vent.position = Vector3(vsx * 0.36, arm_y, -bc.height - 0.16)
+				vent.rotation.y = vsx * deg_to_rad(15.0)
+				vent.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.08, 0.08, 0.08)))
+				turret_pivot.add_child(vent)
+			# Chunky breech block at the rear of the barrel — a
+			# faceted box that anchors the gun to the turntable and
+			# adds visual mass.
+			var breech := MeshInstance3D.new()
+			var br_box := BoxMesh.new()
+			br_box.size = Vector3(0.50, 0.46, 0.42)
+			breech.mesh = br_box
+			breech.position = Vector3(0, arm_y, 0.05)
+			breech.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.16, 0.14, 0.13)))
+			turret_pivot.add_child(breech)
 		&"anti_air":
 			# Missile rack — three tubes pointing up-and-forward, plus a small
 			# radar dish.
