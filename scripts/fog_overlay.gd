@@ -90,33 +90,27 @@ func _make_overlay_material() -> ShaderMaterial:
 	##  - 0 (UNEXPLORED) -> opaque black
 	##  - 1 (EXPLORED)   -> ~55% dim
 	##  - 2 (VISIBLE)    -> fully transparent
-	## The cell state is stored as the texture's R channel; we
-	## quantize the sampled value into the three buckets so a
-	## linear-filtered sample on the boundary still picks one bucket
-	## cleanly instead of fading through.
+	## The cell-state byte is stored verbatim in the texture's R
+	## channel; the shader scales the 0..1 sample back to the
+	## integer cell-state value before bucketing.
 	var sh := Shader.new()
 	sh.code = """
 shader_type spatial;
 render_mode unshaded, blend_mix, depth_draw_never, cull_disabled;
 
 uniform sampler2D fog_texture : filter_nearest, repeat_disable;
-uniform float map_half_extent;
-uniform float cell_state_max;
 
 void fragment() {
-	// Map world XZ into [0, 1] UV using the plane's local UV
-	// (PlaneMesh ships unit UVs). The plane is centred on the
-	// origin spanning -half..+half on X/Z so UV.x = (x + half) /
-	// (2 * half), and the plane mesh has UV already aligned that
-	// way.
-	float r = texture(fog_texture, UV).r;
-	// Texture stores cell state byte; rescale to 0..2 range.
-	float state = round(r * cell_state_max);
-	if (state < 0.5) {
+	// PlaneMesh ships unit UVs; the plane is centred on origin so
+	// UV.x = (x + half) / (2 * half) maps directly to texel index.
+	// R8 sample returns byte / 255; multiply back to get the raw
+	// cell-state byte value (0, 1, or 2).
+	int state = int(texture(fog_texture, UV).r * 255.0 + 0.5);
+	if (state == 0) {
 		// UNEXPLORED -- opaque black.
 		ALBEDO = vec3(0.0);
 		ALPHA = 1.0;
-	} else if (state < 1.5) {
+	} else if (state == 1) {
 		// EXPLORED -- dim memory.
 		ALBEDO = vec3(0.0);
 		ALPHA = 0.55;
@@ -138,33 +132,13 @@ func _refresh_texture() -> void:
 	var cells: PackedByteArray = _fow.get_cells()
 	if cells.size() != _grid_size * _grid_size:
 		return
-	# Pack the cell-state byte array directly into the image. R8
-	# format expects raw bytes per pixel matching exactly. The
-	# cell state values 0/1/2 map onto the texture's R channel
-	# 0/1/2 byte values; the shader rescales by cell_state_max.
-	# The texture range 0..255 means our 0/1/2 sample as
-	# ~0.0/0.004/0.008 floats; rescaling cell_state_max = 2 still
-	# works because we sample raw bytes via the 8-bit format and
-	# rescale relative to 2.0 / 255.0 below.
-	# To keep the shader simple, write pre-rescaled bytes (state
-	# * 127 + 1) -- maps {0, 1, 2} to {0, 128, 255} which
-	# survives 8-bit precision cleanly.
-	var data: PackedByteArray = PackedByteArray()
-	data.resize(cells.size())
-	for i: int in cells.size():
-		var s: int = cells[i] & 0x3
-		# Map CellState to a byte the shader can pick three buckets
-		# from after the implicit /255 read: 0 -> 0, 1 -> 128, 2 -> 255.
-		var b: int = 0
-		if s == 1:
-			b = 128
-		elif s == 2:
-			b = 255
-		data[i] = b
-	_fog_image.set_data(_grid_size, _grid_size, false, Image.FORMAT_R8, data)
+	# Hand the cell PackedByteArray straight to the image -- the
+	# bytes already match R8 layout (1 byte per cell carrying the
+	# CellState enum value 0/1/2). The shader rescales 0..1
+	# sample back to the integer state, so no per-byte CPU loop
+	# rewriting is needed. The previous version walked the
+	# 60k-cell array in GDScript per FOW recompute -- the loop
+	# alone was a measurable chunk of the per-tick cost.
+	_fog_image.set_data(_grid_size, _grid_size, false, Image.FORMAT_R8, cells)
 	_fog_texture.update(_fog_image)
-	# Shader samples raw byte / 255, so rescale to pick three
-	# buckets from {0.0, 0.5, 1.0}: cell_state_max * sample_value
-	# should land on the three integer buckets {0, 1, 2}.
-	_shader_material.set_shader_parameter("cell_state_max", 2.0)
 	_last_revision = _fow.revision
