@@ -25,6 +25,13 @@ var _state_timer: float = 0.0
 var _target_pos: Vector3 = Vector3.ZERO
 ## Per-kind effect tick scratch (e.g. MOLOT's shell-spawn timer).
 var _effect_scratch: float = 0.0
+## Last whole-second value pushed to the HUD's persistent warning
+## banner, so the countdown re-emits exactly once per second instead
+## of once per frame (or once at activation, like the old alert).
+var _last_banner_sec: int = -1
+## Stable key for the HUD warning banner + minimap pulse pin so we
+## clear the same entries we set at telegraph time.
+var _telegraph_key: String = ""
 
 
 func _ready() -> void:
@@ -108,7 +115,9 @@ func _process(delta: float) -> void:
 	_state_timer -= delta
 	match _state:
 		State.ARMING:
+			_tick_arming_banner()
 			if _state_timer <= 0.0:
+				_clear_telegraph()
 				_start_firing()
 		State.FIRING:
 			_firing_tick(delta)
@@ -117,6 +126,48 @@ func _process(delta: float) -> void:
 		State.COOLDOWN:
 			if _state_timer <= 0.0:
 				_state = State.READY
+
+
+func _tick_arming_banner() -> void:
+	## Re-emits the countdown to the HUD's persistent warning bar
+	## once per second so the player sees a live timer instead of
+	## the original 'fire once, fade after 3.5s' alert.
+	var remaining: int = int(ceilf(_state_timer))
+	if remaining == _last_banner_sec:
+		return
+	_last_banner_sec = remaining
+	var hud: Node = _find_hud()
+	if not hud or not hud.has_method("set_persistent_warning"):
+		return
+	if remaining > 0:
+		var msg: String = "Incoming superweapon strike — %ds" % remaining
+		hud.call("set_persistent_warning", _telegraph_key, msg, 2)
+
+
+func _clear_telegraph() -> void:
+	## Drop the warning banner + minimap pulse pin once arming ends
+	## (the firing-window VFX takes over the visual from there).
+	if _telegraph_key == "":
+		return
+	var hud: Node = _find_hud()
+	if hud and hud.has_method("clear_persistent_warning"):
+		hud.call("clear_persistent_warning", _telegraph_key)
+	if hud:
+		var minimap: Node = hud.get_node_or_null("Minimap")
+		if minimap and minimap.has_method("stop_pulse_pin"):
+			minimap.call("stop_pulse_pin", _telegraph_key)
+
+
+func _find_hud() -> Node:
+	var scene: Node = get_tree().current_scene if get_tree() else null
+	if not scene:
+		return null
+	var hud: Node = scene.get_node_or_null("HUD")
+	if not hud:
+		var canvas: Node = scene.get_node_or_null("HUDCanvas")
+		if canvas:
+			hud = canvas.get_node_or_null("HUD")
+	return hud
 
 
 func _start_firing() -> void:
@@ -139,46 +190,36 @@ func _start_cooldown() -> void:
 
 
 func _emit_telegraph() -> void:
-	## Surfaces a critical-severity alert + minimap pulse pin at the
-	## target so every player (the firer included) sees the
-	## incoming-superweapon warning.
-	var scene: Node = get_tree().current_scene if get_tree() else null
-	if not scene:
-		return
-	var alerts: Node = scene.get_node_or_null("AlertManager")
-	if alerts and alerts.has_method("emit_alert"):
-		alerts.call(
-			"emit_alert",
-			"Incoming superweapon strike — %ds" % int(_arming_sec),
+	## Surfaces a critical-severity warning banner + minimap pulse
+	## pin at the target so every player (the firer included) sees
+	## the incoming-superweapon warning. Banner is the persistent
+	## variant -- _tick_arming_banner refreshes the seconds counter
+	## once per second until ARMING ends; _clear_telegraph drops the
+	## banner + pin together at that point.
+	_telegraph_key = "superweapon_%d" % get_instance_id()
+	_last_banner_sec = -1
+	var hud: Node = _find_hud()
+	if hud and hud.has_method("set_persistent_warning"):
+		hud.call(
+			"set_persistent_warning",
+			_telegraph_key,
+			"Incoming superweapon strike — %ds" % int(ceilf(_arming_sec)),
 			2,
-			_target_pos,
 		)
-	var hud: Node = scene.get_node_or_null("HUD")
-	if not hud:
-		var canvas: Node = scene.get_node_or_null("HUDCanvas")
-		if canvas:
-			hud = canvas.get_node_or_null("HUD")
 	if hud:
 		var minimap: Node = hud.get_node_or_null("Minimap")
 		if minimap and minimap.has_method("start_pulse_pin"):
-			var key: String = "superweapon_%d" % get_instance_id()
-			minimap.call("start_pulse_pin", key, _target_pos, TELEGRAPH_PING_COLOR)
-			# Schedule pin removal once the firing window ends so the
-			# minimap clears on its own.
-			var t: SceneTreeTimer = get_tree().create_timer(_arming_sec + maxf(_firing_sec, 1.0))
-			t.timeout.connect(_remove_telegraph_pin.bind(key))
-
-
-func _remove_telegraph_pin(key: String) -> void:
+			minimap.call("start_pulse_pin", _telegraph_key, _target_pos, TELEGRAPH_PING_COLOR)
+	# One-shot AlertManager ping for the audio cue + minimap flash.
+	# The persistent banner above carries the visible countdown; the
+	# alert is just the audible 'something is happening' chime.
 	var scene: Node = get_tree().current_scene if get_tree() else null
-	if not scene:
-		return
-	var hud: Node = scene.get_node_or_null("HUD")
-	if not hud:
-		var canvas: Node = scene.get_node_or_null("HUDCanvas")
-		if canvas:
-			hud = canvas.get_node_or_null("HUD")
-	if hud:
-		var minimap: Node = hud.get_node_or_null("Minimap")
-		if minimap and minimap.has_method("stop_pulse_pin"):
-			minimap.call("stop_pulse_pin", key)
+	if scene:
+		var alerts: Node = scene.get_node_or_null("AlertManager")
+		if alerts and alerts.has_method("emit_alert"):
+			alerts.call(
+				"emit_alert",
+				"Incoming superweapon strike",
+				2,
+				_target_pos,
+			)
