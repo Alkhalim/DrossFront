@@ -260,34 +260,51 @@ func _create_beam_mesh(color: Color, from: Vector3, to: Vector3) -> void:
 	var dir: Vector3 = to - from
 	var length: float = dir.length()
 
+	# Bright thin core -- the actual laser line, near-white at the
+	# center so the beam reads as 'energy', not 'colored stick'.
 	_mesh = MeshInstance3D.new()
 	_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var box := BoxMesh.new()
-	box.size = Vector3(0.05, 0.05, maxf(length, 0.1))
-	_mesh.mesh = box
+	var core := BoxMesh.new()
+	core.size = Vector3(0.06, 0.06, maxf(length, 0.1))
+	_mesh.mesh = core
+	var core_mat := StandardMaterial3D.new()
+	var core_color: Color = color.lerp(Color(1.0, 1.0, 1.0, 1.0), 0.6)
+	core_color.a = 1.0
+	core_mat.albedo_color = core_color
+	core_mat.emission_enabled = true
+	core_mat.emission = core_color
+	core_mat.emission_energy_multiplier = 7.0
+	core_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	core_mat.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
+	_mesh.set_surface_override_material(0, core_mat)
+	add_child(_mesh)
 
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(color.r, color.g, color.b, 0.8)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.emission_enabled = true
-	mat.emission = color
-	mat.emission_energy_multiplier = 5.0
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_mesh.set_surface_override_material(0, mat)
+	# Wider translucent halo wrapping the core -- the energy bloom
+	# you see on a real cinematic laser beam.
+	var halo := MeshInstance3D.new()
+	halo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var halo_box := BoxMesh.new()
+	halo_box.size = Vector3(0.20, 0.20, maxf(length, 0.1))
+	halo.mesh = halo_box
+	var halo_mat := StandardMaterial3D.new()
+	halo_mat.albedo_color = Color(color.r, color.g, color.b, 0.45)
+	halo_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	halo_mat.emission_enabled = true
+	halo_mat.emission = color
+	halo_mat.emission_energy_multiplier = 3.5
+	halo_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	halo_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	halo.set_surface_override_material(0, halo_mat)
+	add_child(halo)
 
 	# Position + orient via Transform3D so the basis is correct on the very
 	# first frame, before the projectile is parented to the scene tree.
-	# (Node3D.look_at silently produces an identity orientation when called
-	# pre-tree, which made the beam render as a Z-aligned segment regardless
-	# of where it was supposed to fire.)
 	var mid: Vector3 = (from + to) * 0.5
 	var xform := Transform3D()
 	xform.origin = mid
 	if length > 0.1:
 		xform = xform.looking_at(to, Vector3.UP)
 	transform = xform
-
-	add_child(_mesh)
 
 
 ## Cached FogOfWar reference — looked up lazily on the first
