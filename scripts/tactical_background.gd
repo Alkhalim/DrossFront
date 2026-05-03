@@ -14,6 +14,19 @@ extends Control
 var _t: float = 0.0
 var _pips: Array = []
 var _contours: Array = []
+## Cached oval-ring polylines per (center, rx, ry) tuple. The
+## radar's nested elevation contours never move, so building the
+## 36-vertex polylines once at _ready and reusing the
+## PackedVector2Array each draw avoids the 19k+ allocations the
+## profiler saw across a 65s session.
+var _cached_contour_polys: Array = []
+## Cached range-ring polylines indexed by ring index (0..N-1) so
+## _draw doesn't rebuild them each frame.
+var _cached_range_rings: Array = []
+## Cached size we built _cached_contour_polys + _cached_range_rings
+## against. When the control resizes (rare in the menu but possible
+## on viewport change) we rebuild.
+var _cache_size: Vector2 = Vector2.ZERO
 ## When the sweep most recently passed over each pip's bearing.
 ## Drives the per-pip brightness flash + phosphor decay so the pip
 ## reads as an active radar return.
@@ -134,14 +147,16 @@ func _draw() -> void:
 	# UI text on top.
 	draw_rect(Rect2(Vector2.ZERO, sz), COLOR_BG_DEEP)
 
+	# Rebuild the cached polylines whenever the control's size
+	# changes (rare but possible on viewport change).
+	if sz != _cache_size:
+		_rebuild_geometry_cache(sz)
+
 	# Faint nested elevation contours under everything else.
-	for c: Dictionary in _contours:
-		var center := Vector2((c["x"] as float) * sz.x, (c["y"] as float) * sz.y)
-		var rx: float = (c["r"] as float) * sz.x
-		var ry: float = rx * (c["squash"] as float)
-		_draw_oval_ring(center, rx, ry, COLOR_CONTOUR, 1.4)
-		_draw_oval_ring(center, rx * 0.78, ry * 0.78, COLOR_CONTOUR * Color(1, 1, 1, 0.7), 1.0)
-		_draw_oval_ring(center, rx * 0.55, ry * 0.55, COLOR_CONTOUR * Color(1, 1, 1, 0.5), 0.8)
+	# Polylines pre-built; we just emit them with their cached colour
+	# triplets via draw_polyline.
+	for entry: Dictionary in _cached_contour_polys:
+		draw_polyline(entry["pts"] as PackedVector2Array, entry["col"] as Color, entry["w"] as float)
 
 	# Light grid -- two pitches so the major lines read as a
 	# coordinate grid + the minor lines as the in-between detail.
@@ -160,13 +175,9 @@ func _draw() -> void:
 	# --- Radar plot ---
 	var pivot: Vector2 = sz * 0.5
 	var max_radius: float = minf(sz.x, sz.y) * 0.46
-	# Concentric range rings -- 5 nested rings + every-other ring at
-	# a brighter alpha so the player reads the map as 'distance
-	# bands'.
-	for i: int in NUM_RANGE_RINGS:
-		var r: float = max_radius * float(i + 1) / float(NUM_RANGE_RINGS)
-		var ring_col: Color = COLOR_RING if (i % 2) == 0 else COLOR_RING_FAINT
-		_draw_oval_ring(pivot, r, r, ring_col, 1.4)
+	# Concentric range rings -- pre-built in _rebuild_geometry_cache.
+	for entry: Dictionary in _cached_range_rings:
+		draw_polyline(entry["pts"] as PackedVector2Array, entry["col"] as Color, entry["w"] as float)
 
 	# Bearing tick marks every 15°; cardinal directions (N/E/S/W)
 	# get a label glyph in the menu's brass-green palette.
@@ -278,9 +289,60 @@ func _draw() -> void:
 
 
 func _draw_oval_ring(center: Vector2, rx: float, ry: float, col: Color, width: float) -> void:
+	## Kept for any future caller that wants on-the-fly rings. The
+	## hot _draw path uses _cached_contour_polys / _cached_range_rings
+	## instead so it doesn't allocate per frame.
+	var pts := _build_oval_pts(center, rx, ry, 36)
+	draw_polyline(pts, col, width)
+
+
+func _build_oval_pts(center: Vector2, rx: float, ry: float, steps: int) -> PackedVector2Array:
 	var pts := PackedVector2Array()
-	var steps: int = 36
+	pts.resize(steps + 1)
 	for i: int in steps + 1:
 		var a: float = TAU * float(i) / float(steps)
-		pts.append(center + Vector2(cos(a) * rx, sin(a) * ry))
-	draw_polyline(pts, col, width)
+		pts[i] = center + Vector2(cos(a) * rx, sin(a) * ry)
+	return pts
+
+
+func _rebuild_geometry_cache(sz: Vector2) -> void:
+	## Pre-build every static polyline (contour ovals + radar range
+	## rings) once at this size. Each entry stores the PackedVector2
+	## points + colour + width so the _draw hot path is a flat
+	## walk-and-emit with zero per-frame allocation.
+	_cache_size = sz
+	_cached_contour_polys.clear()
+	for c: Dictionary in _contours:
+		var center := Vector2((c["x"] as float) * sz.x, (c["y"] as float) * sz.y)
+		var rx: float = (c["r"] as float) * sz.x
+		var ry: float = rx * (c["squash"] as float)
+		# Three nested rings per contour at decreasing radius +
+		# alpha. Pre-baking the (radius * factor) calculation here
+		# means draw doesn't have to do the math every frame.
+		_cached_contour_polys.append({
+			"pts": _build_oval_pts(center, rx, ry, 36),
+			"col": COLOR_CONTOUR,
+			"w": 1.4,
+		})
+		_cached_contour_polys.append({
+			"pts": _build_oval_pts(center, rx * 0.78, ry * 0.78, 36),
+			"col": COLOR_CONTOUR * Color(1, 1, 1, 0.7),
+			"w": 1.0,
+		})
+		_cached_contour_polys.append({
+			"pts": _build_oval_pts(center, rx * 0.55, ry * 0.55, 36),
+			"col": COLOR_CONTOUR * Color(1, 1, 1, 0.5),
+			"w": 0.8,
+		})
+	# Radar range rings -- centered, even alpha, alternating tone.
+	_cached_range_rings.clear()
+	var pivot: Vector2 = sz * 0.5
+	var max_radius: float = minf(sz.x, sz.y) * 0.46
+	for i: int in NUM_RANGE_RINGS:
+		var r: float = max_radius * float(i + 1) / float(NUM_RANGE_RINGS)
+		var ring_col: Color = COLOR_RING if (i % 2) == 0 else COLOR_RING_FAINT
+		_cached_range_rings.append({
+			"pts": _build_oval_pts(pivot, r, r, 48),
+			"col": ring_col,
+			"w": 1.4,
+		})
