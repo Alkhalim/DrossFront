@@ -5,7 +5,7 @@ extends CharacterBody3D
 ## Treated as a unit by combat (owner_id, alive_count, take_damage) so enemies
 ## can target it.
 
-enum State { IDLE, MOVING_TO_WRECK, HARVESTING, RETURNING }
+enum State { IDLE, MOVING_TO_WRECK, HARVESTING, RETURNING, UNSTUCKING }
 
 const MOVE_SPEED: float = 6.0
 const HARVEST_RATE: float = 15.0
@@ -62,6 +62,20 @@ const STUCK_GIVE_UP_SEC: float = 4.0
 const STUCK_PROGRESS_EPS: float = 0.6
 var _stuck_check_pos: Vector3 = Vector3.INF
 var _stuck_time: float = 0.0
+
+## Unstuck phase -- when the stuck-detect trips, we don't just go
+## straight back to IDLE (which would re-target the same wreck and
+## re-stuck against the same wall). Instead we push laterally in a
+## random horizontal direction for ~1.2s so the worker physically
+## clears the obstacle before re-scanning. The stuck wreck is
+## remembered for a short cooldown so the very next scan also
+## prefers a different target.
+const UNSTUCK_PUSH_SEC: float = 1.2
+const UNSTUCK_TARGET_BLACKLIST_SEC: float = 6.0
+var _unstuck_dir: Vector3 = Vector3.ZERO
+var _unstuck_timer: float = 0.0
+## { wreck_instance_id : float seconds_until_clear }
+var _blacklisted_wrecks: Dictionary = {}
 
 
 func _ready() -> void:
@@ -352,6 +366,18 @@ func _physics_process(delta: float) -> void:
 	# half as often, but we double the effective delta on heavy frames
 	# so cargo accumulation / movement progress remain at the same rate.
 	delta *= 2.0
+	# Tick down the temporary blacklist so a wreck we couldn't reach
+	# 5 seconds ago becomes a candidate again once the blockade
+	# (transient unit traffic, mid-pile crawler swap) clears.
+	if not _blacklisted_wrecks.is_empty():
+		var stale: Array = []
+		for k in _blacklisted_wrecks.keys():
+			_blacklisted_wrecks[k] = (_blacklisted_wrecks[k] as float) - delta
+			if (_blacklisted_wrecks[k] as float) <= 0.0:
+				stale.append(k)
+		for k in stale:
+			_blacklisted_wrecks.erase(k)
+
 	match state:
 		State.IDLE:
 			_find_wreck()
@@ -361,6 +387,8 @@ func _physics_process(delta: float) -> void:
 			_harvest(delta)
 		State.RETURNING:
 			_return_to_yard(delta)
+		State.UNSTUCKING:
+			_unstuck_step(delta)
 
 	# Subtle cargo-bin glow that brightens as salvage is carried.
 	if _cargo_mat:
@@ -382,6 +410,11 @@ func _find_wreck() -> void:
 	for node: Node in wrecks:
 		var wreck: Wreck = node as Wreck
 		if not wreck:
+			continue
+		# Skip wrecks we recently failed to reach. Cooldown lapses on
+		# its own (see _physics_process) so a transient blockade
+		# clears.
+		if _blacklisted_wrecks.has(wreck.get_instance_id()):
 			continue
 		var dist_to_yard: float = search_origin.distance_to(wreck.global_position)
 		if dist_to_yard > search_radius:
@@ -529,21 +562,48 @@ func _move_toward(target: Vector3, delta: float) -> bool:
 		if _stuck_time >= STUCK_GIVE_UP_SEC:
 			var progress: float = global_position.distance_to(_stuck_check_pos)
 			if progress < STUCK_PROGRESS_EPS:
-				# Drop the current move; reset state to IDLE so the
-				# next tick re-scans for a reachable wreck. Returning
-				# true here makes the caller treat the move as
-				# "arrived enough"; the state-machine branches that
-				# call _move_toward all check post-arrival action
-				# (HARVEST / RETURN), so just transitioning to IDLE
-				# from outside is cleanest.
-				state = State.IDLE
+				# Stuck. Blacklist the current wreck for a few seconds
+				# so the next IDLE scan picks something else, then
+				# enter UNSTUCKING which physically pushes the worker
+				# laterally for UNSTUCK_PUSH_SEC seconds before it
+				# tries again. Without the lateral push the worker
+				# would just re-target the second-nearest wreck and
+				# re-grind into the same wall.
+				if is_instance_valid(_target_wreck):
+					_blacklisted_wrecks[_target_wreck.get_instance_id()] = UNSTUCK_TARGET_BLACKLIST_SEC
 				_target_wreck = null
 				_move_target = Vector3.INF
-				velocity = Vector3.ZERO
-				_stuck_time = 0.0
-				_stuck_check_pos = Vector3.INF
+				_enter_unstuck()
 				return false
 			# Made progress over the window — restart the sample.
 			_stuck_check_pos = global_position
 			_stuck_time = 0.0
 	return false
+
+
+func _enter_unstuck() -> void:
+	## Pick a random horizontal direction biased AWAY from the centre
+	## of mass of nearby colliders. We don't have cheap access to that,
+	## so just roll a uniform random direction; over multiple unstuck
+	## attempts the worker eventually clears any pocket.
+	var ang: float = randf() * TAU
+	_unstuck_dir = Vector3(cos(ang), 0.0, sin(ang))
+	_unstuck_timer = UNSTUCK_PUSH_SEC
+	state = State.UNSTUCKING
+	_stuck_time = 0.0
+	_stuck_check_pos = Vector3.INF
+
+
+func _unstuck_step(delta: float) -> void:
+	## Push laterally in _unstuck_dir for UNSTUCK_PUSH_SEC seconds;
+	## then return to IDLE so the next tick re-scans for a reachable
+	## wreck (now that we've cleared the obstacle and the previous
+	## target is briefly blacklisted).
+	_unstuck_timer -= delta
+	velocity = _unstuck_dir * MOVE_SPEED * 0.7
+	if _unstuck_dir.length_squared() > 0.001:
+		look_at(global_position + _unstuck_dir, Vector3.UP)
+	move_and_slide()
+	if _unstuck_timer <= 0.0:
+		state = State.IDLE
+		velocity = Vector3.ZERO
