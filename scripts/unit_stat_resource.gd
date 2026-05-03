@@ -258,3 +258,11 @@ func can_target_air() -> bool:
 ## etc.). Empty = no passive button. Branch tooltips also list
 ## this in the gains pros column when a branch acquires it.
 @export var passive_description: String = ""
+
+## One-line prose summary of what choosing this branch trades for
+## what -- e.g. "Trades mobility and anti-air for more HP and a
+## heavy laser cannon". Surfaced by the branch upgrade tooltip in
+## BASIC view; the SHIFT-expanded view shows the per-stat diff
+## instead. Empty = fall back to the per-stat diff. Set on the
+## BRANCH VARIANT (e.g. anvil_hound_ripper) not the parent.
+@export_multiline var branch_summary: String = ""
