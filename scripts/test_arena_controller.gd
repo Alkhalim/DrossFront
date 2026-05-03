@@ -2526,9 +2526,10 @@ func _spawn_terrain_piece(pos: Vector3, piece_size: Vector3, kind: String) -> vo
 		if has_upper:
 			_decorate_ruin_block(root, upper_size, upper_offset, true)
 	else:
-		# Single debris chunk on top — random size + rotation, slightly
-		# darker shade. Adds vertical silhouette variation and breaks the
-		# perfect-cube read without changing the collision footprint.
+		# Rock outcrop -- top crown chunk + 2-3 smaller corner boulders
+		# clinging to the sides + a scree skirt of pebbles at the base.
+		# Breaks the cube silhouette into a fractured rock formation
+		# without changing the collision footprint.
 		var chunk := MeshInstance3D.new()
 		var chunk_box := BoxMesh.new()
 		var cs: float = piece_size.x * randf_range(0.35, 0.55)
@@ -2552,6 +2553,64 @@ func _spawn_terrain_piece(pos: Vector3, piece_size: Vector3, kind: String) -> vo
 		chunk_mat.roughness = mat.roughness
 		chunk.material_override = chunk_mat
 		root.add_child(chunk)
+		# Side corner boulders -- 2-3 angular sub-chunks at random
+		# corners of the base so the silhouette reads as a fractured
+		# stone formation instead of a smooth cube.
+		var corner_count: int = randi_range(2, 3)
+		for ci: int in corner_count:
+			var corner := MeshInstance3D.new()
+			var co_box := BoxMesh.new()
+			var co_s: float = piece_size.x * randf_range(0.25, 0.40)
+			co_box.size = Vector3(co_s, co_s * randf_range(0.6, 1.0), co_s * randf_range(0.7, 1.1))
+			corner.mesh = co_box
+			var ang: float = randf_range(0.0, TAU)
+			var rad: float = piece_size.x * randf_range(0.42, 0.55)
+			corner.position = Vector3(
+				cos(ang) * rad,
+				co_box.size.y * 0.45 - piece_size.y * 0.25,
+				sin(ang) * (piece_size.z / piece_size.x) * rad,
+			)
+			corner.rotation = Vector3(
+				randf_range(-0.45, 0.45),
+				randf_range(0.0, TAU),
+				randf_range(-0.45, 0.45),
+			)
+			var co_mat := StandardMaterial3D.new()
+			co_mat.albedo_color = base_color.darkened(randf_range(0.0, 0.20))
+			co_mat.albedo_texture = SharedTextures.get_metal_wear_texture()
+			co_mat.uv1_offset = Vector3(randf(), randf(), 0.0)
+			co_mat.uv1_scale = Vector3(2.4, 2.4, 1.0)
+			co_mat.roughness = randf_range(0.92, 0.99)
+			corner.material_override = co_mat
+			root.add_child(corner)
+		# Scree skirt -- 4-6 small angular pebbles around the base
+		# perimeter so the rock looks settled into the ground rather
+		# than dropped on top of a flat plain. Tiny enough to stay
+		# below the chunk silhouette.
+		var pebble_count: int = randi_range(4, 6)
+		for pi: int in pebble_count:
+			var pebble := MeshInstance3D.new()
+			var pe_box := BoxMesh.new()
+			var pe_s: float = piece_size.x * randf_range(0.10, 0.20)
+			pe_box.size = Vector3(pe_s, pe_s * 0.7, pe_s * randf_range(0.7, 1.1))
+			pebble.mesh = pe_box
+			var pang: float = randf_range(0.0, TAU)
+			var prad: float = piece_size.x * randf_range(0.50, 0.62)
+			pebble.position = Vector3(
+				cos(pang) * prad,
+				-piece_size.y * 0.5 + pe_box.size.y * 0.5,
+				sin(pang) * (piece_size.z / piece_size.x) * prad,
+			)
+			pebble.rotation = Vector3(
+				randf_range(-0.6, 0.6),
+				randf_range(0.0, TAU),
+				randf_range(-0.6, 0.6),
+			)
+			var pe_mat := StandardMaterial3D.new()
+			pe_mat.albedo_color = base_color.darkened(randf_range(0.0, 0.30))
+			pe_mat.roughness = 0.95
+			pebble.material_override = pe_mat
+			root.add_child(pebble)
 
 	# RVO obstacle so units steer around instead of grinding into the side.
 	# Radius covers the FULL diagonal half-extent (sqrt(x²+z²)/2) plus a
