@@ -3803,6 +3803,10 @@ func _setup_buildable_buildings() -> void:
 			# V3 §"Pillar 2" — Sable's Mesh anchor structure. Filtered
 			# below by faction_lock so Anvil players don't see it.
 			"res://resources/buildings/black_pylon.tres",
+			# Faction superweapons (one each, gated by faction_lock
+			# below + the Advanced Armory prereq on the resource).
+			"res://resources/buildings/molot_platform.tres",
+			"res://resources/buildings/echo_array.tres",
 		]
 		var player_faction: int = _faction_id_for_player(0)
 		for path: String in stat_paths:

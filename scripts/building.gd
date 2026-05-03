@@ -242,6 +242,23 @@ func _ready() -> void:
 		# created from inside _detail_hq_defense_turret once the
 		# corner pivots exist, so we don't pre-create one here.
 
+		# Superweapon component -- attached to any building whose
+		# stats declare a superweapon_kind. The component handles
+		# the activation flow (ARMING -> FIRING -> COOLDOWN) and
+		# dispatches the per-kind effect.
+		if stats.superweapon_kind != &"":
+			var sw_path: String = "res://scripts/superweapon_component.gd"
+			match stats.superweapon_kind:
+				&"molot":
+					sw_path = "res://scripts/superweapon_molot.gd"
+				&"echo":
+					sw_path = "res://scripts/superweapon_echo.gd"
+			var sw_script: GDScript = load(sw_path) as GDScript
+			if sw_script:
+				var sw: Node = sw_script.new()
+				sw.name = "SuperweaponComponent"
+				add_child(sw)
+
 
 func _ensure_visual_root() -> void:
 	if _visual_root and is_instance_valid(_visual_root):
@@ -298,6 +315,8 @@ func _add_building_details() -> void:
 		&"aerodrome": _detail_aerodrome()
 		&"sam_site": _detail_sam_site()
 		&"black_pylon": _detail_black_pylon()
+		&"molot_platform": _detail_molot_platform()
+		&"echo_array": _detail_echo_array()
 	# Mesh-provider aura ring (V3 §Pillar 2). Drawn after the type
 	# detail layer so the ring sits on top of the ground markings.
 	if stats.mesh_provider_radius > 0.0:
@@ -3674,6 +3693,89 @@ func _make_sable_hull_mat(c: Color) -> StandardMaterial3D:
 	m.metallic = 0.5
 	m.roughness = 0.5
 	return m
+
+
+func _detail_molot_platform() -> void:
+	## Combine MOLOT artillery superweapon. A massive elevated barrel
+	## angled up toward the sky from a heavy octagonal turntable on
+	## top of the chassis. Radiates Combine-industrial 'too big to
+	## fight' energy.
+	var fs: Vector3 = stats.footprint_size
+	# Turntable disc on top of the hull.
+	var disc := MeshInstance3D.new()
+	var d_cyl := CylinderMesh.new()
+	d_cyl.top_radius = fs.x * 0.45
+	d_cyl.bottom_radius = fs.x * 0.50
+	d_cyl.height = 0.40
+	d_cyl.radial_segments = 8
+	disc.mesh = d_cyl
+	disc.position = Vector3(0, fs.y + 0.20, 0)
+	disc.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.20, 0.18, 0.16)))
+	_attach_visual(disc)
+	# Mount yoke -- two side cheeks bracketing the elevated barrel.
+	for side: int in 2:
+		var sx: float = -1.0 if side == 0 else 1.0
+		var cheek := MeshInstance3D.new()
+		var cb := BoxMesh.new()
+		cb.size = Vector3(0.30, fs.y * 0.55, 0.85)
+		cheek.mesh = cb
+		cheek.position = Vector3(sx * fs.x * 0.22, fs.y + cb.size.y * 0.5 + 0.40, 0.0)
+		cheek.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.20, 0.18)))
+		_attach_visual(cheek)
+	# Big elevated barrel -- tilted up ~30 degrees, mounted between
+	# the cheeks. Long enough that the silhouette dominates the
+	# whole base.
+	var barrel_len: float = fs.x * 1.30
+	var barrel := MeshInstance3D.new()
+	var b_cyl := CylinderMesh.new()
+	b_cyl.top_radius = fs.x * 0.10
+	b_cyl.bottom_radius = fs.x * 0.13
+	b_cyl.height = barrel_len
+	b_cyl.radial_segments = 16
+	barrel.mesh = b_cyl
+	# Cylinder default axis is +Y; rotate so it aligns +Z, then tilt
+	# upward 30 degrees around X.
+	barrel.rotation = Vector3(deg_to_rad(60.0), 0.0, 0.0)
+	# Sit the barrel just inside the yoke at half-height + the +Z
+	# component of the half-length so the breech is centred on the
+	# turntable.
+	var ang: float = deg_to_rad(30.0)
+	var y_extra: float = sin(ang) * barrel_len * 0.5
+	var z_extra: float = cos(ang) * barrel_len * 0.5
+	barrel.position = Vector3(0.0, fs.y + 0.95 + y_extra, z_extra * 0.55)
+	barrel.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.16, 0.14, 0.12)))
+	_attach_visual(barrel)
+	# Muzzle brake at the barrel tip -- chunky ring.
+	var brake := MeshInstance3D.new()
+	var brake_cyl := CylinderMesh.new()
+	brake_cyl.top_radius = fs.x * 0.16
+	brake_cyl.bottom_radius = fs.x * 0.16
+	brake_cyl.height = 0.30
+	brake_cyl.radial_segments = 12
+	brake.mesh = brake_cyl
+	brake.rotation = barrel.rotation
+	brake.position = Vector3(
+		barrel.position.x,
+		barrel.position.y + sin(ang) * (barrel_len * 0.5 + 0.20),
+		barrel.position.z + cos(ang) * (barrel_len * 0.5 + 0.20),
+	)
+	brake.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.10, 0.09, 0.08)))
+	_attach_visual(brake)
+	# Hazard chevrons around the platform -- amber emissive band so
+	# the player + opponent can pick the building out at any zoom.
+	var stripe := MeshInstance3D.new()
+	var stripe_box := BoxMesh.new()
+	stripe_box.size = Vector3(fs.x * 1.05, 0.12, fs.z * 1.05)
+	stripe.mesh = stripe_box
+	stripe.position = Vector3(0, fs.y * 0.12, 0)
+	stripe.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.55, 0.10), 1.4))
+	_attach_visual(stripe)
+
+
+func _detail_echo_array() -> void:
+	## Stub -- EChO Broadcast Array detail builder lives in the
+	## next commit.
+	pass
 
 
 func _detail_black_pylon() -> void:

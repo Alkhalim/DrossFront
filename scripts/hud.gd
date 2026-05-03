@@ -2026,6 +2026,16 @@ func _rebuild_production_buttons(building: Building) -> void:
 		_append_hq_upgrade_buttons(building)
 		return
 
+	# Superweapon panel -- a building with a SuperweaponComponent
+	# replaces the standard production grid with one big activation
+	# button that doubles as a state readout (Ready / Arming / Firing
+	# / Cooldown). Targeting handover happens via SelectionManager.
+	var sw: Node = building.get_node_or_null("SuperweaponComponent")
+	if sw:
+		_action_label.text = "Superweapon"
+		_append_superweapon_button(building, sw)
+		return
+
 	if producible_all.is_empty():
 		_action_label.text = "No production"
 		return
@@ -2065,6 +2075,36 @@ func _rebuild_production_buttons(building: Building) -> void:
 			btn.tooltip_text = "%s — locked.\nBuild a %s to unlock." % [unit_stat.unit_name, prereq_label]
 			btn.modulate = Color(0.7, 0.7, 0.7, 0.85)
 		_button_grid.add_child(btn)
+
+
+func _append_superweapon_button(building: Building, sw: Node) -> void:
+	## Single big activation button for the selected superweapon
+	## building. Label flips between Ready (clickable) and a state
+	## readout (Arming X% / Firing X% / Cooldown XXs) when a fire
+	## sequence is in flight or the weapon is recharging.
+	var btn := Button.new()
+	btn.custom_minimum_size = Vector2(220, 56)
+	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var state: int = sw.call("get_state") as int if sw.has_method("get_state") else 0
+	var ready: bool = sw.call("is_ready") as bool if sw.has_method("is_ready") else false
+	if ready:
+		btn.text = "[D] Activate Superweapon"
+		btn.tooltip_text = "Click to enter targeting mode, then right-click a target on the map."
+		btn.pressed.connect(_on_superweapon_activate.bind(building, sw))
+	else:
+		var label_state: String = sw.call("get_state_label") as String if sw.has_method("get_state_label") else "Busy"
+		var pct: int = int((sw.call("get_state_progress") as float if sw.has_method("get_state_progress") else 0.0) * 100.0)
+		var remaining: int = int(ceilf(sw.call("get_remaining_seconds") as float if sw.has_method("get_remaining_seconds") else 0.0))
+		btn.text = "%s  %d%%  (%ds)" % [label_state, pct, remaining]
+		btn.disabled = true
+	_button_grid.add_child(btn)
+
+
+func _on_superweapon_activate(building: Building, sw: Node) -> void:
+	if not _selection_manager:
+		return
+	if _selection_manager.has_method("enter_superweapon_target_mode"):
+		_selection_manager.call("enter_superweapon_target_mode", sw)
 
 
 func _building_display_name(building_id: String) -> String:

@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+building_name = "MOLOT Artillery Platform"
+building_id = &"molot_platform"
+hp = 1800
+cost_salvage = 1200
+cost_fuel = 100
+build_time = 120.0
+power_consumption = 25
+power_production = 0
+footprint_size = Vector3(7.0, 5.5, 7.0)
+placeholder_color = Color(0.32, 0.28, 0.22, 1)
+is_advanced = true
+prerequisites = [&"advanced_armory"]
+faction_lock = 1
+superweapon_kind = &"molot"
+superweapon_cooldown_sec = 240.0
+superweapon_arming_sec = 15.0
+superweapon_firing_sec = 30.0
+superweapon_radius = 30.0

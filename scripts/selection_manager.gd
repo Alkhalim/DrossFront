@@ -59,6 +59,12 @@ var _inspected_enemy: Node3D = null
 
 ## Attack-move mode: next right-click issues attack-move instead of move.
 var _attack_move_mode: bool = false
+## Active superweapon waiting for a target. Set when the player
+## clicks the Activate button on a superweapon building's panel;
+## the next right-click on the map resolves the strike location
+## via the component's try_activate(). Cleared on resolution OR
+## when the player escapes / changes selection.
+var _superweapon_targeting: Node = null
 
 ## Control groups: index 0-9 maps to arrays of unit instance IDs.
 var _control_groups: Array[Array] = []
@@ -245,6 +251,15 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 		elif _patrol_target_mode:
 			_command_patrol(event.position)
 			_patrol_target_mode = false
+		elif _superweapon_targeting and is_instance_valid(_superweapon_targeting):
+			# Targeting a superweapon strike. Right-click on the map
+			# resolves the target world position; the component
+			# refuses if it's no longer READY (e.g. building destroyed
+			# mid-targeting), and the mode clears either way.
+			var sw_target: Vector3 = _raycast_ground(event.position)
+			if sw_target != Vector3.INF and _superweapon_targeting.has_method("try_activate"):
+				_superweapon_targeting.call("try_activate", sw_target)
+			_superweapon_targeting = null
 		else:
 			# Check if right-clicking an enemy → attack command
 			var enemy := _find_enemy_at(event.position)
@@ -833,6 +848,12 @@ func _command_attack_move(screen_pos: Vector2) -> void:
 
 ## Stand Ground / Patrol mode flags driven by the unit-action panel.
 var _patrol_target_mode: bool = false
+
+
+func enter_superweapon_target_mode(component: Node) -> void:
+	_superweapon_targeting = component
+	_attack_move_mode = false
+	_patrol_target_mode = false
 
 
 func enter_attack_move_mode() -> void:

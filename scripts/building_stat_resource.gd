@@ -61,3 +61,23 @@ extends Resource
 ## Faction lock. 0 = available to all, 1 = Anvil only, 2 = Sable
 ## only. Used by HUD's build menu to filter the buildable list.
 @export var faction_lock: int = 0
+
+@export_group("Superweapon")
+## Empty when this building isn't a superweapon. Set to a kind id
+## (e.g. &"molot", &"echo") to attach a SuperweaponComponent that
+## handles the activation flow + per-kind effect dispatch.
+@export var superweapon_kind: StringName = &""
+## Seconds the player must wait between firing the superweapon and
+## being able to fire it again. Doc spec is 4-5 minutes per weapon.
+@export var superweapon_cooldown_sec: float = 240.0
+## Seconds spent in the ARMING phase after activation -- the
+## telegraph window where the opponent sees the warning before the
+## effect lands.
+@export var superweapon_arming_sec: float = 15.0
+## Seconds the FIRING phase lasts. Some weapons fire instantly
+## (EChO paralysis pulse) -- set to 0.0 in that case so the
+## component skips straight to cooldown.
+@export var superweapon_firing_sec: float = 30.0
+## World-unit radius for the superweapon's effect zone. Used by
+## both the targeting reticle and the per-kind effect dispatch.
+@export var superweapon_radius: float = 30.0
