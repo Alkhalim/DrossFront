@@ -132,6 +132,13 @@ func _apply_fog_dim_recursive(node: Node, overlay: Material) -> void:
 	for child: Node in node.get_children():
 		_apply_fog_dim_recursive(child, overlay)
 
+## Hound Tracker recon-support aura. Friendly units inside this
+## radius of a Tracker get a sight bonus, mirroring the Tracker's
+## "this branch makes the army see further" identity. Cheap to
+## scan -- trackers are sparse on the field.
+const TRACKER_AURA_RADIUS: float = 25.0
+const TRACKER_AURA_BONUS: float = 1.15
+
 ## Sight-tier -> radius in world units. Units / buildings without
 ## a stat resource fall through DEFAULT_SIGHT_RADIUS.
 const DEFAULT_SIGHT_RADIUS: float = 18.0
@@ -284,6 +291,21 @@ func _recompute_visibility() -> void:
 		if _cells[i] == CellState.VISIBLE:
 			_cells[i] = CellState.EXPLORED
 
+	# Pre-collect Hound Tracker positions so the per-unit sight loop
+	# below can apply the +15% sight aura when a friendly Anvil unit
+	# stands within TRACKER_AURA_RADIUS of any Tracker. Cheap because
+	# trackers are usually few; we stop scanning once the boost is
+	# applied to a given unit.
+	var tracker_positions: Array[Vector3] = []
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node) or not _is_friendly(node):
+			continue
+		if "alive_count" in node and (node.get("alive_count") as int) <= 0:
+			continue
+		var ts: UnitStatResource = (node.get("stats") as UnitStatResource) if "stats" in node else null
+		if ts and ts.unit_name.findn("Tracker") >= 0:
+			tracker_positions.append((node as Node3D).global_position)
+
 	# Walk every unit + building owned by the local player or any
 	# ally and stamp visible cells around them.
 	for node: Node in get_tree().get_nodes_in_group("units"):
@@ -302,6 +324,16 @@ func _recompute_visibility() -> void:
 		# spotting range.
 		if is_elevated and not is_air:
 			radius *= ELEVATED_SIGHT_BONUS
+		# Tracker aura: any friendly unit within TRACKER_AURA_RADIUS
+		# of a Hound Tracker gains +15% sight. Trackers themselves
+		# also benefit when stacked. The aura is cheap-passive (no
+		# resource cost, no UI) -- the Tracker's recon-support role
+		# is its identity.
+		if not tracker_positions.is_empty():
+			for tp: Vector3 in tracker_positions:
+				if node3d.global_position.distance_to(tp) <= TRACKER_AURA_RADIUS:
+					radius *= TRACKER_AURA_BONUS
+					break
 		_stamp_visibility(node3d.global_position, radius, is_elevated, is_air)
 
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
