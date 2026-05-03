@@ -54,6 +54,12 @@ var _turn_speed: float = 6.0
 var member_hp: Array[int] = []
 var alive_count: int = 0
 
+## Seconds remaining on an EChO override / EMP paralysis. While
+## > 0 the unit's velocity is forced to zero in _physics_process
+## (movement halts even if a move command is queued) and the
+## attached CombatComponent's silence timer prevents firing.
+var _emp_paralysis_remaining: float = 0.0
+
 ## Visual state.
 var _member_meshes: Array[Node3D] = []
 var _color_shell: MeshInstance3D = null
@@ -3241,6 +3247,21 @@ func stop() -> void:
 	has_move_order = false
 
 
+func apply_emp_paralysis(duration: float) -> void:
+	## Public hook used by Meridian's EChO override. Stacks by max so
+	## a fresh short cast can't clip the tail of a longer one. Halts
+	## current movement, silences the combat component (gates firing
+	## via the existing _silence_remaining check), and arms the
+	## per-frame velocity-zero gate in _physics_process.
+	if duration <= 0.0:
+		return
+	_emp_paralysis_remaining = maxf(_emp_paralysis_remaining, duration)
+	stop()
+	var combat: Node = get_combat()
+	if combat and combat.has_method("apply_silence"):
+		combat.call("apply_silence", duration)
+
+
 ## --- Active abilities ---
 
 func has_ability() -> bool:
@@ -3628,6 +3649,24 @@ func _physics_process(delta: float) -> void:
 			global_position = _garrisoned_in.global_position
 			velocity = Vector3.ZERO
 			return
+
+	# EChO override / EMP paralysis. While the timer is hot, force
+	# velocity to zero, drop any pending move target, and skip the
+	# rest of the physics frame so the unit is fully frozen even
+	# if the AI keeps re-issuing commands. Gravity still settles
+	# via move_and_slide so airborne units don't hover.
+	if _emp_paralysis_remaining > 0.0:
+		_emp_paralysis_remaining = maxf(0.0, _emp_paralysis_remaining - delta)
+		velocity.x = 0.0
+		velocity.z = 0.0
+		if not is_on_floor():
+			velocity.y -= GRAVITY * delta
+		else:
+			velocity.y = 0.0
+		move_target = Vector3.INF
+		has_move_order = false
+		move_and_slide()
+		return
 
 	# Damage flash countdown (cheap — runs every frame).
 	if _flash_timer > 0.0:

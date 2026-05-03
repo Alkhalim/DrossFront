@@ -46,18 +46,21 @@ func _apply_override(duration: float) -> void:
 		var dz: float = n3.global_position.z - _target_pos.z
 		if dx * dx + dz * dz > radius_sq:
 			continue
-		# Route through the unit's combat component so the existing
-		# silence machinery (silence_remaining gates firing already)
-		# carries the weapon-offline half of the effect. Movement
-		# halt: stop() + clear move target so the paralyzed unit
-		# stands still even if it had a queued waypoint.
-		var combat: Node = null
-		if n3.has_method("get_combat"):
-			combat = n3.call("get_combat")
-		if combat and "_silence_remaining" in combat:
-			combat.set("_silence_remaining", duration)
-		if n3.has_method("stop"):
-			n3.call("stop")
+		# Hand off to Unit's apply_emp_paralysis -- silences combat
+		# AND arms the per-frame velocity-zero gate so the AI can't
+		# keep dragging the mech across the override zone with
+		# spammed move commands.
+		if n3.has_method("apply_emp_paralysis"):
+			n3.call("apply_emp_paralysis", duration)
+		else:
+			# Fallback for non-Unit entities in the units group.
+			var combat: Node = null
+			if n3.has_method("get_combat"):
+				combat = n3.call("get_combat")
+			if combat and combat.has_method("apply_silence"):
+				combat.call("apply_silence", duration)
+			if n3.has_method("stop"):
+				n3.call("stop")
 		# Per-unit pulse flash -- a small violet sparkle above the
 		# unit so the player sees exactly who went offline.
 		_spawn_unit_pulse(n3.global_position + Vector3(0.0, 1.4, 0.0))
