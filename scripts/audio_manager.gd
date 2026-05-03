@@ -200,6 +200,10 @@ func _load_sfx_banks() -> void:
 		"res://assets/audio/Confirm UI Sfx Low (1).mp3",
 	])
 	_load_voicelines()
+	# Pre-bake the procedural-sound cache so the first match plays
+	# don't pay the ~1.5 ms per-buffer generation cost mid-frame.
+	# Cost lives in the menu/load window where stutter is invisible.
+	prewarm_proc_pool()
 
 
 func _load_voicelines() -> void:
@@ -923,26 +927,120 @@ func play_capture_complete(at: Vector3 = Vector3.INF) -> void:
 
 
 ## --- Generator playback ---
+##
+## Procedural sound generators are expensive (~1.5 ms per buffer
+## fill at 22 kHz) and the call sites randomise freq + duration, so
+## a naive cache would never hit. We quantise the parameters to
+## coarse buckets (freq -> nearest 5 Hz, duration -> nearest 0.01 s)
+## and cache the AudioStreamWAV by that key. After ~15 seconds of
+## play every common bucket lands in the cache and subsequent
+## generator calls become a dict lookup. The variation the
+## randomised params were going for is preserved by the volume_db /
+## pitch jitter still applied per-emit + the bucket coarseness
+## leaving a couple-Hz of natural drift.
+
+var _proc_sound_cache: Dictionary = {}
+const _PROC_CACHE_MAX: int = 256
+
+
+func _proc_cache_get(key: String) -> AudioStream:
+	return _proc_sound_cache.get(key, null) as AudioStream
+
+
+func _proc_cache_put(key: String, stream: AudioStream) -> void:
+	if _proc_sound_cache.size() >= _PROC_CACHE_MAX:
+		# Bound the cache. Drop a single arbitrary entry rather than
+		# fully clearing so the hot bucket doesn't wipe.
+		var first_key: String = (_proc_sound_cache.keys()[0]) as String
+		_proc_sound_cache.erase(first_key)
+	_proc_sound_cache[key] = stream
+
 
 func _play_tone(freq: float, duration: float, volume_db: float, detune: float = 0.0) -> void:
-	var stream := _generate_tone(freq + detune, duration)
+	var f: float = freq + detune
+	var key: String = "t:%d:%d" % [int(round(f / 5.0)) * 5, int(round(duration * 100.0))]
+	var stream: AudioStream = _proc_cache_get(key)
+	if stream == null:
+		stream = _generate_tone(f, duration)
+		_proc_cache_put(key, stream)
 	_emit(stream, volume_db)
 
 
 func _play_thump(freq: float, duration: float, volume_db: float) -> void:
 	# A "thump" is a tone that pitches down across its duration — gives weight.
-	var stream := _generate_pitched_tone(freq * 1.6, freq * 0.7, duration)
+	var key: String = "p:%d:%d" % [int(round(freq / 5.0)) * 5, int(round(duration * 100.0))]
+	var stream: AudioStream = _proc_cache_get(key)
+	if stream == null:
+		stream = _generate_pitched_tone(freq * 1.6, freq * 0.7, duration)
+		_proc_cache_put(key, stream)
 	_emit(stream, volume_db)
 
 
 func _play_two_tone(freq1: float, freq2: float, duration: float, volume_db: float) -> void:
-	var stream := _generate_two_tone(freq1, freq2, duration)
+	var key: String = "tt:%d:%d:%d" % [
+		int(round(freq1 / 5.0)) * 5,
+		int(round(freq2 / 5.0)) * 5,
+		int(round(duration * 100.0)),
+	]
+	var stream: AudioStream = _proc_cache_get(key)
+	if stream == null:
+		stream = _generate_two_tone(freq1, freq2, duration)
+		_proc_cache_put(key, stream)
 	_emit(stream, volume_db)
 
 
 func _play_filtered_noise(duration: float, lowpass_hz: float, volume_db: float) -> void:
-	var stream := _generate_filtered_noise(duration, lowpass_hz)
+	var key: String = "n:%d:%d" % [
+		int(round(duration * 100.0)),
+		int(round(lowpass_hz / 50.0)) * 50,
+	]
+	var stream: AudioStream = _proc_cache_get(key)
+	if stream == null:
+		stream = _generate_filtered_noise(duration, lowpass_hz)
+		_proc_cache_put(key, stream)
 	_emit(stream, volume_db)
+
+
+func prewarm_proc_pool() -> void:
+	## Pre-generates the most common procedural sound buckets at
+	## scene start so the first few plays of each effect don't pay
+	## the 1.5ms generation cost mid-match. Covers the freq /
+	## duration ranges actually called by the public play_* helpers
+	## (UI confirms, error blips, weapon fire variants).
+	# UI tones (confirm / select / production-complete blips) sit
+	# around 380-720 Hz at 0.04-0.07 s.
+	for f: int in [380, 420, 460, 500, 540, 580, 620, 660, 700, 740]:
+		for dms: int in [4, 5, 6, 7]:
+			_play_tone_warm(float(f), float(dms) / 100.0)
+	# Thump pool -- explosions / heavy footfalls at 60-105 Hz, 0.18-0.28 s.
+	for f2: int in [60, 70, 80, 90, 100]:
+		for dms2: int in [18, 22, 25, 28]:
+			_play_thump_warm(float(f2), float(dms2) / 100.0)
+	# Filtered-noise pool -- explosion shells, hisses.
+	for hz: int in [800, 1500, 2000, 2500, 3000, 3500]:
+		for dms3: int in [4, 8, 12, 18]:
+			_play_filtered_warm(float(dms3) / 100.0, float(hz))
+
+
+func _play_tone_warm(freq: float, duration: float) -> void:
+	var key: String = "t:%d:%d" % [int(round(freq / 5.0)) * 5, int(round(duration * 100.0))]
+	if _proc_cache_get(key) == null:
+		_proc_cache_put(key, _generate_tone(freq, duration))
+
+
+func _play_thump_warm(freq: float, duration: float) -> void:
+	var key: String = "p:%d:%d" % [int(round(freq / 5.0)) * 5, int(round(duration * 100.0))]
+	if _proc_cache_get(key) == null:
+		_proc_cache_put(key, _generate_pitched_tone(freq * 1.6, freq * 0.7, duration))
+
+
+func _play_filtered_warm(duration: float, lowpass_hz: float) -> void:
+	var key: String = "n:%d:%d" % [
+		int(round(duration * 100.0)),
+		int(round(lowpass_hz / 50.0)) * 50,
+	]
+	if _proc_cache_get(key) == null:
+		_proc_cache_put(key, _generate_filtered_noise(duration, lowpass_hz))
 
 
 func _emit(stream: AudioStream, volume_db: float, pitch: float = 1.0) -> void:
