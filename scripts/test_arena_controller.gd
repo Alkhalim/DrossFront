@@ -2188,6 +2188,18 @@ func _spawn_terrain_piece(pos: Vector3, piece_size: Vector3, kind: String) -> vo
 	root.add_to_group("terrain")
 	add_child(root)
 
+	# Tall terrain (rocks, ruins) blocks line of sight. FogOfWar's
+	# Bresenham vision walk treats the marked cells as opaque so a
+	# unit on the far side of a rock spine stays hidden until the
+	# observer moves into the gap. Threshold ~1.4u so flat scrap
+	# stains and similar ground-level decoration don't qualify.
+	if piece_size.y >= 1.4:
+		var fow: FogOfWar = get_node_or_null("FogOfWar") as FogOfWar
+		if fow and fow.has_method("register_los_occluder"):
+			# Use the half-extent diagonal as the LOS footprint so a
+			# rotated piece still occludes its full ground area.
+			fow.call("register_los_occluder", root.position, diag_half * 0.85)
+
 	# Hard collision matching the visual extent.
 	var shape := CollisionShape3D.new()
 	var box := BoxShape3D.new()

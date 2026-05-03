@@ -41,6 +41,14 @@ const FOW_REFRESH_HZ: float = 5.0
 ## plateau-top cells (they can't see uphill); plateau-top observers
 ## and aircraft pass through the gate.
 var _plateau_cells: PackedByteArray = PackedByteArray()
+## LOS-occluder grid -- 1 = the cell contains tall terrain that
+## blocks line of sight (rock pile, derelict building block, dense
+## tree). Vision stamping below walks a Bresenham line from observer
+## to candidate cell and stops at the first occluder, so units on
+## the far side of a forest / rock spine stay hidden until the
+## observer moves into the gap. Marked by terrain spawners via
+## `register_los_occluder` / `unregister_los_occluder`.
+var _occluder_cells: PackedByteArray = PackedByteArray()
 
 ## Y threshold above which an observer counts as "elevated" for
 ## plateau LOS purposes. Plateaus are 2.5-3u tall in v2, so anything
@@ -60,6 +68,8 @@ func register_plateau_footprint(centre: Vector3, top_size: Vector2) -> void:
 	## ground footprint defaults to 0 (non-plateau).
 	if _plateau_cells.size() != _cells.size():
 		_plateau_cells.resize(_cells.size())
+	if _occluder_cells.size() != _cells.size():
+		_occluder_cells.resize(_cells.size())
 	var hx: float = top_size.x * 0.5
 	var hz: float = top_size.y * 0.5
 	var min_x: float = centre.x - hx
@@ -74,6 +84,58 @@ func register_plateau_footprint(centre: Vector3, top_size: Vector2) -> void:
 			if cx < 0 or cx >= GRID_SIZE or cz < 0 or cz >= GRID_SIZE:
 				continue
 			_plateau_cells[_cell_index(cx, cz)] = 1
+
+
+func register_los_occluder(world_pos: Vector3, radius: float = 1.5) -> void:
+	## Marks every cell within `radius` of `world_pos` as a LOS
+	## occluder. Tall terrain (rocks, ruins, dense trees) call this
+	## from their setup so vision stamping stops at the first
+	## occluder cell along the observer-to-cell line. Cheap O(N) per
+	## terrain piece called once at spawn.
+	if _occluder_cells.size() != _cells.size():
+		_occluder_cells.resize(_cells.size())
+	var cell_radius: int = maxi(int(ceil(radius / CELL_SIZE)), 0)
+	var c: Vector2i = _world_to_cell(world_pos)
+	var x0: int = maxi(c.x - cell_radius, 0)
+	var x1: int = mini(c.x + cell_radius, GRID_SIZE - 1)
+	var z0: int = maxi(c.y - cell_radius, 0)
+	var z1: int = mini(c.y + cell_radius, GRID_SIZE - 1)
+	var radius_sq: float = radius * radius
+	for cz: int in range(z0, z1 + 1):
+		for cx: int in range(x0, x1 + 1):
+			var cell_centre := Vector3(
+				float(cx) * CELL_SIZE - MAP_HALF_EXTENT,
+				world_pos.y,
+				float(cz) * CELL_SIZE - MAP_HALF_EXTENT,
+			)
+			if cell_centre.distance_squared_to(world_pos) > radius_sq:
+				continue
+			_occluder_cells[_cell_index(cx, cz)] = 1
+
+
+func unregister_los_occluder(world_pos: Vector3, radius: float = 1.5) -> void:
+	## Inverse of register -- clears the cells when a tree is felled
+	## or a rock destroyed. Walks the same footprint and zeroes the
+	## occluder bit so vision opens up again on the next recompute.
+	if _occluder_cells.size() != _cells.size():
+		return
+	var cell_radius: int = maxi(int(ceil(radius / CELL_SIZE)), 0)
+	var c: Vector2i = _world_to_cell(world_pos)
+	var x0: int = maxi(c.x - cell_radius, 0)
+	var x1: int = mini(c.x + cell_radius, GRID_SIZE - 1)
+	var z0: int = maxi(c.y - cell_radius, 0)
+	var z1: int = mini(c.y + cell_radius, GRID_SIZE - 1)
+	var radius_sq: float = radius * radius
+	for cz: int in range(z0, z1 + 1):
+		for cx: int in range(x0, x1 + 1):
+			var cell_centre := Vector3(
+				float(cx) * CELL_SIZE - MAP_HALF_EXTENT,
+				world_pos.y,
+				float(cz) * CELL_SIZE - MAP_HALF_EXTENT,
+			)
+			if cell_centre.distance_squared_to(world_pos) > radius_sq:
+				continue
+			_occluder_cells[_cell_index(cx, cz)] = 0
 
 
 ## Material overlay applied to each MeshInstance3D inside an entity
@@ -201,6 +263,8 @@ func _ready() -> void:
 	# can stamp into it without an additional resize.
 	if _plateau_cells.size() != _cells.size():
 		_plateau_cells.resize(_cells.size())
+	if _occluder_cells.size() != _cells.size():
+		_occluder_cells.resize(_cells.size())
 	_registry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
 	# Full first pass on enter so cells around the local-player base
 	# are visible the moment the HUD wakes up.
@@ -534,13 +598,20 @@ func _stamp_visibility(world_pos: Vector3, radius: float, observer_elevated: boo
 	# events, not unit vision.
 	var has_plateau_data: bool = _plateau_cells.size() == _cells.size()
 	var skip_plateau_cells: bool = has_plateau_data and not observer_elevated and not observer_aircraft
+	# Aircraft see straight over forests / rock spines, so LOS
+	# occlusion only gates ground observers. Plateau-top observers
+	# are typically firing DOWN into rocks/trees so they also bypass
+	# the gate; keeps the elevation tradeoff consistent with the
+	# 'high ground sees more' rule.
+	var has_occluder_data: bool = _occluder_cells.size() == _cells.size()
+	var honour_occluders: bool = has_occluder_data and not observer_aircraft and not observer_elevated
+	var origin_cell: Vector2i = _world_to_cell(world_pos)
 
 	var cell_radius: int = int(ceil(radius / CELL_SIZE))
-	var c: Vector2i = _world_to_cell(world_pos)
-	var x0: int = maxi(c.x - cell_radius, 0)
-	var x1: int = mini(c.x + cell_radius, GRID_SIZE - 1)
-	var z0: int = maxi(c.y - cell_radius, 0)
-	var z1: int = mini(c.y + cell_radius, GRID_SIZE - 1)
+	var x0: int = maxi(origin_cell.x - cell_radius, 0)
+	var x1: int = mini(origin_cell.x + cell_radius, GRID_SIZE - 1)
+	var z0: int = maxi(origin_cell.y - cell_radius, 0)
+	var z1: int = mini(origin_cell.y + cell_radius, GRID_SIZE - 1)
 	var radius_sq: float = radius * radius
 	for cz: int in range(z0, z1 + 1):
 		for cx: int in range(x0, x1 + 1):
@@ -564,4 +635,43 @@ func _stamp_visibility(world_pos: Vector3, radius: float, observer_elevated: boo
 				if _cells[idx] == CellState.UNEXPLORED:
 					_cells[idx] = CellState.EXPLORED
 				continue
+			# LOS occluder gate: walk the cell-grid line from the
+			# observer's cell to (cx, cz) and stop at the first
+			# occluder cell along the way. The occluder cell itself
+			# stays visible (the player sees the trunk / rock face);
+			# anything past it doesn't get a vision stamp this tick.
+			# The observer's own cell never blocks; same for the
+			# destination so a unit standing inside a forest still
+			# reveals that cell.
+			if honour_occluders and not _line_of_sight_clear(origin_cell.x, origin_cell.y, cx, cz):
+				continue
 			_cells[idx] = CellState.VISIBLE
+
+
+func _line_of_sight_clear(x0: int, y0: int, x1: int, y1: int) -> bool:
+	## Bresenham line walk between two grid cells. Returns true when
+	## no cell along the line (excluding the endpoints) carries the
+	## occluder flag. Endpoint cells are excluded so an observer
+	## standing inside a forest still reveals its own cell, and a
+	## tree at the destination still gets revealed (the player sees
+	## the trunk; cells PAST the trunk are what get blocked).
+	var dx: int = absi(x1 - x0)
+	var dy: int = absi(y1 - y0)
+	var sx: int = 1 if x0 < x1 else -1
+	var sy: int = 1 if y0 < y1 else -1
+	var err: int = dx - dy
+	var cx: int = x0
+	var cy: int = y0
+	while cx != x1 or cy != y1:
+		var e2: int = err * 2
+		if e2 > -dy:
+			err -= dy
+			cx += sx
+		if e2 < dx:
+			err += dx
+			cy += sy
+		if cx == x1 and cy == y1:
+			break
+		if _occluder_cells[_cell_index(cx, cy)] == 1:
+			return false
+	return true
