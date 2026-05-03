@@ -32,6 +32,6 @@ built_at = &"aerodrome"
 primary_weapon = SubResource("weapon_hunter_at")
 is_aircraft = true
 flight_altitude = 5.5
-flight_speed = 18.0
+flight_speed = 13.5
 special_description = "Fang Hunter — micro-missiles retuned for anti-armour work (AA tag, moderate damage). Drops light micro-rockets that crack heavy armour. Pair with Switchblades or Specters; the Hunter alone won't beat dedicated AAir defenses."
 passive_description = "Anti-Armour Micro-Missiles — AA-tagged warheads tuned for cracking heavy ground armour."
