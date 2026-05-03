@@ -2011,10 +2011,10 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 
 
-## Building placement grid -- 0.25u steps along XZ. Locks foundations
+## Building placement grid -- 0.5u steps along XZ. Locks foundations
 ## to a regular lattice so adjacent buildings share a clean edge and
 ## the navmesh carves uniform corridors between them.
-const BUILD_GRID_STEP: float = 0.25
+const BUILD_GRID_STEP: float = 0.5
 
 
 func _snap_to_build_grid(pos: Vector3) -> Vector3:
