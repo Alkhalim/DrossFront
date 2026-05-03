@@ -3602,7 +3602,10 @@ func _update_unit_panel(units: Array[Node3D]) -> void:
 
 		var has_builder: bool = false
 		for unit: Node3D in units:
-			if unit.get_builder():
+			# Defensive: SalvageWorker + any future "units" group entry
+			# without a builder API would crash this loop. has_method
+			# guard keeps the panel safe regardless of who's selected.
+			if unit.has_method("get_builder") and unit.get_builder():
 				has_builder = true
 				break
 
@@ -3647,7 +3650,7 @@ func _update_unit_panel(units: Array[Node3D]) -> void:
 			if hp_pct < 0.5: hp_color = Color(0.95, 0.78, 0.32, 0.95)
 			if hp_pct < 0.25: hp_color = Color(1.0, 0.4, 0.35, 0.95)
 			_show_progress(hp_pct, hp_color)
-			if unit.get_builder():
+			if unit.has_method("get_builder") and unit.get_builder():
 				_action_label.text = "Build  [1-6]"
 		else:
 			_name_label.text = "Unit"

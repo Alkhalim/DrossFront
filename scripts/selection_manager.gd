@@ -370,8 +370,15 @@ func select_all_player_military() -> void:
 			continue
 		if u.is_in_group("crawlers"):
 			continue
+		# Skip non-mech entities that share the "units" group --
+		# SalvageWorker and friends have no UnitStatResource, no
+		# get_builder, and aren't player-controllable. Without this
+		# the HUD inspect path would crash trying to read stats /
+		# call get_builder on a worker drone.
 		var stats: UnitStatResource = (u.get("stats") as UnitStatResource) if "stats" in u else null
-		if stats and stats.can_build:
+		if not stats:
+			continue
+		if stats.can_build:
 			continue
 		_selected_units.append(u)
 		if u.has_method("set_selected"):
