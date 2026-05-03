@@ -3168,20 +3168,45 @@ func _make_branch_button(
 
 
 func _make_branch_styled_tooltip(base_stats: UnitStatResource, branch_stats: UnitStatResource, branch_name: String, cost_suffix: String) -> Control:
-	## Branch-commit tooltip. Reads as "BaseUnit -> Branch", body =
-	## a short delta summary of what improves and what gets worse vs
-	## the base, footer = standard upgrade-cost suffix. Tech violet
-	## accent matches the armory panel role.
+	## Branch-commit tooltip. Default body = short prose summary of
+	## what the branch trades (read from `branch_summary` on the
+	## variant). Holding SHIFT swaps to the per-stat delta breakdown
+	## for players who want the full numbers. Empty branch_summary
+	## falls back to the delta breakdown so legacy variants still
+	## surface useful info.
 	var title: String = "%s — %s" % [
 		base_stats.unit_name if base_stats else "Unit",
 		branch_name,
 	]
-	var body: String = _branch_delta_summary(base_stats, branch_stats)
+	var summary: String = ""
+	if branch_stats and branch_stats.branch_summary != "":
+		summary = branch_stats.branch_summary
+	var show_extended: bool = _extended_stats_active()
+	var body: String
+	if summary != "" and not show_extended:
+		body = summary + "\n\n[hold SHIFT for full stat breakdown]"
+	else:
+		body = _branch_delta_summary(base_stats, branch_stats)
 	var lines_extra: PackedStringArray = PackedStringArray()
 	if cost_suffix and cost_suffix != "":
 		lines_extra.append("")
 		lines_extra.append("Upgrade cost:%s" % cost_suffix)
 	return make_styled_upgrade_tooltip(title, body, 0, 0, _ROLE_COLOR_TECH, lines_extra)
+
+
+func _extended_stats_active() -> bool:
+	## True when the player is currently asking for the full per-stat
+	## breakdown -- either by holding SHIFT or by enabling the
+	## 'extended stats by default' setting from the settings panel.
+	if _extended_stats_default:
+		return not Input.is_key_pressed(KEY_SHIFT)
+	return Input.is_key_pressed(KEY_SHIFT)
+
+
+## Persistent toggle exposed by the settings panel. When true the
+## roles invert: basic stats / branch summary live behind SHIFT,
+## extended view is the default.
+var _extended_stats_default: bool = false
 
 
 func _branch_delta_summary(base_stats: UnitStatResource, branch_stats: UnitStatResource) -> String:
