@@ -84,6 +84,18 @@ func _ready() -> void:
 		_control_groups.append([])
 
 
+## Hover throttle. The hover update fires a physics raycast +
+## a registry walk every call. At 60Hz with a stationary mouse
+## (player just panning the camera with WASD) the raycast result
+## was identical frame-to-frame; throttling to ~20Hz +
+## skip-when-mouse-didn't-move drops the per-frame cost
+## significantly without making cursor feedback feel laggy.
+const HOVER_TICK_INTERVAL_MS: int = 50
+const HOVER_MOTION_EPSILON_PX: float = 1.0
+var _hover_last_tick_msec: int = 0
+var _hover_last_mouse_pos: Vector2 = Vector2(-9999.0, -9999.0)
+
+
 func _process(_delta: float) -> void:
 	_update_hover()
 
@@ -97,10 +109,19 @@ func _update_hover() -> void:
 		_set_hover(null)
 		_update_cursor_kind_for_build_mode()
 		return
+	# Skip when the mouse hasn't moved AND the throttle window
+	# hasn't elapsed. Camera pans (WASD scroll) leave the mouse
+	# screen-pos identical so the hover result hasn't changed.
+	var screen_pos: Vector2 = get_viewport().get_mouse_position()
+	var now_msec: int = Time.get_ticks_msec()
+	var moved: bool = screen_pos.distance_to(_hover_last_mouse_pos) > HOVER_MOTION_EPSILON_PX
+	if not moved and now_msec - _hover_last_tick_msec < HOVER_TICK_INTERVAL_MS:
+		return
+	_hover_last_tick_msec = now_msec
+	_hover_last_mouse_pos = screen_pos
 	# Hover affects ground Units only (HP-bar reveal). Aircraft skip
 	# hover treatment for now — `as Unit` returns null for Aircraft so
 	# `_set_hover(null)` clears the previous hover cleanly.
-	var screen_pos: Vector2 = get_viewport().get_mouse_position()
 	var raw_hover: Node3D = _raycast_unit(screen_pos)
 	var hovered: Unit = raw_hover as Unit
 	_set_hover(hovered)
