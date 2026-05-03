@@ -3185,13 +3185,15 @@ func _finish_construction() -> void:
 		_collision.disabled = false
 	if _visual_root:
 		_visual_root.position.y = 0.0
-	# Register as a FogOfWar LOS occluder so the structure
-	# physically blocks vision the same way rocks + ruins do.
-	# Aircraft, plateau-top observers, and units flagged
-	# sees_over_buildings (Spotter / Apex / Harbinger) bypass the
-	# gate. Footprint + a clearance fudge so the cells right at
-	# the wall mark as opaque.
-	_register_los_footprint(true)
+	# Building LOS occluder registration is INTENTIONALLY disabled
+	# until FOW recompute moves to a shadow-cast / threaded path.
+	# Per-cell Bresenham line walks across N building occluders ×
+	# M observer cells × 5Hz blew the per-tick CPU budget; rocks +
+	# ruins + dense trees still register so the LOS feature isn't
+	# fully gone, just opted out of the densest contributor. Hook
+	# is kept so the feature can flip back on once the recompute
+	# is cheap enough.
+	# _register_los_footprint(true)
 
 
 func _register_los_footprint(register: bool) -> void:

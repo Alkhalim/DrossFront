@@ -249,9 +249,25 @@ func _spawn_select_ring() -> void:
 		add_child(_select_ring)
 
 
+## Half-frame stagger so multiple aircraft don't all churn the
+## per-frame altitude-bob / shadow / drone-bob loop on the same
+## tick. The doubled delta on heavy frames keeps motion + bob
+## cadence identical to the un-staggered version.
+var _ac_phys_frame: int = 0
+
+
 func _process(delta: float) -> void:
 	if alive_count <= 0:
 		return
+	_ac_phys_frame += 1
+	if (_ac_phys_frame & 1) != (get_instance_id() & 1):
+		# Off-frames still need the position integration so the
+		# craft moves smoothly; everything else (bob, shadows,
+		# rotors, drones) waits for its phase tick.
+		if move_target != Vector3.INF and stats:
+			global_position += velocity * delta
+		return
+	delta *= 2.0
 	# Active-ability cooldown tick (mirrors Unit). The autocast
 	# trigger lives in CombatComponent so it fires at the right
 	# moment in the combat tick instead of here.

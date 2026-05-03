@@ -37,7 +37,13 @@ func _ready() -> void:
 	collision_layer = 4
 	collision_mask = 0
 	_build_visual()
-	_register_occluder(true)
+	# LOS occluder registration disabled for trees -- on
+	# Schwarzwald with 500+ trees the per-cell Bresenham line walks
+	# in FOW recompute were the dominant per-tick cost. Trees still
+	# physically block movement and reveal as the player explores;
+	# vision just isn't blocked through them until the FOW recompute
+	# moves to a cheaper representation.
+	# _register_occluder(true)
 
 
 func _build_visual() -> void:

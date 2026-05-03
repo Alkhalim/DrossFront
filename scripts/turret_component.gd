@@ -153,9 +153,22 @@ func _apply_visual_profile() -> void:
 		_building.rebuild_turret_visual(profile)
 
 
+## Half-frame stagger so 16+ HQ corner MGs + standalone turrets
+## don't all tick at 60Hz. The fire / search timers tick at the
+## doubled delta on heavy frames so cadence stays identical.
+var _turret_phys_frame: int = 0
+
+
 func _process(delta: float) -> void:
 	if not _building or not _building.get("is_constructed"):
 		return
+	# Stagger heavy work to ~30Hz; phase tied to instance id so a
+	# base of corner MGs spreads across alternating frames instead
+	# of all firing on the same physics tick.
+	_turret_phys_frame += 1
+	if (_turret_phys_frame & 1) != (get_instance_id() & 1):
+		return
+	delta *= 2.0
 
 	_fire_timer -= delta
 	_search_timer -= delta
