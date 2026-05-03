@@ -3775,6 +3775,10 @@ func _rebuild_build_buttons() -> void:
 		# build-menu hover info is readable + role-coloured.
 		btn.tooltip_text = bstat.building_name
 		btn.disabled = not prereqs_ok
+		# Tint the button itself by the building's role color so the
+		# whole panel can be scanned by category at a glance, mirroring
+		# the role border tint used in the hover tooltip.
+		_apply_role_tint_to_build_button(btn, _building_role_color(bstat), prereqs_ok)
 		# Bind by stat reference, not visible index — visible_index only
 		# matches `buildable[i]` while filters are stable, and we don't
 		# want a hotkey collision to pick the wrong building.
@@ -4397,6 +4401,55 @@ const _ROLE_COLOR_DEFENSE: Color    = Color(0.95, 0.30, 0.25, 1.0) # warm red
 const _ROLE_COLOR_POWER: Color      = Color(1.00, 0.95, 0.20, 1.0) # bright yellow
 const _ROLE_COLOR_ECONOMY: Color    = Color(0.50, 0.92, 0.55, 1.0) # bright green
 const _ROLE_COLOR_COMMAND: Color    = Color(0.85, 0.85, 0.95, 1.0) # cool white
+
+
+func _apply_role_tint_to_build_button(btn: Button, role_color: Color, enabled: bool) -> void:
+	## Tints a build-menu button so the whole panel reads at a glance
+	## by category. Background is a desaturated dark of the role color
+	## (visible but not loud), border is the saturated role color, and
+	## the hover state brightens both for feedback. Locked buttons use
+	## a flat dark grey + dim border so the player can still see which
+	## category the locked tile belongs to without it shouting.
+	var dim: float = 0.92 if enabled else 0.65
+	var bg: Color = Color(
+		role_color.r * 0.20,
+		role_color.g * 0.20,
+		role_color.b * 0.20,
+		1.0,
+	)
+	var hover_bg: Color = Color(
+		role_color.r * 0.32,
+		role_color.g * 0.32,
+		role_color.b * 0.32,
+		1.0,
+	)
+	var border: Color = Color(role_color.r, role_color.g, role_color.b, dim)
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = bg
+	normal.border_color = border
+	normal.border_width_top = 2
+	normal.border_width_bottom = 2
+	normal.border_width_left = 2
+	normal.border_width_right = 2
+	normal.corner_radius_top_left = 4
+	normal.corner_radius_top_right = 4
+	normal.corner_radius_bottom_left = 4
+	normal.corner_radius_bottom_right = 4
+	normal.content_margin_left = 6
+	normal.content_margin_right = 6
+	normal.content_margin_top = 4
+	normal.content_margin_bottom = 4
+	var hover := normal.duplicate() as StyleBoxFlat
+	hover.bg_color = hover_bg
+	var pressed := normal.duplicate() as StyleBoxFlat
+	pressed.bg_color = bg.darkened(0.15)
+	var disabled := normal.duplicate() as StyleBoxFlat
+	disabled.bg_color = Color(0.10, 0.10, 0.12, 1.0)
+	disabled.border_color = Color(role_color.r, role_color.g, role_color.b, 0.45)
+	btn.add_theme_stylebox_override("normal", normal)
+	btn.add_theme_stylebox_override("hover", hover)
+	btn.add_theme_stylebox_override("pressed", pressed)
+	btn.add_theme_stylebox_override("disabled", disabled)
 
 
 func _building_role_color(stat: BuildingStatResource) -> Color:
