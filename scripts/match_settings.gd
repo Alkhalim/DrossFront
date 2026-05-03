@@ -26,6 +26,27 @@ enum FactionId { ANVIL, SABLE }
 ## archetype, e.g. for the menu's "AI Charlie: Turret Heavy" picker.
 enum AiPersonality { RANDOM, BALANCED, TURRET_HEAVY, ECONOMY_HEAVY, RUSH }
 
+## Optional scenario seed -- when set to anything other than NONE, the
+## arena controller post-processes its standard setup with extra base
+## construction, seeded units, and resource pre-loads to match the
+## scenario brief. Drives the Campaigns -> Special Operations menu.
+##   SPECOPS_SABLE_PROVING : player Sable, established base + economy,
+##                           three AI Anvil opponents with parity setup
+##   SPECOPS_ANVIL_PROVING : mirror image -- player Anvil, three Sable
+##   SPECOPS_STRESS_TEST   : 250-pop army on each side, scattered
+##                           battlefield, player + AI ally vs 2 AI
+enum Scenario {
+	NONE,
+	SPECOPS_SABLE_PROVING,
+	SPECOPS_ANVIL_PROVING,
+	SPECOPS_STRESS_TEST,
+}
+var scenario: Scenario = Scenario.NONE
+
+
+func is_scenario() -> bool:
+	return scenario != Scenario.NONE
+
 ## Picked on the main menu before launching a match.
 var difficulty: Difficulty = Difficulty.NORMAL
 ## True when the player launched via the Tutorial button — the HUD shows a
