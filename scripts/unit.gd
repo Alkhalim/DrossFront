@@ -1313,6 +1313,14 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 				_apply_jackal_striker_overlay(torso_pivot, torso_size, mats)
 			"Jackal (Widow)":
 				_apply_jackal_widow_overlay(torso_pivot, torso_size, mats)
+			"Forgemaster (Foreman)":
+				_apply_forgemaster_foreman_extras(torso_pivot, torso_size, mats)
+			"Forgemaster (Reactor)":
+				_apply_forgemaster_reactor_extras(torso_pivot, torso_size, mats)
+			"Harbinger (Overseer)":
+				_apply_harbinger_overseer_overlay(torso_pivot, torso_size, mats)
+			"Harbinger (Swarm Marshal)":
+				_apply_harbinger_swarm_marshal_overlay(torso_pivot, torso_size, mats)
 
 	# Per-member gait variation so a squad doesn't goose-step in lockstep.
 	# Each mech has its own phase, slightly different stride speed, swing
@@ -2293,6 +2301,189 @@ func _apply_jackal_widow_overlay(torso_pivot: Node3D, torso_size: Vector3, mats:
 	eye.set_surface_override_material(0, e_mat)
 	torso_pivot.add_child(eye)
 	mats.append(e_mat)
+
+
+func _apply_forgemaster_foreman_extras(torso_pivot: Node3D, torso_size: Vector3, mats: Array[StandardMaterial3D]) -> void:
+	# Repair-coil halo around the chest -- the Foreman branch leans
+	# into the healing identity, so a green-tinted aura ring sits in
+	# front of the standard Forgemaster overlay's amber chest ring
+	# to differentiate it visually.
+	var coil := MeshInstance3D.new()
+	var t := TorusMesh.new()
+	t.inner_radius = torso_size.x * 0.62
+	t.outer_radius = torso_size.x * 0.74
+	t.rings = 24
+	t.ring_segments = 6
+	coil.mesh = t
+	coil.position = Vector3(0.0, torso_size.y * 0.40, torso_size.z * 0.05)
+	coil.rotation.x = PI * 0.5
+	var c_mat := StandardMaterial3D.new()
+	c_mat.albedo_color = Color(0.30, 0.95, 0.55)
+	c_mat.emission_enabled = true
+	c_mat.emission = Color(0.30, 0.95, 0.55)
+	c_mat.emission_energy_multiplier = 1.6
+	c_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	coil.set_surface_override_material(0, c_mat)
+	torso_pivot.add_child(coil)
+	mats.append(c_mat)
+	# Worker-arm extra -- a stubby tool arm jutting from the right
+	# shoulder so the silhouette differs from the base Forgemaster.
+	var arm := MeshInstance3D.new()
+	var a_box := BoxMesh.new()
+	a_box.size = Vector3(0.10, 0.10, 0.55)
+	arm.mesh = a_box
+	arm.position = Vector3(torso_size.x * 0.55, torso_size.y * 0.65, torso_size.z * 0.15)
+	arm.rotation.y = deg_to_rad(20.0)
+	arm.set_surface_override_material(0, _make_metal_mat(Color(0.20, 0.18, 0.16)))
+	torso_pivot.add_child(arm)
+	# Welding torch tip -- bright cyan emissive cone at the arm's end.
+	var torch := MeshInstance3D.new()
+	var t_sph := SphereMesh.new()
+	t_sph.radius = 0.06
+	t_sph.height = 0.12
+	torch.mesh = t_sph
+	torch.position = Vector3(torso_size.x * 0.55 + 0.10, torso_size.y * 0.65, torso_size.z * 0.15 + 0.34)
+	var to_mat := StandardMaterial3D.new()
+	to_mat.albedo_color = Color(0.55, 0.95, 1.0)
+	to_mat.emission_enabled = true
+	to_mat.emission = Color(0.55, 0.95, 1.0)
+	to_mat.emission_energy_multiplier = 2.4
+	torch.set_surface_override_material(0, to_mat)
+	torso_pivot.add_child(torch)
+	mats.append(to_mat)
+
+
+func _apply_forgemaster_reactor_extras(torso_pivot: Node3D, torso_size: Vector3, mats: Array[StandardMaterial3D]) -> void:
+	# Reactor coil ring -- a tall vertical coil tower sitting on the
+	# back of the torso, with three glowing horizontal rings stacked
+	# along it. Reads as 'this one runs the damage-buff aura' rather
+	# than the healing Foreman.
+	var tower := MeshInstance3D.new()
+	var t_box := BoxMesh.new()
+	t_box.size = Vector3(0.20, 1.10, 0.20)
+	tower.mesh = t_box
+	tower.position = Vector3(0.0, torso_size.y + 0.55, -torso_size.z * 0.45)
+	tower.set_surface_override_material(0, _make_metal_mat(Color(0.18, 0.16, 0.14)))
+	torso_pivot.add_child(tower)
+	for ring_i: int in 3:
+		var ring := MeshInstance3D.new()
+		var rt := TorusMesh.new()
+		rt.inner_radius = 0.18
+		rt.outer_radius = 0.26
+		rt.rings = 16
+		rt.ring_segments = 6
+		ring.mesh = rt
+		ring.rotation.x = PI * 0.5
+		ring.position = Vector3(0.0, torso_size.y + 0.20 + float(ring_i) * 0.40, -torso_size.z * 0.45)
+		var r_mat := StandardMaterial3D.new()
+		r_mat.albedo_color = Color(1.0, 0.55, 0.18)
+		r_mat.emission_enabled = true
+		r_mat.emission = Color(1.0, 0.55, 0.18)
+		r_mat.emission_energy_multiplier = 2.2
+		r_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		ring.set_surface_override_material(0, r_mat)
+		torso_pivot.add_child(ring)
+		mats.append(r_mat)
+	# Hot-orange beacon on the tower tip.
+	var beacon := MeshInstance3D.new()
+	var b_sph := SphereMesh.new()
+	b_sph.radius = 0.10
+	b_sph.height = 0.20
+	beacon.mesh = b_sph
+	beacon.position = Vector3(0.0, torso_size.y + 1.20, -torso_size.z * 0.45)
+	var b_mat := StandardMaterial3D.new()
+	b_mat.albedo_color = Color(1.0, 0.45, 0.15)
+	b_mat.emission_enabled = true
+	b_mat.emission = Color(1.0, 0.45, 0.15)
+	b_mat.emission_energy_multiplier = 2.6
+	beacon.set_surface_override_material(0, b_mat)
+	torso_pivot.add_child(beacon)
+	mats.append(b_mat)
+
+
+func _apply_harbinger_overseer_overlay(torso_pivot: Node3D, torso_size: Vector3, mats: Array[StandardMaterial3D]) -> void:
+	# Bigger drone bay on the back -- a wider housing with two
+	# violet-emissive launch tubes facing aft. Reads as the variant
+	# that pumps out more drones.
+	var bay := MeshInstance3D.new()
+	var b_box := BoxMesh.new()
+	b_box.size = Vector3(torso_size.x * 0.85, torso_size.y * 0.45, 0.50)
+	bay.mesh = b_box
+	bay.position = Vector3(0.0, torso_size.y * 0.65, -torso_size.z * 0.55)
+	bay.set_surface_override_material(0, _make_metal_mat(Color(0.10, 0.10, 0.13)))
+	torso_pivot.add_child(bay)
+	# Two launch tubes facing aft, each with a violet glow inside.
+	for side: int in 2:
+		var sx: float = -1.0 if side == 0 else 1.0
+		var tube := MeshInstance3D.new()
+		var tc := CylinderMesh.new()
+		tc.top_radius = 0.10
+		tc.bottom_radius = 0.10
+		tc.height = 0.30
+		tc.radial_segments = 12
+		tube.mesh = tc
+		tube.rotation.x = PI * 0.5
+		tube.position = Vector3(sx * torso_size.x * 0.25, torso_size.y * 0.65, -torso_size.z * 0.78)
+		tube.set_surface_override_material(0, _make_metal_mat(Color(0.06, 0.06, 0.08)))
+		torso_pivot.add_child(tube)
+		# Violet inner glow.
+		var glow := MeshInstance3D.new()
+		var gc := CylinderMesh.new()
+		gc.top_radius = 0.08
+		gc.bottom_radius = 0.08
+		gc.height = 0.04
+		gc.radial_segments = 12
+		glow.mesh = gc
+		glow.rotation.x = PI * 0.5
+		glow.position = Vector3(sx * torso_size.x * 0.25, torso_size.y * 0.65, -torso_size.z * 0.92)
+		var g_mat := StandardMaterial3D.new()
+		g_mat.albedo_color = SABLE_NEON
+		g_mat.emission_enabled = true
+		g_mat.emission = SABLE_NEON
+		g_mat.emission_energy_multiplier = 2.4
+		glow.set_surface_override_material(0, g_mat)
+		torso_pivot.add_child(glow)
+		mats.append(g_mat)
+
+
+func _apply_harbinger_swarm_marshal_overlay(torso_pivot: Node3D, torso_size: Vector3, mats: Array[StandardMaterial3D]) -> void:
+	# Command spire on top of the torso -- a tall slim antenna with a
+	# pulsing violet beacon at the tip. Reads as the coordination /
+	# command variant rather than the production-focused Overseer.
+	var spire := MeshInstance3D.new()
+	var s_box := BoxMesh.new()
+	s_box.size = Vector3(0.10, 1.20, 0.10)
+	spire.mesh = s_box
+	spire.position = Vector3(0.0, torso_size.y + 0.60, 0.0)
+	spire.set_surface_override_material(0, _make_metal_mat(Color(0.10, 0.10, 0.13)))
+	torso_pivot.add_child(spire)
+	# Beacon at the tip.
+	var beacon := MeshInstance3D.new()
+	var b_sph := SphereMesh.new()
+	b_sph.radius = 0.12
+	b_sph.height = 0.24
+	beacon.mesh = b_sph
+	beacon.position = Vector3(0.0, torso_size.y + 1.30, 0.0)
+	var bm: StandardMaterial3D = StandardMaterial3D.new()
+	bm.albedo_color = SABLE_NEON
+	bm.emission_enabled = true
+	bm.emission = SABLE_NEON
+	bm.emission_energy_multiplier = 2.8
+	beacon.set_surface_override_material(0, bm)
+	torso_pivot.add_child(beacon)
+	mats.append(bm)
+	# Two coordination antennae -- slim diagonal struts off the
+	# shoulders that read as drone-formation broadcast aerials.
+	for side: int in 2:
+		var sx: float = -1.0 if side == 0 else 1.0
+		var ant := MeshInstance3D.new()
+		var a_box := BoxMesh.new()
+		a_box.size = Vector3(0.04, 0.65, 0.04)
+		ant.mesh = a_box
+		ant.position = Vector3(sx * torso_size.x * 0.45, torso_size.y + 0.15, -torso_size.z * 0.10)
+		ant.rotation = Vector3(deg_to_rad(-25.0), 0.0, sx * deg_to_rad(15.0))
+		ant.set_surface_override_material(0, _make_metal_mat(Color(0.10, 0.10, 0.13)))
+		torso_pivot.add_child(ant)
 
 
 func _build_legs(member: Node3D, shape: Dictionary, mats: Array[StandardMaterial3D], kind: String) -> Dictionary:
