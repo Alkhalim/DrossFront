@@ -13,7 +13,7 @@ rof_tier = &"slow"
 
 [sub_resource type="Resource" id="weapon_marshal_drone_swarm"]
 script = ExtResource("2")
-weapon_name = "Rapid Pulse Battery"
+weapon_name = "Rapid Drone Bay"
 role_tag = &"Universal"
 damage_tier = &"moderate"
 range_tier = &"medium"
@@ -44,4 +44,4 @@ ability_radius = 0.0
 ability_duration = 0.0
 ability_autocast = true
 ability_description = "Next railgun shot fires as a glowing 5-pellet salvo for 2x damage. Autocasts whenever the cooldown rolls over and a target is in range."
-special_description = "Harbinger Swarm Marshal — offensive variant. Trades the Overseer's wide Mesh aura for the Heavy Volley ability: every 12s the next railgun shot fires as a glowing 5-pellet salvo for 2x damage. Pair with frontline brawlers; the Marshal carries the burst output."
+special_description = "Harbinger Swarm Marshal — combat-focused branch. Faster drone-bay cadence + the Heavy Volley ability: every 12s the next railgun shot fires as a glowing 5-pellet salvo for 2x damage. Trades the Overseer's wider Mesh aura for raw burst output."
