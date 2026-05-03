@@ -10,6 +10,7 @@ role_tag = &"AA"
 damage_tier = &"moderate"
 range_tier = &"medium"
 rof_tier = &"fast"
+damage_value = 21
 base_accuracy = 0.90
 can_hit_air = true
 
