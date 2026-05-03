@@ -118,10 +118,13 @@ var attack_move_target: Vector3 = Vector3.INF
 func _ready() -> void:
 	_unit = get_parent()
 	_registry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
-	# Round-robin half-frame stagger across the combat fleet. Fire
-	# cadence is well above 30 Hz (~3-10 shots/s at peak) so a 30 Hz
-	# combat tick is invisible.
-	_phase = int(get_instance_id() & 1)
+	# Round-robin third-frame stagger across the combat fleet. The
+	# 250-pop stress test showed CombatComponent eating ~20s of script
+	# time over 4 minutes; bumping from 1-in-2 to 1-in-3 cuts ~33% of
+	# that. Fire cadence (3-10 shots/sec at peak) sits well below the
+	# resulting 20 Hz combat tick so the rate-of-fire stays identical
+	# -- the doubled delta below becomes a tripled delta to match.
+	_phase = int(get_instance_id() % 3)
 
 
 func apply_silence(duration: float) -> void:
@@ -200,13 +203,13 @@ func _physics_process(delta: float) -> void:
 	if alive <= 0:
 		return
 
-	# Half-frame stagger — only run heavy targeting / fire logic on
-	# the assigned phase. Cooldowns advance via the doubled delta so
-	# fire rate is identical to an un-staggered tick.
+	# Third-frame stagger -- only run heavy targeting / fire logic
+	# on the assigned phase. Cooldowns advance via the tripled delta
+	# so fire rate is identical to an un-staggered tick.
 	_phys_frame += 1
-	if (_phys_frame & 1) != _phase:
+	if (_phys_frame % 3) != _phase:
 		return
-	delta *= 2.0
+	delta *= 3.0
 
 	_fire_cooldown -= delta
 	_secondary_cooldown -= delta
