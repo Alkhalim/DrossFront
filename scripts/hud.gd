@@ -2117,7 +2117,10 @@ func _rebuild_production_buttons(building: Building) -> void:
 			_set_label_button(btn, "Locked", "%s\nneeds %s" % [u_display, prereq_label])
 			btn.disabled = true
 			btn.tooltip_text = "%s — locked.\nBuild a %s to unlock." % [u_display, prereq_label]
-			btn.modulate = Color(0.7, 0.7, 0.7, 0.85)
+		# Tint the button by the unit's category so the training
+		# panel can be read at a glance the same way the build menu
+		# is colour-coded.
+		_apply_role_tint_to_build_button(btn, _train_button_role_color(unit_stat), unlocked)
 		_button_grid.add_child(btn)
 
 
@@ -4582,6 +4585,63 @@ func _apply_role_tint_to_build_button(btn: Button, role_color: Color, enabled: b
 	btn.add_theme_stylebox_override("hover", hover)
 	btn.add_theme_stylebox_override("pressed", pressed)
 	btn.add_theme_stylebox_override("disabled", disabled)
+
+
+## Per-class training-button tints. Ground vs Air share base hues so
+## the panel reads air-vs-ground at a glance; each class gets a
+## distinct shade so lights / mediums / heavies / supports are
+## still individually distinguishable.
+const _TRAIN_COLOR_ECONOMY: Color       = Color(0.45, 0.92, 0.55, 1.0)  # bright green
+const _TRAIN_COLOR_LIGHT_GROUND: Color  = Color(0.40, 0.78, 1.00, 1.0)  # cool blue
+const _TRAIN_COLOR_MEDIUM_GROUND: Color = Color(0.95, 0.78, 0.30, 1.0)  # amber
+const _TRAIN_COLOR_HEAVY_GROUND: Color  = Color(1.00, 0.45, 0.25, 1.0)  # warm orange
+const _TRAIN_COLOR_SUPPORT_GROUND: Color = Color(0.78, 0.45, 1.00, 1.0) # violet
+const _TRAIN_COLOR_LIGHT_AIR: Color     = Color(0.55, 0.92, 1.00, 1.0)  # paler cyan
+const _TRAIN_COLOR_MEDIUM_AIR: Color    = Color(1.00, 0.92, 0.50, 1.0)  # paler amber
+const _TRAIN_COLOR_HEAVY_AIR: Color     = Color(1.00, 0.65, 0.42, 1.0)  # paler orange
+const _TRAIN_COLOR_SUPPORT_AIR: Color   = Color(0.85, 0.62, 1.00, 1.0)  # paler violet
+
+
+func _train_button_role_color(stat: UnitStatResource) -> Color:
+	## Picks the train-button tint by unit category. Engineers /
+	## crawlers are 'economy' regardless of class. Support is detected
+	## via repair_rate / mesh_provider_radius / ability_name on units
+	## that aren't already classified by class. Falls back to the
+	## medium-ground tint for anything that doesn't match.
+	if not stat:
+		return _TRAIN_COLOR_MEDIUM_GROUND
+	# Economy first -- engineers + crawlers always read as econ.
+	if stat.unit_class == &"engineer" or stat.unit_class == &"crawler" or stat.is_crawler:
+		return _TRAIN_COLOR_ECONOMY
+	# Support: dedicated caster / repair / aura units. Detected by
+	# carrying a Mesh aura, a heal rate, or an active ability without
+	# being one of the standard combat classes.
+	var support: bool = (
+		stat.mesh_provider_radius > 0.0
+		or stat.repair_rate > 0.0
+	)
+	var is_air: bool = stat.is_aircraft or stat.unit_class == &"aircraft"
+	if is_air:
+		if support:
+			return _TRAIN_COLOR_SUPPORT_AIR
+		# Air tier by HP -- there's no light / medium / heavy enum
+		# on aircraft so we bucket by total HP instead.
+		if stat.hp_total >= 1500:
+			return _TRAIN_COLOR_HEAVY_AIR
+		if stat.hp_total >= 800:
+			return _TRAIN_COLOR_MEDIUM_AIR
+		return _TRAIN_COLOR_LIGHT_AIR
+	# Ground.
+	if support:
+		return _TRAIN_COLOR_SUPPORT_GROUND
+	match stat.unit_class:
+		&"light":
+			return _TRAIN_COLOR_LIGHT_GROUND
+		&"medium":
+			return _TRAIN_COLOR_MEDIUM_GROUND
+		&"heavy":
+			return _TRAIN_COLOR_HEAVY_GROUND
+	return _TRAIN_COLOR_MEDIUM_GROUND
 
 
 func _building_role_color(stat: BuildingStatResource) -> Color:
