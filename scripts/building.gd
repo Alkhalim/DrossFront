@@ -1129,12 +1129,16 @@ func _detail_headquarters() -> void:
 
 func _detail_foundry(advanced: bool) -> void:
 	var fs: Vector3 = stats.footprint_size
-	# Off-center smokestack.
+	# Off-center smokestack. Top cap removed so the stack reads as
+	# a real hollow chimney -- the dark throat cylinder built below
+	# is visible straight down through the opening, and at any
+	# slant angle the silhouette shows the open lip.
 	var stack := MeshInstance3D.new()
 	var stack_cyl := CylinderMesh.new()
 	stack_cyl.top_radius = fs.x * 0.12
 	stack_cyl.bottom_radius = fs.x * 0.16
 	stack_cyl.height = fs.y * (1.1 if advanced else 0.9)
+	stack_cyl.cap_top = false
 	stack.mesh = stack_cyl
 	stack.position = Vector3(fs.x * 0.28, fs.y + stack_cyl.height * 0.5, fs.z * 0.18)
 	# Cylindrical team collar wrapping the stack base. A box collar
