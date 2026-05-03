@@ -659,6 +659,23 @@ func _build_pause_overlay() -> void:
 		slider.process_mode = Node.PROCESS_MODE_ALWAYS
 		row.add_child(slider)
 
+	# Extended-stats default toggle. When checked, unit/building info
+	# panels show the full stat breakdown by default and SHIFT
+	# collapses back to the basic view. When unchecked (the default)
+	# basic is the default and SHIFT expands. Lives in the pause
+	# panel because the player only sees its effect once they're
+	# in-match looking at unit info.
+	var ext_row := HBoxContainer.new()
+	ext_row.add_theme_constant_override("separation", 8)
+	ext_row.process_mode = Node.PROCESS_MODE_ALWAYS
+	vbox.add_child(ext_row)
+	var ext_check := CheckBox.new()
+	ext_check.text = "Show extended stats by default"
+	ext_check.button_pressed = _extended_stats_default
+	ext_check.process_mode = Node.PROCESS_MODE_ALWAYS
+	ext_check.toggled.connect(_on_extended_stats_toggled)
+	ext_row.add_child(ext_check)
+
 	# Spacer + Restart + Return-to-menu buttons. Restart is the more
 	# common 'I want to redo this' affordance (mistake first 30 sec,
 	# wrong faction pick, lost the opening); Main Menu is the harder
@@ -688,6 +705,14 @@ func _build_pause_overlay() -> void:
 func _on_return_to_menu() -> void:
 	get_tree().paused = false
 	get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
+
+
+func _on_extended_stats_toggled(pressed: bool) -> void:
+	## Persists the player's preference for the basic vs extended
+	## stat sheet default. _extended_stats_active() reads from the
+	## flag plus the live SHIFT key state so the toggle takes effect
+	## on the next panel refresh.
+	_extended_stats_default = pressed
 
 
 func _on_pause_restart() -> void:
