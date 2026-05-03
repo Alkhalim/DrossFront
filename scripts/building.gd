@@ -130,12 +130,18 @@ var _damage_anim_time: float = 0.0
 ## per-stage albedo darken on every attached material.
 var _damage_stage: int = 0
 ## Average seconds between smoke puffs at each stage. Stage 0 is unused.
-const _DAMAGE_SMOKE_INTERVAL_MIN: Array[float] = [0.0, 0.7, 0.28, 0.10]
-const _DAMAGE_SMOKE_INTERVAL_MAX: Array[float] = [0.0, 1.1, 0.55, 0.22]
-## How many of the 7 ember slots are visible at each stage.
-const _DAMAGE_EMBER_VISIBLE: Array[int] = [0, 0, 3, 7]
+## Bumped (was 0.7/0.28/0.10) so wisps actually read at standard zoom --
+## the previous cadence was too sparse to notice even at stage 3.
+const _DAMAGE_SMOKE_INTERVAL_MIN: Array[float] = [0.0, 0.30, 0.15, 0.06]
+const _DAMAGE_SMOKE_INTERVAL_MAX: Array[float] = [0.0, 0.55, 0.28, 0.14]
+## How many of the 7 ember slots are visible at each stage. Stage 1
+## now shows a single ember + a faint smolder so 'just took damage'
+## reads visually before stages 2/3 ramp.
+const _DAMAGE_EMBER_VISIBLE: Array[int] = [0, 1, 5, 7]
 ## Albedo darken factor (multiplied as `1 - factor`) at each stage.
-const _DAMAGE_DARKEN: Array[float] = [0.0, 0.0, 0.10, 0.22]
+## Bumped from [0, 0, 0.10, 0.22] -- the old values were too subtle
+## to read; stage 3 buildings were barely darker than freshly built.
+const _DAMAGE_DARKEN: Array[float] = [0.0, 0.08, 0.22, 0.42]
 ## Original albedo per material we've darkened, keyed by material instance_id.
 ## Lets us restore + reapply when the stage changes (including healing back
 ## up the chain) without compounding darken multipliers.
@@ -4336,24 +4342,33 @@ func _update_damage_state() -> void:
 	if _damage_smoke:
 		_damage_smoke.visible = _damage_stage >= 1
 
-	# Fire / embers — lazy-build at stage 2+. Stage 2 shows a subset of
-	# embers; stage 3 shows them all + the OmniLight3D at full strength.
-	if _damage_stage >= 2 and not _damage_fire:
+	# Fire / embers — lazy-build at stage 1+ so a single smolder
+	# already reads at the first damage threshold. Stage 1 shows
+	# 1 ember + a very dim light, stage 2 ramps to 5 + medium light,
+	# stage 3 shows all 7 + the full orange glow.
+	if _damage_stage >= 1 and not _damage_fire:
 		_build_damage_fire()
 	if _damage_fire:
-		_damage_fire.visible = _damage_stage >= 2
+		_damage_fire.visible = _damage_stage >= 1
 		var visible_count: int = _DAMAGE_EMBER_VISIBLE[_damage_stage]
 		for i: int in _damage_embers.size():
 			var entry: Dictionary = _damage_embers[i] as Dictionary
 			var mesh: MeshInstance3D = entry.get("mesh") as MeshInstance3D
 			if is_instance_valid(mesh):
 				mesh.visible = i < visible_count
-		# Stage 3 cranks the fire light; stage 2 keeps it dim so embers
-		# don't flood the building with light when only a handful are
-		# burning.
+		# Light energy ramps with stage so the burning building's
+		# orange wash builds smoothly from stage 1 -> 3.
 		if _damage_fire_light and is_instance_valid(_damage_fire_light):
-			_damage_fire_light.visible = _damage_stage >= 2
-			_damage_fire_light.light_energy = 2.5 if _damage_stage >= 3 else 1.0
+			_damage_fire_light.visible = _damage_stage >= 1
+			match _damage_stage:
+				1:
+					_damage_fire_light.light_energy = 0.5
+				2:
+					_damage_fire_light.light_energy = 1.4
+				3:
+					_damage_fire_light.light_energy = 3.0
+				_:
+					_damage_fire_light.light_energy = 0.0
 
 	# Material darkening — reset to originals, then reapply at the new
 	# factor. Cheap because we only touch our own VisualRoot tree.
