@@ -1961,14 +1961,23 @@ func _setup_terrain_schwarzwald() -> void:
 	## flank; NW with SW on the left). The forest fills the
 	## non-corridor area + the corners.
 	const MAP_HALF: float = 130.0
-	const HQ_CLEAR_RADIUS: float = 20.0
+	# Wide cleared zone around each HQ so the player has real room
+	# to lay down a base. The previous 20u barely cleared the HQ
+	# itself + a foundry; 38u opens up an actual building plot.
+	const HQ_CLEAR_RADIUS: float = 38.0
 	# Corridor halfwidths control how wide the cleared lanes are;
 	# large enough that a Bulwark squad fits comfortably without
 	# clipping trees on either flank.
 	const CORRIDOR_HALF_WIDTH: float = 18.0
-	# Tree density expressed as average grid spacing (smaller = denser).
-	const TREE_GRID_STEP: float = 4.5
-	const TREE_JITTER: float = 1.7
+	# Tree density. Step ~3.4u is just under TRUNK_RADIUS * 2 for a
+	# trunk of 1.05u + a small jitter buffer -- units (collision
+	# radius ~1.5u) cannot squeeze between adjacent trunks, so the
+	# forest reads as a real wall rather than a grid the squad can
+	# pour through. Density doubles the previous tree count;
+	# rendering cost stays bounded by the shared mesh + material
+	# palette.
+	const TREE_GRID_STEP: float = 3.4
+	const TREE_JITTER: float = 1.1
 
 	var corridor_centres_x: Array[float] = []
 	if _is_2v2():
