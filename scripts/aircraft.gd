@@ -621,58 +621,150 @@ func _apply_phalanx_interceptor_extras() -> void:
 
 
 func _apply_fang_hunter_extras() -> void:
-	# Each Hunter drone grows a tall sensor needle on its top with a
-	# violet-emissive tip. Reads as the long-sight tracking variant
-	# vs the Harasser's twin-gun loadout.
+	# Tracker silhouette: tall sensor needle, two side-mounted
+	# secondary sensor pods, a wing-mounted antenna array, and a
+	# soft glow ring around the body so the formation reads as
+	# 'always painting targets' vs Harasser's bristling guns.
+	var needle_mat: StandardMaterial3D = _aircraft_metal_mat(Color(0.10, 0.10, 0.13))
+	var pod_mat: StandardMaterial3D = _aircraft_metal_mat(Color(0.16, 0.14, 0.20))
+	var glow_mat := StandardMaterial3D.new()
+	glow_mat.albedo_color = SABLE_NEON_PALE
+	glow_mat.emission_enabled = true
+	glow_mat.emission = SABLE_NEON_PALE
+	glow_mat.emission_energy_multiplier = 2.0
 	for drone: Node3D in _drone_meshes:
 		if not is_instance_valid(drone):
 			continue
+		# Main sensor needle.
 		var needle := MeshInstance3D.new()
 		needle.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var n_box := BoxMesh.new()
-		n_box.size = Vector3(0.03, 0.32, 0.03)
+		n_box.size = Vector3(0.03, 0.42, 0.03)
 		needle.mesh = n_box
-		needle.position = Vector3(0.0, 0.20, 0.0)
-		needle.set_surface_override_material(0, _aircraft_metal_mat(Color(0.10, 0.10, 0.13)))
+		needle.position = Vector3(0.0, 0.25, 0.0)
+		needle.set_surface_override_material(0, needle_mat)
 		drone.add_child(needle)
-		# Violet tip light.
+		# Cross-bar antenna array near the base of the needle.
+		var crossbar := MeshInstance3D.new()
+		crossbar.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var cb_box := BoxMesh.new()
+		cb_box.size = Vector3(0.32, 0.02, 0.02)
+		crossbar.mesh = cb_box
+		crossbar.position = Vector3(0.0, 0.32, 0.0)
+		crossbar.set_surface_override_material(0, needle_mat)
+		drone.add_child(crossbar)
+		# Smaller cross-bar higher up.
+		var crossbar2 := MeshInstance3D.new()
+		crossbar2.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var cb2_box := BoxMesh.new()
+		cb2_box.size = Vector3(0.20, 0.02, 0.02)
+		crossbar2.mesh = cb2_box
+		crossbar2.position = Vector3(0.0, 0.42, 0.0)
+		crossbar2.set_surface_override_material(0, needle_mat)
+		drone.add_child(crossbar2)
+		# Tip light at the very top.
 		var tip := MeshInstance3D.new()
 		tip.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var t_sph := SphereMesh.new()
-		t_sph.radius = 0.05
-		t_sph.height = 0.10
+		t_sph.radius = 0.06
+		t_sph.height = 0.12
 		tip.mesh = t_sph
-		tip.position = Vector3(0.0, 0.40, 0.0)
-		var t_mat := StandardMaterial3D.new()
-		t_mat.albedo_color = SABLE_NEON_PALE
-		t_mat.emission_enabled = true
-		t_mat.emission = SABLE_NEON_PALE
-		t_mat.emission_energy_multiplier = 2.0
-		tip.set_surface_override_material(0, t_mat)
+		tip.position = Vector3(0.0, 0.50, 0.0)
+		tip.set_surface_override_material(0, glow_mat)
 		drone.add_child(tip)
+		# Two side sensor pods -- small ovoids on each side of the
+		# body with their own glow apertures aimed forward.
+		for side: int in 2:
+			var sx: float = -1.0 if side == 0 else 1.0
+			var pod := MeshInstance3D.new()
+			pod.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var po_sph := SphereMesh.new()
+			po_sph.radius = 0.10
+			po_sph.height = 0.20
+			pod.mesh = po_sph
+			pod.position = Vector3(sx * 0.40, 0.04, 0.10)
+			pod.scale = Vector3(0.9, 0.7, 1.4)
+			pod.set_surface_override_material(0, pod_mat)
+			drone.add_child(pod)
+			# Pod aperture glow.
+			var aperture := MeshInstance3D.new()
+			aperture.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var ap_cyl := CylinderMesh.new()
+			ap_cyl.top_radius = 0.04
+			ap_cyl.bottom_radius = 0.04
+			ap_cyl.height = 0.02
+			ap_cyl.radial_segments = 10
+			aperture.mesh = ap_cyl
+			aperture.rotation.x = PI * 0.5
+			aperture.position = Vector3(sx * 0.40, 0.04, 0.24)
+			aperture.set_surface_override_material(0, glow_mat)
+			drone.add_child(aperture)
 
 
 func _apply_fang_harasser_extras() -> void:
-	# Each Harasser drone gains twin extra forward gun barrels
-	# bracketing the body. Sells the 'salvage-disrupt repeater'
-	# economy-disruption identity with a visible forward bristle.
+	# Salvage-disrupt repeater silhouette: twin forward barrels, an
+	# ammo box on each side feeding the barrels via short belts, and
+	# a small disruptor coil ring around each barrel that pulses
+	# violet so the formation reads as 'bristling, lit-up gunship'.
+	var barrel_mat: StandardMaterial3D = _aircraft_metal_mat(Color(0.06, 0.06, 0.08))
+	var ammo_mat: StandardMaterial3D = _aircraft_metal_mat(Color(0.18, 0.16, 0.20))
+	var coil_mat := StandardMaterial3D.new()
+	coil_mat.albedo_color = SABLE_NEON
+	coil_mat.emission_enabled = true
+	coil_mat.emission = SABLE_NEON
+	coil_mat.emission_energy_multiplier = 1.8
 	for drone: Node3D in _drone_meshes:
 		if not is_instance_valid(drone):
 			continue
 		for side: int in 2:
 			var sx: float = -1.0 if side == 0 else 1.0
+			# Forward gun barrel.
 			var barrel := MeshInstance3D.new()
 			barrel.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			var b_cyl := CylinderMesh.new()
 			b_cyl.top_radius = 0.025
 			b_cyl.bottom_radius = 0.030
-			b_cyl.height = 0.35
+			b_cyl.height = 0.40
 			b_cyl.radial_segments = 8
 			barrel.mesh = b_cyl
 			barrel.rotation.x = PI * 0.5
 			barrel.position = Vector3(sx * 0.18, -0.05, 0.42)
-			barrel.set_surface_override_material(0, _aircraft_metal_mat(Color(0.06, 0.06, 0.08)))
+			barrel.set_surface_override_material(0, barrel_mat)
 			drone.add_child(barrel)
+			# Disruptor coil ring midway down the barrel -- a thin
+			# torus-equivalent (low-segment cylinder) glowing violet.
+			var coil := MeshInstance3D.new()
+			coil.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var co_cyl := CylinderMesh.new()
+			co_cyl.top_radius = 0.06
+			co_cyl.bottom_radius = 0.06
+			co_cyl.height = 0.025
+			co_cyl.radial_segments = 12
+			coil.mesh = co_cyl
+			coil.rotation.x = PI * 0.5
+			coil.position = Vector3(sx * 0.18, -0.05, 0.42)
+			coil.set_surface_override_material(0, coil_mat)
+			drone.add_child(coil)
+			# Side ammo box -- a small box wedged against the body.
+			var ammo := MeshInstance3D.new()
+			ammo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var am_box := BoxMesh.new()
+			am_box.size = Vector3(0.12, 0.10, 0.20)
+			ammo.mesh = am_box
+			ammo.position = Vector3(sx * 0.30, -0.05, 0.16)
+			ammo.set_surface_override_material(0, ammo_mat)
+			drone.add_child(ammo)
+			# Belt feed -- small dark strip from the box to the
+			# barrel base.
+			var belt := MeshInstance3D.new()
+			belt.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var be_box := BoxMesh.new()
+			be_box.size = Vector3(0.04, 0.03, 0.18)
+			belt.mesh = be_box
+			belt.position = Vector3(sx * 0.24, -0.04, 0.30)
+			belt.rotation.y = sx * deg_to_rad(-12.0)
+			belt.set_surface_override_material(0, barrel_mat)
+			drone.add_child(belt)
 
 
 func _build_anvil_drone(parent: Node3D, team: Color, body_color: Color, s: float) -> void:
