@@ -1,30 +1,23 @@
 class_name FogOverlay
 extends Node3D
 ## Visible darkening layer that sits just above the ground and tints
-## itself per-cell from the FogOfWar grid:
+## per-cell from the FogOfWar grid:
 ##   UNEXPLORED -> opaque black (player has no idea what's there)
 ##   EXPLORED   -> ~55% dim grey (terrain visible, no live info)
 ##   VISIBLE    -> fully transparent
 ##
-## Implementation: a single MultiMeshInstance3D with one flat quad per
-## cell, modulated via per-instance custom data colour. The shader
-## reads custom data .a as the alpha multiplier so visible cells
-## drop to alpha 0 each frame without needing to rebuild the
-## MultiMesh layout — only the per-instance colour buffer is
-## re-uploaded.
+## Implementation: a single PlaneMesh covering the whole map, with a
+## ShaderMaterial sampling a fog ImageTexture (one texel per cell).
+## Each FOW tick we refresh the texture in one buffer upload instead
+## of pushing 60k+ per-instance custom-data writes through the
+## RenderingServer the way the previous MultiMesh approach did.
 
-## Overlay quads sit just above the ground plane. Lifting them higher
-## pushes them in front of the tilted RTS camera (50 deg pitch) and
-## introduces a parallax offset — a unit at world (X, 0, Z) appears
-## centred ~10u south of where its vision circle is actually punched
-## out. Keeping it at ground level removes the offset entirely.
-## Per-entity FOW visibility hooks (units, buildings, wrecks,
-## projectiles) handle hiding TALL stuff in unexplored cells; the
-## overlay only needs to cover ground texture.
 const CELL_LIFT_Y: float = 0.1
 
-var _multimesh: MultiMeshInstance3D = null
-var _mm: MultiMesh = null
+var _plane_mesh: MeshInstance3D = null
+var _shader_material: ShaderMaterial = null
+var _fog_image: Image = null
+var _fog_texture: ImageTexture = null
 var _grid_size: int = 0
 var _cell_size: float = 0.0
 var _half_extent: float = 0.0
@@ -41,93 +34,97 @@ func _ready() -> void:
 	_cell_size = FogOfWar.CELL_SIZE
 	_half_extent = FogOfWar.MAP_HALF_EXTENT
 
-	_build_multimesh()
-	_refresh_colors()
+	_build_overlay()
+	_refresh_texture()
 
 
 func _process(_delta: float) -> void:
 	if not _fow:
 		return
-	# Only re-upload the per-instance colour buffer when FOW has
-	# actually recomputed. revision is bumped at the end of the
-	# 5 Hz tick so we mirror the same cadence here.
+	# Only re-upload the texture when FOW has actually recomputed.
+	# revision is bumped at the end of the 5 Hz tick so we mirror
+	# the same cadence here.
 	if _fow.revision != _last_revision:
-		_refresh_colors()
+		_refresh_texture()
 
 
-func _build_multimesh() -> void:
-	# Single flat quad mesh used for every cell. The fog overlay
-	# darkens the ground; non-ground entities (buildings, wrecks,
-	# rocks, skyline) get dimmed via per-MeshInstance material
-	# overlays applied by FogOfWar._apply_entity_visibility, since
-	# a tall fog column doesn't reliably cover them under Godot's
-	# transparent-pass sorting.
-	var quad := QuadMesh.new()
-	quad.size = Vector2(_cell_size, _cell_size)
+func _build_overlay() -> void:
+	# One flat plane covering the map. The shader samples the fog
+	# texture per-fragment so cell tinting / smoothing is GPU-side
+	# instead of pushing per-cell uploads through the
+	# RenderingServer per tick.
+	var quad := PlaneMesh.new()
+	quad.size = Vector2(_half_extent * 2.0, _half_extent * 2.0)
+	quad.subdivide_width = 1
+	quad.subdivide_depth = 1
 
-	_mm = MultiMesh.new()
-	_mm.transform_format = MultiMesh.TRANSFORM_3D
-	_mm.use_colors = false
-	_mm.use_custom_data = true
-	_mm.mesh = quad
-	_mm.instance_count = _grid_size * _grid_size
+	# Fog texture -- one byte per cell (R8 channel) carrying the
+	# CellState enum value. The shader maps that value to the dim
+	# tint per-fragment.
+	_fog_image = Image.create(_grid_size, _grid_size, false, Image.FORMAT_R8)
+	_fog_image.fill(Color(0, 0, 0, 0))
+	_fog_texture = ImageTexture.create_from_image(_fog_image)
 
-	# Pre-place every quad transform once. Per-frame work only
-	# touches the custom data buffer (alpha multiplier per cell),
-	# not the position transforms.
-	for cz: int in _grid_size:
-		for cx: int in _grid_size:
-			var i: int = cz * _grid_size + cx
-			var x: float = float(cx) * _cell_size - _half_extent
-			var z: float = float(cz) * _cell_size - _half_extent
-			var t := Transform3D()
-			t = t.rotated(Vector3.RIGHT, -PI * 0.5)
-			t.origin = Vector3(x, CELL_LIFT_Y, z)
-			_mm.set_instance_transform(i, t)
-			_mm.set_instance_custom_data(i, Color(1, 1, 1, 1))
+	_shader_material = _make_overlay_material()
+	_shader_material.set_shader_parameter("fog_texture", _fog_texture)
+	_shader_material.set_shader_parameter("map_half_extent", _half_extent)
+	_shader_material.set_shader_parameter("cell_state_max", 2.0)
 
-	_multimesh = MultiMeshInstance3D.new()
-	_multimesh.name = "FogOverlayMM"
-	_multimesh.multimesh = _mm
-	_multimesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_multimesh.material_override = _make_overlay_material()
-	# Generous AABB so the overlay isn't culled when the camera is
-	# only looking at one corner of the map.
-	_multimesh.custom_aabb = AABB(
+	_plane_mesh = MeshInstance3D.new()
+	_plane_mesh.name = "FogOverlayPlane"
+	_plane_mesh.mesh = quad
+	_plane_mesh.position = Vector3(0.0, CELL_LIFT_Y, 0.0)
+	_plane_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_plane_mesh.material_override = _shader_material
+	# Generous AABB so the plane isn't culled at oblique camera
+	# angles where the bounds barely overlap the screen.
+	_plane_mesh.custom_aabb = AABB(
 		Vector3(-_half_extent, -1.0, -_half_extent),
 		Vector3(_half_extent * 2.0, 4.0, _half_extent * 2.0),
 	)
-	add_child(_multimesh)
+	add_child(_plane_mesh)
 
 
 func _make_overlay_material() -> ShaderMaterial:
-	# INSTANCE_CUSTOM is only readable in the VERTEX stage in
-	# Godot 4 spatial shaders, so we hand-pipe the colour value
-	# through a varying so the fragment stage can sample it. The
-	# previous version tried to read INSTANCE_CUSTOM directly in
-	# fragment, which fails to compile and the whole material
-	# falls back to invisible.
-	#
-	# .rgb is the tint colour (black for unexplored, blue-grey for
-	# explored), .a is the per-cell alpha multiplier. Visible cells
-	# push alpha to 0 so the camera sees the world clearly;
-	# explored cells dim with a slightly desaturated cool grey so
-	# they read as MEMORY rather than just "dark"; unexplored cells
-	# go fully opaque black so the player has zero info.
+	## Spatial shader. Samples the fog texture in world-space:
+	##  - 0 (UNEXPLORED) -> opaque black
+	##  - 1 (EXPLORED)   -> ~55% dim
+	##  - 2 (VISIBLE)    -> fully transparent
+	## The cell state is stored as the texture's R channel; we
+	## quantize the sampled value into the three buckets so a
+	## linear-filtered sample on the boundary still picks one bucket
+	## cleanly instead of fading through.
 	var sh := Shader.new()
 	sh.code = """
 shader_type spatial;
 render_mode unshaded, blend_mix, depth_draw_never, cull_disabled;
 
-varying vec4 v_fog_color;
-
-void vertex() {
-	v_fog_color = INSTANCE_CUSTOM;
-}
+uniform sampler2D fog_texture : filter_nearest, repeat_disable;
+uniform float map_half_extent;
+uniform float cell_state_max;
 
 void fragment() {
-	ALBEDO = v_fog_color.rgb;
-	ALPHA = v_fog_color.a;
+	// Map world XZ into [0, 1] UV using the plane's local UV
+	// (PlaneMesh ships unit UVs). The plane is centred on the
+	// origin spanning -half..+half on X/Z so UV.x = (x + half) /
+	// (2 * half), and the plane mesh has UV already aligned that
+	// way.
+	float r = texture(fog_texture, UV).r;
+	// Texture stores cell state byte; rescale to 0..2 range.
+	float state = round(r * cell_state_max);
+	if (state < 0.5) {
+		// UNEXPLORED -- opaque black.
+		ALBEDO = vec3(0.0);
+		ALPHA = 1.0;
+	} else if (state < 1.5) {
+		// EXPLORED -- dim memory.
+		ALBEDO = vec3(0.0);
+		ALPHA = 0.55;
+	} else {
+		// VISIBLE -- pass through.
+		ALBEDO = vec3(0.0);
+		ALPHA = 0.0;
+	}
 }
 """
 	var mat := ShaderMaterial.new()
@@ -135,30 +132,39 @@ void fragment() {
 	return mat
 
 
-## Per-state overlay colours. Unexplored is opaque black so the
-## player sees nothing of what's there. Explored cells overlay
-## with a near-black tint at moderate alpha so the underlying
-## terrain still reads but plays as "lights off in that cell".
-## Pure black RGB so the result darkens without colour shift.
-## Currently visible cells stay fully clear.
-const FOG_COLOR_UNEXPLORED: Color = Color(0.0, 0.0, 0.0, 1.0)
-const FOG_COLOR_EXPLORED: Color = Color(0.0, 0.0, 0.0, 0.55)
-
-
-func _refresh_colors() -> void:
-	if not _mm or not _fow:
+func _refresh_texture() -> void:
+	if not _fog_image or not _fog_texture or not _fow:
 		return
 	var cells: PackedByteArray = _fow.get_cells()
-	var size: int = mini(cells.size(), _mm.instance_count)
-	for i: int in size:
-		var state: int = cells[i]
-		var col: Color = Color(0, 0, 0, 0)
-		match state:
-			FogOfWar.CellState.UNEXPLORED:
-				col = FOG_COLOR_UNEXPLORED
-			FogOfWar.CellState.EXPLORED:
-				col = FOG_COLOR_EXPLORED
-			_:
-				col = Color(0, 0, 0, 0)
-		_mm.set_instance_custom_data(i, col)
+	if cells.size() != _grid_size * _grid_size:
+		return
+	# Pack the cell-state byte array directly into the image. R8
+	# format expects raw bytes per pixel matching exactly. The
+	# cell state values 0/1/2 map onto the texture's R channel
+	# 0/1/2 byte values; the shader rescales by cell_state_max.
+	# The texture range 0..255 means our 0/1/2 sample as
+	# ~0.0/0.004/0.008 floats; rescaling cell_state_max = 2 still
+	# works because we sample raw bytes via the 8-bit format and
+	# rescale relative to 2.0 / 255.0 below.
+	# To keep the shader simple, write pre-rescaled bytes (state
+	# * 127 + 1) -- maps {0, 1, 2} to {0, 128, 255} which
+	# survives 8-bit precision cleanly.
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(cells.size())
+	for i: int in cells.size():
+		var s: int = cells[i] & 0x3
+		# Map CellState to a byte the shader can pick three buckets
+		# from after the implicit /255 read: 0 -> 0, 1 -> 128, 2 -> 255.
+		var b: int = 0
+		if s == 1:
+			b = 128
+		elif s == 2:
+			b = 255
+		data[i] = b
+	_fog_image.set_data(_grid_size, _grid_size, false, Image.FORMAT_R8, data)
+	_fog_texture.update(_fog_image)
+	# Shader samples raw byte / 255, so rescale to pick three
+	# buckets from {0.0, 0.5, 1.0}: cell_state_max * sample_value
+	# should land on the three integer buckets {0, 1, 2}.
+	_shader_material.set_shader_parameter("cell_state_max", 2.0)
 	_last_revision = _fow.revision
