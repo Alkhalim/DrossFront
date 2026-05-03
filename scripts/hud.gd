@@ -2917,8 +2917,11 @@ func _refresh_turret_profile_highlight(building: Building) -> void:
 	for entry: Dictionary in _action_buttons:
 		if (entry.get("kind") as String) != "turret_profile":
 			continue
-		var btn: Button = entry["button"] as Button
-		if not is_instance_valid(btn):
+		var btn_v: Variant = entry.get("button", null)
+		if btn_v == null or not is_instance_valid(btn_v):
+			continue
+		var btn: Button = btn_v as Button
+		if not btn:
 			continue
 		if (entry["key"] as StringName) == current:
 			btn.modulate = Color(0.55, 1.0, 0.55, 1.0)
@@ -4226,8 +4229,15 @@ func _update_button_affordability() -> void:
 	if not _resource_manager or _action_buttons.is_empty():
 		return
 	for entry: Dictionary in _action_buttons:
-		var btn: Button = entry["button"] as Button
-		if not is_instance_valid(btn):
+		# Untyped read so a freed Object reference doesn't trip
+		# "Trying to assign invalid previously freed instance" before
+		# we get a chance to validity-check it. See _refresh_ability_button
+		# for the detailed reasoning.
+		var btn_v: Variant = entry.get("button", null)
+		if btn_v == null or not is_instance_valid(btn_v):
+			continue
+		var btn: Button = btn_v as Button
+		if not btn:
 			continue
 		var kind: String = entry["kind"] as String
 		var affordable: bool = true
@@ -4283,21 +4293,37 @@ func _refresh_ability_button(entry: Dictionary) -> void:
 	## knows when SOMEONE will be ready next).
 	if not entry.has("button") or not entry.has("stat"):
 		return
-	var btn: Button = entry["button"] as Button
-	var stat: UnitStatResource = entry["stat"] as UnitStatResource
-	var units: Array = entry.get("units", []) as Array
-	# Triple guard: button must exist, must be a live instance, AND
-	# must still be in the scene tree. The third check catches the
-	# brief window after queue_free where is_instance_valid still
-	# returns true but property access on the freed Object errors.
-	if not btn or not is_instance_valid(btn) or not btn.is_inside_tree() or not stat:
+	# Read button + stat as untyped Variants first. Typed assignment
+	# (`var btn: Button = entry["button"]`) errors with "Trying to
+	# assign invalid previously freed instance" when the stored
+	# reference points at a queue_freed Object -- happens when the
+	# selected cohort gets vaporised mid-frame (superweapon strike,
+	# AoE kill). Untyped read + is_instance_valid lets us bail
+	# safely before the cast trips.
+	var btn_v: Variant = entry["button"]
+	var stat_v: Variant = entry["stat"]
+	if btn_v == null or not is_instance_valid(btn_v):
 		return
+	if stat_v == null:
+		return
+	var btn: Button = btn_v as Button
+	var stat: UnitStatResource = stat_v as UnitStatResource
+	if not btn or not btn.is_inside_tree() or not stat:
+		return
+	# Same defensive read for the units list -- typed for-loop
+	# iteration assigns each entry to a typed local, which errors on
+	# a freed reference. Walk the array as Variants and skip any
+	# freed members before doing typed work on them.
+	var units_v: Variant = entry.get("units", [])
+	var units: Array = units_v as Array if units_v is Array else []
 	var any_ready: bool = false
 	var min_cd: float = INF
-	for unit_node: Node in units:
-		if not is_instance_valid(unit_node):
+	for raw in units:
+		if raw == null or not is_instance_valid(raw):
 			continue
-		var u: Node = unit_node
+		var u: Node = raw as Node
+		if not u:
+			continue
 		if u.has_method("ability_ready") and u.call("ability_ready"):
 			any_ready = true
 			break
