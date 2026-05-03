@@ -20,8 +20,10 @@ const FUEL_PAYOUT_INTERVAL_SEC: float = 10.0
 ## Radius in which units can capture or contest.
 @export var capture_radius: float = 12.0
 
-## Time in seconds to capture from neutral.
-@export var capture_time: float = 30.0
+## Time in seconds to capture from neutral. 25% faster than the
+## v1 baseline (30s -> 22.5s) so the early game doesn't drag while
+## both sides slow-walk to neutral fields.
+@export var capture_time: float = 22.5
 
 ## Current owner: -1 = neutral, 0 = player, 1+ = AI
 var owner_id: int = -1
