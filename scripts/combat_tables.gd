@@ -64,12 +64,17 @@ const ARMOR_MAP: Dictionary = {
 ## AAir weapons are essentially the only way to reliably hit Light/Heavy Air.
 const ROLE_VS_ARMOR: Dictionary = {
 	&"AP": {
-		# Per player feedback — AP / anti-light / high-RoF weapons
-		# do 20% less damage to buildings (0.5 -> 0.4) so heavy
-		# structures aren't melted by chaingun spam.
-		&"unarmored": 1.0, &"light": 1.0, &"medium": 0.7,
+		# AP pivots to a "light-armor specialist" role: full damage
+		# vs unarmored / light ground AND light air (1.0x), nerfed
+		# vs medium ground (0.7 -> 0.4) so AP doesn't double as a
+		# generalist mid-armor cracker, and still poor vs heavy.
+		# The light_air buff (0.2 -> 1.0) only matters for AP
+		# weapons that have opted into can_hit_air; ground-only AP
+		# units are unaffected. Anti-building stays at 0.4 so
+		# chaingun spam can't melt structures.
+		&"unarmored": 1.0, &"light": 1.0, &"medium": 0.4,
 		&"heavy": 0.3, &"structure": 0.4,
-		&"light_air": 0.2, &"heavy_air": 0.1,
+		&"light_air": 1.0, &"heavy_air": 0.1,
 	},
 	&"AA": {
 		&"unarmored": 0.8, &"light": 0.5, &"medium": 0.8,
