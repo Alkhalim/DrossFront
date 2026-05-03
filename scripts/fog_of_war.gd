@@ -22,7 +22,13 @@ enum CellState { UNEXPLORED, EXPLORED, VISIBLE }
 ## block; the recent FOW perf wins (occluder-free fast-path,
 ## cached scene refs) leave headroom for the ~1.6x grid bump
 ## without the recompute spike the 1.35u attempt produced.
-const CELL_SIZE: float = 1.6
+## Larger cells = fewer per-stamp iterations and a smaller _cells
+## buffer (= cheaper per-recompute reset). Bumped 1.6 -> 2.0u after
+## a 250-pop stress test showed FOW dominating script time at high
+## observer counts. The cosmetic resolution loss (~25% larger cell
+## footprint) is invisible at RTS zoom; the perf win is ~36%
+## (1.6^2 / 2.0^2) per stamp.
+const CELL_SIZE: float = 2.0
 
 ## Map covers a square centred on the world origin from
 ## -MAP_HALF_EXTENT to +MAP_HALF_EXTENT on both X and Z axes.
