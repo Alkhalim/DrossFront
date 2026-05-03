@@ -209,6 +209,13 @@ func update_power() -> void:
 		var building: Building = node as Building
 		if not building or not building.is_constructed or not building.stats:
 			continue
+		# Filter by owner so the AI / ally HQ + generators don't leak
+		# their power production into THIS manager's totals. Pre-fix
+		# the player saw 60 baseline from 'their' HQ + the AI's HQ
+		# (or both ally HQs in 2v2).
+		var b_owner: int = (building.get("owner_id") as int) if "owner_id" in building else -1
+		if b_owner != owner_id:
+			continue
 		total_production += building.stats.power_production
 		total_consumption += building.stats.power_consumption
 
