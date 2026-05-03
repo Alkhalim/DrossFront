@@ -24,6 +24,10 @@ var _setup_panel: VBoxContainer = null
 var _settings_panel: VBoxContainer = null
 var _campaigns_panel: VBoxContainer = null
 var _scenarios_panel: VBoxContainer = null
+var _tactical_bg: Control = null
+## Brief white-flash overlay used during the command-center screen
+## transition (Campaigns / back). Hidden until a transition fires.
+var _transition_flash: ColorRect = null
 
 # Setup-screen state — populated by the radio buttons / faction picks.
 var _selected_mode: int = MatchSettingsClass.Mode.ONE_V_ONE
@@ -136,6 +140,7 @@ func _build_layout() -> void:
 	# widgets so the UI text stays cleanly readable on top.
 	var tactical_bg := _build_tactical_background()
 	add_child(tactical_bg)
+	_tactical_bg = tactical_bg
 
 	# Centered column.
 	var center := CenterContainer.new()
@@ -181,6 +186,16 @@ func _build_layout() -> void:
 	_build_settings_panel()
 	_build_campaigns_panel()
 	_build_scenarios_panel()
+	# Transition flash -- a fullscreen white ColorRect that pulses
+	# briefly during command-center screen changes (Campaigns / back).
+	# Lives ABOVE every other UI layer so the flash dominates the
+	# transition midpoint. mouse_filter = IGNORE so it doesn't eat
+	# clicks while sitting at modulate.a = 0.
+	_transition_flash = ColorRect.new()
+	_transition_flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_transition_flash.color = Color(0.85, 1.0, 0.85, 0.0)
+	_transition_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_transition_flash)
 
 
 func _build_main_buttons() -> void:
@@ -803,7 +818,75 @@ func _on_settings_pressed() -> void:
 
 
 func _on_campaigns_pressed() -> void:
-	_show_campaigns()
+	# Animated screen-change feel -- the radar fades + slides off,
+	# the command-center flashes briefly, and the Europe map slides
+	# in from the right. Mimics the operator panning to a different
+	# screen on the wall.
+	_transition_to_campaigns()
+
+
+func _transition_to_campaigns() -> void:
+	## Cross-fade + slide transition into the Campaigns full-screen
+	## page. Phase 1 (~0.32s): radar + main UI fade out and slide
+	## left while a soft phosphor flash fires at the midpoint. Phase
+	## 2 (~0.32s): _campaigns_panel slides in from the right and
+	## fades up to full opacity.
+	# Phase 1 -- pull the current view away.
+	if _tactical_bg:
+		var t1: Tween = create_tween()
+		t1.set_parallel(true)
+		t1.tween_property(_tactical_bg, "modulate:a", 0.35, 0.32)
+		t1.tween_property(_tactical_bg, "position:x", -120.0, 0.32)
+	if _root_vbox:
+		var t2: Tween = create_tween()
+		t2.set_parallel(true)
+		t2.tween_property(_root_vbox, "modulate:a", 0.0, 0.30)
+		t2.tween_property(_root_vbox, "position:x", _root_vbox.position.x - 80.0, 0.30)
+	# Mid-transition phosphor flash -- short bright blip then fade.
+	if _transition_flash:
+		var tf: Tween = create_tween()
+		tf.tween_property(_transition_flash, "color:a", 0.30, 0.18)
+		tf.tween_property(_transition_flash, "color:a", 0.0, 0.30)
+	# Phase 2 -- show campaigns AFTER the fade-out lands. Reset the
+	# tactical bg / root_vbox state so the next time we come back
+	# they slide in cleanly.
+	get_tree().create_timer(0.34).timeout.connect(_finish_show_campaigns, CONNECT_ONE_SHOT)
+
+
+func _finish_show_campaigns() -> void:
+	# Hide the previous layer; show the campaigns panel pre-positioned
+	# off-screen-right then slide it in.
+	_root_vbox.visible = false
+	if _campaigns_panel:
+		_campaigns_panel.visible = true
+		_campaigns_panel.modulate.a = 0.0
+		_campaigns_panel.position.x = 90.0
+		var t3: Tween = create_tween()
+		t3.set_parallel(true)
+		t3.tween_property(_campaigns_panel, "modulate:a", 1.0, 0.32)
+		t3.tween_property(_campaigns_panel, "position:x", 0.0, 0.32)
+
+
+func _restore_main_view_after_campaigns() -> void:
+	## Reverse of _transition_to_campaigns -- called when the player
+	## hits Back from the campaigns / scenarios pages. Slides the
+	## radar + main menu back in.
+	if _tactical_bg:
+		var t1: Tween = create_tween()
+		t1.set_parallel(true)
+		t1.tween_property(_tactical_bg, "modulate:a", 1.0, 0.32)
+		t1.tween_property(_tactical_bg, "position:x", 0.0, 0.32)
+	if _root_vbox:
+		_root_vbox.visible = true
+		_root_vbox.modulate.a = 0.0
+		var t2: Tween = create_tween()
+		t2.set_parallel(true)
+		t2.tween_property(_root_vbox, "modulate:a", 1.0, 0.32)
+		t2.tween_property(_root_vbox, "position:x", 0.0, 0.32)
+	if _transition_flash:
+		var tf: Tween = create_tween()
+		tf.tween_property(_transition_flash, "color:a", 0.20, 0.16)
+		tf.tween_property(_transition_flash, "color:a", 0.0, 0.30)
 
 
 func _on_quit_pressed() -> void:
@@ -1477,8 +1560,26 @@ func _build_campaigns_panel() -> void:
 	back.text = "Back"
 	back.custom_minimum_size = Vector2(180, 40)
 	back.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	back.pressed.connect(_show_main)
+	back.pressed.connect(_back_from_campaigns)
 	_campaigns_panel.add_child(back)
+
+
+func _back_from_campaigns() -> void:
+	## Slide the campaigns panel off-screen, then show + slide the
+	## main menu back in. Mirrors _transition_to_campaigns.
+	if _campaigns_panel:
+		var t1: Tween = create_tween()
+		t1.set_parallel(true)
+		t1.tween_property(_campaigns_panel, "modulate:a", 0.0, 0.30)
+		t1.tween_property(_campaigns_panel, "position:x", 90.0, 0.30)
+	get_tree().create_timer(0.32).timeout.connect(_finish_back_from_campaigns, CONNECT_ONE_SHOT)
+
+
+func _finish_back_from_campaigns() -> void:
+	if _campaigns_panel:
+		_campaigns_panel.visible = false
+		_campaigns_panel.position.x = 0.0
+	_restore_main_view_after_campaigns()
 
 
 func _attach_campaign_stumps(map: Control) -> void:
