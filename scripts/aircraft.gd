@@ -709,9 +709,9 @@ func _apply_fang_harasser_extras() -> void:
 	var barrel_mat: StandardMaterial3D = _aircraft_metal_mat(Color(0.06, 0.06, 0.08))
 	var ammo_mat: StandardMaterial3D = _aircraft_metal_mat(Color(0.18, 0.16, 0.20))
 	var coil_mat := StandardMaterial3D.new()
-	coil_mat.albedo_color = SABLE_NEON
+	coil_mat.albedo_color = SABLE_NEON_PALE
 	coil_mat.emission_enabled = true
-	coil_mat.emission = SABLE_NEON
+	coil_mat.emission = SABLE_NEON_PALE
 	coil_mat.emission_energy_multiplier = 1.8
 	for drone: Node3D in _drone_meshes:
 		if not is_instance_valid(drone):
