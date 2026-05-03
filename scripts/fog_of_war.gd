@@ -55,6 +55,31 @@ var _occluder_cells: PackedByteArray = PackedByteArray()
 ## terrain has registered as an LOS blocker (Foundry Belt + most v1
 ## maps), saving ~80% of the recompute cost on those maps.
 var _has_any_occluders: bool = false
+## Bumped whenever the occluder grid changes (tree felled, building
+## destroyed, etc). Per-observer stamp caches snapshot the value at
+## stamp time and invalidate the moment _occluder_revision advances
+## past their snapshot, so a single tree falling correctly opens up
+## sight for every cached observer near it on the next recompute.
+var _occluder_revision: int = 0
+
+## Per-observer visibility-stamp cache. Keyed by Object.get_instance_id().
+## Each entry stores the inputs that produced its vision footprint
+## last recompute (cell, radius, elevation/aircraft flags, occluder
+## revision) plus the PackedInt32Array of cell indices that were
+## stamped VISIBLE. When all inputs match on the next recompute, we
+## skip the bounding-box-with-LOS walk entirely and just iterate the
+## cached cell list -- the dominant speedup at high unit counts
+## because most units are stationary or move slowly compared to the
+## 5 Hz recompute rate.
+##
+## Entry shape:
+##   { cell: int, radius: float, elev: bool, air: bool,
+##     occ_rev: int, vis_cells: PackedInt32Array }
+var _observer_stamp_cache: Dictionary = {}
+## Recompute counter -- used to schedule periodic _prune_observer_cache
+## passes (every 20 recomputes ~= every 4 seconds at 5 Hz) so the
+## stamp cache doesn't grow unboundedly across a long match.
+var _recompute_tick: int = 0
 
 ## Y threshold above which an observer counts as "elevated" for
 ## plateau LOS purposes. Plateaus are 2.5-3u tall in v2, so anything
@@ -118,6 +143,7 @@ func register_los_occluder(world_pos: Vector3, radius: float = 1.5) -> void:
 				continue
 			_occluder_cells[_cell_index(cx, cz)] = 1
 			_has_any_occluders = true
+	_occluder_revision += 1
 
 
 func unregister_los_occluder(world_pos: Vector3, radius: float = 1.5) -> void:
@@ -143,6 +169,7 @@ func unregister_los_occluder(world_pos: Vector3, radius: float = 1.5) -> void:
 			if cell_centre.distance_squared_to(world_pos) > radius_sq:
 				continue
 			_occluder_cells[_cell_index(cx, cz)] = 0
+	_occluder_revision += 1
 
 
 ## Material overlay applied to each MeshInstance3D inside an entity
@@ -369,6 +396,14 @@ func _recompute_visibility() -> void:
 		_apply_entity_visibility()
 		return
 
+	# Periodically drop cache entries for freed observers so the
+	# stamp cache doesn't accumulate dead instance_ids. Every ~4
+	# seconds at 5 Hz refresh -- frequent enough to bound memory,
+	# rare enough that the prune walk doesn't show up in profiling.
+	_recompute_tick += 1
+	if (_recompute_tick % 20) == 0:
+		_prune_observer_cache()
+
 	# Demote currently-VISIBLE cells to EXPLORED. New vision will
 	# bump them back up below; cells that were visible last tick but
 	# aren't this tick stay EXPLORED so the player can still see
@@ -427,7 +462,13 @@ func _recompute_visibility() -> void:
 		# bypass branch picks it up without a second arg.
 		var unit_stats: UnitStatResource = (node.get("stats") as UnitStatResource) if "stats" in node else null
 		var sees_over: bool = unit_stats != null and unit_stats.sees_over_buildings
-		_stamp_visibility(node3d.global_position, radius, is_elevated or sees_over, is_air)
+		_stamp_visibility_cached(
+			node.get_instance_id(),
+			node3d.global_position,
+			radius,
+			is_elevated or sees_over,
+			is_air,
+		)
 
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(node):
@@ -442,7 +483,13 @@ func _recompute_visibility() -> void:
 			continue
 		var b3d: Node3D = node as Node3D
 		var b_elevated: bool = b3d.global_position.y >= ELEVATED_OBSERVER_Y
-		_stamp_visibility(b3d.global_position, BUILDING_SIGHT_RADIUS, b_elevated, false)
+		_stamp_visibility_cached(
+			node.get_instance_id(),
+			b3d.global_position,
+			BUILDING_SIGHT_RADIUS,
+			b_elevated,
+			false,
+		)
 
 	# Temporary reveals — satellite-crash flares, scan pings, etc.
 	# Drop expired entries first; the rest stamp visibility just
@@ -657,7 +704,69 @@ func _unit_sight_radius(node: Node) -> float:
 	return SIGHT_RADIUS_BY_TIER.get(stats.sight_tier, DEFAULT_SIGHT_RADIUS) as float
 
 
-func _stamp_visibility(world_pos: Vector3, radius: float, observer_elevated: bool = false, observer_aircraft: bool = false) -> void:
+func _stamp_visibility_cached(observer_id: int, world_pos: Vector3, radius: float, observer_elevated: bool, observer_aircraft: bool) -> void:
+	## Cached entry-point used by _recompute_visibility's per-unit /
+	## per-building stamp loop. When the observer's vision inputs
+	## (cell, radius, elevation/aircraft flags, occluder revision)
+	## haven't changed since the last recompute, we re-mark the same
+	## VISIBLE cells from a stored PackedInt32Array instead of running
+	## the full bounding-box-with-LOS walk. Skips ~all the per-stamp
+	## CPU for stationary observers (defenders, anchored crawlers,
+	## buildings) -- the dominant fraction of observers in any match
+	## past the early opening.
+	var origin_cell: Vector2i = _world_to_cell(world_pos)
+	var origin_cell_idx: int = _cell_index(origin_cell.x, origin_cell.y)
+	# Plateau-aware skip flag baked into the cache key so a unit that
+	# walks UP onto a plateau (changing observer_elevated even if the
+	# cell index stayed the same) misses the cache and re-stamps.
+	var entry: Dictionary = _observer_stamp_cache.get(observer_id, {}) as Dictionary
+	if not entry.is_empty() \
+			and entry.get("cell", -1) == origin_cell_idx \
+			and is_equal_approx(entry.get("radius", -1.0) as float, radius) \
+			and (entry.get("elev", false) as bool) == observer_elevated \
+			and (entry.get("air", false) as bool) == observer_aircraft \
+			and (entry.get("occ_rev", -1) as int) == _occluder_revision:
+		var cached_cells: PackedInt32Array = entry["vis_cells"] as PackedInt32Array
+		var n: int = cached_cells.size()
+		# Direct PackedByteArray writes -- no per-iter validity work.
+		# We trust the cached list; cell indices are bounded at cache
+		# build time below.
+		for i: int in n:
+			_cells[cached_cells[i]] = CellState.VISIBLE
+		return
+	# Cache miss -- run the full stamp and snapshot the cells we
+	# touched. _stamp_visibility returns the PackedInt32Array of
+	# stamped indices (passed via return rather than out-arg because
+	# PackedInt32Array is pass-by-value-with-COW in GDScript and an
+	# in-place out-arg pattern doesn't propagate to the caller).
+	var collected: PackedInt32Array = _stamp_visibility(world_pos, radius, observer_elevated, observer_aircraft, true)
+	_observer_stamp_cache[observer_id] = {
+		"cell": origin_cell_idx,
+		"radius": radius,
+		"elev": observer_elevated,
+		"air": observer_aircraft,
+		"occ_rev": _occluder_revision,
+		"vis_cells": collected,
+	}
+
+
+func _prune_observer_cache() -> void:
+	## Drops cache entries whose owning instance has been freed. Called
+	## periodically from _recompute_visibility so the dict doesn't grow
+	## unboundedly across a long match. instance_from_id returns null
+	## when the original Object has been queue_freed so the validity
+	## check is robust without keeping refs around.
+	var stale: Array = []
+	for observer_id_v in _observer_stamp_cache.keys():
+		var observer_id: int = observer_id_v as int
+		var inst: Object = instance_from_id(observer_id)
+		if inst == null or not is_instance_valid(inst):
+			stale.append(observer_id)
+	for observer_id in stale:
+		_observer_stamp_cache.erase(observer_id)
+
+
+func _stamp_visibility(world_pos: Vector3, radius: float, observer_elevated: bool = false, observer_aircraft: bool = false, collect_cells: bool = false) -> PackedInt32Array:
 	# Compute the cell-bounding box of the radius and walk every
 	# cell inside it, marking those whose centre falls inside the
 	# circle as VISIBLE. Square -> circle filter is cheap because
@@ -686,6 +795,11 @@ func _stamp_visibility(world_pos: Vector3, radius: float, observer_elevated: boo
 	var honour_occluders: bool = has_occluder_data and not observer_aircraft and not observer_elevated
 	var origin_cell: Vector2i = _world_to_cell(world_pos)
 
+	# Snapshot of cell indices we marked VISIBLE this stamp -- used by
+	# _stamp_visibility_cached so subsequent recomputes can re-mark
+	# the same cells without re-running the bounding-box-with-LOS
+	# walk. Only allocated when the caller actually wants the list.
+	var collected: PackedInt32Array = PackedInt32Array()
 	var cell_radius: int = int(ceil(radius / CELL_SIZE))
 	var x0: int = maxi(origin_cell.x - cell_radius, 0)
 	var x1: int = mini(origin_cell.x + cell_radius, GRID_SIZE - 1)
@@ -725,6 +839,9 @@ func _stamp_visibility(world_pos: Vector3, radius: float, observer_elevated: boo
 			if honour_occluders and not _line_of_sight_clear(origin_cell.x, origin_cell.y, cx, cz):
 				continue
 			_cells[idx] = CellState.VISIBLE
+			if collect_cells:
+				collected.append(idx)
+	return collected
 
 
 func _line_of_sight_clear(x0: int, y0: int, x1: int, y1: int) -> bool:
