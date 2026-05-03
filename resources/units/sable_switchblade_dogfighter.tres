@@ -34,3 +34,4 @@ flight_altitude = 7.5
 flight_speed = 24.0
 special_description = "Switchblade Dogfighter — anti-air specialist. Higher accuracy, longer range, AAir tag stays. The pure interceptor build."
 passive_description = "AAir Specialist Loadout — higher accuracy + longer range vs aircraft. Pure interceptor; weak vs ground targets."
+branch_summary = "Tighter turn rate and AAir missile pods. Pure air-superiority interceptor; loses to ground fire but dominates other aircraft."

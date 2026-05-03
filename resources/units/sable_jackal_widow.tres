@@ -35,3 +35,4 @@ built_at = &"basic_foundry"
 primary_weapon = SubResource("weapon_widow_needles")
 special_description = "Jackal Widow branch — long pulse lasers extend reach so the Widow picks targets from outside their detection bubble. Lower HP, no missile secondary. Damage rolled into the lasers."
 passive_description = "Long Pulse Lasers — extended-range laser line. Engages from outside the enemy's reaction bubble; fragile if caught."
+branch_summary = "Lighter chassis with stealth coating. Trades survivability for a much wider sight + ambush potential. Cannot fire at air."

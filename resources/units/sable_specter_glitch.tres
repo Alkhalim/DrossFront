@@ -37,3 +37,4 @@ stealth_restore_time = 4.0
 mesh_provider_radius = 18.0
 special_description = "Specter Glitch branch — extended 150u stealth detection radius (sees through enemy Sable concealment) AND emits an 18u Mesh aura. The forward-deployable Mesh provider — push Glitches into enemy territory to project the Mesh."
 passive_description = "Stealth + 18u Mesh + 150u Detection — concealed scout that also extends Sable's Mesh aura and reveals stealthed enemies in range."
+branch_summary = "Trades cloak for an EW panel suite that projects a wide Mesh aura. The ground-anchored support specter; fragile, valuable, must be protected."

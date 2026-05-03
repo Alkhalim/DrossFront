@@ -51,3 +51,4 @@ ability_duration = 0.0
 ability_autocast = true
 ability_description = "Next railgun shot fires as a glowing 5-pellet salvo for 2x damage. Autocasts whenever the cooldown rolls over and a target is in range."
 special_description = "Harbinger Swarm Marshal — combat-focused branch. Faster drone-bay cadence + the Heavy Volley ability: every 12s the next railgun shot fires as a glowing 5-pellet salvo for 2x damage. Trades the Overseer's wider Mesh aura for raw burst output."
+branch_summary = "Trades the Mesh aura for a glowing Heavy Volley active and bigger guns. The Harbinger that hunts other apex units."

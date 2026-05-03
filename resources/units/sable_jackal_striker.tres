@@ -33,3 +33,4 @@ built_at = &"basic_foundry"
 primary_weapon = SubResource("weapon_striker_cannons")
 special_description = "Jackal Striker branch — heavier laser cannons (75 dmg per shot vs base 45) and a thicker chassis. Reads as a duelling line skirmisher rather than a flanker."
 passive_description = "Heavy Laser Cannons — 75 dmg per shot duelling-line laser pair. Thicker chassis trades flank speed for stand-and-shoot durability."
+branch_summary = "Twin pulse lasers replaced with a heavy beam cannon and reinforced chassis. Trades mobility and air-coverage for sustained ground DPS."

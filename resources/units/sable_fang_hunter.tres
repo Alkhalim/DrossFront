@@ -36,3 +36,4 @@ flight_altitude = 5.5
 flight_speed = 13.5
 special_description = "Fang Hunter — micro-missiles retuned for anti-armour work (AA tag, moderate damage). Drops light micro-rockets that crack heavy armour. Pair with Switchblades or Specters; the Hunter alone won't beat dedicated AAir defenses."
 passive_description = "Anti-Armour Micro-Missiles — AA-tagged warheads tuned for cracking heavy ground armour."
+branch_summary = "Micro-missiles re-armed for AT (heavy-armour cracking) work. Slower-firing cluster volleys; the Fang variant that can actually threaten heavies."

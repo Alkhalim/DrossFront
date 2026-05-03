@@ -38,3 +38,4 @@ is_stealth_capable = true
 detection_radius = 80.0
 stealth_restore_time = 4.0
 special_description = "Courier Infiltrator — stealth-capable transport variant. Same Garrison hardware as the base Courier; vehicle-scale stealth shrouding lets it ferry units through enemy territory undetected."
+branch_summary = "Trades cargo capacity for a cloak field — moves invisibly into the enemy backline before unloading. Specialist for sneaky drops; delicate."
