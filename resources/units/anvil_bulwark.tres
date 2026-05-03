@@ -13,6 +13,10 @@ damage_tier = &"very_high"
 range_tier = &"long"
 rof_tier = &"moderate"
 can_damage_trees = true
+mult_vs_light = 0.3
+mult_vs_medium = 0.5
+mult_vs_heavy = 1.0
+structure_damage_mult = 0.6
 
 [sub_resource type="Resource" id="weapon_missile_pod"]
 script = ExtResource("2")

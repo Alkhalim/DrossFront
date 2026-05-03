@@ -552,15 +552,12 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	if mesh_sys and mesh_sys.has_method("accuracy_bonus"):
 		accuracy += mesh_sys.call("accuracy_bonus", mesh_strength) as float
 
-	# Role vs armor modifier
+	# Role vs armor modifier. Routes through WeaponResource.get_role_mult_for
+	# so per-weapon per-class overrides (Bulwark cannon's 0.3/0.5/1.0/0.6,
+	# WRAITH bomb bay's 3.0 vs structure, etc.) take precedence over the
+	# default CombatTables.ROLE_VS_ARMOR row.
 	var target_armor: StringName = _get_target_armor()
-	var role_mod: float = CombatTables.get_role_modifier(weapon.role_tag, target_armor)
-	# Per-weapon structure-mult override -- when set positive on a
-	# weapon, replaces the role-vs-structure multiplier for that
-	# specific weapon (e.g. WRAITH's bomb bay overrides AS's 2.5x
-	# with 3.0x). Default -1 = use the role table.
-	if target_armor == &"structure" and weapon.structure_damage_mult > 0.0:
-		role_mod = weapon.structure_damage_mult
+	var role_mod: float = weapon.get_role_mult_for(target_armor)
 
 	# Armor flat reduction — prefer the target's resolved_armor_reduction()
 	# (honors per-unit numeric override), fall back to the armor_class

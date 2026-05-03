@@ -81,13 +81,22 @@ extends Resource
 ## real number, not just the role mult.
 @export_range(0.0, 1.0, 0.01) var air_damage_mult: float = 1.0
 
-## Per-weapon override for the structure damage multiplier. When >
-## 0, replaces the role-vs-structure entry from CombatTables for
-## this specific weapon (combat_component reads it in the damage
-## assembly). Used to give a single weapon a custom anti-structure
-## ratio without shifting the global AS table -- e.g. WRAITH bomb
-## bay sets this to 3.0 to override AS's 2.5 against buildings.
-## Default -1 = fall through to CombatTables.ROLE_VS_ARMOR.
+## Per-weapon overrides for the role-vs-armor multiplier table.
+## When > 0, replaces the corresponding CombatTables entry for
+## this specific weapon (combat_component reads them in the
+## damage assembly). Used to give a single weapon a custom
+## armor-class profile without shifting the global role table --
+## e.g. Bulwark Heavy AP Cannon overrides AP's vs-medium 0.4 with
+## 0.5, vs-heavy 0.3 with 1.0, etc. Default -1 = fall through to
+## CombatTables.ROLE_VS_ARMOR.
+@export var mult_vs_light: float = -1.0
+@export var mult_vs_medium: float = -1.0
+@export var mult_vs_heavy: float = -1.0
+@export var mult_vs_light_air: float = -1.0
+@export var mult_vs_heavy_air: float = -1.0
+## Structure variant -- kept separate from the per-armor-class
+## block above so the existing wraith-bomb + sapper-charge tres
+## files don't need a rename. New weapons can use either path.
 @export var structure_damage_mult: float = -1.0
 
 ## Tree damage gate. Default false: small-arms / SMGs / minigun
@@ -168,3 +177,31 @@ func resolved_rof_seconds() -> float:
 	if rof_seconds_value >= 0.0:
 		return rof_seconds_value
 	return CombatTables.get_rof(rof_tier)
+
+
+func get_role_mult_for(armor_class: StringName) -> float:
+	## Returns the effective role multiplier vs the given armor
+	## class. Honours per-weapon overrides first, then falls back to
+	## the CombatTables role-vs-armor table. HUD displays + combat
+	## damage paths funnel through this so the displayed multiplier
+	## always matches what the gun actually does.
+	match armor_class:
+		&"light":
+			if mult_vs_light > 0.0:
+				return mult_vs_light
+		&"medium":
+			if mult_vs_medium > 0.0:
+				return mult_vs_medium
+		&"heavy":
+			if mult_vs_heavy > 0.0:
+				return mult_vs_heavy
+		&"light_air":
+			if mult_vs_light_air > 0.0:
+				return mult_vs_light_air
+		&"heavy_air":
+			if mult_vs_heavy_air > 0.0:
+				return mult_vs_heavy_air
+		&"structure":
+			if structure_damage_mult > 0.0:
+				return structure_damage_mult
+	return CombatTables.get_role_modifier(role_tag, armor_class)

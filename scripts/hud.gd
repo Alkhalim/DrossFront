@@ -2499,7 +2499,10 @@ func _attack_bonus_chips(stats: UnitStatResource) -> Array:
 	var weapon_air_mult: float = stats.primary_weapon.air_damage_mult
 	var mults: Array[float] = []
 	for i: int in classes.size():
-		var m: float = CombatTables.get_role_modifier(role_tag, classes[i])
+		# Use the weapon's per-class override path so overridden
+		# multipliers (Bulwark cannon, WRAITH bay, etc.) display the
+		# same number combat actually uses.
+		var m: float = stats.primary_weapon.get_role_mult_for(classes[i])
 		# Air rows fold in the per-weapon air scalar so the displayed
 		# multiplier matches what the gun actually does to airframes.
 		if classes[i] == &"light_air" or classes[i] == &"heavy_air":
@@ -4208,7 +4211,8 @@ func _compute_dps_vs(stat: UnitStatResource, armor_class: StringName) -> float:
 		if is_air_query and not weapon.engages_air():
 			continue
 		var raw: float = _weapon_dps(weapon) * float(stat.squad_size)
-		var role_mod: float = CombatTables.get_role_modifier(weapon.role_tag, armor_class)
+		# Mirrors combat: honour per-weapon per-armor-class overrides.
+		var role_mod: float = weapon.get_role_mult_for(armor_class)
 		var armor_red: float = CombatTables.get_armor_reduction(armor_class)
 		# Per-weapon air scalar -- mirrors the combat path so the
 		# displayed Air DPS matches actual output.
