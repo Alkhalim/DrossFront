@@ -69,46 +69,76 @@ func stop_pulse_pin(key: String) -> void:
 	_pulse_pins.erase(key)
 
 
-func _draw_fog_tint(fow: FogOfWar, map_origin: Vector2, map_size: Vector2, half_world: float) -> void:
-	## One filled rect per FOW cell, drawn directly in the minimap's
-	## map area. Per-cell px size is derived from the FOW grid size.
-	## Iterates the flat byte array linearly so we hit each cell at
-	## most once.
+## Per-state minimap fog tint. UNEXPLORED is near-opaque dark,
+## EXPLORED is dimmed grey, VISIBLE is pass-through (alpha 0).
+const _FOG_TINT_UNEXPLORED: Color = Color(0.02, 0.02, 0.04, 0.95)
+const _FOG_TINT_EXPLORED: Color = Color(0.02, 0.02, 0.04, 0.55)
+const _FOG_TINT_VISIBLE: Color = Color(0, 0, 0, 0)
+
+## Cached fog-of-war ImageTexture sized GRID_SIZE x GRID_SIZE,
+## one RGBA8 pixel per cell. Refreshed only when FOW.revision
+## changes (5Hz worst case) instead of redrawing 62500 rects per
+## minimap repaint at 15Hz. Massive RenderingServer-call cut.
+var _fog_tint_image: Image = null
+var _fog_tint_texture: ImageTexture = null
+var _fog_tint_last_revision: int = -1
+var _fog_tint_grid_size: int = 0
+
+
+func _refresh_fog_tint_texture(fow: FogOfWar) -> void:
 	var grid_size: int = fow.get_grid_size()
 	if grid_size <= 0:
 		return
+	if _fog_tint_image == null or _fog_tint_grid_size != grid_size:
+		_fog_tint_image = Image.create(grid_size, grid_size, false, Image.FORMAT_RGBA8)
+		_fog_tint_texture = ImageTexture.create_from_image(_fog_tint_image)
+		_fog_tint_grid_size = grid_size
+		_fog_tint_last_revision = -1
+	# Skip the upload when FOW hasn't recomputed since last refresh.
+	if fow.revision == _fog_tint_last_revision:
+		return
+	_fog_tint_last_revision = fow.revision
 	var cells: PackedByteArray = fow.get_cells()
-	var cell_px: Vector2 = map_size / float(grid_size)
-	# Tint world fits the same MAP_WORLD_SIZE the entity loops use.
-	# half_world is unused for the fog tint (cells map directly to
-	# the minimap rect 1:1), but kept in the signature for symmetry.
+	var pixel_count: int = mini(cells.size(), grid_size * grid_size)
+	# Build the RGBA buffer in one pass; uploading the whole
+	# texture per FOW recompute is ~one RenderingServer call vs
+	# 62500 draw_rect calls every minimap repaint.
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(pixel_count * 4)
+	for i: int in pixel_count:
+		var tint: Color = _FOG_TINT_VISIBLE
+		match cells[i]:
+			FogOfWar.CellState.UNEXPLORED:
+				tint = _FOG_TINT_UNEXPLORED
+			FogOfWar.CellState.EXPLORED:
+				tint = _FOG_TINT_EXPLORED
+		var b: int = i * 4
+		data[b] = int(tint.r * 255.0)
+		data[b + 1] = int(tint.g * 255.0)
+		data[b + 2] = int(tint.b * 255.0)
+		data[b + 3] = int(tint.a * 255.0)
+	_fog_tint_image.set_data(grid_size, grid_size, false, Image.FORMAT_RGBA8, data)
+	_fog_tint_texture.update(_fog_tint_image)
+
+
+func _draw_fog_tint(fow: FogOfWar, map_origin: Vector2, map_size: Vector2, half_world: float) -> void:
+	## Refresh the cached fog texture (no-op when FOW hasn't moved)
+	## and draw it as a single textured rect. Replaces a 62500 x
+	## per-frame draw_rect loop -- the previous version was the
+	## dominant per-frame CPU cost on the entire game.
 	var _hw: float = half_world  # quiet the unused-arg warning
-	for cz: int in grid_size:
-		for cx: int in grid_size:
-			var i: int = cz * grid_size + cx
-			if i >= cells.size():
-				continue
-			var alpha: float = 0.0
-			match cells[i]:
-				FogOfWar.CellState.UNEXPLORED:
-					alpha = 0.95
-				FogOfWar.CellState.EXPLORED:
-					alpha = 0.55
-				_:
-					continue
-			var px := Vector2(
-				map_origin.x + float(cx) * cell_px.x,
-				# World +Z (south) maps to minimap +Y (down) — matches
-				# _world_to_map's convention so fog overlay aligns
-				# with where entities are actually drawn.
-				map_origin.y + float(cz) * cell_px.y,
-			)
-			# Bump rect size by ~0.5 px so adjacent cell rects don't
-			# leave hairline gaps at fractional cell sizes.
-			draw_rect(
-				Rect2(px, cell_px + Vector2(0.5, 0.5)),
-				Color(0.02, 0.02, 0.04, alpha)
-			)
+	_refresh_fog_tint_texture(fow)
+	if _fog_tint_texture == null:
+		return
+	# draw_texture_rect samples the texture across the destination
+	# rect using the current default_filter (nearest neighbour
+	# would feel too pixelated; the small upscale interpolation
+	# is fine for a minimap).
+	draw_texture_rect(
+		_fog_tint_texture,
+		Rect2(map_origin, map_size),
+		false,
+	)
 
 
 func _color_for_owner(owner_idx: int) -> Color:
