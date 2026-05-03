@@ -15,7 +15,11 @@ extends Control
 ## Used by the match-setup screen below the map dropdown so the player
 ## sees what they're picking before committing.
 
-enum MapId { FOUNDRY_BELT, ASHPLAINS_CROSSING }
+## Mirrors MatchSettingsClass.MapId so the preview can dispatch to
+## a per-map _draw helper for every map the menu can pick. Adding
+## a new map requires extending both this enum AND the dispatch in
+## _draw / the headline label below.
+enum MapId { FOUNDRY_BELT, ASHPLAINS_CROSSING, IRON_GATE_CROSSING, SCHWARZWALD }
 
 @export var map_id: MapId = MapId.FOUNDRY_BELT:
 	set(value):
@@ -37,21 +41,36 @@ func _init() -> void:
 func _draw() -> void:
 	var s: Vector2 = size
 	# Background — dark frame + subtle ground tint per map.
-	var bg_color: Color = (
-		Color(0.12, 0.13, 0.13, 1.0) if map_id == MapId.FOUNDRY_BELT
-		else Color(0.18, 0.13, 0.10, 1.0)  # warm ash tint
-	)
+	var bg_color: Color
+	var label: String
+	match map_id:
+		MapId.ASHPLAINS_CROSSING:
+			bg_color = Color(0.18, 0.13, 0.10, 1.0)  # warm ash tint
+			label = "THE ASHLINE"
+		MapId.IRON_GATE_CROSSING:
+			bg_color = Color(0.10, 0.12, 0.14, 1.0)  # winter slate
+			label = "GATEPOINT RHIN"
+		MapId.SCHWARZWALD:
+			bg_color = Color(0.06, 0.10, 0.07, 1.0)  # forest floor
+			label = "SCHWARZWALD"
+		_:
+			bg_color = Color(0.12, 0.13, 0.13, 1.0)
+			label = "CORRIDOR 7"
 	draw_rect(Rect2(Vector2.ZERO, s), bg_color, true)
 	draw_rect(Rect2(Vector2.ZERO, s), Color(0.30, 0.32, 0.36, 1.0), false, 1.5)
 	# Headline label across the top.
-	var label: String = "FOUNDRY BELT" if map_id == MapId.FOUNDRY_BELT else "ASHPLAINS CROSSING"
 	var f := ThemeDB.fallback_font
 	draw_string(f, Vector2(8, 14), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.85, 0.85, 0.80, 1.0))
 	# Per-map content. Centre of preview maps to world (0, 0).
-	if map_id == MapId.FOUNDRY_BELT:
-		_draw_foundry_belt()
-	else:
-		_draw_ashplains()
+	match map_id:
+		MapId.ASHPLAINS_CROSSING:
+			_draw_ashplains()
+		MapId.IRON_GATE_CROSSING:
+			_draw_iron_gate()
+		MapId.SCHWARZWALD:
+			_draw_schwarzwald()
+		_:
+			_draw_foundry_belt()
 	# Selection ring.
 	if selected:
 		draw_rect(Rect2(Vector2.ZERO, s).grow(-2), Color(0.95, 0.78, 0.32, 1.0), false, 2.5)
@@ -93,6 +112,75 @@ func _draw_ashplains() -> void:
 	]:
 		_draw_deposit(d)
 	# HQ corners.
+	_draw_hq(Vector3(0, 0, 110), Color(0.30, 0.55, 1.0, 1.0))
+	_draw_hq(Vector3(0, 0, -110), Color(1.0, 0.30, 0.30, 1.0))
+
+
+func _draw_iron_gate() -> void:
+	# Two flanking ruin clusters + central plateau, four deposits.
+	# Approximated from _setup_terrain_iron_gate.
+	_draw_plateau(Vector3(0, 0, 25), Vector2(36, 14))
+	_draw_plateau(Vector3(0, 0, -75), Vector2(28, 14))
+	# Cluster footprints as small cool-grey blobs to read as ruin
+	# masses.
+	for cluster_centre: Vector3 in [
+		Vector3(48, 0, 56), Vector3(-48, 0, 56),
+		Vector3(48, 0, -56), Vector3(-48, 0, -56),
+	]:
+		var p_c: Vector2 = _w2p(cluster_centre)
+		var sz_c: Vector2 = _w2p_size(Vector2(11.0, 7.0))
+		draw_rect(Rect2(p_c - sz_c * 0.5, sz_c), Color(0.36, 0.34, 0.36, 1.0), true)
+		draw_rect(Rect2(p_c - sz_c * 0.5, sz_c), Color(0.55, 0.52, 0.55, 1.0), false, 1.0)
+	for d: Vector3 in [
+		Vector3(0, 0, 80), Vector3(0, 0, -95),
+		Vector3(55, 0, 0), Vector3(-55, 0, 0),
+	]:
+		_draw_deposit(d)
+	_draw_hq(Vector3(0, 0, 110), Color(0.30, 0.55, 1.0, 1.0))
+	_draw_hq(Vector3(0, 0, -110), Color(1.0, 0.30, 0.30, 1.0))
+
+
+func _draw_schwarzwald() -> void:
+	# Forest fill — render as a dotted canopy mass everywhere
+	# EXCEPT the corridor strips. The 1v1 dispatch picks the
+	# central corridor (one strip down x=0); 2v2 corridors at
+	# x = +/- 60 aren't shown here because the menu can't tell
+	# 1v1 from 2v2 yet. Reads as 'forest with a clear road' in
+	# both cases since the central column at minimum reflects the
+	# 1v1 layout.
+	const CORRIDOR_HALF: float = 18.0
+	var s: Vector2 = size
+	var pad: float = 8.0
+	var w: float = s.x - pad * 2.0
+	var h: float = s.y - pad * 2.0
+	# Filled forest blocks on the left + right of the corridor.
+	var corridor_left_world: float = -CORRIDOR_HALF
+	var corridor_right_world: float = CORRIDOR_HALF
+	var cl_x: float = pad + (corridor_left_world + MAP_HALF) / (MAP_HALF * 2.0) * w
+	var cr_x: float = pad + (corridor_right_world + MAP_HALF) / (MAP_HALF * 2.0) * w
+	var forest_color: Color = Color(0.10, 0.20, 0.12, 1.0)
+	draw_rect(Rect2(Vector2(pad, pad), Vector2(cl_x - pad, h)), forest_color, true)
+	draw_rect(Rect2(Vector2(cr_x, pad), Vector2(pad + w - cr_x, h)), forest_color, true)
+	# Sparse canopy stipple inside the forest blocks for texture.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 0xF02E57
+	var dot_color: Color = Color(0.18, 0.32, 0.18, 1.0)
+	for _i: int in 80:
+		var sx: float = pad + rng.randf() * (cl_x - pad)
+		var sy: float = pad + rng.randf() * h
+		draw_circle(Vector2(sx, sy), 1.6, dot_color)
+	for _i: int in 80:
+		var sx: float = cr_x + rng.randf() * (pad + w - cr_x)
+		var sy: float = pad + rng.randf() * h
+		draw_circle(Vector2(sx, sy), 1.6, dot_color)
+	# HQ corners + the Foundry Belt deposit set (Schwarzwald
+	# inherits these positions for now).
+	for d: Vector3 in [
+		Vector3(28, 0, 80), Vector3(-28, 0, -80),
+		Vector3(35, 0, 0), Vector3(-35, 0, 0),
+		Vector3(95, 0, 0), Vector3(-95, 0, 0),
+	]:
+		_draw_deposit(d)
 	_draw_hq(Vector3(0, 0, 110), Color(0.30, 0.55, 1.0, 1.0))
 	_draw_hq(Vector3(0, 0, -110), Color(1.0, 0.30, 0.30, 1.0))
 

@@ -2036,6 +2036,8 @@ func _setup_terrain_schwarzwald() -> void:
 			add_child(tree)
 		x += TREE_GRID_STEP
 
+
+func _decorate_ruin_block(root: Node3D, piece_size: Vector3, center_offset: Vector3 = Vector3.ZERO, add_roof_details: bool = true) -> void:
 	## Adds building-character details (windows, antennae, half-collapsed
 	## corner) to a ruin block of `piece_size` centered at `center_offset`
 	## within `root`. Pass center_offset = Vector3.ZERO for the base block,
