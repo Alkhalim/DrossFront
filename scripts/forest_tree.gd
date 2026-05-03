@@ -98,15 +98,12 @@ func _build_visual() -> void:
 	col.shape = col_cyl
 	col.position = Vector3(0, TRUNK_HEIGHT * 0.5, 0)
 	add_child(col)
-	# Navigation obstacle so agents route around trees via RVO
-	# without baking a hole into the static navmesh per tree (a
-	# Schwarzwald-density forest would otherwise blow up the
-	# triangulation pass at startup).
-	var obstacle: NavigationObstacle3D = NavigationObstacle3D.new()
-	obstacle.radius = TRUNK_RADIUS * 1.4
-	obstacle.affect_navigation_mesh = false
-	obstacle.avoidance_enabled = true
-	add_child(obstacle)
+	# No NavigationObstacle3D per tree -- a Schwarzwald-density
+	# forest would saturate the RVO server with hundreds of
+	# obstacles per agent neighbourhood and tank the frame rate.
+	# Hard collision (trunk cylinder above) physically blocks
+	# agents; the FOW LOS occluder + collision are enough to
+	# make trees feel solid without paying RVO costs per trunk.
 
 
 func take_damage(amount: int, attacker: Node3D = null) -> void:
