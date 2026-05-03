@@ -6,13 +6,24 @@ extends SuperweaponComponent
 ## movement halted. Units take no damage. Effect applies once on
 ## firing-start; the firing window is the paralysis duration so the
 ## state machine plays out naturally.
+##
+## Firing visuals: a violet broadcast pulse fires from the array
+## beacon up into the sky, an expanding violet shockwave + decal
+## ring lands at the target, and each paralyzed unit gets a small
+## violet flash above its head so the player can see which mechs
+## are offline.
 
 const PARALYSIS_SECONDS: float = 12.0
+const ECHO_NEON: Color = Color(0.78, 0.42, 1.0, 1.0)
+const SHOCKWAVE_RING_LIFETIME: float = 1.6
+const BROADCAST_BEAM_LIFETIME: float = 1.4
 
 
 func _start_firing() -> void:
 	super()
+	_play_broadcast_visual()
 	_apply_override(PARALYSIS_SECONDS)
+	_play_shockwave_at_target()
 
 
 func _apply_override(duration: float) -> void:
@@ -47,17 +58,148 @@ func _apply_override(duration: float) -> void:
 			combat.set("_silence_remaining", duration)
 		if n3.has_method("stop"):
 			n3.call("stop")
-	# Visual telegraph at the centre -- a brief violet pulse so the
-	# 600u override zone reads on impact. Reuses the same particle
-	# emitter the ammo dump explosion uses for cheap reuse.
+		# Per-unit pulse flash -- a small violet sparkle above the
+		# unit so the player sees exactly who went offline.
+		_spawn_unit_pulse(n3.global_position + Vector3(0.0, 1.4, 0.0))
+
+
+func _play_broadcast_visual() -> void:
+	## Fires a tall violet beam straight up from the EChO beacon and
+	## a series of expanding rings around the array so the building
+	## reads as 'broadcasting' rather than just sitting there. Audio
+	## carries a low broadcast hum + pop layered on top.
+	if not _building or not is_instance_valid(_building):
+		return
 	var scene: Node = get_tree().current_scene if get_tree() else null
-	if scene:
-		var pem: Node = scene.get_node_or_null("ParticleEmitterManager")
-		if pem:
-			pem.call("emit_flash", _target_pos + Vector3(0, 1.5, 0), Color(0.78, 0.42, 1.0, 1.0), 24)
-		var audio: Node = scene.get_node_or_null("AudioManager")
-		if audio and audio.has_method("play_huge_explosion"):
-			audio.call("play_huge_explosion", _target_pos)
+	if not scene:
+		return
+	var beacon_pos: Vector3 = _building.global_position + Vector3(0.0, 6.0, 0.0)
+	var pem: Node = scene.get_node_or_null("ParticleEmitterManager")
+	if pem:
+		pem.call("emit_flash", beacon_pos, ECHO_NEON, 24)
+		pem.call("emit_spark", beacon_pos, 18)
+	# Tall violet beam shooting up from the beacon -- a stretched
+	# cylinder tinted with the Meridian neon. Auto-frees after a
+	# short lifetime so the visual is a flash rather than a beam
+	# that lingers through the whole firing window.
+	_spawn_broadcast_beam(scene, beacon_pos)
+	# Three nested expanding rings around the array base for the
+	# 'broadcast going out in every direction' read.
+	for i: int in 3:
+		_spawn_expanding_ring(
+			scene,
+			_building.global_position + Vector3(0.0, 0.4, 0.0),
+			3.5,
+			14.0,
+			SHOCKWAVE_RING_LIFETIME + float(i) * 0.20,
+			float(i) * 0.18,
+		)
+	var audio: Node = scene.get_node_or_null("AudioManager")
+	if audio and audio.has_method("play_huge_explosion"):
+		audio.call("play_huge_explosion", beacon_pos)
+
+
+func _play_shockwave_at_target() -> void:
+	## Lands a violet shockwave at the strike point: a big flash, a
+	## shower of sparks, and an expanding ring decal sized to the
+	## paralysis radius so both players can see the override zone.
+	var scene: Node = get_tree().current_scene if get_tree() else null
+	if not scene:
+		return
+	var pem: Node = scene.get_node_or_null("ParticleEmitterManager")
+	if pem:
+		pem.call("emit_flash", _target_pos + Vector3(0, 1.5, 0), ECHO_NEON, 32)
+		pem.call("emit_spark", _target_pos + Vector3(0, 0.6, 0), 28)
+	_spawn_expanding_ring(
+		scene,
+		_target_pos + Vector3(0, 0.25, 0),
+		_radius * 0.18,
+		_radius,
+		SHOCKWAVE_RING_LIFETIME,
+		0.0,
+	)
+	var audio: Node = scene.get_node_or_null("AudioManager")
+	if audio and audio.has_method("play_huge_explosion"):
+		audio.call("play_huge_explosion", _target_pos)
+
+
+func _spawn_unit_pulse(pos: Vector3) -> void:
+	var scene: Node = get_tree().current_scene if get_tree() else null
+	if not scene:
+		return
+	var pem: Node = scene.get_node_or_null("ParticleEmitterManager")
+	if pem:
+		pem.call("emit_flash", pos, ECHO_NEON, 6)
+		pem.call("emit_spark", pos, 4)
+
+
+func _spawn_broadcast_beam(scene: Node, base: Vector3) -> void:
+	## A short-lived stretched cylinder firing straight up from the
+	## EChO beacon so the array visibly broadcasts on activation.
+	var beam: MeshInstance3D = MeshInstance3D.new()
+	var cyl: CylinderMesh = CylinderMesh.new()
+	cyl.top_radius = 0.45
+	cyl.bottom_radius = 0.85
+	cyl.height = 28.0
+	cyl.radial_segments = 12
+	beam.mesh = cyl
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.albedo_color = Color(ECHO_NEON.r, ECHO_NEON.g, ECHO_NEON.b, 0.55)
+	mat.emission_enabled = true
+	mat.emission = ECHO_NEON
+	mat.emission_energy_multiplier = 3.5
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	beam.set_surface_override_material(0, mat)
+	beam.position = base + Vector3(0, cyl.height * 0.5, 0)
+	scene.add_child(beam)
+	var timer: SceneTreeTimer = scene.get_tree().create_timer(BROADCAST_BEAM_LIFETIME)
+	timer.timeout.connect(beam.queue_free)
+
+
+func _spawn_expanding_ring(
+	scene: Node,
+	at: Vector3,
+	start_radius: float,
+	end_radius: float,
+	lifetime: float,
+	delay: float,
+) -> void:
+	## Tweenable flat ring that grows from start_radius to end_radius
+	## across `lifetime` seconds while fading out. Used for both the
+	## broadcast halo around the array and the shockwave at target.
+	var root: Node3D = Node3D.new()
+	root.position = at
+	scene.add_child(root)
+	var ring: MeshInstance3D = MeshInstance3D.new()
+	var torus: TorusMesh = TorusMesh.new()
+	torus.outer_radius = maxf(start_radius, 0.1)
+	torus.inner_radius = maxf(start_radius - 0.4, 0.05)
+	ring.mesh = torus
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.albedo_color = ECHO_NEON
+	mat.emission_enabled = true
+	mat.emission = ECHO_NEON
+	mat.emission_energy_multiplier = 2.5
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	ring.set_surface_override_material(0, mat)
+	root.add_child(ring)
+	if delay > 0.0:
+		ring.visible = false
+		var d_timer: SceneTreeTimer = scene.get_tree().create_timer(delay)
+		d_timer.timeout.connect(func() -> void:
+			if is_instance_valid(ring):
+				ring.visible = true
+		)
+	var tween: Tween = root.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(torus, "outer_radius", end_radius, lifetime)
+	tween.tween_property(torus, "inner_radius", maxf(end_radius - 0.6, 0.05), lifetime)
+	tween.tween_property(mat, "albedo_color:a", 0.0, lifetime)
+	tween.chain().tween_callback(root.queue_free)
 
 
 func _are_allied(a: int, b: int) -> bool:
