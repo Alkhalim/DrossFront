@@ -127,13 +127,42 @@ func _play_shockwave_at_target() -> void:
 
 
 func _spawn_unit_pulse(pos: Vector3) -> void:
+	## EMP arc visual at an overridden mech: a violet sphere flash,
+	## an upward column of sparks, and a thin vertical 'lightning'
+	## cylinder that flickers in and out for the first ~0.6s so the
+	## paralyze beat reads as electrical, not just a generic
+	## particle burst.
 	var scene: Node = get_tree().current_scene if get_tree() else null
 	if not scene:
 		return
 	var pem: Node = scene.get_node_or_null("ParticleEmitterManager")
 	if pem:
-		pem.call("emit_flash", pos, ECHO_NEON, 6)
-		pem.call("emit_spark", pos, 4)
+		pem.call("emit_flash", pos, ECHO_NEON, 10)
+		pem.call("emit_spark", pos, 12)
+	# Thin vertical 'arc' column above the unit.
+	var arc: MeshInstance3D = MeshInstance3D.new()
+	var cyl: CylinderMesh = CylinderMesh.new()
+	cyl.top_radius = 0.10
+	cyl.bottom_radius = 0.18
+	cyl.height = 2.4
+	cyl.radial_segments = 8
+	arc.mesh = cyl
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.albedo_color = ECHO_NEON
+	mat.emission_enabled = true
+	mat.emission = ECHO_NEON
+	mat.emission_energy_multiplier = 4.0
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	arc.set_surface_override_material(0, mat)
+	arc.position = pos + Vector3(randf_range(-0.25, 0.25), cyl.height * 0.4, randf_range(-0.25, 0.25))
+	scene.add_child(arc)
+	var tween: Tween = arc.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(mat, "albedo_color:a", 0.0, 0.55)
+	tween.tween_property(mat, "emission_energy_multiplier", 0.0, 0.55)
+	tween.chain().tween_callback(arc.queue_free)
 
 
 func _spawn_broadcast_beam(scene: Node, base: Vector3) -> void:
