@@ -659,10 +659,21 @@ func _build_pause_overlay() -> void:
 		slider.process_mode = Node.PROCESS_MODE_ALWAYS
 		row.add_child(slider)
 
-	# Spacer + return-to-menu button.
+	# Spacer + Restart + Return-to-menu buttons. Restart is the more
+	# common 'I want to redo this' affordance (mistake first 30 sec,
+	# wrong faction pick, lost the opening); Main Menu is the harder
+	# bail-out. Restart drops above so it's the visually default
+	# action.
 	var menu_spacer := Control.new()
 	menu_spacer.custom_minimum_size = Vector2(0, 14)
 	vbox.add_child(menu_spacer)
+
+	var restart_btn := Button.new()
+	restart_btn.text = "Restart Match"
+	restart_btn.custom_minimum_size = Vector2(220, 36)
+	restart_btn.process_mode = Node.PROCESS_MODE_ALWAYS
+	restart_btn.pressed.connect(_on_pause_restart)
+	vbox.add_child(restart_btn)
 
 	var menu_btn := Button.new()
 	menu_btn.text = "Return to Main Menu"
@@ -677,6 +688,14 @@ func _build_pause_overlay() -> void:
 func _on_return_to_menu() -> void:
 	get_tree().paused = false
 	get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
+
+
+func _on_pause_restart() -> void:
+	## Reload the current scene so the player gets a fresh match with the
+	## same MatchSettings (faction picks, difficulty, map). Mirrors the
+	## post-match victory-panel Restart button.
+	get_tree().paused = false
+	get_tree().reload_current_scene()
 
 
 func _on_bus_volume_changed(db: float, bus_name: String) -> void:
