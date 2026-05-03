@@ -278,27 +278,72 @@ func claim_microchips() -> int:
 
 func _build_satellite_crater(base_color: Color) -> void:
 	## Replacement for the standard rectangular hull box on satellite
-	## piles. Stack two low scorched discs (one wider/darker for the
-	## scorch ring on the ground, one narrower for the actual debris
-	## mound) plus 4 mid-size deformed plates jutting at random angles.
-	## Reads as a small impact crater + crumpled hull plates instead
-	## of a crisp 2.6u rectangular slab.
+	## piles. The base is now a CLUSTER of overlapping scorch patches
+	## at random offsets + sizes (rather than one tidy disc) so the
+	## outline is irregular and blends into the surrounding ground.
+	## A central debris mound + 4 crumpled hull plates sit on top.
 	var max_extent: float = maxf(wreck_size.x, wreck_size.z)
-	# Outer scorch disc -- wide, very flat, dark, blends into the
-	# ground texture as a soot ring around the impact.
-	var scorch := MeshInstance3D.new()
-	var scorch_cyl := CylinderMesh.new()
-	scorch_cyl.top_radius = max_extent * 0.85
-	scorch_cyl.bottom_radius = max_extent * 0.90
-	scorch_cyl.height = 0.06
-	scorch_cyl.radial_segments = 18
-	scorch.mesh = scorch_cyl
-	scorch.position.y = 0.03
-	var scorch_mat := StandardMaterial3D.new()
-	scorch_mat.albedo_color = base_color.darkened(0.55)
-	scorch_mat.roughness = 1.0
-	scorch.set_surface_override_material(0, scorch_mat)
-	add_child(scorch)
+	# Cluster of overlapping scorch patches forming an irregular
+	# silhouette. Each disc uses a slightly different darken so the
+	# cluster reads as 'scorched + sooted ground' rather than one
+	# flat grey patch. Patches are CullDisabled so the underlying
+	# ground texture still reads through their alpha edges.
+	var patch_count: int = randi_range(6, 9)
+	for i: int in patch_count:
+		var patch := MeshInstance3D.new()
+		var p_cyl := CylinderMesh.new()
+		# Largest patch is the central anchor; the rest are smaller
+		# offshoots that overlap the centre to break the silhouette.
+		var radius: float = max_extent * (0.85 if i == 0 else randf_range(0.30, 0.65))
+		p_cyl.top_radius = radius
+		p_cyl.bottom_radius = radius
+		p_cyl.height = randf_range(0.04, 0.08)
+		p_cyl.radial_segments = 20
+		patch.mesh = p_cyl
+		# Anchor patch sits at centre; offshoots ring around it.
+		var off_ang: float = randf_range(0.0, TAU)
+		var off_r: float = max_extent * randf_range(0.0, 0.55) if i > 0 else 0.0
+		patch.position = Vector3(
+			cos(off_ang) * off_r,
+			0.025 + randf_range(0.0, 0.02),
+			sin(off_ang) * off_r,
+		)
+		# Slight per-patch rotation + non-uniform XZ scale so each disc
+		# isn't a perfect circle -- the silhouette gains organic edges.
+		patch.rotation.y = randf_range(0.0, TAU)
+		patch.scale = Vector3(randf_range(0.85, 1.15), 1.0, randf_range(0.85, 1.15))
+		var p_mat := StandardMaterial3D.new()
+		p_mat.albedo_color = base_color.darkened(randf_range(0.45, 0.65))
+		p_mat.roughness = 1.0
+		# Slight transparency on the outer patches so their edges fade
+		# into the ground rather than terminating in a hard rim.
+		if i > 0:
+			p_mat.albedo_color.a = randf_range(0.75, 0.92)
+			p_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		patch.set_surface_override_material(0, p_mat)
+		add_child(patch)
+	# Small lumps of charred soil scattered just outside the main
+	# scorch ring -- low half-buried half-spheres that add granular
+	# detail to the crater edge instead of leaving a clean cylinder
+	# perimeter.
+	var lump_count: int = randi_range(5, 8)
+	for j: int in lump_count:
+		var lump := MeshInstance3D.new()
+		var sph := SphereMesh.new()
+		var lump_r: float = randf_range(0.18, 0.32)
+		sph.radius = lump_r
+		sph.height = lump_r * 0.8
+		lump.mesh = sph
+		var ang: float = randf_range(0.0, TAU)
+		var rad: float = max_extent * randf_range(0.75, 1.05)
+		lump.position = Vector3(cos(ang) * rad, lump_r * 0.25, sin(ang) * rad)
+		lump.rotation = Vector3(randf_range(-0.4, 0.4), randf_range(0.0, TAU), randf_range(-0.4, 0.4))
+		lump.scale = Vector3(randf_range(0.85, 1.25), randf_range(0.55, 0.85), randf_range(0.85, 1.25))
+		var l_mat := StandardMaterial3D.new()
+		l_mat.albedo_color = base_color.darkened(randf_range(0.25, 0.45))
+		l_mat.roughness = 0.95
+		lump.set_surface_override_material(0, l_mat)
+		add_child(lump)
 	# Inner debris mound -- shorter cylinder, base material, irregular.
 	var mound := MeshInstance3D.new()
 	var mound_cyl := CylinderMesh.new()
