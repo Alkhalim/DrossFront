@@ -795,10 +795,14 @@ func _build_hp_bar() -> void:
 	_hp_bar = Node3D.new()
 	_hp_bar.name = "HPBar"
 	_hp_bar.position.y = 3.4
-	# Background
+	# Background -- bumped from 2.8u to 4.4u so the bar matches the
+	# Crawler's wider chassis. Standard mech HP bars are 2u over a
+	# ~2u-wide torso; the Crawler's harvester body is closer to 4u
+	# wide so the previous 2.8u bar read as 'shorter than other unit
+	# bars' relative to the body it sat above.
 	_hp_bar_bg = MeshInstance3D.new()
 	var bg_box := BoxMesh.new()
-	bg_box.size = Vector3(2.8, 0.16, 0.1)
+	bg_box.size = Vector3(4.4, 0.18, 0.10)
 	_hp_bar_bg.mesh = bg_box
 	var bg_mat := StandardMaterial3D.new()
 	bg_mat.albedo_color = Color(0.1, 0.1, 0.1, 0.7)
@@ -809,7 +813,7 @@ func _build_hp_bar() -> void:
 	# Fill
 	_hp_bar_fill = MeshInstance3D.new()
 	var fill_box := BoxMesh.new()
-	fill_box.size = Vector3(1.0, 0.2, 0.12)
+	fill_box.size = Vector3(1.0, 0.22, 0.12)
 	_hp_bar_fill.mesh = fill_box
 	var fill_mat := StandardMaterial3D.new()
 	fill_mat.albedo_color = Color(0.3, 0.95, 0.4, 0.9)
@@ -990,7 +994,7 @@ func _update_hp_bar_fill() -> void:
 	if not _hp_bar_fill or not stats:
 		return
 	var pct: float = float(current_hp) / float(maxi(stats.hp_total, 1))
-	var bar_width: float = 2.8
+	var bar_width: float = 4.4
 	_hp_bar_fill.scale.x = maxf(pct * bar_width, 0.01)
 	_hp_bar_fill.position.x = -bar_width / 2.0 * (1.0 - pct)
 	var fmat: StandardMaterial3D = _hp_bar_fill.get_surface_override_material(0) as StandardMaterial3D
