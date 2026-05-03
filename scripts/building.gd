@@ -5001,6 +5001,20 @@ func is_damaged() -> bool:
 
 
 func take_damage(amount: int, _attacker: Node3D = null) -> void:
+	# HQ-specific damage reduction vs light-class attackers: an
+	# additional 20% off so a Rook / Jackal squad's small-arms fire
+	# can't credibly threaten the Headquarters. Heavies, aircraft,
+	# and superweapons still deal their full computed damage.
+	if (
+		stats
+		and stats.building_id == &"headquarters"
+		and _attacker
+		and is_instance_valid(_attacker)
+		and "stats" in _attacker
+	):
+		var atk_stats: UnitStatResource = _attacker.get("stats") as UnitStatResource
+		if atk_stats and atk_stats.unit_class == &"light":
+			amount = int(round(float(amount) * 0.8))
 	current_hp -= amount
 	_update_damage_state()
 	if owner_id == 0:
