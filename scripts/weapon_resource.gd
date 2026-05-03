@@ -96,6 +96,13 @@ extends Resource
 ## thruster). Other values fall through to "default".
 @export var drone_variant: StringName = &"default"
 
+## Maximum simultaneously-active drones from this carrier+weapon.
+## Combat skips the drone spawn for any salvo shot that would push
+## the live count above this cap. Drones queue_free on dock or
+## carrier death so the cap recovers naturally. 0 / negative =
+## unbounded (don't gate the spawn).
+@export var max_active_drones: int = 6
+
 
 ## Bomber-style projectile origin -- when true the projectile spawns
 ## just below the firing aircraft and arcs onto the target instead

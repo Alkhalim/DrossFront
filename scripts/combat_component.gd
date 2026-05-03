@@ -39,6 +39,11 @@ var _glowing_volley_mult: float = 0.0
 const GLOWING_VOLLEY_PELLETS: int = 5
 const GLOWING_VOLLEY_SPREAD_RAD: float = 0.10  # tight cone, ~5.7 deg
 
+## Live drones launched by this carrier. Pruned each spawn tick so
+## queue_freed entries (drones that docked or died with the
+## carrier) don't keep counting against the bay cap.
+var _active_drones: Array[Node3D] = []
+
 
 func queue_glowing_volley(damage_mult: float) -> void:
 	## Caller (an active ability) tags the next primary fire to come
@@ -715,7 +720,7 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 		# returns. Damage is delivered by the drone on arrival.
 		if weapon.is_drone_release:
 			if hit:
-				_spawn_drone(per_member_dmg, weapon.role_tag, weapon.drone_variant)
+				_spawn_drone(per_member_dmg, weapon.role_tag, weapon.drone_variant, weapon.max_active_drones)
 			continue
 
 		if firing_visible and proj_script:
@@ -818,7 +823,7 @@ func _find_stray_target(aim_pos: Vector3, primary: Node3D, my_owner: int) -> Nod
 	return nearest
 
 
-func _spawn_drone(damage: int, role_tag: StringName, variant: StringName = &"default") -> void:
+func _spawn_drone(damage: int, role_tag: StringName, variant: StringName = &"default", max_active: int = 6) -> void:
 	## Spawns a Drone tethered to this carrier (the firing unit) that
 	## flies out, fires at the current target, and returns to dock.
 	## Drones live as scene-tree children at scene root so they
@@ -829,6 +834,17 @@ func _spawn_drone(damage: int, role_tag: StringName, variant: StringName = &"def
 		return
 	if not _current_target or not is_instance_valid(_current_target):
 		return
+	# Prune the active-drone list (drones queue_free on dock + on
+	# carrier death) and gate the spawn on the bay cap. max_active
+	# <= 0 disables the cap entirely.
+	if max_active > 0:
+		var live: Array[Node3D] = []
+		for d: Node3D in _active_drones:
+			if is_instance_valid(d):
+				live.append(d)
+		_active_drones = live
+		if _active_drones.size() >= max_active:
+			return
 	var drone: Node3D = drone_script.new()
 	drone.set("carrier", _unit)
 	drone.set("target", _current_target)
@@ -847,6 +863,7 @@ func _spawn_drone(damage: int, role_tag: StringName, variant: StringName = &"def
 	else:
 		var spawn_offset: Vector3 = Vector3(randf_range(-1.5, 1.5), 1.5, randf_range(-1.5, 1.5))
 		drone.global_position = _unit.global_position + spawn_offset
+	_active_drones.append(drone)
 
 
 func _shooter_faction_id() -> int:

@@ -21,6 +21,7 @@ rof_tier = &"fast"
 salvo_count = 3
 is_drone_release = true
 drone_variant = &"fast"
+max_active_drones = 6
 
 [resource]
 script = ExtResource("1")

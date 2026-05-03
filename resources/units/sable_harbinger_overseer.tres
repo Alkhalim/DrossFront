@@ -21,6 +21,7 @@ rof_tier = &"moderate"
 salvo_count = 2
 is_drone_release = true
 drone_variant = &"missile"
+max_active_drones = 4
 
 [resource]
 script = ExtResource("1")
