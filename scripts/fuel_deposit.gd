@@ -435,6 +435,18 @@ func _create_visuals() -> void:
 	add_child(_capture_label)
 
 
+## Cached flag material so _update_visuals doesn't allocate a
+## fresh StandardMaterial3D every frame. The previous version
+## created + assigned a new material on every tick -- with a
+## handful of deposits this was 240-480 material allocations
+## per second JUST for the flag tint. Now reused: only the
+## albedo / emission colors are written when the colour actually
+## changes since the last visual update.
+var _flag_mat_cached: StandardMaterial3D = null
+var _flag_color_cached: Color = Color(0, 0, 0, 0)
+var _capture_label_text_cached: String = "<uninit>"
+
+
 func _update_visuals() -> void:
 	# Update colors based on state. Owner colour pulls from the
 	# PlayerRegistry so the user's match-setup colour pick + AI
@@ -455,21 +467,31 @@ func _update_visuals() -> void:
 		else:
 			color = ENEMY_COLOR
 
-	# Update flag
-	var flag_mat := StandardMaterial3D.new()
-	flag_mat.albedo_color = color
-	flag_mat.emission_enabled = true
-	flag_mat.emission = color
-	flag_mat.emission_energy_multiplier = 1.0
-	_owner_indicator.set_surface_override_material(0, flag_mat)
+	# Reuse the cached material; only rewrite when the colour has
+	# actually changed (state transitions are rare relative to the
+	# 60Hz tick rate, so most frames hit the no-op path).
+	if not _flag_mat_cached:
+		_flag_mat_cached = StandardMaterial3D.new()
+		_flag_mat_cached.emission_enabled = true
+		_flag_mat_cached.emission_energy_multiplier = 1.0
+		_owner_indicator.set_surface_override_material(0, _flag_mat_cached)
+	if color != _flag_color_cached:
+		_flag_color_cached = color
+		_flag_mat_cached.albedo_color = color
+		_flag_mat_cached.emission = color
 
-	# Update capture label
+	# Capture label -- compare-and-skip on the formatted string so
+	# the Label3D's text setter (which trips a re-render of the
+	# label glyphs) only fires when the displayed text changes.
+	var new_text: String = ""
+	var new_modulate: Color = Color(1.0, 1.0, 1.0, 1.0)
 	if _capturing_owner >= 0 and _capture_progress > 0.0 and owner_id != _capturing_owner:
 		var pct: int = int((_capture_progress / capture_time) * 100.0)
-		_capture_label.text = "Capturing: %d%%" % pct
-		_capture_label.modulate = Color(1.0, 1.0, 1.0, 1.0)
+		new_text = "Capturing: %d%%" % pct
 	elif _is_contested:
-		_capture_label.text = "CONTESTED"
-		_capture_label.modulate = CONTESTED_COLOR
-	else:
-		_capture_label.text = ""
+		new_text = "CONTESTED"
+		new_modulate = CONTESTED_COLOR
+	if new_text != _capture_label_text_cached:
+		_capture_label_text_cached = new_text
+		_capture_label.text = new_text
+		_capture_label.modulate = new_modulate
