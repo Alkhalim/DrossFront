@@ -4321,6 +4321,18 @@ func _process(delta: float) -> void:
 	# selected (early-out) so this stays outside the cosmetic stagger.
 	if _is_selected:
 		_update_selection_bars()
+	else:
+		# Damaged-but-unselected buildings still display the HP bar
+		# so the player sees harm without having to re-select. Bar
+		# is built lazily on first damage and torn down once the
+		# building has been fully repaired.
+		if is_damaged():
+			if not _sel_hp_fill or not is_instance_valid(_sel_hp_fill):
+				_build_selection_bars()
+				_remove_production_bar_only()
+			_update_damaged_hp_bar()
+		elif _sel_hp_fill and is_instance_valid(_sel_hp_fill):
+			_remove_selection_bars()
 
 	# Half-frame stagger for the cosmetic / damage-VFX work. Buildings
 	# don't need 60 Hz redraws — smoke timers, ember flicker, foundry
@@ -4521,7 +4533,13 @@ func deselect_building() -> void:
 		return
 	_is_selected = false
 	_update_selection_visual()
-	_remove_selection_bars()
+	# Keep the HP bar around when the building is still damaged
+	# so the player can see lingering harm without re-selecting.
+	# Production bar (selection-only) is torn down either way.
+	if is_damaged():
+		_remove_production_bar_only()
+	else:
+		_remove_selection_bars()
 
 
 func _update_selection_visual() -> void:
@@ -4542,14 +4560,25 @@ const _SELECT_ENERGY_FLOOR: float = 0.45
 
 func _build_selection_bars() -> void:
 	## Floating HP + production bars above the selected building.
-	## HP bar always renders while selected; production bar only when
-	## units are queued. Lazy-built so unselected buildings don't pay
-	## the geometry cost.
+	## HP bar always renders while selected, AND while damaged even
+	## when unselected (per the world-space damage-tell pattern);
+	## production bar only when selected + units queued. Lazy-built
+	## per section so re-entering this function from a different
+	## state path (damaged-then-selected) doesn't leak old meshes.
 	if not stats:
 		return
 	var bar_w: float = stats.footprint_size.x
 	var hp_y: float = stats.footprint_size.y * 1.5 + 1.6
 	var prod_y: float = hp_y - 0.40
+	if _sel_hp_fill and is_instance_valid(_sel_hp_fill):
+		# HP bar already built (likely by the damaged-unselected
+		# path). Just (re)build the production bar if missing and
+		# bail.
+		if not _sel_prod_bg or not is_instance_valid(_sel_prod_bg):
+			_build_production_bar(bar_w, prod_y)
+		_bar_width = bar_w
+		_update_selection_bars()
+		return
 	# HP background (dark) + fill (red->green by ratio).
 	_sel_hp_bg = MeshInstance3D.new()
 	var hp_bg_mesh := BoxMesh.new()
@@ -4573,8 +4602,21 @@ func _build_selection_bars() -> void:
 	_sel_hp_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_sel_hp_fill.set_surface_override_material(0, _sel_hp_mat)
 	add_child(_sel_hp_fill)
-	# Production bar (yellow). Visibility flips per-frame based on
-	# the build queue.
+	# Production bar (yellow). Selection-only: built only when the
+	# building is actually selected; the damaged-but-unselected path
+	# tears it back down via _remove_production_bar_only.
+	if _is_selected:
+		_build_production_bar(bar_w, prod_y)
+	_bar_width = bar_w
+	if _is_selected:
+		_update_selection_bars()
+	else:
+		_update_damaged_hp_bar()
+
+
+func _build_production_bar(bar_w: float, prod_y: float) -> void:
+	if _sel_prod_bg and is_instance_valid(_sel_prod_bg):
+		return
 	_sel_prod_bg = MeshInstance3D.new()
 	var pb_bg_mesh := BoxMesh.new()
 	pb_bg_mesh.size = Vector3(bar_w, 0.14, 0.28)
@@ -4597,8 +4639,6 @@ func _build_selection_bars() -> void:
 	_sel_prod_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_sel_prod_fill.set_surface_override_material(0, _sel_prod_mat)
 	add_child(_sel_prod_fill)
-	_bar_width = bar_w
-	_update_selection_bars()
 
 
 func _remove_selection_bars() -> void:
@@ -4608,6 +4648,38 @@ func _remove_selection_bars() -> void:
 	_sel_hp_bg = null
 	_sel_hp_fill = null
 	_sel_hp_mat = null
+	_sel_prod_bg = null
+	_sel_prod_fill = null
+	_sel_prod_mat = null
+
+
+func _update_damaged_hp_bar() -> void:
+	## HP-bar refresh for the unselected-but-damaged path. Mirrors the
+	## same fill-width + tint math the selection refresh uses but skips
+	## the production-bar work.
+	if not _sel_hp_fill:
+		return
+	var hp_max: int = effective_max_hp() if has_method("effective_max_hp") else stats.hp
+	var ratio: float = clampf(float(current_hp) / float(maxi(hp_max, 1)), 0.0, 1.0)
+	var fill_w: float = _bar_width * ratio
+	var half_w: float = _bar_width * 0.5
+	_sel_hp_fill.scale.x = maxf(fill_w, 0.01)
+	_sel_hp_fill.position = Vector3(-half_w + fill_w * 0.5, _sel_hp_bg.position.y, 0)
+	if _sel_hp_mat:
+		var r: float = clampf(1.0 - ratio, 0.10, 0.95)
+		var g: float = clampf(ratio, 0.10, 0.95)
+		_sel_hp_mat.albedo_color = Color(r, g, 0.20, 0.95)
+		_sel_hp_mat.emission = Color(r, g, 0.20, 1.0)
+
+
+func _remove_production_bar_only() -> void:
+	## Tears down the production bar nodes while leaving the HP bar
+	## intact. Used when deselecting a damaged building -- the HP bar
+	## stays as a damage tell for the player; the prod bar shouldn't
+	## linger because it's a selection-only readout.
+	for n: Node in [_sel_prod_bg, _sel_prod_fill]:
+		if n and is_instance_valid(n):
+			n.queue_free()
 	_sel_prod_bg = null
 	_sel_prod_fill = null
 	_sel_prod_mat = null

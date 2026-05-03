@@ -2560,8 +2560,10 @@ func _build_building_stat_sheet(building: Node3D, bstats: BuildingStatResource, 
 	var hp_max: int = bstats.hp
 	if building and building.has_method("effective_max_hp"):
 		hp_max = building.call("effective_max_hp") as int
+	# HP is shown by the world-space HP bar above the building model
+	# (always visible while damaged, plus on selection) so the panel
+	# doesn't double-up the readout. Class + Power chips remain.
 	var defense_row: Array = [
-		_stat_chip("HP", "%d / %d" % [hp_now, hp_max], STAT_LABEL_COLOR_HP),
 		_stat_chip("Class", "Structure", STAT_LABEL_COLOR_DEFENSE),
 	]
 	if bstats.power_production > 0:
