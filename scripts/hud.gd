@@ -107,6 +107,11 @@ func _ready() -> void:
 
 	_apply_theme()
 	_apply_resource_colors()
+	# Stat sheet now compresses to ~4 rows since the bottom-row armor
+	# chip merged into the top defense row -- give the rows a few
+	# extra pixels of breathing room so the panel doesn't feel cramped.
+	if _stats_label:
+		_stats_label.add_theme_constant_override("line_separation", 5)
 	_build_progress_bar()
 	_build_pause_overlay()
 	_build_power_widget()
@@ -2391,10 +2396,60 @@ func _attack_bonus_chips(stats: UnitStatResource) -> Array:
 	if stats.can_target_air():
 		classes = [&"light", &"medium", &"heavy", &"light_air", &"heavy_air", &"structure"]
 		labels = ["Lt", "Md", "Hv", "LtAir", "HvAir", "Struct"]
+	# Per-unit gradient colour: green for the highest matchup, red for
+	# the lowest, smooth interpolation in between. Lets the player
+	# spot at a glance which armor class this unit punches up against
+	# and which it should avoid. Computed per-call so every unit reads
+	# its own scale -- a Switchblade's 'best' chip is a different
+	# absolute value than a Bulwark's 'best'.
+	var mults: Array[float] = []
 	for i: int in classes.size():
-		var mult: float = CombatTables.get_role_modifier(role_tag, classes[i])
-		out.append(_stat_chip("vs " + labels[i], "%.1fx" % mult, STAT_LABEL_COLOR_DAMAGE))
+		mults.append(CombatTables.get_role_modifier(role_tag, classes[i]))
+	var lo: float = mults[0]
+	var hi: float = mults[0]
+	for m: float in mults:
+		if m < lo:
+			lo = m
+		if m > hi:
+			hi = m
+	for i: int in classes.size():
+		var mult: float = mults[i]
+		var color_hex: String = _gradient_value_color(mult, lo, hi)
+		out.append(_stat_chip_value_colored("vs " + labels[i], "%.1fx" % mult, STAT_LABEL_COLOR_DAMAGE, color_hex))
 	return out
+
+
+func _gradient_value_color(value: float, lo: float, hi: float) -> String:
+	## Returns a hex colour string ranging red -> yellow -> green
+	## across the (lo..hi) range. Collapses to plain yellow when the
+	## row has no spread (every chip equal) so a flat row doesn't
+	## arbitrarily pick one chip to highlight green over the others.
+	if hi - lo < 0.001:
+		return "ddc94c"  # neutral mid-yellow
+	var t: float = clampf((value - lo) / (hi - lo), 0.0, 1.0)
+	# Lerp red -> yellow -> green via two segments so the midpoint
+	# lands on yellow instead of muddy orange.
+	var r: float
+	var g: float
+	var b: float = 0.30
+	if t < 0.5:
+		var k: float = t * 2.0
+		r = 0.92
+		g = lerp(0.32, 0.86, k)
+	else:
+		var k: float = (t - 0.5) * 2.0
+		r = lerp(0.92, 0.40, k)
+		g = lerp(0.86, 0.92, k)
+	return "%02x%02x%02x" % [int(r * 255.0), int(g * 255.0), int(b * 255.0)]
+
+
+func _stat_chip_value_colored(label: String, value: String, label_color_hex: String, value_color_hex: String) -> String:
+	## Variant of `_stat_chip` that also colours the value (not just
+	## the label). Used by the attack-bonus matrix so the per-unit
+	## red->green gradient lands on the multiplier figure itself.
+	return "[color=#%s]%s[/color] [color=#%s]%s[/color]" % [
+		label_color_hex, label, value_color_hex, value,
+	]
 
 
 func _build_building_stat_sheet(building: Node3D, bstats: BuildingStatResource, hp_now: int) -> String:
