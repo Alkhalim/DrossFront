@@ -8,15 +8,15 @@
 
 [resource]
 script = ExtResource("1")
-faction_name = &"Sable Concord"
-tagline = "Information warfare. Fast, fragile, deceptive."
+faction_name = &"Meridian Protocol"
+tagline = "Meridian Protocol GmbH. Information dominance. The fight is over before it starts."
 color_base = Color(0.10, 0.11, 0.13, 1)
 color_internal_glow = Color(0.55, 0.85, 1.0, 1)
 color_detail_accent = Color(0.85, 0.92, 0.98, 1)
 mechanic_id = &"neural_mesh"
 mechanic_display_name = "Neural Mesh"
-mechanic_description = "Sable forces share sensor data through a network of Mesh providers (Black Pylons + key unit branches). Units in Mesh range gain stacking accuracy and reload bonuses. Concentrated forces punch above their weight; killing Mesh providers degrades the whole army."
-faction_power_building_name = "Black Pylon"
+mechanic_description = "Meridian Protocol forces share sensor data through a network of Mesh providers (Mesh Anchors + key unit branches). Units in Mesh range gain stacking accuracy and reload bonuses. Concentrated forces punch above their weight; killing Mesh providers degrades the whole army."
+faction_power_building_name = "Meridian Mesh Anchor"
 engineer_stats = ExtResource("2")
 light_mech_stats = ExtResource("3")
 medium_mech_stats = ExtResource("4")

@@ -8,15 +8,15 @@
 
 [resource]
 script = ExtResource("1")
-faction_name = &"Anvil Directive"
-tagline = "Militarized heavy industry. Slow, armored, inevitable."
+faction_name = &"The Combine"
+tagline = "Krasnyforge-Velikan. Vertically integrated war. Inevitable by procedure."
 color_base = Color(0.35, 0.35, 0.38, 1)
 color_internal_glow = Color(0.95, 0.7, 0.2, 1)
 color_detail_accent = Color(0.5, 0.45, 0.35, 1)
 mechanic_id = &"fortification"
 mechanic_display_name = "Fortification"
-mechanic_description = "All Anvil structures and Salvage Yard workers gain increased durability. Basic Generators receive +20% HP. The longer Anvil holds ground, the harder it becomes to dislodge."
-faction_power_building_name = "Iron Citadel"
+mechanic_description = "All Combine structures and Salvage Yard workers gain increased durability. Basic Generators receive +20% HP. The longer the Combine holds ground, the harder it becomes to dislodge."
+faction_power_building_name = "Combine Operations Spire"
 engineer_stats = ExtResource("2")
 light_mech_stats = ExtResource("3")
 medium_mech_stats = ExtResource("4")
