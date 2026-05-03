@@ -10,6 +10,7 @@ role_tag = &"AP"
 damage_tier = &"low"
 range_tier = &"medium"
 rof_tier = &"rapid"
+damage_value = 10
 base_accuracy = 0.86
 can_hit_air = true
 air_damage_mult = 0.2
