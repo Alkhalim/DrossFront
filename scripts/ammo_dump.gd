@@ -14,7 +14,10 @@ const MAX_HP: int = 220
 ## Damage tripled per balance pass so ammo dumps actually delete a
 ## squad caught at full radius rather than chip-damaging them.
 const EXPLOSION_RADIUS: float = 14.0
-const EXPLOSION_DAMAGE: int = 840
+# Doubled from 840 -- a chain-detonating ammo dump should reliably
+# erase any squad caught in the radius, not chip them. Encourages
+# tactical use as a battlefield trap (lure squad in, shoot dump).
+const EXPLOSION_DAMAGE: int = 1680
 ## Owner sentinel — dumps are never on a player's team. Treated as
 ## neutral so combat hostility checks already see them as targetable.
 const NEUTRAL_OWNER: int = 2
@@ -398,9 +401,10 @@ func _spawn_explosion_vfx(pos: Vector3) -> void:
 	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	ring_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	ring.set_surface_override_material(0, ring_mat)
-	# TorusMesh's natural orientation is YZ-axis; rotate to lay flat
-	# on XZ ground plane.
-	ring.rotation.x = -PI * 0.5
+	# Godot 4 TorusMesh already lies flat in the XZ plane (ring axis
+	# = Y). The previous -90deg X rotation was tipping the ring up
+	# vertically -- it read as a wall flying out of the dump rather
+	# than a ground shockwave. No rotation needed.
 	scene.add_child(ring)
 	ring.global_position = pos + Vector3(0.0, 0.15, 0.0)
 	# Scale the torus so its OUTER radius matches EXPLOSION_RADIUS at
