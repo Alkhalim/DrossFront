@@ -104,16 +104,16 @@ func _enter_tree() -> void:
 func _econ_mul_for_difficulty(d: int) -> float:
 	# Mirror MatchSettings.get_ai_economy_multiplier mapping.
 	match d:
-		0: return 0.6  # EASY
-		2: return 1.6  # HARD
-		_: return 1.0
+		0: return 0.65  # EASY
+		2: return 2.0   # HARD
+		_: return 1.1   # NORMAL
 
 
 func _agg_mul_for_difficulty(d: int) -> float:
 	match d:
-		0: return 0.7
-		2: return 1.4
-		_: return 1.0
+		0: return 0.75
+		2: return 1.8
+		_: return 1.15
 
 
 func _resolve_strategy_from_settings() -> int:

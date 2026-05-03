@@ -127,17 +127,20 @@ func get_difficulty_label() -> String:
 
 
 ## Scales the AI's passive salvage trickle and unit costs effectively.
+## Bumped Hard 1.6 -> 2.0 because playtest reported even Hard was easy
+## to overwhelm in the early game; Normal stays at 1.0 baseline.
 func get_ai_economy_multiplier() -> float:
 	match difficulty:
-		Difficulty.EASY: return 0.6
-		Difficulty.HARD: return 1.6
-		_: return 1.0
+		Difficulty.EASY: return 0.65
+		Difficulty.HARD: return 2.0
+		_: return 1.1
 
 
 ## Scales how many units the AI sends per wave and how quickly it shifts
-## from economy → army → attack states.
+## from economy → army → attack states. Hard bumped 1.4 -> 1.8 and
+## Normal nudged from 1.0 -> 1.15 so the AI applies pressure earlier.
 func get_ai_aggression_multiplier() -> float:
 	match difficulty:
-		Difficulty.EASY: return 0.7
-		Difficulty.HARD: return 1.4
-		_: return 1.0
+		Difficulty.EASY: return 0.75
+		Difficulty.HARD: return 1.8
+		_: return 1.15
