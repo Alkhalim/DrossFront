@@ -3192,17 +3192,34 @@ func _branch_delta_summary(base_stats: UnitStatResource, branch_stats: UnitStatR
 	# Ability gain / change. Branches that introduce a new active
 	# (System Crash, Missile Barrage, etc.) advertise it in the
 	# plus column so the player isn't blindsided by a hotkey that
-	# wasn't on the base unit.
+	# wasn't on the base unit. Autocast / manual is called out so
+	# the player knows whether they need to babysit the cast.
 	if branch_stats.ability_name != "" and base_stats.ability_name == "":
-		pros.append("Gains ability: %s" % branch_stats.ability_name)
+		var cast_tag_a: String = " (autocast)" if branch_stats.ability_autocast else " (active)"
+		pros.append("Gains ability: %s%s" % [branch_stats.ability_name, cast_tag_a])
 		if branch_stats.ability_description != "":
 			pros.append("  • %s" % branch_stats.ability_description)
 	elif branch_stats.ability_name != base_stats.ability_name and branch_stats.ability_name != "":
-		pros.append("Ability: %s -> %s" % [base_stats.ability_name, branch_stats.ability_name])
+		var cast_tag_b: String = " (autocast)" if branch_stats.ability_autocast else " (active)"
+		pros.append("Ability: %s -> %s%s" % [base_stats.ability_name, branch_stats.ability_name, cast_tag_b])
 		if branch_stats.ability_description != "":
 			pros.append("  • %s" % branch_stats.ability_description)
 	elif branch_stats.ability_name == "" and base_stats.ability_name != "":
 		cons.append("Loses ability: %s" % base_stats.ability_name)
+
+	# Passive identity gain / change. Lists the branch's
+	# passive_description in the pros column so the player sees
+	# every always-on trait the branch grants alongside active
+	# abilities, with the same '(passive)' tag so it's
+	# distinguishable from an active hotkey.
+	if branch_stats.passive_description != "" and base_stats.passive_description == "":
+		pros.append("Gains passive")
+		pros.append("  • %s" % branch_stats.passive_description)
+	elif branch_stats.passive_description != base_stats.passive_description and branch_stats.passive_description != "":
+		pros.append("Passive change")
+		pros.append("  • %s" % branch_stats.passive_description)
+	elif branch_stats.passive_description == "" and base_stats.passive_description != "":
+		cons.append("Loses passive: %s" % base_stats.passive_description)
 
 	# Passive / role-defining stats that aren't an active ability
 	# but functionally ARE the upgrade. The previous tooltip only
