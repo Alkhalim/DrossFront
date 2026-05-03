@@ -2992,8 +2992,11 @@ func advance_construction(amount: float, builder: Node = null) -> void:
 		return
 	# Construction halts while any unit is standing inside the footprint, so
 	# foundations placed on top of units (or with units passing through) wait
-	# for the area to clear before progressing.
+	# for the area to clear before progressing. When blocked, push any
+	# friendly / allied units out so the player doesn't have to manually
+	# move them every time a building is plopped on top of an idle squad.
 	if not _is_foundation_clear():
+		_evacuate_foundation_blockers()
 		return
 	# First tick of real progress flips construction_started so opponents'
 	# FOW visibility + auto-target acquisition start treating the foundation
@@ -3069,6 +3072,70 @@ func _is_foundation_clear() -> bool:
 			return false
 	_foundation_clear_cached = true
 	return true
+
+
+## Throttle for the auto-evacuate sweep so a stalled foundation
+## doesn't issue a fresh command_move to every blocker every frame.
+var _evacuate_blockers_at_msec: int = 0
+
+
+func _evacuate_foundation_blockers() -> void:
+	## Walks any friendly / allied unit standing inside the
+	## construction footprint and commands it to move just outside
+	## the edge so the foundation-clear check passes on the next
+	## tick. Hostile blockers are left alone (they're presumably
+	## intentionally griefing the build site -- the player should
+	## fight them off, not auto-shuffle them).
+	if not stats:
+		return
+	var now_msec: int = Time.get_ticks_msec()
+	if now_msec < _evacuate_blockers_at_msec:
+		return
+	_evacuate_blockers_at_msec = now_msec + 600
+	var registry: PlayerRegistry = null
+	var scene: Node = get_tree().current_scene if get_tree() else null
+	if scene:
+		registry = scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
+	var half_x: float = stats.footprint_size.x * 0.5 + 0.4
+	var half_z: float = stats.footprint_size.z * 0.5 + 0.4
+	var extent: float = maxf(stats.footprint_size.x, stats.footprint_size.z) * 0.5
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node):
+			continue
+		var node3d: Node3D = node as Node3D
+		if not node3d:
+			continue
+		var dx_signed: float = node3d.global_position.x - global_position.x
+		var dz_signed: float = node3d.global_position.z - global_position.z
+		if absf(dx_signed) >= half_x or absf(dz_signed) >= half_z:
+			continue
+		# Only push friendly / allied units. Enemies blocking the
+		# foundation are an intentional fight -- not a layout bug.
+		var n_owner: int = (node3d.get("owner_id") as int) if "owner_id" in node3d else -1
+		var allied: bool = (n_owner == owner_id)
+		if not allied and registry and registry.has_method("are_allied"):
+			allied = registry.call("are_allied", owner_id, n_owner) as bool
+		if not allied:
+			continue
+		# Skip if the unit doesn't take movement orders or is
+		# already moving (the existing move target probably gets it
+		# clear shortly).
+		if not node3d.has_method("command_move"):
+			continue
+		var has_order: bool = (node3d.get("has_move_order") as bool) if "has_move_order" in node3d else false
+		if has_order:
+			continue
+		# Pick the nearest map edge (relative to the building) and
+		# walk that way. Using the radial-out direction keeps the
+		# evacuation path straight + short.
+		var radial: Vector3 = Vector3(dx_signed, 0.0, dz_signed)
+		if radial.length_squared() < 0.01:
+			# Standing on the centre exactly -- push along +x.
+			radial = Vector3(1.0, 0.0, 0.0)
+		else:
+			radial = radial.normalized()
+		var clear_pt: Vector3 = global_position + radial * (extent + 3.5)
+		node3d.call("command_move", clear_pt, false)
 
 
 func get_construction_percent() -> float:
