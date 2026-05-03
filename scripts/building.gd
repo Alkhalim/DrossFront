@@ -4761,6 +4761,10 @@ func _build_selection_bars() -> void:
 	## state path (damaged-then-selected) doesn't leak old meshes.
 	if not stats:
 		return
+	# Placement-preview ghosts must never get bars or any other
+	# 'live' UI overlay -- they represent intent, not state.
+	if is_ghost_preview:
+		return
 	var bar_w: float = stats.footprint_size.x
 	var hp_y: float = stats.footprint_size.y * 1.5 + 1.6
 	var prod_y: float = hp_y - 0.40
@@ -4872,6 +4876,11 @@ func _build_selection_footprint() -> void:
 	if _sel_footprint and is_instance_valid(_sel_footprint):
 		return
 	if not stats:
+		return
+	# Suppress on placement ghosts -- the placement-mode preview
+	# already paints its own footprint cue (the green-tinted ghost
+	# silhouette + the validity ring).
+	if is_ghost_preview:
 		return
 	var fs: Vector3 = stats.footprint_size
 	var hx: float = fs.x * 0.5
