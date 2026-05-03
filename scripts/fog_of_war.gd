@@ -458,6 +458,29 @@ func _recompute_visibility() -> void:
 	_apply_entity_visibility()
 
 
+## Per-entity visibility cache. Keyed by instance_id; value is a
+## packed (cell_index << 2 | cell_state) so a single int compare
+## detects 'this entity hasn't moved between cells AND its cell's
+## state hasn't changed since last tick'. When the cache hits, the
+## per-entity work is skipped entirely. Saves the dominant chunk of
+## the recompute on busy maps because most entities are stationary
+## inside non-changing cells.
+var _entity_visibility_cache: Dictionary = {}
+
+
+func _entity_state_key(node3d: Node3D) -> int:
+	## Packs the entity's current cell index + cell state into a
+	## single int for the visibility cache. Cell state lives in the
+	## bottom 2 bits (CellState fits in 0..2); cell index shifts
+	## above. Returns -1 when the position is out of grid bounds so
+	## the cache miss path always re-evaluates.
+	var c: Vector2i = _world_to_cell(node3d.global_position)
+	var idx: int = _cell_index(c.x, c.y)
+	if idx < 0 or idx >= _cells.size():
+		return -1
+	return (idx << 2) | (_cells[idx] & 0x3)
+
+
 func _apply_entity_visibility() -> void:
 	for node: Node in get_tree().get_nodes_in_group("units"):
 		if not is_instance_valid(node):
@@ -467,13 +490,19 @@ func _apply_entity_visibility() -> void:
 			continue
 		var owner_id: int = (node.get("owner_id") as int) if "owner_id" in node else local_player_id
 		# Friendly + ally entities stay visible regardless of FOW.
+		# Skip the cache + work entirely -- they're always visible.
 		if owner_id == local_player_id or _is_friendly(node):
-			node3d.visible = true
+			if not node3d.visible:
+				node3d.visible = true
 			continue
 		# Enemy / neutral unit — hide unless its current cell is
-		# in line of sight. Cell state is sampled at the entity's
-		# world position; aircraft sample the same way (the cell
-		# grid is 2D over X/Z, ignoring altitude).
+		# in line of sight. Cell state cache early-out: same cell +
+		# same state as last tick = nothing to do.
+		var iid: int = node3d.get_instance_id()
+		var key: int = _entity_state_key(node3d)
+		if _entity_visibility_cache.get(iid, -2) == key:
+			continue
+		_entity_visibility_cache[iid] = key
 		node3d.visible = is_visible_world(node3d.global_position)
 
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
@@ -484,7 +513,8 @@ func _apply_entity_visibility() -> void:
 			continue
 		var owner_id: int = (node.get("owner_id") as int) if "owner_id" in node else local_player_id
 		if owner_id == local_player_id or _is_friendly(node):
-			b3d.visible = true
+			if not b3d.visible:
+				b3d.visible = true
 			_apply_fog_dim(b3d, false)
 			continue
 		# Foundations the placing engineer hasn't reached yet are
@@ -493,8 +523,18 @@ func _apply_entity_visibility() -> void:
 		# of explored / visible state.
 		if "construction_started" in node and not (node.get("construction_started") as bool):
 			if "is_constructed" in node and not (node.get("is_constructed") as bool):
-				b3d.visible = false
+				if b3d.visible:
+					b3d.visible = false
 				continue
+		# Cache early-out: stationary buildings rarely change cell or
+		# state, so the dominant case is 'no change since last tick'.
+		# Skipping the recompute drops the per-tick cost of the
+		# buildings sweep to one hash lookup per building.
+		var b_iid: int = b3d.get_instance_id()
+		var b_key: int = _entity_state_key(b3d)
+		if _entity_visibility_cache.get(b_iid, -2) == b_key:
+			continue
+		_entity_visibility_cache[b_iid] = b_key
 		# Enemy buildings stick around once explored — Age-of-Empires
 		# behaviour: the player remembers seeing the structure even
 		# after losing live vision (terrain doesn't change, the
@@ -517,25 +557,39 @@ func _apply_entity_visibility() -> void:
 		if not is_instance_valid(node):
 			continue
 		var w3d: Node3D = node as Node3D
-		if w3d:
-			var w_explored: bool = is_explored_world(w3d.global_position)
-			var w_visible: bool = is_visible_world(w3d.global_position)
-			w3d.visible = w_explored
-			_apply_fog_dim(w3d, w_explored and not w_visible)
+		if not w3d:
+			continue
+		var w_iid: int = w3d.get_instance_id()
+		var w_key: int = _entity_state_key(w3d)
+		if _entity_visibility_cache.get(w_iid, -2) == w_key:
+			continue
+		_entity_visibility_cache[w_iid] = w_key
+		var w_explored: bool = is_explored_world(w3d.global_position)
+		var w_visible: bool = is_visible_world(w3d.global_position)
+		w3d.visible = w_explored
+		_apply_fog_dim(w3d, w_explored and not w_visible)
 	for node: Node in get_tree().get_nodes_in_group("fuel_deposits"):
 		if not is_instance_valid(node):
 			continue
 		var f3d: Node3D = node as Node3D
-		if f3d:
-			var f_explored: bool = is_explored_world(f3d.global_position)
-			var f_visible: bool = is_visible_world(f3d.global_position)
-			f3d.visible = f_explored
-			_apply_fog_dim(f3d, f_explored and not f_visible)
+		if not f3d:
+			continue
+		var f_iid: int = f3d.get_instance_id()
+		var f_key: int = _entity_state_key(f3d)
+		if _entity_visibility_cache.get(f_iid, -2) == f_key:
+			continue
+		_entity_visibility_cache[f_iid] = f_key
+		var f_explored: bool = is_explored_world(f3d.global_position)
+		var f_visible: bool = is_visible_world(f3d.global_position)
+		f3d.visible = f_explored
+		_apply_fog_dim(f3d, f_explored and not f_visible)
 
 	# Projectiles — strictly LOS-only. A missile fired from an
 	# unscouted Hammerhead would otherwise leak the unit's position
 	# by drawing its arc through the fog. Only currently-VISIBLE
 	# cells render projectiles; once they enter LOS they show.
+	# Projectiles move every frame so cache-skipping wouldn't help;
+	# they bypass the cache entirely.
 	for node: Node in get_tree().get_nodes_in_group("projectiles"):
 		if not is_instance_valid(node):
 			continue
@@ -555,11 +609,17 @@ func _apply_entity_visibility() -> void:
 		if not is_instance_valid(node):
 			continue
 		var t3d: Node3D = node as Node3D
-		if t3d:
-			var t_explored: bool = is_explored_world(t3d.global_position)
-			var t_visible: bool = is_visible_world(t3d.global_position)
-			t3d.visible = t_explored
-			_apply_fog_dim(t3d, t_explored and not t_visible)
+		if not t3d:
+			continue
+		var t_iid: int = t3d.get_instance_id()
+		var t_key: int = _entity_state_key(t3d)
+		if _entity_visibility_cache.get(t_iid, -2) == t_key:
+			continue
+		_entity_visibility_cache[t_iid] = t_key
+		var t_explored: bool = is_explored_world(t3d.global_position)
+		var t_visible: bool = is_visible_world(t3d.global_position)
+		t3d.visible = t_explored
+		_apply_fog_dim(t3d, t_explored and not t_visible)
 
 
 func _is_friendly(node: Node) -> bool:
