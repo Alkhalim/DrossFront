@@ -114,6 +114,20 @@ func _physics_process(delta: float) -> void:
 	_approach_stuck_timer = 0.0
 	_approach_last_dist = INF
 
+	# Foundation-block self-rescue. With big-footprint buildings
+	# (MOLOT / EChO / Headquarters) the engineer's "in range" gate
+	# (extent + BUILD_BUFFER) sits outside the footprint, but nav
+	# precision occasionally lands the engineer just inside the
+	# foundation XZ box. The engineer then blocks its own
+	# foundation-clear check, advance_construction silently no-ops,
+	# and the build stalls until the player nudges them out. Detect
+	# the self-block and move the engineer back to the approach
+	# point so construction resumes on its own.
+	if _is_inside_foundation_footprint():
+		_unit.command_move(_approach_point())
+		_set_build_anim(false)
+		return
+
 	# In range — stop moving and build
 	_unit.stop()
 	_target_building.advance_construction(build_rate * delta, _unit)
@@ -264,6 +278,24 @@ func _build_max_distance() -> float:
 	var footprint: Vector3 = _target_building.stats.footprint_size
 	var extent: float = maxf(footprint.x, footprint.z) * 0.5
 	return extent + BUILD_BUFFER
+
+
+func _is_inside_foundation_footprint() -> bool:
+	## True when the engineer's XZ position lands inside the target
+	## building's foundation-clear box (footprint half-extent + the
+	## same 0.4u margin used by Building._is_foundation_clear). Used
+	## to push the engineer back to the approach point when nav
+	## precision lands them on top of their own work.
+	if not _target_building or not _target_building.stats:
+		return false
+	if not _unit:
+		return false
+	var fs: Vector3 = _target_building.stats.footprint_size
+	var half_x: float = fs.x * 0.5 + 0.4
+	var half_z: float = fs.z * 0.5 + 0.4
+	var dx: float = absf(_unit.global_position.x - _target_building.global_position.x)
+	var dz: float = absf(_unit.global_position.z - _target_building.global_position.z)
+	return dx < half_x and dz < half_z
 
 
 func _approach_point() -> Vector3:
