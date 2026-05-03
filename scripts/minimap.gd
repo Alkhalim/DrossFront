@@ -179,8 +179,12 @@ func _color_for_owner(owner_idx: int) -> Color:
 
 
 var _redraw_timer: float = 0.0
-const REDRAW_INTERVAL: float = 0.066  # ~15 Hz; minimap glance-readability
-									   # doesn't need 60 Hz
+## ~6 Hz minimap repaint. The 250-pop stress test profiler showed
+## Minimap._draw at ~2.4 ms/call across 563 calls; dropping from
+## ~15 Hz to ~6 Hz roughly halves the cost without any noticeable
+## glance-readability loss (unit dot positions slosh by at most a
+## couple of pixels between repaints at typical mech speed).
+const REDRAW_INTERVAL: float = 0.16
 
 func _process(delta: float) -> void:
 	# Throttle minimap repaint to ~15 Hz. At 360+ units the per-frame
