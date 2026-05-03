@@ -30,7 +30,23 @@ func apply_code(raw: String) -> String:
 		"cashmoneten":
 			_max_resources_for_local_player()
 			return "Cheat: max resources granted."
+		"nofog":
+			if _set_omniscient_local():
+				return "Cheat: fog of war disabled."
+			return "Cheat: no fog-of-war system in this scene."
 	return "Unknown cheat: %s" % code
+
+
+func _set_omniscient_local() -> bool:
+	## Flips FogOfWar.omniscient_local on so the local player sees the
+	## entire map + every enemy entity. Returns false if no FOW node is
+	## present in the current scene (so the chat HUD can echo a useful
+	## message rather than 'cheat applied' silently).
+	var fow: FogOfWar = get_tree().current_scene.get_node_or_null("FogOfWar") as FogOfWar if get_tree() else null
+	if not fow:
+		return false
+	fow.omniscient_local = true
+	return true
 
 
 func _max_resources_for_local_player() -> void:

@@ -161,6 +161,12 @@ const BUILDING_SIGHT_RADIUS: float = 28.0
 ## node is in the tree.
 var enabled: bool = true
 
+## Cheat-only override. When true, _recompute_visibility skips its
+## normal vision pass and stamps every cell as VISIBLE so the local
+## player sees the entire map and every enemy entity. Toggled by
+## the 'nofog' cheat code.
+var omniscient_local: bool = false
+
 ## Local-player id this fog instance tracks. Always 0 (the human
 ## player) — the AI doesn't render through the fog system, it
 ## reads ground truth.
@@ -283,6 +289,15 @@ func reveal_area(pos: Vector3, radius: float, duration_sec: float) -> void:
 ## --- Visibility recompute -------------------------------------------------
 
 func _recompute_visibility() -> void:
+	# Cheat: skip the normal vision pass and stamp every cell as
+	# VISIBLE. Bump revision so the overlay + minimap pick it up.
+	if omniscient_local:
+		for i: int in _cells.size():
+			_cells[i] = CellState.VISIBLE
+		revision += 1
+		_apply_entity_visibility()
+		return
+
 	# Demote currently-VISIBLE cells to EXPLORED. New vision will
 	# bump them back up below; cells that were visible last tick but
 	# aren't this tick stay EXPLORED so the player can still see
