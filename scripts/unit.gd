@@ -161,6 +161,13 @@ const FLASH_DURATION: float = 0.12
 ## Navigation.
 var _nav_agent: NavigationAgent3D = null
 var _stuck_timer: float = 0.0
+## Throttle (msec timestamp) for the zero-movement repath in
+## _physics_process. Prevents spamming NavigationServer with a
+## new target_position every physics frame while the unit is
+## wedged against geometry; the half-second gap is short enough
+## that a freshly-blocked path resolves in the same beat the
+## player notices it stopping.
+var _zero_move_repath_at_msec: int = 0
 
 ## V3 Stealth — see UnitStatResource.is_stealth_capable. `is_revealed`
 ## is true while an enemy is within detection range OR the unit took
@@ -4026,6 +4033,19 @@ func _physics_process(delta: float) -> void:
 	# frame is rotated.
 	var actual_move: float = (global_position - prev_pos).length()
 	var expected_move: float = _move_speed * delta * 0.3
+	# Zero-movement repath: when the unit has a move order but the
+	# physics step produced essentially no displacement, force the
+	# NavigationAgent to recompute its path immediately. The
+	# deflection ladder below still handles the "moved a little but
+	# not enough" cases; this branch catches the harder failure
+	# mode where the agent is stuck against fresh geometry (a
+	# building that just rose, a wreck that just spawned) and is
+	# returning a stale next_path_position. Throttled to avoid
+	# spamming the navigation server every frame while wedged.
+	if actual_move < 0.001 and has_move_order and _nav_agent:
+		if now_msec >= _zero_move_repath_at_msec:
+			_nav_agent.target_position = move_target
+			_zero_move_repath_at_msec = now_msec + 500
 	if actual_move < expected_move:
 		_stuck_timer += delta
 		# 0.25s — first sidestep, ~50°. Light corner / shoulder bump.
