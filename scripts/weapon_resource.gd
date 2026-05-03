@@ -82,6 +82,16 @@ extends Resource
 @export_range(0.0, 1.0, 0.01) var air_damage_mult: float = 1.0
 
 
+## Bomber-style projectile origin -- when true the projectile spawns
+## just below the firing aircraft and arcs onto the target instead
+## of leaving from the chassis center. Reads as 'opens bomb bay,
+## drops payload' rather than 'fires from above the wing'. Applies
+## to the base aircraft fire path (e.g. Hammerhead Bomber's Cluster
+## Bomb Bay) and is independent of any active ability that may also
+## drop a bomb.
+@export var bomb_drop: bool = false
+
+
 ## Buckshot / scatter-fire flag. When true, CombatComponent fires the
 ## weapon as a cone of pellets per shot instead of a single
 ## projectile. Damage is still applied once per shot (the visual is

@@ -1817,6 +1817,8 @@ func trigger_ability() -> bool:
 	match stats.ability_name:
 		"Missile Barrage", "AA Missile Barrage":
 			fired = _ability_missile_barrage()
+		"Carpet Bombard":
+			fired = _ability_carpet_bombard()
 		_:
 			push_warning("Aircraft '%s' has unknown ability '%s'" % [stats.unit_name, stats.ability_name])
 			return false
@@ -1903,6 +1905,86 @@ func _fire_barrage_missile(target: Node3D, damage: int, side_x: float, spread_of
 	)
 	if proj:
 		get_tree().current_scene.add_child(proj)
+
+
+func _ability_carpet_bombard() -> bool:
+	## Hammerhead Bomber's heavy bomb drop. One bomb spawns just below
+	## the bomber, arcs onto the current target, and detonates for ~650
+	## damage at impact (70% of a gun emplacement's HP) -- AS-tagged so
+	## structures eat the full hit while units shrug off most of it via
+	## the role-vs-armor multiplier table. Splash falls off linearly
+	## inside ability_radius. Skipped silently if no target.
+	if not _combat:
+		return false
+	var target: Node3D = _combat.get("_current_target") as Node3D
+	if not target or not is_instance_valid(target):
+		return false
+	if "alive_count" in target and (target.get("alive_count") as int) <= 0:
+		return false
+	# Bomb spawn just below the bomber so the visual reads as 'opens
+	# bomb bay, drops payload'. Arcs onto the target via the missile
+	# trajectory. Role tag AS so the same anti-structure multipliers
+	# the regular Cluster Bomb Bay uses apply here too.
+	var spawn_pos: Vector3 = global_position + Vector3(0.0, -3.5, 0.0)
+	if spawn_pos.y < 0.5:
+		spawn_pos.y = 0.5
+	var aim_pos: Vector3 = target.global_position
+	var faction: int = 0
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if settings and "player_faction" in settings and (owner_id == 0):
+		faction = settings.get("player_faction") as int
+	var proj: Projectile = Projectile.create(
+		spawn_pos,
+		aim_pos,
+		&"AS",
+		&"slow",
+		&"missile",
+		faction,
+	)
+	if proj:
+		get_tree().current_scene.add_child(proj)
+	# Apply splash damage on impact -- approximated as 'happens now'
+	# rather than waiting for the projectile to land, since the
+	# missile-style projectile is purely cosmetic (no per-frame hit
+	# check). The role multiplier delivers the 'big vs structure /
+	# small vs unit' ratio without us having to fan out per-class
+	# branching here.
+	const BOMBARD_BASE: int = 650
+	var splash_radius: float = stats.ability_radius if stats.ability_radius > 0.0 else 5.0
+	var splash_radius_sq: float = splash_radius * splash_radius
+	var groups: Array[String] = ["units", "buildings", "crawlers"]
+	for g: String in groups:
+		for node: Node in get_tree().get_nodes_in_group(g):
+			if not is_instance_valid(node) or node == self:
+				continue
+			if not node.has_method("take_damage"):
+				continue
+			var n3: Node3D = node as Node3D
+			if not n3:
+				continue
+			var dx: float = n3.global_position.x - aim_pos.x
+			var dz: float = n3.global_position.z - aim_pos.z
+			var dist_sq: float = dx * dx + dz * dz
+			if dist_sq > splash_radius_sq:
+				continue
+			var falloff: float = clampf(1.0 - sqrt(dist_sq) / splash_radius * 0.6, 0.4, 1.0)
+			# Apply AS role multiplier so structures take the full hit
+			# and units take a small fraction (matches the regular bomb
+			# bay's damage profile).
+			var target_armor: StringName = &"medium"
+			if n3.has_method("get") and "stats" in n3:
+				var ts: Variant = n3.get("stats")
+				if typeof(ts) == TYPE_OBJECT and is_instance_valid(ts):
+					var unit_stats: UnitStatResource = ts as UnitStatResource
+					if unit_stats:
+						target_armor = unit_stats.armor_class
+				if n3.is_in_group("buildings"):
+					target_armor = &"structure"
+			var role_mod: float = CombatTables.get_role_modifier(&"AS", target_armor)
+			var armor_red: float = CombatTables.get_armor_reduction(target_armor)
+			var dmg: float = float(BOMBARD_BASE) * role_mod * (1.0 - armor_red) * falloff
+			n3.take_damage(int(dmg), self)
+	return true
 
 
 func get_member_positions() -> Array[Vector3]:

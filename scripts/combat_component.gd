@@ -685,6 +685,12 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 			# spawning from the unit's centre.
 			if not muzzle_positions.is_empty():
 				fire_pos = muzzle_positions[i % muzzle_positions.size()]
+			# Bomb-drop weapons spawn the projectile a few metres below
+			# the firing aircraft so the bomb visibly leaves the bomb
+			# bay before arcing onto the target -- reads as 'opens
+			# payload doors' instead of 'shoots from over the wing'.
+			if weapon.bomb_drop:
+				fire_pos.y = maxf(fire_pos.y - 4.0, 0.5)
 
 			if is_shotgun:
 				var to_target: Vector3 = aim_pos - fire_pos
