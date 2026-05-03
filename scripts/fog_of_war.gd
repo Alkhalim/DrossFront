@@ -17,13 +17,12 @@ extends Node
 
 enum CellState { UNEXPLORED, EXPLORED, VISIBLE }
 
-## Cell side length in world units. Pulled in from 4u to 2u so
-## the exploration steps render at finer grain than the chunky
-## 4u blocks the previous setting produced, while keeping the
-## cell count manageable (4x not 9x) -- the 1.35u attempt tanked
-## the 5 Hz recompute on Schwarzwald-sized maps with the new
-## per-cell Bresenham LOS walks.
-const CELL_SIZE: float = 2.0
+## Cell side length in world units. Pulled in to 1.6u so the
+## exploration steps render at finer grain than the previous 2u
+## block; the recent FOW perf wins (occluder-free fast-path,
+## cached scene refs) leave headroom for the ~1.6x grid bump
+## without the recompute spike the 1.35u attempt produced.
+const CELL_SIZE: float = 1.6
 
 ## Map covers a square centred on the world origin from
 ## -MAP_HALF_EXTENT to +MAP_HALF_EXTENT on both X and Z axes.
