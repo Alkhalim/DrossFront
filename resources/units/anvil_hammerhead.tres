@@ -12,7 +12,7 @@ role_tag = &"AB"
 damage_tier = &"very_low"
 range_tier = &"medium"
 rof_tier = &"rapid"
-damage_value = 50
+damage_value = 30
 rof_seconds_value = 0.25
 base_accuracy = 0.78
 
