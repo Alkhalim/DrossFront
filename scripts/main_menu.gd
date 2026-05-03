@@ -1407,55 +1407,91 @@ func _build_tactical_background() -> Control:
 ## --- Campaigns + Special Operations ----------------------------------------
 
 func _build_campaigns_panel() -> void:
-	## Skeleton -- the Europe map + stumps land in a follow-up commit.
-	## This commit just puts the Campaigns page on its own panel with a
-	## Back button so navigation works end to end.
+	## Stylized tactical Europe map with five marker stumps. Four of
+	## them are disabled (campaigns coming soon); the fifth, located
+	## at Geneva (CERN), opens the Special Operations scenarios.
 	_campaigns_panel = VBoxContainer.new()
-	_campaigns_panel.add_theme_constant_override("separation", 14)
+	_campaigns_panel.add_theme_constant_override("separation", 12)
 	_campaigns_panel.alignment = BoxContainer.ALIGNMENT_CENTER
 	_campaigns_panel.visible = false
 	_root_vbox.add_child(_campaigns_panel)
 
 	var heading := Label.new()
-	heading.text = "Campaigns"
+	heading.text = "Campaigns — European Theatre"
 	heading.add_theme_font_size_override("font_size", 24)
 	heading.add_theme_color_override("font_color", COLOR_SUBTITLE)
 	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_campaigns_panel.add_child(heading)
 
 	var hint := Label.new()
-	hint.text = "Map of Europe coming soon. Pick a deployment site:"
+	hint.text = "Select a deployment site. CERN site offers Special Operations missions."
 	hint.add_theme_font_size_override("font_size", 14)
 	hint.add_theme_color_override("font_color", COLOR_HINT)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_campaigns_panel.add_child(hint)
 
-	# Placeholder stumps -- 4 disabled campaigns + the live Special Ops
-	# entry. Special Ops opens its own scenarios panel.
-	var stump_row := HBoxContainer.new()
-	stump_row.add_theme_constant_override("separation", 12)
-	stump_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	_campaigns_panel.add_child(stump_row)
+	# The map + buttons live in a Control wrapper so the stumps can be
+	# positioned absolutely on top of the painted backdrop without the
+	# parent VBox stretching them around.
+	var map_script: GDScript = preload("res://scripts/europe_map.gd")
+	var map: Control = Control.new()
+	map.set_script(map_script)
+	# Center horizontally inside the panel; preserve the map's intrinsic
+	# size so the stumps land on the painted geography.
+	map.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_campaigns_panel.add_child(map)
 
-	for label_str: String in ["Western Front", "Northern Front", "Eastern Front", "Southern Front"]:
-		var stub := Button.new()
-		stub.text = label_str
-		stub.custom_minimum_size = Vector2(160, 80)
-		stub.disabled = true
-		stub.tooltip_text = "Campaign coming soon."
-		stump_row.add_child(stub)
-
-	var specops_btn := Button.new()
-	specops_btn.text = "Special\nOperations"
-	specops_btn.custom_minimum_size = Vector2(180, 80)
-	specops_btn.pressed.connect(_show_scenarios)
-	stump_row.add_child(specops_btn)
+	# Deferred stump placement -- the map's _ready (which sets its
+	# custom_minimum_size) needs to fire before we ask for marker
+	# coordinates. call_deferred lets us layer the buttons after the
+	# control has its real size.
+	map.call_deferred("_ready")
+	_attach_campaign_stumps(map)
 
 	var back := Button.new()
 	back.text = "Back"
 	back.custom_minimum_size = Vector2(160, 36)
 	back.pressed.connect(_show_main)
 	_campaigns_panel.add_child(back)
+
+
+func _attach_campaign_stumps(map: Control) -> void:
+	## Pin a stump button on top of the Europe map at each marker
+	## site. Stumps are anchored to the map's local coordinates so the
+	## label / button rides with the underlying paint regardless of
+	## menu resizing.
+	var stumps: Array[Dictionary] = [
+		{ "key": "uk",      "label": "Western\nFront",  "enabled": false },
+		{ "key": "germany", "label": "Northern\nFront", "enabled": false },
+		{ "key": "russia",  "label": "Eastern\nFront",  "enabled": false },
+		{ "key": "italy",   "label": "Southern\nFront", "enabled": false },
+		{ "key": "cern",    "label": "Special\nOps",    "enabled": true  },
+	]
+	const STUMP_SIZE := Vector2(110, 56)
+	for s: Dictionary in stumps:
+		var btn := Button.new()
+		btn.text = s["label"] as String
+		btn.custom_minimum_size = STUMP_SIZE
+		btn.size = STUMP_SIZE
+		btn.disabled = not (s["enabled"] as bool)
+		if s["enabled"] as bool:
+			btn.pressed.connect(_show_scenarios)
+			btn.tooltip_text = "Geneva (CERN) -- Special Operations Proving Grounds."
+		else:
+			btn.tooltip_text = "Campaign coming soon."
+		map.add_child(btn)
+		# Defer the actual position write until the map control has
+		# resolved its layout size; otherwise get_marker_position
+		# multiplies by a still-zero MAP_SIZE on the very first tick.
+		var key: String = s["key"] as String
+		_position_stump_deferred.call_deferred(map, btn, key, STUMP_SIZE)
+
+
+func _position_stump_deferred(map: Control, btn: Button, key: String, stump_size: Vector2) -> void:
+	if not is_instance_valid(map) or not is_instance_valid(btn):
+		return
+	var p: Vector2 = map.call("get_marker_position", key) as Vector2
+	btn.position = p - stump_size * 0.5
 
 
 func _build_scenarios_panel() -> void:
