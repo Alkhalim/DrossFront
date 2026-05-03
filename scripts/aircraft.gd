@@ -1963,6 +1963,107 @@ func _build_wraith() -> void:
 		sliver.set_surface_override_material(0, team_mat)
 		add_child(sliver)
 
+	# --- Polish layer ---
+	# Sleeker nose cone -- a tapered cone capping the boxy beak so
+	# the front silhouette reads as 'stealth blade' rather than
+	# 'cardboard wedge'.
+	var nose := MeshInstance3D.new()
+	nose.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var nose_cyl := CylinderMesh.new()
+	nose_cyl.top_radius = 0.0
+	nose_cyl.bottom_radius = 0.32
+	nose_cyl.height = 0.95
+	nose_cyl.radial_segments = 12
+	nose.mesh = nose_cyl
+	nose.rotation = Vector3(deg_to_rad(90.0), 0.0, 0.0)
+	nose.position = Vector3(0, 0.04, 1.95)
+	nose.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.12)))
+	add_child(nose)
+	# Twin engine nacelles tucked under the rear fuselage with
+	# violet thruster glow at the back -- gives the bomber an
+	# obvious propulsion read instead of flying via faith.
+	for nac_side: int in 2:
+		var nsx: float = -1.0 if nac_side == 0 else 1.0
+		var nacelle := MeshInstance3D.new()
+		nacelle.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var n_cyl := CylinderMesh.new()
+		n_cyl.top_radius = 0.18
+		n_cyl.bottom_radius = 0.20
+		n_cyl.height = 1.05
+		n_cyl.radial_segments = 12
+		nacelle.mesh = n_cyl
+		nacelle.rotation = Vector3(deg_to_rad(90.0), 0.0, 0.0)
+		nacelle.position = Vector3(nsx * 0.45, -0.08, -0.85)
+		nacelle.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.18)))
+		add_child(nacelle)
+		# Hot exhaust ring at the rear of the nacelle.
+		var exhaust := MeshInstance3D.new()
+		exhaust.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var ex_cyl := CylinderMesh.new()
+		ex_cyl.top_radius = 0.13
+		ex_cyl.bottom_radius = 0.13
+		ex_cyl.height = 0.12
+		ex_cyl.radial_segments = 12
+		exhaust.mesh = ex_cyl
+		exhaust.rotation = Vector3(deg_to_rad(90.0), 0.0, 0.0)
+		exhaust.position = Vector3(nsx * 0.45, -0.08, -1.42)
+		var ex_mat := StandardMaterial3D.new()
+		ex_mat.albedo_color = SABLE_NEON_PALE
+		ex_mat.emission_enabled = true
+		ex_mat.emission = SABLE_NEON_PALE
+		ex_mat.emission_energy_multiplier = 2.6
+		ex_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		exhaust.set_surface_override_material(0, ex_mat)
+		add_child(exhaust)
+	# Underwing hardpoints + a slim bomb pylon under each wing so
+	# the bomber visibly carries ordnance.
+	for hp_side: int in 2:
+		var hsx: float = 1.0 if hp_side == 0 else -1.0
+		var pylon := MeshInstance3D.new()
+		pylon.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var py_box := BoxMesh.new()
+		py_box.size = Vector3(0.10, 0.12, 0.40)
+		pylon.mesh = py_box
+		pylon.position = Vector3(hsx * 1.10, -0.10, 0.55)
+		pylon.rotation.y = hsx * deg_to_rad(-32.0)
+		pylon.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.14)))
+		add_child(pylon)
+		var bomb := MeshInstance3D.new()
+		bomb.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var bm_cyl := CylinderMesh.new()
+		bm_cyl.top_radius = 0.10
+		bm_cyl.bottom_radius = 0.10
+		bm_cyl.height = 0.85
+		bm_cyl.radial_segments = 10
+		bomb.mesh = bm_cyl
+		bomb.rotation = Vector3(deg_to_rad(90.0), hsx * deg_to_rad(-32.0), 0.0)
+		bomb.position = Vector3(hsx * 1.10, -0.20, 0.55)
+		bomb.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.20)))
+		add_child(bomb)
+	# Wing-tip canted winglets so the wings don't end in a flat
+	# slab. Small triangular shards angled up from each wing tip.
+	for wt_side: int in 2:
+		var wtsx: float = 1.0 if wt_side == 0 else -1.0
+		var winglet := MeshInstance3D.new()
+		winglet.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var wt_box := BoxMesh.new()
+		wt_box.size = Vector3(0.08, 0.32, 0.55)
+		winglet.mesh = wt_box
+		winglet.position = Vector3(wtsx * 2.05, 0.12, 0.10)
+		winglet.rotation = Vector3(0.0, wtsx * deg_to_rad(-32.0), wtsx * deg_to_rad(28.0))
+		winglet.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.16)))
+		add_child(winglet)
+	# Dorsal spine ridge -- thin raised strip running the length
+	# of the body so the centreline reads as a deliberate seam.
+	var spine := MeshInstance3D.new()
+	spine.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var sp_box := BoxMesh.new()
+	sp_box.size = Vector3(0.14, 0.06, 2.40)
+	spine.mesh = sp_box
+	spine.position = Vector3(0, 0.15, 0.10)
+	spine.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.20)))
+	add_child(spine)
+
 
 func _build_default_aircraft() -> void:
 	# Fallback for any aircraft type without a dedicated builder.
