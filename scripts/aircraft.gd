@@ -1209,6 +1209,8 @@ func _build_hammerhead() -> void:
 	# the family resemblance is intact.
 	if stats and stats.unit_name == "Hammerhead (Bomber)":
 		_apply_hammerhead_bomber_extras(body_color)
+	elif stats and stats.unit_name == "Hammerhead (Escort)":
+		_apply_hammerhead_escort_extras(body_color)
 
 
 func _apply_hammerhead_bomber_extras(body_color: Color) -> void:
@@ -1295,6 +1297,82 @@ func _apply_hammerhead_bomber_extras(body_color: Color) -> void:
 	seam_mat.emission_energy_multiplier = 1.4
 	seam.set_surface_override_material(0, seam_mat)
 	add_child(seam)
+
+
+func _apply_hammerhead_escort_extras(body_color: Color) -> void:
+	# Dorsal AA missile rails -- two pairs of upward-tilted slim
+	# missiles mounted above the spine, so the escort silhouettes as
+	# 'this one carries the air-to-air payload'.
+	for rail_side: int in 2:
+		var rsx: float = -0.45 if rail_side == 0 else 0.45
+		var rail := MeshInstance3D.new()
+		rail.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var rb := BoxMesh.new()
+		rb.size = Vector3(0.12, 0.08, 1.30)
+		rail.mesh = rb
+		rail.position = Vector3(rsx, 0.55, 0.10)
+		rail.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.15)))
+		add_child(rail)
+		for missile_i: int in 2:
+			var missile := MeshInstance3D.new()
+			missile.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var m_box := BoxMesh.new()
+			m_box.size = Vector3(0.14, 0.14, 0.95)
+			missile.mesh = m_box
+			missile.position = Vector3(rsx, 0.66, -0.30 + float(missile_i) * 0.65)
+			missile.rotation.x = deg_to_rad(-12.0)
+			missile.set_surface_override_material(0, _aircraft_metal_mat(Color(0.78, 0.78, 0.80, 1.0)))
+			add_child(missile)
+			var tip := MeshInstance3D.new()
+			tip.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var t_box := BoxMesh.new()
+			t_box.size = Vector3(0.12, 0.12, 0.18)
+			tip.mesh = t_box
+			tip.position = Vector3(rsx, 0.68, -0.30 + float(missile_i) * 0.65 + 0.46)
+			tip.rotation.x = deg_to_rad(-12.0)
+			var tip_mat := StandardMaterial3D.new()
+			tip_mat.albedo_color = Color(0.85, 0.18, 0.15, 1.0)
+			tip_mat.emission_enabled = true
+			tip_mat.emission = Color(1.0, 0.25, 0.18, 1.0)
+			tip_mat.emission_energy_multiplier = 0.9
+			tip.set_surface_override_material(0, tip_mat)
+			add_child(tip)
+	# Countermeasure flare pods on the wing roots -- slim dispensers
+	# with three faint-amber tube end caps facing aft so the escort
+	# reads as carrying defensive countermeasures alongside the AA
+	# missiles.
+	for pod_side: int in 2:
+		var psx: float = -1.0 if pod_side == 0 else 1.0
+		var pod := MeshInstance3D.new()
+		pod.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var pod_box := BoxMesh.new()
+		pod_box.size = Vector3(0.20, 0.18, 0.55)
+		pod.mesh = pod_box
+		pod.position = Vector3(psx * 0.85, -0.22, -0.45)
+		pod.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.20)))
+		add_child(pod)
+		for tube_i: int in 3:
+			var cap := MeshInstance3D.new()
+			cap.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var cap_cyl := CylinderMesh.new()
+			cap_cyl.top_radius = 0.025
+			cap_cyl.bottom_radius = 0.025
+			cap_cyl.height = 0.05
+			cap_cyl.radial_segments = 8
+			cap.mesh = cap_cyl
+			cap.rotation.x = PI * 0.5
+			cap.position = Vector3(
+				psx * 0.85 + (float(tube_i) - 1.0) * 0.06,
+				-0.22,
+				-0.74,
+			)
+			var cap_mat := StandardMaterial3D.new()
+			cap_mat.albedo_color = Color(1.0, 0.78, 0.20, 1.0)
+			cap_mat.emission_enabled = true
+			cap_mat.emission = Color(1.0, 0.78, 0.20, 1.0)
+			cap_mat.emission_energy_multiplier = 0.6
+			cap.set_surface_override_material(0, cap_mat)
+			add_child(cap)
 
 
 func _build_switchblade() -> void:
@@ -1493,6 +1571,115 @@ func _build_switchblade() -> void:
 	belly.position = Vector3(0, -0.27, 0.1)
 	belly.set_surface_override_material(0, spine_mat)
 	add_child(belly)
+
+	# Variant overlays. Dogfighter mounts twin gunpods under each
+	# wing root; Strafe Runner mounts a single longer belly cannon
+	# along the underside of the fuselage.
+	if stats and stats.unit_name == "Switchblade (Dogfighter)":
+		_apply_switchblade_dogfighter_extras(body_color)
+	elif stats and stats.unit_name == "Switchblade (Strafe Runner)":
+		_apply_switchblade_strafe_extras(body_color)
+
+
+func _apply_switchblade_dogfighter_extras(body_color: Color) -> void:
+	# Twin underwing gunpods -- short stubby barrels mounted at the
+	# wing roots so the silhouette pinches forward into 'fighter
+	# bristling with guns'. Each pod has a faint cyan emissive cap
+	# matching the Switchblade's canopy palette.
+	for side: int in 2:
+		var sx: float = -1.0 if side == 0 else 1.0
+		# Pod housing.
+		var pod := MeshInstance3D.new()
+		pod.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var pod_box := BoxMesh.new()
+		pod_box.size = Vector3(0.18, 0.18, 0.85)
+		pod.mesh = pod_box
+		pod.position = Vector3(sx * 0.55, -0.18, 0.30)
+		pod.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.12)))
+		add_child(pod)
+		# Twin barrels protruding forward from the pod.
+		for barrel_i: int in 2:
+			var bx: float = -0.05 if barrel_i == 0 else 0.05
+			var barrel := MeshInstance3D.new()
+			barrel.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var bcyl := CylinderMesh.new()
+			bcyl.top_radius = 0.025
+			bcyl.bottom_radius = 0.030
+			bcyl.height = 0.42
+			bcyl.radial_segments = 10
+			barrel.mesh = bcyl
+			barrel.rotation.x = PI * 0.5
+			barrel.position = Vector3(sx * 0.55 + bx, -0.18, 0.92)
+			barrel.set_surface_override_material(0, _aircraft_metal_mat(Color(0.10, 0.10, 0.11, 1.0)))
+			add_child(barrel)
+		# Faint cyan emissive cap on the back of each pod -- targeting
+		# pickup on a Sable interceptor.
+		var cap := MeshInstance3D.new()
+		cap.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var cap_box := BoxMesh.new()
+		cap_box.size = Vector3(0.10, 0.10, 0.04)
+		cap.mesh = cap_box
+		cap.position = Vector3(sx * 0.55, -0.18, -0.10)
+		var cap_mat := StandardMaterial3D.new()
+		cap_mat.albedo_color = SABLE_NEON_PALE
+		cap_mat.emission_enabled = true
+		cap_mat.emission = SABLE_NEON_PALE
+		cap_mat.emission_energy_multiplier = 1.6
+		cap.set_surface_override_material(0, cap_mat)
+		add_child(cap)
+
+
+func _apply_switchblade_strafe_extras(body_color: Color) -> void:
+	# Belly cannon -- single long ventral barrel running fore-aft
+	# under the fuselage, with a fairing that wraps around it. Reads
+	# as 'this one runs strafing passes' rather than 'this one
+	# dogfights'.
+	var fairing := MeshInstance3D.new()
+	fairing.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var fb := BoxMesh.new()
+	fb.size = Vector3(0.32, 0.18, 1.50)
+	fairing.mesh = fb
+	fairing.position = Vector3(0.0, -0.34, 0.20)
+	fairing.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.18)))
+	add_child(fairing)
+	# Long single barrel poking out the front of the fairing.
+	var barrel := MeshInstance3D.new()
+	barrel.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var b_cyl := CylinderMesh.new()
+	b_cyl.top_radius = 0.05
+	b_cyl.bottom_radius = 0.06
+	b_cyl.height = 0.85
+	b_cyl.radial_segments = 12
+	barrel.mesh = b_cyl
+	barrel.rotation.x = PI * 0.5
+	barrel.position = Vector3(0.0, -0.34, 1.30)
+	barrel.set_surface_override_material(0, _aircraft_metal_mat(Color(0.08, 0.08, 0.10, 1.0)))
+	add_child(barrel)
+	# Muzzle brake ring at the front of the barrel for silhouette.
+	var brake := MeshInstance3D.new()
+	brake.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var brake_cyl := CylinderMesh.new()
+	brake_cyl.top_radius = 0.085
+	brake_cyl.bottom_radius = 0.085
+	brake_cyl.height = 0.10
+	brake_cyl.radial_segments = 10
+	brake.mesh = brake_cyl
+	brake.rotation.x = PI * 0.5
+	brake.position = Vector3(0.0, -0.34, 1.65)
+	brake.set_surface_override_material(0, _aircraft_metal_mat(Color(0.06, 0.06, 0.07, 1.0)))
+	add_child(brake)
+	# Twin ammo feed boxes flanking the fairing aft so the strafer
+	# reads as carrying ammo for its big gun.
+	for side: int in 2:
+		var sx: float = -1.0 if side == 0 else 1.0
+		var feed := MeshInstance3D.new()
+		feed.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var feed_box := BoxMesh.new()
+		feed_box.size = Vector3(0.18, 0.18, 0.42)
+		feed.mesh = feed_box
+		feed.position = Vector3(sx * 0.22, -0.30, -0.30)
+		feed.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.30)))
+		add_child(feed)
 
 
 const SABLE_NEON_PALE := Color(0.78, 0.35, 1.0, 1.0)  # violet, paired with unit/building Sable accent
