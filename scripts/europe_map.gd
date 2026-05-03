@@ -20,7 +20,13 @@ const ACCENT := Color(0.95, 0.65, 0.28, 0.55)
 ##   russia  = Moscow
 ##   italy   = Rome
 ##   cern    = Geneva (Switzerland) -- the Special Operations site
-const MARKERS: Dictionary = {
+##
+## `var` rather than `const`: GDScript's compile-time const evaluator
+## rejects `Vector2(...)` constructor calls inside Dictionary / Packed
+## array literals ("isn't a constant expression"). Computed once at
+## script load and never mutated afterwards, so it has the same
+## semantics as a const without tripping the parser.
+var MARKERS: Dictionary = {
 	"uk":      Vector2(0.22, 0.40),
 	"germany": Vector2(0.50, 0.45),
 	"russia":  Vector2(0.84, 0.30),
@@ -32,8 +38,9 @@ const MARKERS: Dictionary = {
 ## landmarks (Iberian peninsula, Italian boot, Scandinavian sweep,
 ## British isles, Black Sea bite) to read as Europe at a glance
 ## without needing an actual asset. Coordinates are in normalized
-## 0..1 space; _draw scales them to MAP_SIZE.
-const MAIN_LAND: PackedVector2Array = PackedVector2Array([
+## 0..1 space; _draw scales them to MAP_SIZE. `var` rather than
+## `const` for the same Vector2-constructor reason as MARKERS above.
+var MAIN_LAND: PackedVector2Array = PackedVector2Array([
 	# Iberia bottom
 	Vector2(0.15, 0.85),
 	Vector2(0.20, 0.78),
@@ -84,8 +91,8 @@ const MAIN_LAND: PackedVector2Array = PackedVector2Array([
 	Vector2(0.16, 0.72),
 ])
 
-## British Isles (separate landmass).
-const BRITISH_ISLES: PackedVector2Array = PackedVector2Array([
+## British Isles (separate landmass). var, not const, see MAIN_LAND.
+var BRITISH_ISLES: PackedVector2Array = PackedVector2Array([
 	Vector2(0.20, 0.30),
 	Vector2(0.27, 0.32),
 	Vector2(0.27, 0.42),
@@ -94,8 +101,8 @@ const BRITISH_ISLES: PackedVector2Array = PackedVector2Array([
 	Vector2(0.18, 0.40),
 ])
 
-## Ireland.
-const IRELAND: PackedVector2Array = PackedVector2Array([
+## Ireland. var, not const, see MAIN_LAND.
+var IRELAND: PackedVector2Array = PackedVector2Array([
 	Vector2(0.13, 0.36),
 	Vector2(0.17, 0.36),
 	Vector2(0.17, 0.43),
@@ -103,8 +110,9 @@ const IRELAND: PackedVector2Array = PackedVector2Array([
 ])
 
 ## Sicily / Sardinia hint -- two small dots to keep the
-## Mediterranean from reading completely empty.
-const ISLAND_DOTS: PackedVector2Array = PackedVector2Array([
+## Mediterranean from reading completely empty. var, not const,
+## see MAIN_LAND.
+var ISLAND_DOTS: PackedVector2Array = PackedVector2Array([
 	Vector2(0.49, 0.86),  # Sicily
 	Vector2(0.45, 0.78),  # Sardinia
 ])

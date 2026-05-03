@@ -2601,7 +2601,28 @@ func _build_unit_stat_sheet(unit: Node3D, _include_cost: bool = false) -> String
 	# (Bottom-row armor reduction chip removed -- the percentage now
 	# lives inline on the Armor chip in row_defense.)
 
-	return _build_stat_sheet([row_defense, row_combat, row_mobility, row_attack_bonus])
+	# Basic vs Extended split. Default view shows the headline rows
+	# only (defense + combat); SHIFT (or the persistent settings
+	# toggle) adds mobility + attack-bonus matrix. Keeps the panel
+	# scannable for new players while power users can still pull the
+	# full breakdown on demand.
+	var rows: Array = [row_defense, row_combat]
+	if _extended_stats_active():
+		rows.append(row_mobility)
+		rows.append(row_attack_bonus)
+	else:
+		rows.append([_extended_hint_chip()])
+	return _build_stat_sheet(rows)
+
+
+func _extended_hint_chip() -> String:
+	## Tiny hint chip that lives at the bottom of the basic stat
+	## sheet so players know there's more behind SHIFT. When the
+	## settings toggle inverts the default, the hint flips to "[hold
+	## SHIFT for basic view]" so the cue still reads correctly.
+	if _extended_stats_default:
+		return "[color=#888888][hold SHIFT for basic view][/color]"
+	return "[color=#888888][hold SHIFT for full stats][/color]"
 
 
 func _role_matchup_chips(role_tag: StringName) -> Array:
@@ -2748,9 +2769,11 @@ func _build_building_stat_sheet(building: Node3D, bstats: BuildingStatResource, 
 	rows.append(defense_row)
 
 	# Turret stats (gun emplacements / SAM sites that have a
-	# TurretComponent attached). Mirrors the per-shot damage table used
-	# by the actual fire path.
+	# TurretComponent attached). Basic view shows DPS + Range; the
+	# role-vs-armor matchup row is held back for the SHIFT-extended
+	# view since it's the "why is this number what it is" detail.
 	var turret: Node = building.get_node_or_null("TurretComponent") if building else null
+	var extended: bool = _extended_stats_active()
 	if turret:
 		# Read the turret's actual current profile (Anvil emplacement
 		# damage already includes the +15% multiplier; basic / SAM
@@ -2773,20 +2796,26 @@ func _build_building_stat_sheet(building: Node3D, bstats: BuildingStatResource, 
 			_stat_chip("Range", "%.0fu" % t_rng, STAT_LABEL_COLOR_RANGE),
 		]
 		rows.append(combat_row)
-		# Role-vs-armor matchups for the turret's current profile -- so
-		# the player can see why a SAM site shreds aircraft but barely
-		# scratches mechs, or why an AP emplacement under-performs vs
-		# heavy armor. Mirrors the unit panel's attack-bonus row.
-		var role_tag: StringName = (turret.call("get_role") as StringName) if turret.has_method("get_role") else &"Universal"
-		var bonus_row: Array = _role_matchup_chips(role_tag)
-		if not bonus_row.is_empty():
-			rows.append(bonus_row)
+		if extended:
+			# Role-vs-armor matchups for the turret's current profile
+			# -- so the player can see why a SAM site shreds aircraft
+			# but barely scratches mechs, or why an AP emplacement
+			# under-performs vs heavy armor.
+			var role_tag: StringName = (turret.call("get_role") as StringName) if turret.has_method("get_role") else &"Universal"
+			var bonus_row: Array = _role_matchup_chips(role_tag)
+			if not bonus_row.is_empty():
+				rows.append(bonus_row)
 
-	if not bstats.producible_units.is_empty():
+	if extended and not bstats.producible_units.is_empty():
+		# 'Produces N unit type(s)' is informational; in the basic
+		# view the production grid below the panel already conveys
+		# this, so it lives in the extended sheet only.
 		var produces_row: Array = [
 			_stat_chip("Produces", "%d unit type(s)" % bstats.producible_units.size(), STAT_LABEL_COLOR_RANGE),
 		]
 		rows.append(produces_row)
+	if not extended:
+		rows.append([_extended_hint_chip()])
 	return _build_stat_sheet(rows)
 
 
