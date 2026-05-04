@@ -2997,6 +2997,32 @@ func _maybe_override_shape_for_unit(base: Dictionary) -> Dictionary:
 	## on the unmodified profile.
 	if not stats:
 		return base
+	if stats.unit_name.findn("Harbinger") >= 0:
+		var ovh: Dictionary = base.duplicate()
+		# Harbinger ('NODE Command Carrier') reads as the heavy
+		# command frame for the Sable army. +5% on every dimension
+		# so it visibly out-bulks a Bulwark squad, then an
+		# additional +5% on torso.x specifically so the chassis
+		# looks broader (carrier deck) rather than just uniformly
+		# scaled. hip_y comes up with the leg scale so the
+		# silhouette stays proportional and the model isn't sunk
+		# into the ground.
+		var leg: Vector3 = ovh["leg"] as Vector3
+		ovh["leg"] = leg * 1.05
+		ovh["hip_y"] = (ovh["hip_y"] as float) * 1.05
+		var torso: Vector3 = ovh["torso"] as Vector3
+		# Uniform 5% scale + an extra 5% on width.
+		ovh["torso"] = Vector3(torso.x * 1.05 * 1.05, torso.y * 1.05, torso.z * 1.05)
+		var head: Vector3 = ovh["head"] as Vector3
+		ovh["head"] = head * 1.05
+		# Cannon scales with chassis; muzzle alignment carries
+		# through automatically.
+		var cannon: Vector3 = ovh["cannon"] as Vector3
+		ovh["cannon"] = cannon * 1.05
+		ovh["cannon_x"] = (ovh["cannon_x"] as float) * 1.05
+		# Wider footprint demands a touch more spacing in formation.
+		ovh["formation_spacing"] = (ovh["formation_spacing"] as float) * 1.06
+		return ovh
 	if stats.unit_name.findn("Forgemaster") >= 0:
 		var ov: Dictionary = base.duplicate()
 		# Six side-mounted legs (three pairs along the chassis sides)

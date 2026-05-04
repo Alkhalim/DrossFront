@@ -331,38 +331,65 @@ func _create_beam_mesh(color: Color, from: Vector3, to: Vector3, width_scale: fl
 	var dir: Vector3 = to - from
 	var length: float = dir.length()
 
-	# Bright thin core -- the actual laser line, near-white at the
-	# center so the beam reads as 'energy', not 'colored stick'.
+	# THREE concentric beam layers for a visible 'core brighter than
+	# edges' gradient: hot pure-white inner needle, tinted bright
+	# core, translucent tinted halo. The previous two-layer build
+	# (core + halo) was technically a gradient but the halo's alpha
+	# 0.45 fill blended into the core too aggressively at typical
+	# RTS zoom and the overall beam read as flat-coloured. Splitting
+	# into three layers produces an unmistakable hot centre.
+
+	# Layer 1 -- inner hot needle. Pure white, max emission, very
+	# thin so it always sits on top of the tinted core regardless of
+	# camera angle.
 	_mesh = MeshInstance3D.new()
 	_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var core := BoxMesh.new()
-	core.size = Vector3(0.06 * width_scale, 0.06 * width_scale, maxf(length, 0.1))
-	_mesh.mesh = core
+	var hot := BoxMesh.new()
+	hot.size = Vector3(0.035 * width_scale, 0.035 * width_scale, maxf(length, 0.1))
+	_mesh.mesh = hot
+	var hot_mat := StandardMaterial3D.new()
+	hot_mat.albedo_color = Color(1.0, 1.0, 1.0, 1.0)
+	hot_mat.emission_enabled = true
+	hot_mat.emission = Color(1.0, 1.0, 1.0, 1.0)
+	hot_mat.emission_energy_multiplier = 12.0
+	hot_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	hot_mat.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
+	_mesh.set_surface_override_material(0, hot_mat)
+	add_child(_mesh)
+
+	# Layer 2 -- tinted core. Carries the role colour but stays
+	# bright (60% white-blend kept from the previous build).
+	var core := MeshInstance3D.new()
+	core.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var core_box := BoxMesh.new()
+	core_box.size = Vector3(0.09 * width_scale, 0.09 * width_scale, maxf(length, 0.1))
+	core.mesh = core_box
 	var core_mat := StandardMaterial3D.new()
 	var core_color: Color = color.lerp(Color(1.0, 1.0, 1.0, 1.0), 0.6)
 	core_color.a = 1.0
 	core_mat.albedo_color = core_color
 	core_mat.emission_enabled = true
 	core_mat.emission = core_color
-	core_mat.emission_energy_multiplier = 7.0
+	core_mat.emission_energy_multiplier = 6.0
 	core_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	core_mat.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
-	_mesh.set_surface_override_material(0, core_mat)
-	add_child(_mesh)
+	core.set_surface_override_material(0, core_mat)
+	add_child(core)
 
-	# Wider translucent halo wrapping the core -- the energy bloom
-	# you see on a real cinematic laser beam.
+	# Layer 3 -- wider translucent halo wrapping the core. Drops to
+	# alpha 0.30 (was 0.45) so the inner layers' brightness wins
+	# instead of being averaged into the halo's tint at distance.
 	var halo := MeshInstance3D.new()
 	halo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var halo_box := BoxMesh.new()
-	halo_box.size = Vector3(0.20 * width_scale, 0.20 * width_scale, maxf(length, 0.1))
+	halo_box.size = Vector3(0.22 * width_scale, 0.22 * width_scale, maxf(length, 0.1))
 	halo.mesh = halo_box
 	var halo_mat := StandardMaterial3D.new()
-	halo_mat.albedo_color = Color(color.r, color.g, color.b, 0.45)
+	halo_mat.albedo_color = Color(color.r, color.g, color.b, 0.30)
 	halo_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	halo_mat.emission_enabled = true
 	halo_mat.emission = color
-	halo_mat.emission_energy_multiplier = 3.5
+	halo_mat.emission_energy_multiplier = 2.5
 	halo_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	halo_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	halo.set_surface_override_material(0, halo_mat)
