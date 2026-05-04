@@ -23,7 +23,7 @@ const DEBUG_HARNESS_ENABLED: bool = true
 
 ## Layout knobs.
 const PANEL_WIDTH: float = 300.0
-const PANEL_HEIGHT_PER_AI: float = 192.0
+const PANEL_HEIGHT_PER_AI: float = 212.0
 const PANEL_GAP: float = 8.0
 const RIGHT_MARGIN: float = 12.0
 const TOP_MARGIN: float = 90.0          # Sits below the player's HUD bar.
@@ -143,6 +143,13 @@ func _format_snapshot(s: Dictionary) -> String:
 		lines.append("Next build: [b]%s[/b]" % nb)
 	else:
 		lines.append("Next build: [b]%s[/b] [color=#cccc66](%s)[/color]" % [nb, blocker])
+	# Last successful placement -- pairs with the next-blocked line
+	# so the user can see what the AI is actually doing, not just
+	# what it can't do. Empty when nothing has been placed yet.
+	var lp: String = s.get("last_placed", "") as String
+	var lp_age: float = s.get("last_placed_age_sec", -1.0) as float
+	if lp != "" and lp_age >= 0.0:
+		lines.append("Last placed: [b]%s[/b] [color=#7df27d](%ds ago)[/color]" % [lp, int(round(lp_age))])
 	# Engineer state breakdown -- helps diagnose 'no free engineer'
 	# blockers. Snapshot is refreshed once per AI tick directly off
 	# each engineer's current state, so the displayed mix reflects

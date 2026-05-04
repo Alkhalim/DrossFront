@@ -178,6 +178,11 @@ enum BuildBlocker {
 var _next_build_key: String = ""
 var _next_build_blocker: int = BuildBlocker.NONE
 var _blocker_captured_this_tick: bool = false
+## Most recent successful placement -- shown in the debug overlay
+## alongside the next-blocked entry so the user can see what the
+## AI just did, not only what it can't do.
+var _last_placed_key: String = ""
+var _last_placed_clock_sec: float = -INF
 ## Cumulative kill / loss tallies surfaced by the overlay. Both update
 ## via squad_destroyed signal connections that we attach lazily in
 ## _track_unit_lifecycle().
@@ -1136,6 +1141,14 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 	if not building:
 		return
 	_buildings_placed[key] = true
+	# Track the most-recent successful placement so the debug
+	# overlay can show "Last placed: X (Ns ago)" alongside the
+	# "Next build: Y (blocker)" line. Without this the overlay
+	# can read as inaccurate: 'next build' shows a permanently-
+	# blocked entry like generator2 even while several other
+	# builds (yards, turrets) succeed in the same minute.
+	_last_placed_key = key
+	_last_placed_clock_sec = _match_clock_sec
 	# Production-building cadence counter -- bumped after a
 	# successful place so the gate above blocks the NEXT one
 	# until enough units are trained.
@@ -2485,6 +2498,8 @@ func get_debug_snapshot() -> Dictionary:
 		"losses": _losses,
 		"next_build": _next_build_key,
 		"next_build_blocker": _blocker_label(_next_build_blocker),
+		"last_placed": _last_placed_key,
+		"last_placed_age_sec": (_match_clock_sec - _last_placed_clock_sec) if _last_placed_clock_sec > -INF * 0.5 else -1.0,
 		"sec_until_attack": _time_until_next_attack(),
 		"match_clock": _match_clock_sec,
 		"eng_total": _engineer_total,

@@ -2052,6 +2052,20 @@ func _is_valid_build_position(pos: Vector3) -> bool:
 	var half_x: float = _build_stats.footprint_size.x * 0.5
 	var half_z: float = _build_stats.footprint_size.z * 0.5
 
+	# Map-edge clamp -- the entire footprint must sit inside the
+	# playable area. The map runs from -MAP_HALF to +MAP_HALF on
+	# both axes; the test arena defines MAP_HALF as 150. A building
+	# whose footprint clips off-map looked like a placement bug
+	# (corner sitting on the dark backdrop, units couldn't navigate
+	# to it via the navmesh that ends at the playable boundary).
+	const MAP_HALF: float = 150.0
+	const MAP_EDGE_MARGIN: float = 1.0
+	if pos.x - half_x < -MAP_HALF + MAP_EDGE_MARGIN \
+			or pos.x + half_x > MAP_HALF - MAP_EDGE_MARGIN \
+			or pos.z - half_z < -MAP_HALF + MAP_EDGE_MARGIN \
+			or pos.z + half_z > MAP_HALF - MAP_EDGE_MARGIN:
+		return false
+
 	# Other buildings — AABB-vs-AABB in XZ.
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(node):
