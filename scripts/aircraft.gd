@@ -107,6 +107,7 @@ func _ready() -> void:
 	_build_visuals()
 	_build_shadow_blob()
 	_build_click_collider()
+	_build_hp_bar()
 
 	# Stealth-capable aircraft (Wraith) start concealed; the
 	# proximity check below will reveal them when an enemy detector
@@ -259,6 +260,10 @@ var _ac_phys_frame: int = 0
 func _process(delta: float) -> void:
 	if alive_count <= 0:
 		return
+	# HP-bar reposition runs every frame (cheap) so the bar tracks
+	# the aircraft while moving. Bar is hidden at full HP, so the
+	# only cost when undamaged is one visibility check.
+	_update_hp_bar()
 	_ac_phys_frame += 1
 	# Third-frame stagger (was half-frame) -- matches the
 	# CombatComponent + SalvageWorker pattern. Aircraft._process
@@ -2383,6 +2388,7 @@ func take_damage(amount: int, _attacker: Node3D = null) -> void:
 		member_hp[i] -= dealt
 		remaining -= dealt
 		current_hp -= dealt
+		_update_hp_bar()
 		if member_hp[i] <= 0:
 			alive_count -= 1
 			# Hide the dead drone's visual. Swarms have one mesh per
@@ -2705,3 +2711,71 @@ func stop() -> void:
 	move_queue.clear()
 	velocity = Vector3.ZERO
 	has_move_order = false
+
+
+## --- HP bar (mirrors Unit._build_hp_bar / _update_hp_bar) -----------------
+
+var _hp_bar_bg: MeshInstance3D = null
+var _hp_bar_fill: MeshInstance3D = null
+
+
+func _build_hp_bar() -> void:
+	if _hp_bar and is_instance_valid(_hp_bar):
+		_hp_bar.queue_free()
+	# Aircraft sit at flight_altitude (~8u). Drop the bar to a
+	# fixed Y just under the chassis height so it reads at top-
+	# down camera distance without being lost in the sky.
+	var bar_y: float = (stats.flight_altitude if stats else 8.0) + 0.6
+	_hp_bar = Node3D.new()
+	_hp_bar.name = "HPBar"
+	_hp_bar.position.y = bar_y
+	_hp_bar_bg = MeshInstance3D.new()
+	var bg_box := BoxMesh.new()
+	bg_box.size = Vector3(2.0, 0.12, 0.08)
+	_hp_bar_bg.mesh = bg_box
+	var bg_mat := StandardMaterial3D.new()
+	bg_mat.albedo_color = Color(0.1, 0.1, 0.1, 0.7)
+	bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_hp_bar_bg.set_surface_override_material(0, bg_mat)
+	_hp_bar.add_child(_hp_bar_bg)
+	_hp_bar_fill = MeshInstance3D.new()
+	var fill_box := BoxMesh.new()
+	fill_box.size = Vector3(1.0, 0.15, 0.1)
+	_hp_bar_fill.mesh = fill_box
+	var fill_mat := StandardMaterial3D.new()
+	fill_mat.albedo_color = Color(0.1, 0.9, 0.1, 0.9)
+	fill_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	fill_mat.emission_enabled = true
+	fill_mat.emission = Color(0.1, 0.9, 0.1, 1.0)
+	fill_mat.emission_energy_multiplier = 0.5
+	_hp_bar_fill.set_surface_override_material(0, fill_mat)
+	_hp_bar.add_child(_hp_bar_fill)
+	# top_level so the bar doesn't inherit aircraft tilt / yaw.
+	add_child(_hp_bar)
+	_hp_bar.top_level = true
+	_update_hp_bar()
+
+
+func _update_hp_bar() -> void:
+	if not _hp_bar or not is_instance_valid(_hp_bar):
+		return
+	if not _hp_bar_fill or not stats:
+		return
+	# Reposition the bar above the aircraft each tick so it
+	# tracks the aircraft as it moves (top_level needs explicit
+	# global position updates).
+	var bar_y: float = (stats.flight_altitude if stats else 8.0) + 0.6
+	_hp_bar.global_position = global_position + Vector3(0.0, bar_y - global_position.y, 0.0)
+	# Hide the bar at full HP so it only appears when damaged --
+	# matches the land-unit bar policy.
+	var pct: float = float(maxi(current_hp, 0)) / float(maxi(stats.hp_total, 1))
+	_hp_bar.visible = pct < 0.999
+	var bar_width: float = 2.0
+	_hp_bar_fill.scale.x = maxf(pct * bar_width, 0.01)
+	_hp_bar_fill.position.x = -bar_width * 0.5 * (1.0 - pct)
+	var fill_mat: StandardMaterial3D = _hp_bar_fill.get_surface_override_material(0) as StandardMaterial3D
+	if fill_mat:
+		var r: float = 1.0 - pct
+		var g: float = pct
+		fill_mat.albedo_color = Color(r, g, 0.1, 0.9)
+		fill_mat.emission = Color(r, g, 0.1, 1.0)
