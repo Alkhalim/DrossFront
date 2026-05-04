@@ -9,6 +9,7 @@ weapon_name = "Single MG + Sensor Mast"
 role_tag = &"AP"
 damage_tier = &"very_low"
 range_tier = &"long"
+range_value = 27.0
 rof_tier = &"rapid"
 base_accuracy = 0.88
 can_hit_air = true

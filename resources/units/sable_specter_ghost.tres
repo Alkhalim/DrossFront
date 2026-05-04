@@ -9,6 +9,7 @@ weapon_name = "Long Pulse Repeater"
 role_tag = &"AP"
 damage_tier = &"low"
 range_tier = &"long"
+range_value = 27.0
 rof_tier = &"rapid"
 base_accuracy = 0.90
 can_hit_air = true

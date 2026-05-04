@@ -11,6 +11,7 @@ weapon_name = "Twin Shoulder MGs"
 role_tag = &"AP"
 damage_tier = &"very_low"
 range_tier = &"medium"
+range_value = 17.0
 rof_tier = &"rapid"
 can_hit_air = true
 air_damage_mult = 0.7

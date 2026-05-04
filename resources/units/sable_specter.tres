@@ -11,6 +11,7 @@ weapon_name = "Light Pulse Repeater"
 role_tag = &"AP"
 damage_tier = &"low"
 range_tier = &"medium"
+range_value = 17.0
 rof_tier = &"rapid"
 base_accuracy = 0.88
 can_hit_air = true
