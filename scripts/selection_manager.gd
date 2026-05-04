@@ -333,7 +333,17 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 				if friendly_building and not friendly_building.is_constructed:
 					_command_assist_build(friendly_building)
 				else:
-					_command_move(event.position, queue)
+					# Right-click on a tree -> attack the tree.
+					# Whether the unit can actually damage it
+					# (heavy weapons only) is gated inside
+					# tree.take_damage; what matters here is that
+					# the unit FIRES at the tree instead of
+					# walking into it.
+					var tree := _raycast_tree(event.position)
+					if tree:
+						_command_attack(tree)
+					else:
+						_command_move(event.position, queue)
 		get_viewport().set_input_as_handled()
 
 
@@ -735,6 +745,23 @@ func _raycast_wreck(screen_pos: Vector2) -> Wreck:
 	var collider: Object = result["collider"]
 	if collider is Wreck:
 		return collider as Wreck
+	return null
+
+
+func _raycast_tree(screen_pos: Vector2) -> ForestTree:
+	## Returns the ForestTree under the cursor or null. Trees sit on
+	## the terrain collision layer (4) so we hit the same physics
+	## space the rocks + ramps share.
+	var from := _camera.project_ray_origin(screen_pos)
+	var dir := _camera.project_ray_normal(screen_pos)
+	var space := get_viewport().world_3d.direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(from, from + dir * 500.0, 4)
+	var result := space.intersect_ray(query)
+	if result.is_empty():
+		return null
+	var collider: Object = result["collider"]
+	if collider is ForestTree:
+		return collider as ForestTree
 	return null
 
 
