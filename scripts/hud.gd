@@ -4227,12 +4227,11 @@ func _rebuild_build_buttons() -> void:
 	_action_label.text = "Build — %s" % _build_tab.capitalize()
 	var built_ids: Dictionary = _local_player_built_ids()
 	var buildable: Array[BuildingStatResource] = _selection_manager.get_buildable_stats()
-	# Build-hotkey letters per visible button. Same flavour as the
-	# unit-train hotkeys (Q W E R T) but extended to seven slots so
-	# the basic / advanced tabs can each hold a full row of seven.
-	# `_visible_build_stats` mirrors the order the hotkeys map to
-	# so SelectionManager can route key events through it.
-	const BUILD_HOTKEYS: Array[String] = ["Q", "W", "E", "R", "T", "Y", "U"]
+	# Build-hotkey letters per visible button. Two-row layout
+	# matching the on-screen 4x2 grid -- Q W E R across the top
+	# row, A S D F across the bottom. Player's left hand maps
+	# directly to the visual position of the building they want.
+	const BUILD_HOTKEYS: Array[String] = ["Q", "W", "E", "R", "A", "S", "D", "F"]
 	_visible_build_stats.clear()
 	var visible_index: int = 0
 	for i: int in buildable.size():

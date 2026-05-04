@@ -2090,6 +2090,27 @@ func _setup_terrain_schwarzwald() -> void:
 				var ally_lane_half: float = 9.0
 				if absf(pz - 120.0) <= ally_lane_half or absf(pz + 120.0) <= ally_lane_half:
 					inside_corridor = true
+			# Deposit access paths -- a thin lane (~5u half-width)
+			# from each deposit straight horizontally to the
+			# nearest corridor centreline so the player can
+			# actually walk to the oil field without chopping
+			# through the forest.
+			if not inside_corridor:
+				for dpos: Vector3 in deposit_positions:
+					if absf(pz - dpos.z) <= 5.0:
+						# Find nearest corridor centreline along X.
+						var nearest_corridor_x: float = corridor_centres_x[0]
+						var best_corridor_dist: float = INF
+						for cc: float in corridor_centres_x:
+							var d: float = absf(dpos.x - cc)
+							if d < best_corridor_dist:
+								best_corridor_dist = d
+								nearest_corridor_x = cc
+						var lane_lo: float = minf(dpos.x, nearest_corridor_x) - 1.5
+						var lane_hi: float = maxf(dpos.x, nearest_corridor_x) + 1.5
+						if px >= lane_lo and px <= lane_hi:
+							inside_corridor = true
+							break
 			if inside_corridor:
 				continue
 			# Skip cells inside any HQ clearance circle.

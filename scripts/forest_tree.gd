@@ -200,13 +200,14 @@ func _ready() -> void:
 	# physically bumps into the trunk just like a rock pile.
 	collision_layer = 4
 	collision_mask = 0
-	# Variant roll: 60% healthy, 30% dead, 10% stump. Mostly green
-	# enough to read as a forest, with enough decay scattered
-	# through to fit the dieselpunk wasteland tone.
+	# Variant roll: 38% healthy, 50% dead, 12% stump. Pushes the
+	# dieselpunk-wasteland decay tone harder than the previous
+	# 60/30/10 mix that read as too lush. Half the trees are now
+	# bleached + bare; healthy + stump fill the rest.
 	var roll: float = randf()
-	if roll < 0.60:
+	if roll < 0.38:
 		_variant = Variant.HEALTHY
-	elif roll < 0.90:
+	elif roll < 0.88:
 		_variant = Variant.DEAD
 	else:
 		_variant = Variant.STUMP

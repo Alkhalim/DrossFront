@@ -577,15 +577,19 @@ func _handle_build_hotkey(key: InputEventKey) -> void:
 	if not has_engineer:
 		return
 
+	# Build hotkeys arranged as Q W E R / A S D F across two rows
+	# so the player's left hand mirrors the on-screen 4x2 button
+	# grid. Legacy 1-8 keys still resolve as a power-user fallback.
 	var index: int = -1
 	match key.keycode:
 		KEY_Q, KEY_1: index = 0
 		KEY_W, KEY_2: index = 1
 		KEY_E, KEY_3: index = 2
 		KEY_R, KEY_4: index = 3
-		KEY_T, KEY_5: index = 4
-		KEY_Y, KEY_6: index = 5
-		KEY_U, KEY_7: index = 6
+		KEY_A, KEY_5: index = 4
+		KEY_S, KEY_6: index = 5
+		KEY_D, KEY_7: index = 6
+		KEY_F, KEY_8: index = 7
 	if index < 0:
 		return
 	# Prefer the HUD's visible-tab order so the displayed [Q]
