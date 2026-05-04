@@ -24,7 +24,13 @@ const PAN_IN_SEC: float = 1.1
 ## load time on top of the zoom.
 const ZOOM_IN_SEC: float = 3.2
 const FADE_OUT_SEC: float = 0.6
-const ZOOM_FACTOR: float = 2.4
+## Default zoom factor (scale relative to the fitted resting size).
+## Bumped 2.4 -> 4.8 so the final framed view actually shows the
+## map's region recognisably (city-sized footprint) rather than
+## the whole north-half of Europe. Per-map overrides live in
+## MAP_TARGETS["zoom"] -- denser regions can ask for more, sparse
+## ones for less.
+const ZOOM_FACTOR: float = 4.8
 ## Hard ceiling -- if for some reason the threaded load hangs we
 ## bail to a synchronous swap after this many seconds so the
 ## player isn't stuck on the loading screen.
@@ -34,15 +40,19 @@ const HARD_TIMEOUT_SEC: float = 18.0
 ## focal point of the zoom-in tween. MapId enum values from
 ## MatchSettingsClass: FOUNDRY_BELT=0, ASHPLAINS=1, IRON_GATE=2,
 ## SCHWARZWALD=3.
+## Per-map zoom + focal lat/lon. `zoom` is a multiplier on top of
+## the default ZOOM_FACTOR -- 1.0 keeps the default; >1 frames the
+## region tighter (use for compact areas like the Iron Gate);
+## <1 pulls back (use for sprawling regions like the Steppe).
 const MAP_TARGETS: Array[Dictionary] = [
-	{"lon":  8.5, "lat": 50.5, "name": "FOUNDRY BELT"},          # Ruhr industrial heartland
-	{"lon": 30.0, "lat": 47.0, "name": "ASHPLAINS"},             # Ukrainian steppe
-	{"lon": 22.5, "lat": 44.7, "name": "IRON GATE CROSSING"},    # actual Iron Gate of the Danube
-	{"lon":  8.2, "lat": 48.0, "name": "SCHWARZWALD"},           # Black Forest
+	{"lon":  7.4, "lat": 51.4, "name": "FOUNDRY BELT", "zoom": 1.20},   # Ruhr industrial cluster (Essen / Dortmund)
+	{"lon": 35.5, "lat": 48.0, "name": "ASHPLAINS",    "zoom": 0.85},   # Ukrainian steppe -- pulled back, region is big
+	{"lon": 22.6, "lat": 44.6, "name": "IRON GATE CROSSING", "zoom": 1.40},  # narrow Danube gorge -- tighter framing
+	{"lon":  8.0, "lat": 48.2, "name": "SCHWARZWALD",  "zoom": 1.25},   # Black Forest -- mid-tight
 ]
 
 ## Special Operations scenarios all converge on Geneva (CERN).
-const CERN_TARGET: Dictionary = {"lon": 6.14, "lat": 46.20, "name": "CERN BLACK SITE"}
+const CERN_TARGET: Dictionary = {"lon": 6.14, "lat": 46.20, "name": "CERN BLACK SITE", "zoom": 1.30}
 
 var _map: Control = null
 var _label: Label = null
@@ -160,6 +170,19 @@ func _resolve_target_lonlat() -> Vector2:
 	return Vector2(8.5, 50.5)  # default to central Europe
 
 
+func _resolve_target_zoom() -> float:
+	## Per-map zoom multiplier on top of ZOOM_FACTOR. Lets dense
+	## regions frame tighter than sprawling steppe maps.
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if settings and "scenario" in settings and (settings.get("scenario") as int) != 0:
+		return CERN_TARGET.get("zoom", 1.0) as float
+	if settings and "map_id" in settings:
+		var idx: int = settings.get("map_id") as int
+		if idx >= 0 and idx < MAP_TARGETS.size():
+			return MAP_TARGETS[idx].get("zoom", 1.0) as float
+	return 1.0
+
+
 func _start_zoom() -> void:
 	if not is_instance_valid(_map):
 		# Map control didn't survive ready -- skip the visual phase
@@ -218,8 +241,11 @@ func _start_zoom() -> void:
 	pan.tween_property(_map, "rotation", 0.0, PAN_IN_SEC)
 
 	# Final zoom -- pin the target lat/lon pixel to screen centre
-	# at ZOOM_FACTOR magnification, kicked off after the pan lands.
-	var final_scale: float = fit_scale * ZOOM_FACTOR
+	# at ZOOM_FACTOR * per-map override magnification, kicked off
+	# after the pan lands. Per-map override (`zoom` in MAP_TARGETS)
+	# tightens compact theatres (Iron Gate gorge) and pulls back on
+	# sprawling ones (Steppe).
+	var final_scale: float = fit_scale * ZOOM_FACTOR * _resolve_target_zoom()
 	var final_offset: Vector2 = screen_centre - target_pixel * final_scale
 
 	get_tree().create_timer(PAN_IN_SEC).timeout.connect(
