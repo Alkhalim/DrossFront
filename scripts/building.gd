@@ -3496,16 +3496,14 @@ func _faction_producible_list() -> Array[UnitStatResource]:
 			sable_paths = [
 				"res://resources/units/sable_specter.tres",
 				"res://resources/units/sable_jackal.tres",
-				# Courier Tank moved from adv_foundry to basic so
-				# Sable players have an early-tier tank option for
-				# armor-rush builds, mirroring Anvil's Grinder Tank
-				# placement at basic_foundry.
-				"res://resources/units/sable_courier_tank.tres",
 			]
 		&"advanced_foundry":
 			sable_paths = [
 				"res://resources/units/sable_harbinger.tres",
 				"res://resources/units/sable_pulsefont.tres",
+				# Relay Transport (Courier Tank) belongs to the
+				# advanced foundry tier per spec.
+				"res://resources/units/sable_courier_tank.tres",
 			]
 		&"aerodrome":
 			sable_paths = [
