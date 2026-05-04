@@ -226,12 +226,12 @@ func _build_main_buttons() -> void:
 	_main_buttons.alignment = BoxContainer.ALIGNMENT_CENTER
 	_root_vbox.add_child(_main_buttons)
 
-	# Command-center entry list. The "▌ NN" prefix reads as a
-	# command-line index marker and the all-caps label sells the
-	# tactical / military terminal feel without forcing a font swap.
-	# Buttons themselves are deliberately narrow (220x42) so they
-	# stack like a chassis-plate menu instead of stretching like a
-	# generic web form.
+	# Command-center entry list. Tight 150x40 plate sized to fit the
+	# longest label ("CAMPAIGNS") plus a slim left-edge command
+	# indicator bar drawn by the bracket overlay. Decoration carries
+	# all the personality (corner brackets, indicator bar, right
+	# diamond) so the button text can stay clean caps without
+	# inline glyphs.
 	var entries: Array[Dictionary] = [
 		{ "label": "Skirmish",  "callback": Callable(self, "_on_play_pressed") },
 		{ "label": "Campaigns", "callback": Callable(self, "_on_campaigns_pressed") },
@@ -239,33 +239,32 @@ func _build_main_buttons() -> void:
 		{ "label": "Settings",  "callback": Callable(self, "_on_settings_pressed") },
 		{ "label": "Quit",      "callback": Callable(self, "_on_quit_pressed") },
 	]
-	for i: int in entries.size():
-		var entry: Dictionary = entries[i]
+	for entry: Dictionary in entries:
 		var btn := Button.new()
-		btn.text = "▌ %02d  %s" % [i + 1, (entry["label"] as String).to_upper()]
-		btn.custom_minimum_size = Vector2(220, 42)
-		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		btn.text = (entry["label"] as String).to_upper()
+		btn.custom_minimum_size = Vector2(150, 40)
+		btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		btn.pressed.connect(entry["callback"] as Callable)
 		_main_buttons.add_child(btn)
 		_add_command_center_brackets(btn)
 
 
 func _add_command_center_brackets(btn: Button) -> void:
-	## Drape a custom-drawn Control over the button that paints
-	## brass L-shaped corner brackets. The Control resizes with the
+	## Drape a custom-drawn Control over the button that paints brass
+	## corner brackets, a left-edge command indicator bar, and a
+	## right-side diamond accent. The Control resizes with the
 	## button (PRESET_FULL_RECT) and ignores mouse input so clicks
 	## still reach the underlying button. Hover state tracks the
-	## button's pressed/hovered look via a tiny callback.
+	## button's pressed / hovered state via signal-driven redraws --
+	## the indicator bar in particular gets a bright accent flip on
+	## hover so the active entry calls itself out without needing
+	## extra outline thickness.
 	var deco := Control.new()
 	deco.name = "CmdCenterBrackets"
 	deco.set_anchors_preset(Control.PRESET_FULL_RECT)
 	deco.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	btn.add_child(deco)
-	# Render via a dedicated draw helper so we can re-use the same
-	# bracket shapes elsewhere if more menus need them.
 	deco.draw.connect(_draw_command_center_brackets.bind(deco, btn))
-	# Repaint on hover state changes so the brackets glow brighter
-	# when the user is over the button.
 	btn.mouse_entered.connect(deco.queue_redraw)
 	btn.mouse_exited.connect(deco.queue_redraw)
 	btn.focus_entered.connect(deco.queue_redraw)
@@ -273,32 +272,47 @@ func _add_command_center_brackets(btn: Button) -> void:
 
 
 func _draw_command_center_brackets(deco: Control, btn: Button) -> void:
-	## Paints four L-shaped brackets at the button corners + a small
-	## diamond accent at the right edge so the silhouette reads as a
-	## tactical terminal entry rather than a flat slab.
+	## Paints four L-shaped brackets at the button corners, a left-
+	## edge "command indicator" bar (the slim block that used to be
+	## the ▌ glyph in the label), and a small diamond at the right
+	## edge so the silhouette reads as a tactical terminal entry
+	## rather than a flat slab. The indicator bar uses a vibrant
+	## accent on hover so the active row is unambiguous.
 	var sz: Vector2 = deco.size
 	if sz.x <= 0.0 or sz.y <= 0.0:
 		return
 	var hot: bool = btn.has_focus() or btn.get_global_rect().has_point(btn.get_global_mouse_position())
-	var col: Color = Color(1.00, 0.78, 0.32, 1.0) if hot else Color(0.55, 0.46, 0.30, 0.85)
-	var L: float = 11.0
+	var bracket_col: Color = Color(1.00, 0.78, 0.32, 1.0) if hot else Color(0.55, 0.46, 0.30, 0.85)
+	# Indicator bar -- bright cyan-ish accent on hover, dim brass at
+	# rest. The active flip is the loudest hover signal on the
+	# button; brackets carry the supporting cast.
+	var indicator_col: Color = Color(0.55, 0.95, 1.00, 1.0) if hot else Color(0.55, 0.46, 0.30, 0.85)
+	var L: float = 9.0
 	var t: float = 2.0
 	var inset: float = 3.0
 	# Four corner L brackets.
-	deco.draw_rect(Rect2(inset, inset, L, t), col, true)
-	deco.draw_rect(Rect2(inset, inset, t, L), col, true)
-	deco.draw_rect(Rect2(sz.x - inset - L, inset, L, t), col, true)
-	deco.draw_rect(Rect2(sz.x - inset - t, inset, t, L), col, true)
-	deco.draw_rect(Rect2(inset, sz.y - inset - t, L, t), col, true)
-	deco.draw_rect(Rect2(inset, sz.y - inset - L, t, L), col, true)
-	deco.draw_rect(Rect2(sz.x - inset - L, sz.y - inset - t, L, t), col, true)
-	deco.draw_rect(Rect2(sz.x - inset - t, sz.y - inset - L, t, L), col, true)
-	# Right-edge diamond accent -- small rotated square 6px in from
-	# the right edge, visually anchors the "row" feel of each entry.
-	# Drawn as two triangles so we don't need a transform stack.
-	var dx: float = sz.x - 12.0
+	deco.draw_rect(Rect2(inset, inset, L, t), bracket_col, true)
+	deco.draw_rect(Rect2(inset, inset, t, L), bracket_col, true)
+	deco.draw_rect(Rect2(sz.x - inset - L, inset, L, t), bracket_col, true)
+	deco.draw_rect(Rect2(sz.x - inset - t, inset, t, L), bracket_col, true)
+	deco.draw_rect(Rect2(inset, sz.y - inset - t, L, t), bracket_col, true)
+	deco.draw_rect(Rect2(inset, sz.y - inset - L, t, L), bracket_col, true)
+	deco.draw_rect(Rect2(sz.x - inset - L, sz.y - inset - t, L, t), bracket_col, true)
+	deco.draw_rect(Rect2(sz.x - inset - t, sz.y - inset - L, t, L), bracket_col, true)
+	# Left-edge command indicator bar. Centred vertically, ~60% of
+	# button height, 4px wide, inset 6px from the left edge. Replaces
+	# the ▌ glyph that used to live in the button text -- now an
+	# independently-coloured Control element so hover can flip it to
+	# a high-contrast accent without affecting label colour.
+	var bar_w: float = 4.0
+	var bar_h: float = sz.y * 0.6
+	var bar_x: float = 6.0
+	var bar_y: float = (sz.y - bar_h) * 0.5
+	deco.draw_rect(Rect2(bar_x, bar_y, bar_w, bar_h), indicator_col, true)
+	# Right-edge diamond accent -- 6px in from the right edge.
+	var dx: float = sz.x - 10.0
 	var dy: float = sz.y * 0.5
-	var d: float = 4.0
+	var d: float = 3.5
 	deco.draw_colored_polygon(
 		PackedVector2Array([
 			Vector2(dx, dy - d),
@@ -306,7 +320,7 @@ func _draw_command_center_brackets(deco: Control, btn: Button) -> void:
 			Vector2(dx, dy + d),
 			Vector2(dx - d, dy),
 		]),
-		col,
+		bracket_col,
 	)
 
 
