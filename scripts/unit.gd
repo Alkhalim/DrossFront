@@ -3159,6 +3159,16 @@ func _maybe_override_shape_for_unit(base: Dictionary) -> Dictionary:
 	## on the unmodified profile.
 	if not stats:
 		return base
+	if stats.unit_name.findn("Breacher") >= 0:
+		# Breacher Tank squad of 3 sits looser than it needs to.
+		# Chassis is ~2.91u wide (hull 1.55 + 2 * track 0.68); the
+		# transport-class default spacing of 3.5u left a ~0.6u gap
+		# between adjacent tanks. Tighten to 3.15u for a ~0.24u
+		# gap -- visibly closer formation without the tracks
+		# clipping into each other.
+		var ovb: Dictionary = base.duplicate()
+		ovb["formation_spacing"] = 3.15
+		return ovb
 	if stats.unit_name.findn("Harbinger") >= 0:
 		var ovh: Dictionary = base.duplicate()
 		# Harbinger ('NODE Command Carrier') reads as the heavy

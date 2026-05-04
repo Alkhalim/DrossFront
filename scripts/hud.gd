@@ -2341,7 +2341,7 @@ func _rebuild_production_buttons(building: Building) -> void:
 
 	# Defense tab: render the upgrade buttons and skip the unit grid.
 	if show_hq_tabs and _hq_tab == "defense":
-		_action_label.text = "HQ Defense Upgrades"
+		_action_label.text = "Upgrades"
 		_append_hq_upgrade_buttons(building)
 		return
 
@@ -2450,6 +2450,10 @@ func _building_display_name(building_id: String) -> String:
 
 
 func _hq_defense_tab_eligible(building: Building) -> bool:
+	## Eligibility for the HQ "Upgrades" tab (was "Defense"). Both
+	## factions get the tab now since the Crawler Anchor research
+	## lives here -- the Anvil-specific HQ Plating / HQ Battery
+	## buttons hide themselves below when the player isn't Anvil.
 	if not building or not building.stats:
 		return false
 	if building.stats.building_id != &"headquarters":
@@ -2458,10 +2462,7 @@ func _hq_defense_tab_eligible(building: Building) -> bool:
 		return false
 	if not building.is_constructed:
 		return false
-	var settings: Node = get_node_or_null("/root/MatchSettings")
-	if not settings or not ("player_faction" in settings):
-		return false
-	return (settings.get("player_faction") as int) == 0
+	return true
 
 
 func _ensure_hq_tab_row() -> void:
@@ -2487,8 +2488,8 @@ func _ensure_hq_tab_row() -> void:
 	_hq_tab_train.pressed.connect(_on_hq_tab_pressed.bind("train"))
 	row.add_child(_hq_tab_train)
 	_hq_tab_defense = Button.new()
-	_hq_tab_defense.text = "Defense"
-	_hq_tab_defense.custom_minimum_size = Vector2(86, 26)
+	_hq_tab_defense.text = "Upgrades"
+	_hq_tab_defense.custom_minimum_size = Vector2(96, 26)
 	_hq_tab_defense.toggle_mode = true
 	_hq_tab_defense.button_pressed = _hq_tab == "defense"
 	_hq_tab_defense.pressed.connect(_on_hq_tab_pressed.bind("defense"))
@@ -2520,28 +2521,38 @@ const HQ_PLATING_HP_MULT: float = 1.25
 
 
 func _append_hq_upgrade_buttons(building: Building) -> void:
-	## Renders the HQ Plating + HQ Battery buttons. Eligibility check
-	## (Anvil-only, own HQ, constructed) lives in
-	## _hq_defense_tab_eligible -- this function assumes the caller
-	## already gated on it.
-	if not bool(building.get("hq_plating_active")):
-		_button_grid.add_child(_make_hq_upgrade_button(
-			building,
-			"HQ Plating",
-			"+%d%% HP — heavier ablative plating on the command building." % int((HQ_PLATING_HP_MULT - 1.0) * 100.0),
-			HQ_PLATING_COST_SALVAGE,
-			HQ_PLATING_COST_FUEL,
-			Callable(self, "_apply_hq_plating"),
-		))
-	if not bool(building.get("hq_battery_active")):
-		_button_grid.add_child(_make_hq_upgrade_button(
-			building,
-			"HQ Battery",
-			"+50%% damage / +4u range on the HQ defensive turret.",
-			HQ_BATTERY_COST_SALVAGE,
-			HQ_BATTERY_COST_FUEL,
-			Callable(self, "_apply_hq_battery"),
-		))
+	## Renders the HQ Upgrades tab. Crawler Anchor research is shown
+	## for both factions; HQ Plating + HQ Battery are Anvil-only
+	## (faction check inline so the tab itself stays available to
+	## Sable for the Anchor row).
+	# Crawler Anchor research -- moved here from the basic armory
+	# per the upgrade-tier reorg. Shows the same row the armory
+	# used to render so the player gets a consistent UI.
+	var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
+	if rm:
+		_button_grid.add_child(_make_anchor_research_row(rm, ""))
+	# Anvil-only HQ upgrades.
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	var is_anvil: bool = settings and "player_faction" in settings and (settings.get("player_faction") as int) == 0
+	if is_anvil:
+		if not bool(building.get("hq_plating_active")):
+			_button_grid.add_child(_make_hq_upgrade_button(
+				building,
+				"HQ Plating",
+				"+%d%% HP — heavier ablative plating on the command building." % int((HQ_PLATING_HP_MULT - 1.0) * 100.0),
+				HQ_PLATING_COST_SALVAGE,
+				HQ_PLATING_COST_FUEL,
+				Callable(self, "_apply_hq_plating"),
+			))
+		if not bool(building.get("hq_battery_active")):
+			_button_grid.add_child(_make_hq_upgrade_button(
+				building,
+				"HQ Battery",
+				"+50%% damage / +4u range on the HQ defensive turret.",
+				HQ_BATTERY_COST_SALVAGE,
+				HQ_BATTERY_COST_FUEL,
+				Callable(self, "_apply_hq_battery"),
+			))
 
 
 func _make_hq_upgrade_button(building: Building, title: String, blurb: String, cost_s: int, cost_f: int, apply_cb: Callable) -> Button:
@@ -3168,10 +3179,16 @@ func _turret_profile_tooltip(key: StringName, data: Dictionary) -> String:
 const ANVIL_BASIC_BRANCHED_UNITS: Array[String] = [
 	"res://resources/units/anvil_rook.tres",
 	"res://resources/units/anvil_hound.tres",
-	"res://resources/units/anvil_bulwark.tres",
+	# Bulwark moved to ANVIL_ADVANCED -- the heavy mech needs the
+	# bigger armory to commit a branch even though basic_armory
+	# unlocks the build.
 	"res://resources/units/anvil_phalanx.tres",
+	# Breacher Tank's branch upgrades (Salvo / Mortar) live at the
+	# basic armory per the current build-tier reorg.
+	"res://resources/units/anvil_breacher_tank.tres",
 ]
 const ANVIL_ADVANCED_BRANCHED_UNITS: Array[String] = [
+	"res://resources/units/anvil_bulwark.tres",
 	"res://resources/units/anvil_forgemaster.tres",
 	"res://resources/units/anvil_hammerhead.tres",
 ]
@@ -3240,13 +3257,10 @@ func _rebuild_armory_buttons(building: Building) -> void:
 		_button_grid.add_child(_make_armory_row(base_stats, bcm, cost_suffix))
 
 	# Anchor Mode research button — bottom of the Basic Armory only.
-	# It's a Crawler / economy upgrade, baseline-tier; the Advanced
-	# Armory's slot is reserved for the bigger-ticket branch commits
-	# of the units it gates, so don't double up.
-	if not is_advanced_armory:
-		var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
-		if rm:
-			_button_grid.add_child(_make_anchor_research_row(rm, cost_suffix))
+	# Crawler Anchor research moved to the HQ "Upgrades" tab so the
+	# armory slots stay focused on per-unit branch commits. The
+	# anchor row is rendered by _append_hq_upgrade_buttons now.
+	pass
 
 
 func _make_armory_row(base_stats: UnitStatResource, bcm: Node, cost_suffix: String) -> Control:
