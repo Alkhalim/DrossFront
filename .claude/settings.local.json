@@ -32,7 +32,8 @@
       "Bash(awk 'NR>=1086 && NR<=1089 {sub\\(/^\\\\t/, \"\"\\); print; next} {print}' scripts/unit.gd)",
       "Bash(xargs -I {} basename {})",
       "Bash(godot --headless --check-only --script scripts/selection_manager.gd)",
-      "Bash(python *)"
+      "Bash(python *)",
+      "Bash(py --version)"
     ]
   }
 }
