@@ -1047,6 +1047,22 @@ func _physics_process(delta: float) -> void:
 		if _stuck_timer >= 1.5 and _stuck_timer < 1.5 + delta * 1.5:
 			if _nav_agent:
 				_nav_agent.target_position = move_target
+		elif _stuck_timer > 3.0 and _stuck_timer < 3.0 + delta * 1.5:
+			# Detour stage. The repeated re-path at 1.5s used the same
+			# navmesh + same target, which usually computes the same
+			# blocked path -- the chassis grinds against the same
+			# building corner over and over. Try once to insert a
+			# side-step waypoint that routes around the nearest
+			# blocking building before retrying the original target.
+			var detour: Vector3 = _find_detour_waypoint(direction)
+			if detour != Vector3.INF:
+				# Push the original target back into the queue so it
+				# resumes after the detour is reached, then retarget
+				# to the side-step.
+				move_queue.push_front(move_target)
+				move_target = detour
+				if _nav_agent:
+					_nav_agent.target_position = detour
 		elif _stuck_timer > 5.0 and _stuck_timer < 5.0 + delta * 1.5:
 			# Cliff-aware back-out. Most stuck-against-cliff cases
 			# happen when the navmesh ends short of the chassis's
@@ -1459,6 +1475,87 @@ func _speed_from_tier(tier: StringName) -> float:
 		&"fast": return 12.0
 		&"very_fast": return 16.0
 	return 5.0
+
+
+func _find_detour_waypoint(forward_dir: Vector3) -> Vector3:
+	## Picks a side-step waypoint that routes the Crawler around the
+	## nearest blocking building. Called from the 3s stuck stage so
+	## a chassis grinding against the same building corner gets a
+	## one-time detour inserted in front of the original target
+	## instead of just re-issuing the blocked path.
+	##
+	## Approach:
+	##   1. Find the nearest building within DETOUR_SCAN_RADIUS
+	##      whose footprint sits between us and the desired
+	##      direction. That's the obstacle we're stuck on.
+	##   2. Compute the perpendicular axis (rotate forward_dir 90°
+	##      around Y) and pick whichever side has more clearance --
+	##      whichever sidestep is farther from the blocker's centre.
+	##   3. Project a waypoint at that perpendicular offset, far
+	##      enough past the building edge that the Crawler clears
+	##      it before re-targeting the original goal.
+	##
+	## Returns Vector3.INF when no blocking building is found (in
+	## which case the regular stuck-rescue path takes over).
+	const DETOUR_SCAN_RADIUS: float = 14.0
+	const DETOUR_OFFSET_MIN: float = 8.0
+	var origin: Vector3 = global_position
+	# Forward should already be horizontal but normalise just in case.
+	var fwd: Vector3 = Vector3(forward_dir.x, 0.0, forward_dir.z)
+	if fwd.length_squared() < 0.01:
+		return Vector3.INF
+	fwd = fwd.normalized()
+	# Find the closest building roughly ahead of the chassis.
+	var best_blocker: Node3D = null
+	var best_blocker_d: float = DETOUR_SCAN_RADIUS
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var b: Node3D = node as Node3D
+		if not b:
+			continue
+		var to_b: Vector3 = b.global_position - origin
+		to_b.y = 0.0
+		var d: float = to_b.length()
+		if d > DETOUR_SCAN_RADIUS:
+			continue
+		# Reject buildings BEHIND us; only those roughly along the
+		# desired direction count as the blocker. Dot > 0.2 = within
+		# ~78° cone forward.
+		if d > 0.001 and to_b.normalized().dot(fwd) < 0.2:
+			continue
+		if d < best_blocker_d:
+			best_blocker_d = d
+			best_blocker = b
+	if not best_blocker:
+		return Vector3.INF
+	# Perpendicular axis (90° rotation of fwd around Y).
+	var perp: Vector3 = Vector3(-fwd.z, 0.0, fwd.x)
+	# Pick the side that puts the detour FARTHER from the blocker's
+	# centre line (along perp). The blocker offset projected onto
+	# perp tells us which side it leans.
+	var to_blocker: Vector3 = best_blocker.global_position - origin
+	to_blocker.y = 0.0
+	var blocker_lateral: float = to_blocker.dot(perp)
+	# Side direction: opposite of where the blocker leans, so the
+	# detour walks AWAY from the blocker.
+	var side_dir: Vector3 = -perp if blocker_lateral > 0.0 else perp
+	# How far out to step. Pull from the blocker's footprint half-
+	# extent if available so the detour clears the building's
+	# bounding box, plus a comfortable margin.
+	var b_half: float = 4.0
+	var b_stats_v: Variant = best_blocker.get("stats")
+	if typeof(b_stats_v) == TYPE_OBJECT and is_instance_valid(b_stats_v):
+		var fp_v: Variant = b_stats_v.get("footprint_size")
+		if typeof(fp_v) == TYPE_VECTOR3:
+			var fp: Vector3 = fp_v as Vector3
+			b_half = maxf(fp.x, fp.z) * 0.5
+	var lateral_off: float = maxf(b_half + 4.0, DETOUR_OFFSET_MIN)
+	# Detour position: side-step + a small forward push so the
+	# waypoint isn't at the same Z as where we're stuck.
+	var detour: Vector3 = origin + side_dir * lateral_off + fwd * 4.0
+	detour.y = origin.y
+	return detour
 
 
 func _find_clear_extraction_point() -> Vector3:
