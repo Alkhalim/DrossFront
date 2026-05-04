@@ -433,7 +433,7 @@ func _create_visuals() -> void:
 	# can recolor it (owner / contested / neutral) without allocating
 	# fresh materials per frame.
 	_range_mat_cached = StandardMaterial3D.new()
-	_range_mat_cached.albedo_color = Color(NEUTRAL_COLOR.r, NEUTRAL_COLOR.g, NEUTRAL_COLOR.b, 0.10)
+	_range_mat_cached.albedo_color = Color(NEUTRAL_COLOR.r, NEUTRAL_COLOR.g, NEUTRAL_COLOR.b, 0.05)
 	_range_mat_cached.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_range_mat_cached.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_range_mat_cached.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -455,7 +455,7 @@ func _create_visuals() -> void:
 	ring_mesh.rings = 6
 	_range_ring.mesh = ring_mesh
 	_range_ring_mat = StandardMaterial3D.new()
-	_range_ring_mat.albedo_color = Color(NEUTRAL_COLOR.r, NEUTRAL_COLOR.g, NEUTRAL_COLOR.b, 0.55)
+	_range_ring_mat.albedo_color = Color(NEUTRAL_COLOR.r, NEUTRAL_COLOR.g, NEUTRAL_COLOR.b, 0.40)
 	_range_ring_mat.emission_enabled = true
 	_range_ring_mat.emission = NEUTRAL_COLOR
 	_range_ring_mat.emission_energy_multiplier = 0.9
@@ -545,8 +545,8 @@ func _update_visuals() -> void:
 	# contested transitions.
 	if _range_mat_cached and _range_ring_mat and color != _range_color_cached:
 		_range_color_cached = color
-		_range_mat_cached.albedo_color = Color(color.r, color.g, color.b, 0.10)
-		_range_ring_mat.albedo_color = Color(color.r, color.g, color.b, 0.55)
+		_range_mat_cached.albedo_color = Color(color.r, color.g, color.b, 0.05)
+		_range_ring_mat.albedo_color = Color(color.r, color.g, color.b, 0.40)
 		_range_ring_mat.emission = color
 
 	# Capture label -- compare-and-skip on the formatted string so

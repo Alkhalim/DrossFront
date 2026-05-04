@@ -139,25 +139,61 @@ func _build_visuals() -> void:
 		wedge.set_surface_override_material(0, stripe_mat)
 		add_child(wedge)
 
-	# Dedicated GPU steam emitter. Cone-shape with strong upward
-	# velocity and a long lifetime so the plume is unmistakable.
-	# The shared ParticleEmitterManager.emit_smoke route was too
-	# subtle / capped for a continuous source.
+	# Dedicated GPU steam emitter. Cone-shape with upward velocity
+	# and a long lifetime so the plume reads as a continuous column
+	# without the previous version's busy density. The 'smoke' is a
+	# circular alpha-fade billboard sprite -- soft round puffs
+	# instead of square quads.
 	_steam = GPUParticles3D.new()
-	_steam.amount = 32
-	_steam.lifetime = 2.4
-	_steam.preprocess = 1.5  # warm the column on spawn so it doesn't pop in empty
+	_steam.amount = 16  # was 32 -- less dense, less visual noise
+	_steam.lifetime = 2.6
+	_steam.preprocess = 1.5
 	_steam.position = Vector3(0.0, 0.55, 0.0)
 	_steam.draw_pass_1 = _build_steam_mesh()
 	_steam.process_material = _build_steam_material()
 	add_child(_steam)
 
 
+## Process-wide cache of the soft-round puff texture so every vent
+## reuses the same GPU upload.
+static var _puff_texture: Texture2D = null
+
+
+static func _ensure_puff_texture() -> Texture2D:
+	## Builds (once) a circular alpha-fade puff texture used as the
+	## steam particle albedo. Radial gradient: opaque white at the
+	## centre fading to transparent at the rim. Replaces the square
+	## QuadMesh outline with a soft round shape.
+	if _puff_texture:
+		return _puff_texture
+	var sz: int = 64
+	var img: Image = Image.create(sz, sz, false, Image.FORMAT_RGBA8)
+	var centre: float = float(sz - 1) * 0.5
+	var max_r: float = centre * 0.95
+	for y: int in sz:
+		for x: int in sz:
+			var dx: float = float(x) - centre
+			var dy: float = float(y) - centre
+			var dist: float = sqrt(dx * dx + dy * dy)
+			# Smoothstep falloff: fully opaque inside ~30% of the
+			# radius, smoothly transitioning to transparent at the
+			# rim. Gives the puff a soft round read with a hint of
+			# core density.
+			var t: float = clampf((dist - max_r * 0.30) / (max_r * 0.70), 0.0, 1.0)
+			# Smoother-than-linear falloff for that "soft cloud" feel.
+			var alpha: float = 1.0 - (t * t * (3.0 - 2.0 * t))
+			img.set_pixel(x, y, Color(1.0, 1.0, 1.0, alpha))
+	img.generate_mipmaps()
+	_puff_texture = ImageTexture.create_from_image(img)
+	return _puff_texture
+
+
 func _build_steam_mesh() -> Mesh:
 	var qm: QuadMesh = QuadMesh.new()
 	qm.size = Vector2(1.0, 1.0)
 	var mat: StandardMaterial3D = StandardMaterial3D.new()
-	mat.albedo_color = Color(0.85, 0.88, 0.92, 0.85)
+	mat.albedo_color = Color(0.85, 0.88, 0.92, 0.65)
+	mat.albedo_texture = _ensure_puff_texture()
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
@@ -170,27 +206,29 @@ func _build_steam_mesh() -> Mesh:
 func _build_steam_material() -> ParticleProcessMaterial:
 	var pm: ParticleProcessMaterial = ParticleProcessMaterial.new()
 	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
-	pm.emission_sphere_radius = 0.35
+	pm.emission_sphere_radius = 0.30
 	pm.direction = Vector3(0.0, 1.0, 0.0)
-	pm.spread = 18.0
-	pm.initial_velocity_min = 1.6
-	pm.initial_velocity_max = 2.6
-	pm.gravity = Vector3(0.0, 0.6, 0.0)  # mild positive gravity (rises)
-	pm.scale_min = 0.55
-	pm.scale_max = 1.35
+	pm.spread = 14.0  # tighter cone for cleaner column
+	pm.initial_velocity_min = 1.4
+	pm.initial_velocity_max = 2.2
+	pm.gravity = Vector3(0.0, 0.6, 0.0)
+	pm.scale_min = 0.65
+	pm.scale_max = 1.20
 	pm.angle_min = -180.0
 	pm.angle_max = 180.0
-	# Fade out across lifetime via colour ramp.
+	# Fade out across lifetime via colour ramp. Lower starting
+	# alpha (0.55 vs 0.85) so the column is a soft mist rather
+	# than dense smoke.
 	var ramp: Gradient = Gradient.new()
-	ramp.set_color(0, Color(0.92, 0.94, 0.96, 0.85))
+	ramp.set_color(0, Color(0.92, 0.94, 0.96, 0.55))
 	ramp.set_color(1, Color(0.85, 0.86, 0.88, 0.0))
 	var grad_tex: GradientTexture1D = GradientTexture1D.new()
 	grad_tex.gradient = ramp
 	pm.color_ramp = grad_tex
 	# Scale curve -- grow as the puff rises.
 	var sc_curve: Curve = Curve.new()
-	sc_curve.add_point(Vector2(0.0, 0.6))
-	sc_curve.add_point(Vector2(1.0, 1.6))
+	sc_curve.add_point(Vector2(0.0, 0.7))
+	sc_curve.add_point(Vector2(1.0, 1.5))
 	var sc_tex: CurveTexture = CurveTexture.new()
 	sc_tex.curve = sc_curve
 	pm.scale_curve = sc_tex
