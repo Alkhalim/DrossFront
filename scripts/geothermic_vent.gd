@@ -84,7 +84,21 @@ func _build_visuals() -> void:
 		add_child(wedge)
 
 
+## Throttle for the cover-state recheck. Repolling the buildings
+## group every frame for every vent at high counts is wasteful;
+## ~1 Hz is plenty since a generator either is or isn't on top.
+const COVER_RECHECK_INTERVAL: float = 1.1
+var _cover_check_timer: float = 0.0
+
+
 func _process(delta: float) -> void:
+	# Periodically rescan for a Generator footprint covering the
+	# vent. When found, mark covered (kills the smoke); when the
+	# generator is destroyed the recheck flips it back to open.
+	_cover_check_timer -= delta
+	if _cover_check_timer <= 0.0:
+		_cover_check_timer = COVER_RECHECK_INTERVAL + randf_range(-0.1, 0.2)
+		_recheck_cover_state()
 	if is_covered:
 		return
 	_smoke_timer -= delta
@@ -96,6 +110,29 @@ func _process(delta: float) -> void:
 	if _pem and _pem.has_method("emit_smoke"):
 		var origin: Vector3 = global_position + Vector3(0.0, 0.4, 0.0)
 		_pem.call("emit_smoke", origin, Vector3(0.0, 4.0, 0.0), Color(0.78, 0.80, 0.82, 0.55))
+
+
+func _recheck_cover_state() -> void:
+	## Scans the buildings group for a Generator (basic_generator or
+	## advanced_generator) whose footprint overlaps this vent. Sets
+	## is_covered accordingly so the smoke plume tracks reality.
+	var found: bool = false
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var b: Node3D = node as Node3D
+		if not b:
+			continue
+		var stats: Variant = b.get("stats")
+		if stats == null:
+			continue
+		var bid: StringName = stats.get("building_id") as StringName
+		if bid != &"basic_generator" and bid != &"advanced_generator":
+			continue
+		if b.global_position.distance_to(global_position) < VENT_SIZE * 0.6:
+			found = true
+			break
+	is_covered = found
 
 
 func mark_covered(covered: bool) -> void:

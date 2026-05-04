@@ -146,6 +146,10 @@ func _ready() -> void:
 	# hostile AIs instead of two. Done here so subsequent setup paths
 	# read the corrected team_ids.
 	_apply_scenario_team_overrides()
+	# Geothermic vents drive Generator placement. Spawn them BEFORE
+	# the player + AI start placing buildings so any seeded base
+	# can find vents to attach Generators to.
+	_setup_geothermic_vents()
 	_setup_player()
 	_setup_ai()
 	# After bases/AI controllers are in place, seed any scenario-
@@ -4435,3 +4439,57 @@ func _faction_for_player(player_id: int) -> int:
 		if st and st.team_id == 0:
 			return settings.get("player_faction") as int
 	return settings.get("enemy_faction") as int
+
+
+
+## --- Geothermic vents -----------------------------------------------------
+
+func _setup_geothermic_vents() -> void:
+	## Spawns the geothermic-vent network. Each player gets:
+	##   - 2 vents close to their HQ (forming the "starter pair")
+	##   - 1 forward vent ~25u toward map center (visible at start
+	##     so the player can see the next economic step)
+	##   - 3 distributed vents elsewhere on the map
+	## Generators can only be placed on these vents (enforced by the
+	## SelectionManager build path).
+	var roster: Array[Dictionary] = _current_roster()
+	var centre_dir_per_player: Array[Vector3] = []
+	centre_dir_per_player.resize(roster.size())
+	for i: int in roster.size():
+		var pid: int = roster[i]["id"] as int
+		var hq_pos: Vector3 = _hq_position_for(pid)
+		# Direction from HQ toward map centre (Y stripped).
+		var to_centre: Vector3 = (Vector3.ZERO - hq_pos)
+		to_centre.y = 0.0
+		if to_centre.length_squared() > 0.001:
+			centre_dir_per_player[i] = to_centre.normalized()
+		else:
+			centre_dir_per_player[i] = Vector3(0, 0, -1)
+		# 2 close vents flanking the HQ.
+		var perp: Vector3 = Vector3(-centre_dir_per_player[i].z, 0.0, centre_dir_per_player[i].x)
+		_spawn_vent(hq_pos + perp * 12.0 + centre_dir_per_player[i] * 6.0)
+		_spawn_vent(hq_pos - perp * 12.0 + centre_dir_per_player[i] * 6.0)
+		# 1 forward vent toward the map centre.
+		_spawn_vent(hq_pos + centre_dir_per_player[i] * 28.0)
+	# Distributed vents -- 3 per player scattered across the map.
+	# Use a deterministic-but-varied placement: place along a ring
+	# around the map centre with per-player offsets so vent
+	# positions differ across modes / matches without sloshing on
+	# replay.
+	var dist_count: int = roster.size() * 3
+	var dist_radius: float = 75.0
+	for j: int in dist_count:
+		var ang: float = TAU * float(j) / float(dist_count)
+		var wobble: float = sin(ang * 3.0) * 12.0
+		var pos := Vector3(
+			cos(ang) * (dist_radius + wobble),
+			0.0,
+			sin(ang) * (dist_radius + wobble),
+		)
+		_spawn_vent(pos)
+
+
+func _spawn_vent(pos: Vector3) -> void:
+	var vent: GeothermicVent = GeothermicVent.new()
+	add_child(vent)
+	vent.global_position = Vector3(pos.x, 0.0, pos.z)

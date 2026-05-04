@@ -62,6 +62,14 @@ extends Resource
 ## only. Used by HUD's build menu to filter the buildable list.
 @export var faction_lock: int = 0
 
+## Geothermic-vent placement gate. When true, the building can ONLY
+## be placed on top of a GeothermicVent (a steam fissure). Used by
+## Generators -- power production is now tied to vent locations
+## instead of free placement, forcing the player to expand toward
+## map-distributed vents instead of camping every building next to
+## the HQ.
+@export var requires_geothermic_vent: bool = false
+
 @export_group("Superweapon")
 ## Empty when this building isn't a superweapon. Set to a kind id
 ## (e.g. &"molot", &"echo") to attach a SuperweaponComponent that

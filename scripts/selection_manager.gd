@@ -1945,6 +1945,12 @@ func _is_valid_build_position(pos: Vector3) -> bool:
 		return false
 	if not _is_build_position_explored(pos):
 		return false
+	# Geothermic-vent gate -- buildings flagged requires_geothermic_vent
+	# (Generators) only place on top of an open vent.
+	if _build_stats.get("requires_geothermic_vent"):
+		var vent: GeothermicVent = GeothermicVent.find_vent_at(get_tree().current_scene, pos, GeothermicVent.VENT_SIZE * 0.6)
+		if vent == null:
+			return false
 	var half_x: float = _build_stats.footprint_size.x * 0.5
 	var half_z: float = _build_stats.footprint_size.z * 0.5
 

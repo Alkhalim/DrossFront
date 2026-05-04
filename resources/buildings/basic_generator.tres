@@ -13,3 +13,4 @@ power_consumption = 0
 power_production = 30
 footprint_size = Vector3(2.5, 4, 2.5)
 placeholder_color = Color(0.25, 0.3, 0.4, 1)
+requires_geothermic_vent = true
