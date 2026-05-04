@@ -46,6 +46,7 @@ cost_salvage = 455
 cost_fuel = 49
 build_time = 38.5
 built_at = &"advanced_foundry"
+unlock_prerequisite = &"basic_armory"
 primary_weapon = SubResource("weapon_rotary_cannon")
 secondary_weapon = SubResource("weapon_missile_pod")
 special_description = "Anvil heavy line. Heavy AP cannon for armored targets + AA missile pod secondary for self-defense vs aircraft."

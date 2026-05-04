@@ -42,6 +42,7 @@ cost_salvage = 435
 cost_fuel = 56
 build_time = 36.0
 built_at = &"advanced_foundry"
+unlock_prerequisite = &"basic_armory"
 primary_weapon = SubResource("weapon_harbinger_railgun")
 sees_over_buildings = true
 secondary_weapon = SubResource("weapon_drone_swarm")
