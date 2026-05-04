@@ -99,6 +99,27 @@ var _salvage_accumulator: float = 0.0
 ## The archetype shifts the *secondary* timing and footprint shape.
 enum Strategy { BALANCED, TURRET_HEAVY, ECONOMY_HEAVY, RUSH, AIR }
 var _strategy: int = Strategy.BALANCED
+
+## Counter-training bookkeeping. Rebuilt each AI tick from the
+## current scene-wide enemy unit list. Maps armor_class
+## (StringName) -> count. When the most-common class accounts
+## for >50% of >= COUNTER_MIN_SEEN units, _pick_unit_for_foundry
+## flips to a 75/25 weighted choice favouring the AI's best
+## counter to that armor class.
+const COUNTER_MIN_SEEN: int = 4
+const COUNTER_FOCUS_PROB: float = 0.75
+var _enemy_armor_counts: Dictionary = {}
+var _enemy_total_seen: int = 0
+
+## Production-building cadence gate. Each new foundry / aerodrome
+## placement increments _production_buildings_built; each
+## successful military-unit queue increments _military_units_trained.
+## A new production building is only allowed when trained_count
+## >= placed_count * PRODUCTION_BUILDING_TRAINING_GATE so the AI
+## can't carpet the base with foundries before fielding any army.
+const PRODUCTION_BUILDING_TRAINING_GATE: int = 2
+var _production_buildings_built: int = 0
+var _military_units_trained: int = 0
 ## World-space offsets from HQ for each placed building. Filled at _setup
 ## with randomly jittered values keyed by the same string the build flow
 ## uses ("generator", "foundry", "salvage_yard", etc.).
@@ -404,6 +425,8 @@ func _process(delta: float) -> void:
 		if node.is_in_group("units") and is_instance_valid(node):
 			if "alive_count" in node and node.get("alive_count") > 0:
 				_units.append(node)
+	# Refresh the enemy-composition tally for counter training.
+	_refresh_enemy_armor_counts()
 
 	# Match wall-clock advances regardless of state. Drives the
 	# dormant-attack safety net so a stuck ECONOMY/ARMY/REBUILD
@@ -600,17 +623,17 @@ func _process_economy() -> void:
 			# Air doctrine: ONLY one basic foundry (the starter),
 			# then go straight into 2 aerodromes, THEN add a second
 			# basic foundry as ground-defence backup. Never builds
-			# advanced_foundry. Power + armoury still scale via the
-			# generic helpers. Both armoury tiers included so the
-			# tech-gated aircraft (Hammerhead etc.) actually unlock
-			# -- without them the aerodrome's filtered roster is
-			# empty and no aircraft ever queue.
+			# advanced_foundry. First aerodrome comes BEFORE basic
+			# armory so Phalanx drones (no tech gate) start
+			# producing ~75s into the match instead of waiting on
+			# the armory's ~50s build first. Adv armory still in
+			# the chain so Hammerhead unlocks for the second wave.
 			_place_next_power_building("generator2", _offset_for("generator2", Vector3(22, 0, 18)))
-			_try_place("basic_armory", "res://resources/buildings/basic_armory.tres", _offset_for("basic_armory", Vector3(18, 0, -4)))
 			_try_place("aerodrome", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome", Vector3(28, 0, -8)))
+			_try_place("basic_armory", "res://resources/buildings/basic_armory.tres", _offset_for("basic_armory", Vector3(18, 0, -4)))
 			_try_place("aerodrome_2", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome_2", Vector3(-28, 0, -8)))
-			_try_place("advanced_armory", "res://resources/buildings/advanced_armory.tres", _offset_for("advanced_armory", Vector3(-18, 0, -4)))
 			_try_place("sam_site", "res://resources/buildings/sam_site.tres", _offset_for("sam_site", Vector3(0, 0, -22)))
+			_try_place("advanced_armory", "res://resources/buildings/advanced_armory.tres", _offset_for("advanced_armory", Vector3(-18, 0, -4)))
 			_try_place("foundry_2", "res://resources/buildings/basic_foundry.tres", _offset_for("foundry_2", Vector3(0, 0, 14)))
 			_try_place_salvage_yard("salvage_yard_2", _offset_for("salvage_yard_2", Vector3(-12, 0, 28)))
 			_try_place("turret", _turret_path, _offset_for("turret", Vector3(0, 0, -14)))
@@ -781,6 +804,72 @@ func _ai_prerequisites_met(bstats: BuildingStatResource) -> bool:
 	return true
 
 
+func _refresh_enemy_armor_counts() -> void:
+	## Walks every alive enemy unit (any owner that isn't ours and
+	## isn't an ally per PlayerRegistry) and tallies them by
+	## armor_class. Stored on _enemy_armor_counts so the
+	## counter-training pick can read it without re-walking the
+	## scene per foundry per tick.
+	_enemy_armor_counts.clear()
+	_enemy_total_seen = 0
+	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node):
+			continue
+		var node_owner: int = (node.get("owner_id") as int) if "owner_id" in node else 0
+		if node_owner == owner_id:
+			continue
+		var hostile: bool = true
+		if registry and registry.has_method("are_enemies"):
+			hostile = registry.call("are_enemies", owner_id, node_owner)
+		if not hostile:
+			continue
+		if "alive_count" in node and (node.get("alive_count") as int) <= 0:
+			continue
+		var stats_v: UnitStatResource = node.get("stats") as UnitStatResource
+		if not stats_v:
+			continue
+		var armor: StringName = stats_v.armor_class
+		_enemy_armor_counts[armor] = (_enemy_armor_counts.get(armor, 0) as int) + 1
+		_enemy_total_seen += 1
+
+
+func _dominant_enemy_armor() -> StringName:
+	## Returns the armor_class accounting for >50% of seen enemies
+	## when at least COUNTER_MIN_SEEN have been observed. Empty
+	## StringName means no clear dominant class -- the picker
+	## falls back to the normal weighted choice.
+	if _enemy_total_seen < COUNTER_MIN_SEEN:
+		return &""
+	var threshold: int = int(_enemy_total_seen / 2) + 1  # > 50%
+	for k_v: Variant in _enemy_armor_counts.keys():
+		var k: StringName = k_v as StringName
+		if (_enemy_armor_counts[k_v] as int) >= threshold:
+			return k
+	return &""
+
+
+func _best_counter_in_roster(roster: Array, target_armor: StringName) -> UnitStatResource:
+	## Picks the unit in the roster whose primary weapon yields the
+	## highest get_role_mult_for(target_armor). Tiebreaker is roster
+	## order. Returns null if the roster is empty.
+	var best: UnitStatResource = null
+	var best_mult: float = -1.0
+	for r: Variant in roster:
+		var u: UnitStatResource = r as UnitStatResource
+		if not u or not u.primary_weapon:
+			continue
+		var m: float = u.primary_weapon.get_role_mult_for(target_armor)
+		if m > best_mult:
+			best_mult = m
+			best = u
+	return best
+
+
+func _is_production_building_id(bid: StringName) -> bool:
+	return bid == &"basic_foundry" or bid == &"advanced_foundry" or bid == &"aerodrome"
+
+
 func _try_place_salvage_yard(key: String, offset: Vector3) -> void:
 	## Wraps _try_place for salvage yards with an ROI check: only
 	## drops the yard if there's at least 150 salvage worth of
@@ -873,6 +962,16 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 	# straight to the late-tier structure.
 	if not _ai_prerequisites_met(bstats):
 		return
+	# Production-building cadence gate: the AI can't carpet the
+	# base with foundries / aerodromes before fielding any army.
+	# Each new production building requires PRODUCTION_BUILDING_TRAINING_GATE
+	# combat units to have been queued since the previous one.
+	# The very first production building (the starter foundry)
+	# falls through because _production_buildings_built starts at
+	# 0 and the gate compares 0 >= 0 * 2.
+	if _is_production_building_id(bstats.building_id):
+		if _military_units_trained < _production_buildings_built * PRODUCTION_BUILDING_TRAINING_GATE:
+			return
 	# AI must afford the building, just like the player. _ai_resource_manager
 	# handles the spending inside builder.place_building.
 	if _ai_resource_manager and _ai_resource_manager.has_method("can_afford"):
@@ -947,6 +1046,11 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 	if not building:
 		return
 	_buildings_placed[key] = true
+	# Production-building cadence counter -- bumped after a
+	# successful place so the gate above blocks the NEXT one
+	# until enough units are trained.
+	if _is_production_building_id(bstats.building_id):
+		_production_buildings_built += 1
 
 	# Keep references for production
 	match key:
@@ -1883,6 +1987,13 @@ func _try_queue_at(foundry_node: Node) -> void:
 	# for the drain-prevention rationale.
 	if foundry_node.queue_unit(unit_stats):
 		_ai_resource_manager.spend(unit_stats.cost_salvage, unit_stats.cost_fuel)
+		# Production-cadence counter -- bumped on a successful
+		# combat-unit queue. Builders / Crawlers go through
+		# _maintain_engineers / _maintain_crawlers respectively
+		# and don't satisfy the gate (the gate exists to make sure
+		# the AI fields actual ARMY before committing more
+		# production capacity).
+		_military_units_trained += 1
 
 
 func _pick_unit_for_foundry(roster: Array, foundry_id: StringName) -> UnitStatResource:
@@ -1904,6 +2015,16 @@ func _pick_unit_for_foundry(roster: Array, foundry_id: StringName) -> UnitStatRe
 			available.append(u)
 	if available.is_empty():
 		return null
+	# Counter-training: when the enemy army is dominated by one
+	# armor class, with COUNTER_FOCUS_PROB chance pick the roster
+	# entry whose primary weapon scores best vs that class. Falls
+	# through to the strategy-weighted bucket pick the rest of
+	# the time so we still field a mixed army.
+	var dominant: StringName = _dominant_enemy_armor()
+	if dominant != &"" and randf() < COUNTER_FOCUS_PROB:
+		var counter: UnitStatResource = _best_counter_in_roster(available, dominant)
+		if counter:
+			return counter
 	# Weights by index slot (0 = light, 1 = medium, 2+ = heavy/spec)
 	# blended with the AI's strategy. RUSH spams the cheapest slot;
 	# ECONOMY / TURRET lean into the heaviest available.
