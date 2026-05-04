@@ -134,6 +134,7 @@ func _ready() -> void:
 		_stats_label.add_theme_constant_override("line_separation", 5)
 	_build_progress_bar()
 	_build_pause_overlay()
+	_inject_topbar_resource_icons()
 	_build_power_widget()
 	_build_alert_banner()
 	_build_chat_input()
@@ -501,6 +502,47 @@ func _mark_task_done(task_id: String) -> void:
 				lbl.text = "  ☑  %s" % TUTORIAL_TASKS[i].get("label")
 				lbl.add_theme_color_override("font_color", Color(0.55, 0.95, 0.55, 1.0))
 		break
+
+
+func _inject_topbar_resource_icons() -> void:
+	## Inserts a ResourceIcon glyph before each top-bar label so the
+	## row reads as icon + value instead of word + value. The label
+	## text is stripped of the leading resource word in
+	## _update_resource_display so the icon doesn't double up. Power
+	## label stays prefixed because _build_power_widget rebuilds its
+	## widget below; we still inject the icon, the rebuilt column
+	## sits to the icon's right.
+	if not _salvage_label:
+		return
+	var top_bar: Node = _salvage_label.get_parent()
+	if not top_bar:
+		return
+	# Each entry: { label, kind, color, tooltip }. Iteration order
+	# matches the existing TopBar layout so insertion preserves
+	# left-to-right reading order.
+	var rows: Array = [
+		{"label": _salvage_label, "kind": ResourceIcon.Kind.SALVAGE, "color": COLOR_SALVAGE, "tooltip": "Salvage"},
+		{"label": _fuel_label, "kind": ResourceIcon.Kind.FUEL, "color": COLOR_FUEL, "tooltip": "Fuel"},
+	]
+	if _microchips_label:
+		rows.append({"label": _microchips_label, "kind": ResourceIcon.Kind.MICROCHIPS, "color": COLOR_MICROCHIPS, "tooltip": "Microchips"})
+	if _power_label:
+		rows.append({"label": _power_label, "kind": ResourceIcon.Kind.POWER, "color": COLOR_POWER, "tooltip": "Power"})
+	if _pop_label:
+		rows.append({"label": _pop_label, "kind": ResourceIcon.Kind.POPULATION, "color": Color(0.85, 0.85, 0.65, 1.0), "tooltip": "Population"})
+	for row: Dictionary in rows:
+		var lbl: Label = row["label"] as Label
+		if not is_instance_valid(lbl):
+			continue
+		var icon: ResourceIcon = ResourceIcon.make(
+			row["kind"] as ResourceIcon.Kind,
+			row["color"] as Color,
+			row["tooltip"] as String,
+			Vector2(20.0, 20.0),
+		)
+		var idx: int = lbl.get_index()
+		top_bar.add_child(icon)
+		top_bar.move_child(icon, idx)
 
 
 func _build_power_widget() -> void:
@@ -946,11 +988,14 @@ func _update_resource_display() -> void:
 	var avg_income: Vector2 = Vector2.ZERO
 	if _resource_manager.has_method("get_average_income"):
 		avg_income = _resource_manager.get_average_income()
-	_salvage_label.text = "Salvage  %d  (+%.1f/s)" % [_resource_manager.salvage, avg_income.x]
+	# Resource words are now carried by the leading ResourceIcon
+	# glyph injected before each label, so the text stays compact:
+	# numbers + income/cap suffix only.
+	_salvage_label.text = "%d  (+%.1f/s)" % [_resource_manager.salvage, avg_income.x]
 
 	# Fuel — turn red when below 20% capacity (early-warning).
 	var fuel_pct: float = float(_resource_manager.fuel) / float(maxi(_resource_manager.fuel_cap, 1))
-	_fuel_label.text = "Fuel  %d / %d  (+%.1f/s)" % [_resource_manager.fuel, _resource_manager.fuel_cap, avg_income.y]
+	_fuel_label.text = "%d / %d  (+%.1f/s)" % [_resource_manager.fuel, _resource_manager.fuel_cap, avg_income.y]
 	_fuel_label.add_theme_color_override(
 		"font_color",
 		COLOR_WARN if fuel_pct < 0.2 else COLOR_FUEL
@@ -962,7 +1007,7 @@ func _update_resource_display() -> void:
 	if _microchips_label:
 		var chips_now: int = (_resource_manager.get("microchips") as int) if "microchips" in _resource_manager else 0
 		var chips_cap: int = ResourceManager.MICROCHIPS_CAP
-		_microchips_label.text = "Chips  %d / %d" % [chips_now, chips_cap]
+		_microchips_label.text = "%d / %d" % [chips_now, chips_cap]
 
 	# Power — bar shows consumption-vs-production load. The label
 	# itself stays the neutral COLOR_POWER tint always; only the
@@ -974,7 +1019,7 @@ func _update_resource_display() -> void:
 	var consumed: int = _resource_manager.power_consumption
 	var has_deficit: bool = consumed > produced
 	var efficiency: float = _resource_manager.get_power_efficiency()
-	_power_label.text = "Power  %d / %d" % [produced, consumed]
+	_power_label.text = "%d / %d" % [produced, consumed]
 	_power_label.add_theme_color_override("font_color", COLOR_POWER)
 	if _power_pct_label:
 		var pct: int = int(round(efficiency * 100.0))
@@ -1023,7 +1068,7 @@ func _update_resource_display() -> void:
 	# instead of the previous static constant.
 	var pop_cap: int = maxi(_resource_manager.population_cap, 1)
 	var pop_pct: float = float(_resource_manager.population) / float(pop_cap)
-	_pop_label.text = "Pop  %d / %d" % [_resource_manager.population, pop_cap]
+	_pop_label.text = "%d / %d" % [_resource_manager.population, pop_cap]
 	if pop_pct >= 1.0:
 		_pop_label.add_theme_color_override("font_color", COLOR_WARN)
 	elif pop_pct >= 0.9:
