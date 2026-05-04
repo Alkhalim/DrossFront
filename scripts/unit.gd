@@ -3971,10 +3971,11 @@ func _build_breacher_mortar_member(index: int, offset: Vector3, team_color: Colo
 
 
 func _build_breacher_salvo_member(index: int, offset: Vector3, team_color: Color) -> Dictionary:
-	## Salvo variant -- chassis carries a 2x3 grid of vertical
-	## missile pods on the deck instead of a casemate cannon.
-	## Missiles fire upward and the existing missile projectile
-	## arc handles the swoop onto the target. No main cannon.
+	## Salvo variant -- chassis carries a single purpose-built
+	## 6-tube rocket battery housing on a tilted cradle. Reads as
+	## one designed launcher (a la M270 MLRS / Katyusha BM-13)
+	## rather than six free-standing pods. Tubes face up-forward
+	## so ripple-fired rockets arc onto target.
 	var base: Dictionary = _build_breacher_chassis_base(index, offset, team_color)
 	var member: Node3D = base["member"]
 	var mats: Array[StandardMaterial3D] = base["mats"]
@@ -3984,81 +3985,176 @@ func _build_breacher_salvo_member(index: int, offset: Vector3, team_color: Color
 	var hull_y: float = base["hull_y"]
 	var anvil_dark: Color = base["anvil_dark"]
 	var deck_y: float = hull_y + hull_h * 0.5
-	# Mounting plate the missile pods sit on -- a flat dark deck
-	# spanning the upper chassis.
-	var deck := MeshInstance3D.new()
-	var deck_box := BoxMesh.new()
-	deck_box.size = Vector3(hull_w * 0.92, 0.10, hull_len * 0.85)
-	deck.mesh = deck_box
-	deck.position = Vector3(0.0, deck_y + 0.05, 0.0)
-	var deck_mat := _make_metal_mat(anvil_dark)
-	deck.set_surface_override_material(0, deck_mat)
-	member.add_child(deck)
-	mats.append(deck_mat)
-	# Cannon pivot for combat lookups -- positioned at the centre
-	# of the pod array. Missiles spawn from this Marker so the
-	# arc starts above the chassis.
-	var cannon_pivot := Node3D.new()
-	cannon_pivot.name = "CannonPivot_top"
-	cannon_pivot.position = Vector3(0.0, deck_y + 0.85, 0.0)
-	member.add_child(cannon_pivot)
-	# 2x3 vertical missile pod grid (6 tubes total).
+
+	# Cradle base -- the launcher rests on this raised plinth so
+	# the tilt angle reads as deliberate engineering, not a stuck
+	# lid. Spans the rear ~70% of the chassis deck.
+	var cradle := MeshInstance3D.new()
+	var cradle_box := BoxMesh.new()
+	cradle_box.size = Vector3(hull_w * 0.78, 0.20, hull_len * 0.55)
+	cradle.mesh = cradle_box
+	cradle.position = Vector3(0.0, deck_y + 0.10, hull_len * 0.10)
+	var cradle_mat := _make_metal_mat(anvil_dark)
+	cradle.set_surface_override_material(0, cradle_mat)
+	member.add_child(cradle)
+	mats.append(cradle_mat)
+	# Twin trunnion blocks where the cradle meets the launcher --
+	# small cylinders that read as the elevation hinge pins.
+	for tr_i: int in 2:
+		var trx: float = (-1.0 if tr_i == 0 else 1.0) * hull_w * 0.32
+		var trun := MeshInstance3D.new()
+		var trun_cyl := CylinderMesh.new()
+		trun_cyl.top_radius = 0.10
+		trun_cyl.bottom_radius = 0.10
+		trun_cyl.height = 0.10
+		trun_cyl.radial_segments = 12
+		trun.mesh = trun_cyl
+		trun.rotation.z = PI * 0.5
+		trun.position = Vector3(trx, deck_y + 0.30, hull_len * 0.10)
+		var trun_mat := _make_metal_mat(Color(0.10, 0.09, 0.08))
+		trun.set_surface_override_material(0, trun_mat)
+		member.add_child(trun)
+		mats.append(trun_mat)
+
+	# Launcher pivot -- tilts the whole housing back so the front
+	# face (tubes) points up-forward. Pivot positioned at the
+	# trunnion line so the rotation reads as an elevation arm.
+	var launcher_pivot := Node3D.new()
+	launcher_pivot.name = "LauncherPivot"
+	launcher_pivot.position = Vector3(0.0, deck_y + 0.30, hull_len * 0.10)
+	launcher_pivot.rotation.x = deg_to_rad(-22.0)
+	member.add_child(launcher_pivot)
+
+	# Housing -- single rectangular launcher block. Built in
+	# launcher-local space so the tilt carries everything together.
+	# Local -Z is "forward" of the housing (the tube face).
+	var housing_w: float = hull_w * 0.62
+	var housing_h: float = 0.62
+	var housing_d: float = hull_len * 0.62
+	var housing := MeshInstance3D.new()
+	var housing_box := BoxMesh.new()
+	housing_box.size = Vector3(housing_w, housing_h, housing_d)
+	housing.mesh = housing_box
+	# Centre the housing so the trunnion sits at the housing's
+	# bottom-rear corner -- gives a believable elevation arm.
+	housing.position = Vector3(0.0, housing_h * 0.5, -housing_d * 0.5 + 0.10)
+	var housing_mat := _make_metal_mat(_faction_tint_chassis(Color(0.30, 0.22, 0.16)))
+	housing.set_surface_override_material(0, housing_mat)
+	launcher_pivot.add_child(housing)
+	mats.append(housing_mat)
+	# Top spine plate -- a slim raised dark strip running the
+	# length of the housing. Breaks the silhouette and reads as
+	# a structural rib.
+	var spine := MeshInstance3D.new()
+	var spine_box := BoxMesh.new()
+	spine_box.size = Vector3(housing_w * 0.12, 0.06, housing_d * 0.94)
+	spine.mesh = spine_box
+	spine.position = Vector3(0.0, housing_h + 0.03, housing.position.z)
+	var spine_mat := _make_metal_mat(Color(0.10, 0.09, 0.08))
+	spine.set_surface_override_material(0, spine_mat)
+	launcher_pivot.add_child(spine)
+	mats.append(spine_mat)
+	# Side rails -- thin emissive amber strips along the launcher's
+	# upper side edges. Sells "loaded and armed" without needing a
+	# light per tube.
+	var rail_mat := StandardMaterial3D.new()
+	rail_mat.albedo_color = Color(1.00, 0.55, 0.18, 1.0)
+	rail_mat.emission_enabled = true
+	rail_mat.emission = Color(1.00, 0.55, 0.18, 1.0)
+	rail_mat.emission_energy_multiplier = 1.4
+	rail_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	for rail_side: int in 2:
+		var rsx: float = (-1.0 if rail_side == 0 else 1.0) * (housing_w * 0.5 + 0.025)
+		var rail := MeshInstance3D.new()
+		var rail_box := BoxMesh.new()
+		rail_box.size = Vector3(0.05, 0.06, housing_d * 0.78)
+		rail.mesh = rail_box
+		rail.position = Vector3(rsx, housing_h * 0.85, housing.position.z)
+		rail.set_surface_override_material(0, rail_mat)
+		launcher_pivot.add_child(rail)
+	mats.append(rail_mat)
+
+	# 6 tube openings drilled into the housing's front face.
+	# Front face is at local Z = housing.position.z - housing_d*0.5.
+	# Each tube = a short dark cylinder protruding out the front
+	# (the bore) + an emissive amber rocket nose tip just inside.
 	const ROWS: int = 3
 	const COLS: int = 2
-	var pod_radius: float = 0.13
-	var pod_len: float = 0.78
+	var tube_radius: float = 0.13
+	var tube_protrude: float = 0.18
+	var front_z: float = housing.position.z - housing_d * 0.5
+	# Tubes laid out vertically by row, side-by-side by column.
+	# Vertical spacing tuned so all 6 fit inside the housing face
+	# with clear divider strips between them.
+	var col_dx: float = housing_w * 0.22
+	var row_dy: float = housing_h * 0.26
+	var bore_mat := _make_metal_mat(Color(0.06, 0.05, 0.04))
+	var rim_mat := _make_metal_mat(Color(0.16, 0.13, 0.10))
+	var tip_mat := StandardMaterial3D.new()
+	tip_mat.albedo_color = Color(1.00, 0.55, 0.18, 1.0)
+	tip_mat.emission_enabled = true
+	tip_mat.emission = Color(1.00, 0.55, 0.18, 1.0)
+	tip_mat.emission_energy_multiplier = 1.6
+	tip_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	for r_i: int in ROWS:
 		for c_i: int in COLS:
-			var px: float = (-1.0 if c_i == 0 else 1.0) * hull_w * 0.22
-			var pz: float = (float(r_i) - 1.0) * hull_len * 0.27
-			# Pod tube -- thin vertical cylinder.
-			var pod := MeshInstance3D.new()
-			var pod_cyl := CylinderMesh.new()
-			pod_cyl.top_radius = pod_radius
-			pod_cyl.bottom_radius = pod_radius * 1.05
-			pod_cyl.height = pod_len
-			pod_cyl.radial_segments = 14
-			pod.mesh = pod_cyl
-			pod.position = Vector3(px, deck_y + 0.10 + pod_len * 0.5, pz)
-			var pod_mat := _make_metal_mat(Color(0.16, 0.15, 0.14))
-			pod.set_surface_override_material(0, pod_mat)
-			member.add_child(pod)
-			mats.append(pod_mat)
-			# Hollow opening at the top -- dark cap so the player
-			# reads the tube as openable from above.
-			var lip := MeshInstance3D.new()
-			var lip_cyl := CylinderMesh.new()
-			lip_cyl.top_radius = pod_radius * 1.15
-			lip_cyl.bottom_radius = pod_radius * 1.15
-			lip_cyl.height = 0.04
-			lip.mesh = lip_cyl
-			lip.position = Vector3(px, deck_y + 0.10 + pod_len + 0.02, pz)
-			var lip_mat := _make_metal_mat(anvil_dark)
-			lip.set_surface_override_material(0, lip_mat)
-			member.add_child(lip)
-			mats.append(lip_mat)
-			# Missile nose tip protruding from the tube --
-			# emissive Anvil amber so loaded-and-armed reads at
-			# zoom.
+			var tx: float = (-1.0 if c_i == 0 else 1.0) * col_dx
+			# Centre the 3-row stack vertically across the housing.
+			var ty: float = housing_h * 0.5 + (float(r_i) - 1.0) * row_dy
+			var tube_centre_z: float = front_z - tube_protrude * 0.5
+			# Outer rim ring -- slightly larger than the bore so
+			# each tube reads as a flanged opening, not a hole.
+			var rim := MeshInstance3D.new()
+			var rim_cyl := CylinderMesh.new()
+			rim_cyl.top_radius = tube_radius * 1.18
+			rim_cyl.bottom_radius = tube_radius * 1.18
+			rim_cyl.height = 0.04
+			rim_cyl.radial_segments = 14
+			rim.mesh = rim_cyl
+			rim.rotation.x = PI * 0.5
+			rim.position = Vector3(tx, ty, front_z - 0.02)
+			rim.set_surface_override_material(0, rim_mat)
+			launcher_pivot.add_child(rim)
+			# Bore -- the actual visible tube. Dark interior so
+			# the player reads "rocket comes out of here".
+			var bore := MeshInstance3D.new()
+			var bore_cyl := CylinderMesh.new()
+			bore_cyl.top_radius = tube_radius
+			bore_cyl.bottom_radius = tube_radius
+			bore_cyl.height = tube_protrude
+			bore_cyl.radial_segments = 14
+			bore.mesh = bore_cyl
+			bore.rotation.x = PI * 0.5
+			bore.position = Vector3(tx, ty, tube_centre_z)
+			bore.set_surface_override_material(0, bore_mat)
+			launcher_pivot.add_child(bore)
+			# Rocket nose tip just inside the bore -- tiny
+			# emissive cone peeking out so the launcher reads
+			# loaded.
 			var tip := MeshInstance3D.new()
 			var tip_cyl := CylinderMesh.new()
 			tip_cyl.top_radius = 0.0
-			tip_cyl.bottom_radius = pod_radius * 0.78
-			tip_cyl.height = 0.20
+			tip_cyl.bottom_radius = tube_radius * 0.74
+			tip_cyl.height = 0.16
 			tip_cyl.radial_segments = 10
 			tip.mesh = tip_cyl
-			tip.position = Vector3(px, deck_y + 0.10 + pod_len + 0.14, pz)
-			var tip_mat := StandardMaterial3D.new()
-			tip_mat.albedo_color = Color(1.00, 0.55, 0.18, 1.0)
-			tip_mat.emission_enabled = true
-			tip_mat.emission = Color(1.00, 0.55, 0.18, 1.0)
-			tip_mat.emission_energy_multiplier = 1.6
-			tip_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			tip.rotation.x = -PI * 0.5  # cone points -Z (forward)
+			tip.position = Vector3(tx, ty, front_z - tube_protrude - 0.03)
 			tip.set_surface_override_material(0, tip_mat)
-			member.add_child(tip)
-			mats.append(tip_mat)
-	# Muzzle marker sits at the centre top of the pod array so
-	# missile spawns + muzzle flashes land on the launch surface.
+			launcher_pivot.add_child(tip)
+	mats.append(bore_mat)
+	mats.append(rim_mat)
+	mats.append(tip_mat)
+
+	# Cannon pivot for combat lookups -- positioned just in front
+	# of the launcher's tube face so missile spawns originate from
+	# the battery's muzzle, not the chassis centre. Parented to the
+	# tilted launcher_pivot so spawn point inherits the elevation
+	# angle.
+	var cannon_pivot := Node3D.new()
+	cannon_pivot.name = "CannonPivot_top"
+	cannon_pivot.position = Vector3(0.0, housing_h * 0.5, front_z - tube_protrude - 0.20)
+	launcher_pivot.add_child(cannon_pivot)
 	var muzzle_marker := Marker3D.new()
 	muzzle_marker.name = "Muzzle"
 	muzzle_marker.position = Vector3(0.0, 0.0, 0.0)

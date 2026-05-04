@@ -2744,19 +2744,7 @@ func _build_unit_stat_sheet(unit: Node3D, _include_cost: bool = false) -> String
 	if _extended_stats_active():
 		rows.append(row_mobility)
 		rows.append(row_attack_bonus)
-	else:
-		rows.append([_extended_hint_chip()])
 	return _build_stat_sheet(rows)
-
-
-func _extended_hint_chip() -> String:
-	## Tiny hint chip that lives at the bottom of the basic stat
-	## sheet so players know there's more behind SHIFT. When the
-	## settings toggle inverts the default, the hint flips to "[hold
-	## SHIFT for basic view]" so the cue still reads correctly.
-	if _extended_stats_default:
-		return "[color=#888888][hold SHIFT for basic view][/color]"
-	return "[color=#888888][hold SHIFT for full stats][/color]"
 
 
 func _role_matchup_chips(role_tag: StringName) -> Array:
@@ -2959,8 +2947,6 @@ func _build_building_stat_sheet(building: Node3D, bstats: BuildingStatResource, 
 			_stat_chip("Produces", "%d unit type(s)" % bstats.producible_units.size(), STAT_LABEL_COLOR_RANGE),
 		]
 		rows.append(produces_row)
-	if not extended:
-		rows.append([_extended_hint_chip()])
 	return _build_stat_sheet(rows)
 
 
@@ -3376,7 +3362,7 @@ func _make_branch_styled_tooltip(base_stats: UnitStatResource, branch_stats: Uni
 	var show_extended: bool = _extended_stats_active()
 	var body: String
 	if summary != "" and not show_extended:
-		body = summary + "\n\n[hold SHIFT for full stat breakdown]"
+		body = summary
 	else:
 		body = _branch_delta_summary(base_stats, branch_stats)
 	var lines_extra: PackedStringArray = PackedStringArray()

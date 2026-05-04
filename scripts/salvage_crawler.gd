@@ -60,6 +60,11 @@ var hp_bar_hovered: bool = false
 var _move_speed: float = 3.0          # set from stats.speed_tier in _ready
 var _nav_agent: NavigationAgent3D = null
 var _yard_component: Node = null
+## Gravity used to keep the chassis pressed against the ground when
+## crossing ramp transitions. Without this the Crawler had zero Y
+## velocity and could end up clipped into the floor at the foot of
+## a slope where move_and_slide briefly lost floor contact.
+const GRAVITY: float = 18.0
 ## Stuck-rescue: same logic as Unit. Tracks how long the Crawler has been
 ## ordered somewhere but unable to make progress; re-paths once at 1.5s and
 ## gives up at 5s so a wedged Crawler doesn't grind forever.
@@ -137,6 +142,28 @@ func _ready() -> void:
 	_nav_agent.radius = 2.5
 	_nav_agent.max_speed = _move_speed
 	add_child(_nav_agent)
+
+	# Floor snapping so the Crawler stays planted on ramps. Without
+	# this the body could clip into ground geometry at the foot of
+	# slopes -- move_and_slide briefly loses floor contact, and the
+	# next frame's gravity push slammed the box collider through a
+	# corner. floor_snap_length is generous (1.0u) because the chassis
+	# is large; floor_max_angle keeps the Crawler from climbing
+	# absurd inclines.
+	floor_snap_length = 1.0
+	floor_max_angle = deg_to_rad(45.0)
+	up_direction = Vector3.UP
+
+	# Stats fallback so freshly instantiated Crawlers (the test arena
+	# spawns them with just owner_id set) get the canonical stat
+	# sheet -- needed for the wreck spawn on death and for HP bar
+	# scaling.
+	if not stats:
+		stats = load("res://resources/units/anvil_crawler.tres") as UnitStatResource
+		if stats:
+			current_hp = maxi(stats.hp_total, current_hp)
+			_move_speed = stats.resolved_speed()
+			_nav_agent.max_speed = _move_speed
 
 	# Worker management — reuse the existing SalvageYardComponent with
 	# Crawler-spec overrides (per v3.3 §1.3): wider 45m harvest radius,
@@ -970,7 +997,17 @@ func _physics_process(delta: float) -> void:
 			return
 
 	var direction: Vector3 = to_next / maxf(dist, 0.001)
-	velocity = direction * _move_speed
+	# Preserve Y from gravity below; only set the XZ plane.
+	velocity.x = direction.x * _move_speed
+	velocity.z = direction.z * _move_speed
+	# Gravity push so the chassis stays pinned to the ground when
+	# crossing ramp transitions. floor_snap_length picks up the
+	# small reattach when on_floor; otherwise this builds vertical
+	# velocity until move_and_slide brings us back into contact.
+	if is_on_floor():
+		velocity.y = 0.0
+	else:
+		velocity.y -= GRAVITY * delta
 	var prev_pos: Vector3 = global_position
 	move_and_slide()
 
@@ -1086,12 +1123,36 @@ func _die() -> void:
 	squad_destroyed.emit()
 	if _hp_bar and is_instance_valid(_hp_bar):
 		_hp_bar.queue_free()
-	# Spawn a small wreck representing the chassis.
+
+	# VFX -- big particle burst at the chassis. The shared emitter
+	# only exposes emit_dust, so we drive it hard for a heavy hit.
+	var scene: Node = get_tree().current_scene
+	var pem: Node = scene.get_node_or_null("ParticleEmitterManager") if scene else null
+	if pem and pem.has_method("emit_dust"):
+		pem.emit_dust(global_position + Vector3(0.0, 0.6, 0.0), 22, 2.6)
+
+	# Camera shake -- routes the same way Unit._die does, via the
+	# active Camera3D's add_shake helper.
+	var cam: Camera3D = get_viewport().get_camera_3d() if get_viewport() else null
+	if cam and cam.has_method("add_shake"):
+		cam.add_shake(0.45)
+
+	# Audio -- route through the heavy unit-destroyed bank so it
+	# reads bigger than a mech death.
+	var audio: Node = scene.get_node_or_null("AudioManager") if scene else null
+	if audio and audio.has_method("play_unit_destroyed"):
+		audio.play_unit_destroyed(global_position, true)
+
+	# Wreck. Falls back to the canonical stat sheet if `stats` was
+	# never assigned (the test arena spawns Crawlers without it).
+	var wreck_stats: UnitStatResource = stats
+	if not wreck_stats:
+		wreck_stats = load("res://resources/units/anvil_crawler.tres") as UnitStatResource
 	var wreck_script: GDScript = load("res://scripts/wreck.gd") as GDScript
-	if wreck_script and stats:
-		var wreck: Node3D = wreck_script.create_from_unit(stats, global_position) as Node3D
+	if wreck_script and wreck_stats and scene:
+		var wreck: Node3D = wreck_script.create_from_unit(wreck_stats, global_position) as Node3D
 		if wreck:
-			get_tree().current_scene.add_child(wreck)
+			scene.add_child(wreck)
 	queue_free()
 
 
