@@ -3594,6 +3594,36 @@ const GIFT_AMOUNTS_SALVAGE: Array[int] = [50, 100, 250]
 const GIFT_AMOUNTS_FUEL: Array[int] = [10, 25, 50]
 
 
+func _ensure_diploma_button() -> void:
+	## Lazily creates the diplomacy ('diploma') toggle button that
+	## opens / closes the ally gift panel. Sits to the immediate
+	## left of the gift panel anchor so the player learns the
+	## association at a glance. Idempotent -- safe to call every
+	## panel refresh tick.
+	if _diploma_btn and is_instance_valid(_diploma_btn):
+		return
+	_diploma_btn = Button.new()
+	_diploma_btn.name = "DiplomaButton"
+	_diploma_btn.text = "Allies"
+	_diploma_btn.tooltip_text = "Open / close the ally gift panel."
+	_diploma_btn.custom_minimum_size = Vector2(100.0, 32.0)
+	_diploma_btn.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
+	# Sit just below where the gift panel will float open so the
+	# spatial relationship is obvious.
+	_diploma_btn.position = Vector2(-120.0, 60.0)
+	_diploma_btn.mouse_filter = Control.MOUSE_FILTER_PASS
+	_diploma_btn.pressed.connect(_on_diploma_pressed)
+	add_child(_diploma_btn)
+
+
+func _on_diploma_pressed() -> void:
+	## Toggle the gift panel; the next _refresh_gift_panel tick
+	## propagates the visibility flip and (when opening) populates
+	## the per-ally rows.
+	_gift_panel_open = not _gift_panel_open
+	_refresh_gift_panel()
+
+
 func _build_gifting_panel() -> void:
 	_gift_panel = PanelContainer.new()
 	_gift_panel.name = "GiftPanel"
@@ -3615,12 +3645,25 @@ func _build_gifting_panel() -> void:
 	_gift_vbox.add_child(title)
 
 
+## Gating flag toggled by the new diplomacy ('diploma') button.
+## The gift panel was opening on its own whenever an ally existed,
+## which cluttered the HUD on every 2v2 match. Now it stays hidden
+## until the player explicitly opens it via the diploma toggle and
+## hides again on second click. The diploma button itself is built
+## by _ensure_diploma_button below; it auto-spawns once when the
+## player has at least one ally.
+var _gift_panel_open: bool = false
+var _diploma_btn: Button = null
+
+
 func _refresh_gift_panel() -> void:
 	if not _gift_panel:
 		return
 	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry")
 	if not registry:
 		_gift_panel.visible = false
+		if _diploma_btn:
+			_diploma_btn.visible = false
 		return
 
 	var local_id: int = registry.get("local_player_id") as int
@@ -3633,10 +3676,35 @@ func _refresh_gift_panel() -> void:
 		if registry.are_allied(local_id, pid):
 			ally_ids.append(pid)
 
+	# No ally -> tear down both UIs.
 	if ally_ids.is_empty():
 		_gift_panel.visible = false
+		_gift_panel_open = false
+		if _diploma_btn:
+			_diploma_btn.visible = false
 		return
-	_gift_panel.visible = true
+	# Ally present -> ensure the diploma toggle button exists +
+	# is visible. Panel itself only opens on explicit click.
+	_ensure_diploma_button()
+	if _diploma_btn:
+		_diploma_btn.visible = true
+	_gift_panel.visible = _gift_panel_open
+	if not _gift_panel_open:
+		# Skip the row rebuild work when the panel is closed --
+		# nothing to refresh visually. Still tear down stale rows
+		# below so a freshly-opened panel doesn't display dead
+		# allies.
+		var stale_only: Array[int] = []
+		for existing_id_var: Variant in _gift_rows.keys():
+			if (existing_id_var as int) not in ally_ids:
+				stale_only.append(existing_id_var as int)
+		for sid: int in stale_only:
+			var srow_dict: Dictionary = _gift_rows[sid]
+			var srow: Node = srow_dict.get("root", null) as Node
+			if srow and is_instance_valid(srow):
+				srow.queue_free()
+			_gift_rows.erase(sid)
+		return
 
 	# Drop rows for allies who got eliminated since the last refresh.
 	for existing_id: Variant in _gift_rows.keys():
