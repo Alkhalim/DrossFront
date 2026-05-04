@@ -363,6 +363,10 @@ func _build_setup_panel() -> void:
 	_build_ai_section(left_col)
 	_build_map_section(right_col)
 	_build_setup_buttons()
+	# Decorate every button across the setup panel (mode toggles,
+	# faction picks, AI rows, etc.) with the command-center
+	# brackets so the whole sub-screen reads as one tactical UI.
+	call_deferred("_decorate_panel_buttons", _setup_panel)
 
 
 func _build_mode_section(parent: Container) -> void:
@@ -725,16 +729,41 @@ func _build_setup_buttons() -> void:
 	_setup_panel.add_child(hbox)
 
 	var back := Button.new()
-	back.text = "Back"
-	back.custom_minimum_size = Vector2(160, 36)
+	back.text = "BACK"
+	back.custom_minimum_size = Vector2(140, 38)
 	back.pressed.connect(_show_main)
 	hbox.add_child(back)
+	_add_command_center_brackets(back)
 
 	var start := Button.new()
-	start.text = "Start Match"
-	start.custom_minimum_size = Vector2(220, 40)
+	start.text = "START MATCH"
+	start.custom_minimum_size = Vector2(180, 38)
 	start.pressed.connect(_on_start_match_pressed)
 	hbox.add_child(start)
+	_add_command_center_brackets(start)
+
+
+func _decorate_panel_buttons(panel: Container) -> void:
+	## Walks a sub-screen panel's tree and applies the command-
+	## center bracket overlay to every Button child. Skips toggle
+	## buttons (mode picker, faction picker) and the children of
+	## OptionButton popups so we don't decorate dropdown items.
+	## Called once at panel-build time; the brackets are static
+	## children that resize with their parent button.
+	var queue: Array[Node] = [panel]
+	while not queue.is_empty():
+		var n: Node = queue.pop_front()
+		for child: Node in n.get_children():
+			# Don't recurse into OptionButton internals -- they
+			# manage their own popup with their own buttons.
+			if child is OptionButton or child is HSlider:
+				continue
+			if child is Button:
+				var b: Button = child as Button
+				# Skip if already decorated.
+				if not b.has_node("CmdCenterBrackets"):
+					_add_command_center_brackets(b)
+			queue.append(child)
 
 
 ## --- Settings panel (3 audio sliders) ------------------------------------
@@ -785,10 +814,11 @@ func _build_settings_panel() -> void:
 		row.add_child(slider)
 
 	var back := Button.new()
-	back.text = "Back"
-	back.custom_minimum_size = Vector2(160, 36)
+	back.text = "BACK"
+	back.custom_minimum_size = Vector2(140, 38)
 	back.pressed.connect(_show_main)
 	_settings_panel.add_child(back)
+	_add_command_center_brackets(back)
 
 
 ## --- Navigation ---
@@ -1667,11 +1697,12 @@ func _build_campaigns_panel() -> void:
 	_attach_campaign_stumps(map)
 
 	var back := Button.new()
-	back.text = "Back"
-	back.custom_minimum_size = Vector2(180, 40)
+	back.text = "BACK"
+	back.custom_minimum_size = Vector2(140, 38)
 	back.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	back.pressed.connect(_back_from_campaigns)
 	_campaigns_panel.add_child(back)
+	_add_command_center_brackets(back)
 
 
 func _back_from_campaigns() -> void:
@@ -1808,10 +1839,15 @@ func _build_scenarios_panel() -> void:
 		card_vbox.add_child(launch)
 
 	var back := Button.new()
-	back.text = "Back"
-	back.custom_minimum_size = Vector2(160, 36)
+	back.text = "BACK"
+	back.custom_minimum_size = Vector2(140, 38)
 	back.pressed.connect(_show_campaigns)
 	_scenarios_panel.add_child(back)
+	_add_command_center_brackets(back)
+	# Decorate every other button across the scenarios card grid
+	# (each scenario's launch button) so the page reads as a
+	# tactical mission selector.
+	call_deferred("_decorate_panel_buttons", _scenarios_panel)
 
 
 func _on_scenario_pressed(scenario_id: int) -> void:

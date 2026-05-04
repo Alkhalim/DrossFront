@@ -1126,6 +1126,23 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 			if pos.distance_to(Vector3(p3.global_position.x, 0.0, p3.global_position.z)) < plat_keepout:
 				_record_blocker(key, BuildBlocker.NEAR_PLATEAU)
 				return
+	# Map-edge clamp -- mirrors the player's check in
+	# selection_manager._is_valid_build_position. AI used to hand
+	# the engineer a build site whose footprint clipped past the
+	# playable area, which left the engineer trying to path to a
+	# point the navmesh ends short of (engineer wedged against
+	# the edge forever). Reject any candidate position whose
+	# half-extent crosses the +/- 150u boundary.
+	const MAP_HALF_FOR_AI: float = 150.0
+	const AI_EDGE_MARGIN: float = 1.5
+	var bx_h: float = bstats.footprint_size.x * 0.5
+	var bz_h: float = bstats.footprint_size.z * 0.5
+	if pos.x - bx_h < -MAP_HALF_FOR_AI + AI_EDGE_MARGIN \
+			or pos.x + bx_h > MAP_HALF_FOR_AI - AI_EDGE_MARGIN \
+			or pos.z - bz_h < -MAP_HALF_FOR_AI + AI_EDGE_MARGIN \
+			or pos.z + bz_h > MAP_HALF_FOR_AI - AI_EDGE_MARGIN:
+		_record_blocker(key, BuildBlocker.NO_CLEAR_SPOT)
+		return
 
 	# Use the same path as the player: BuilderComponent.place_building spends
 	# resources, instantiates the building, calls begin_construction, and
