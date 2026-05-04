@@ -1064,11 +1064,26 @@ func _physics_process(delta: float) -> void:
 			if _nav_agent:
 				_nav_agent.target_position = move_target
 		elif _stuck_timer > 8.0:
-			# Still stuck after the nudge -- give up on the current
-			# target so the AI's _command_idle_crawler_to_wreck
-			# tick can re-pick a fresh wreck cluster.
-			stop()
-			return
+			# Stage 2 rescue. The simple back-out failed, which usually
+			# means the chassis is overlapping a building footprint
+			# (e.g. nav agent steered too close + physics depenetration
+			# wedged the body inside). Scan an outward spiral for a
+			# position that's clear of every building footprint within
+			# the search radius and teleport there. Falls through to
+			# stop() on the next tick if nothing clear was found.
+			var clear_pos: Vector3 = _find_clear_extraction_point()
+			if clear_pos != Vector3.INF:
+				global_position = clear_pos
+				velocity = Vector3.ZERO
+				_stuck_timer = 0.0
+				if _nav_agent:
+					_nav_agent.target_position = move_target
+			else:
+				# No clear pocket found -- give up on the current
+				# target so the AI's _command_idle_crawler_to_wreck
+				# tick can re-pick a fresh wreck cluster.
+				stop()
+				return
 	else:
 		# Made meaningful progress this frame: clear the stuck timer
 		# and (when on floor) bake the current position as the safe
@@ -1439,3 +1454,62 @@ func _speed_from_tier(tier: StringName) -> float:
 		&"fast": return 12.0
 		&"very_fast": return 16.0
 	return 5.0
+
+
+func _find_clear_extraction_point() -> Vector3:
+	## Stage-2 stuck rescue. Scans an outward spiral around the
+	## Crawler for a position that's clear of every building's
+	## footprint (own + enemy + ally), at increasing radii up to
+	## EXTRACTION_MAX_RADIUS. Returns Vector3.INF when no clear
+	## position is found, in which case the caller should give up
+	## on the current target and let the AI re-pick. Used when the
+	## chassis has wedged INSIDE a building's collider (depenetration
+	## fail mode) so a simple back-along-direction nudge can't
+	## extract it.
+	const EXTRACTION_RADIUS_STEP: float = 3.0
+	const EXTRACTION_MAX_RADIUS: float = 18.0
+	const EXTRACTION_DIRECTIONS: int = 12
+	# Half-extents of the chassis collider so the candidate clearance
+	# check matches the body's actual footprint.
+	const CHASSIS_HALF: Vector2 = Vector2(2.4, 2.8)
+	var origin: Vector3 = global_position
+	var r: float = EXTRACTION_RADIUS_STEP
+	while r <= EXTRACTION_MAX_RADIUS:
+		# Rotate the starting angle a bit each ring so adjacent rings
+		# don't sample identical bearings -- yields better coverage.
+		var ring_offset: float = (r / EXTRACTION_RADIUS_STEP) * 0.21
+		for i: int in EXTRACTION_DIRECTIONS:
+			var ang: float = float(i) / float(EXTRACTION_DIRECTIONS) * TAU + ring_offset
+			var candidate := Vector3(
+				origin.x + cos(ang) * r,
+				origin.y,
+				origin.z + sin(ang) * r,
+			)
+			if _is_extraction_candidate_clear(candidate, CHASSIS_HALF):
+				return candidate
+		r += EXTRACTION_RADIUS_STEP
+	return Vector3.INF
+
+
+func _is_extraction_candidate_clear(pos: Vector3, half: Vector2) -> bool:
+	## True when no building's XZ-aligned footprint overlaps the
+	## chassis bbox at `pos`. Wrecks + units are ignored -- the
+	## former crush, the latter dodge.
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var b: Node3D = node as Node3D
+		if not b:
+			continue
+		var b_stats: Variant = b.get("stats")
+		if typeof(b_stats) != TYPE_OBJECT or not is_instance_valid(b_stats):
+			continue
+		var fp_v: Variant = b_stats.get("footprint_size")
+		if typeof(fp_v) != TYPE_VECTOR3:
+			continue
+		var fp: Vector3 = fp_v as Vector3
+		var b_half_x: float = fp.x * 0.5 + half.x
+		var b_half_z: float = fp.z * 0.5 + half.y
+		if absf(pos.x - b.global_position.x) < b_half_x and absf(pos.z - b.global_position.z) < b_half_z:
+			return false
+	return true

@@ -162,6 +162,7 @@ func _ready() -> void:
 	# ruins that obstruct ramp approach lanes.
 	_setup_elevation()
 	_setup_terrain()
+	_setup_off_map_backdrop()
 	_setup_map_signature_features()
 	_setup_skyline_features()
 	_setup_ground_patches()
@@ -1679,6 +1680,92 @@ func _small_deposit_positions_2v2() -> Array[Vector3]:
 		Vector3(-80, 0, -35),    # West side of team B
 		Vector3(80, 0, -35),     # East side of team B
 	]
+
+
+func _setup_off_map_backdrop() -> void:
+	## Large dark plane sitting just below the playable ground that
+	## extends well past the map's edge. Reads as a "terrain
+	## continues" backdrop with a green topographic contour-line
+	## pattern -- the player can see at a glance that the world is
+	## bigger than the playable area, but the map ends here.
+	##
+	## The plane sits BELOW the existing Ground node (Y=-0.05) and is
+	## significantly larger (1200x1200 vs the playable 320x320), so
+	## it only renders where the playable ground ends. A procedural
+	## ShaderMaterial samples noise to produce the contour-line
+	## bands without needing a baked texture.
+	const BACKDROP_SIZE: float = 1200.0
+	const BACKDROP_Y: float = -0.05
+	var backdrop := MeshInstance3D.new()
+	backdrop.name = "OffMapBackdrop"
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(BACKDROP_SIZE, BACKDROP_SIZE)
+	plane.subdivide_width = 1
+	plane.subdivide_depth = 1
+	backdrop.mesh = plane
+	backdrop.position.y = BACKDROP_Y
+	backdrop.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# Procedural shader: dark base + green topo bands. UV here is
+	# in [0..1] across the giant plane, so we scale by world distance
+	# from origin to get sensible contour spacing.
+	var shader := Shader.new()
+	shader.code = """
+shader_type spatial;
+render_mode unshaded, depth_draw_opaque, cull_back;
+
+uniform vec3 base_color : source_color = vec3(0.06, 0.07, 0.06);
+uniform vec3 line_color : source_color = vec3(0.20, 0.55, 0.30);
+uniform vec3 line_glow  : source_color = vec3(0.45, 0.85, 0.50);
+uniform float band_period = 12.0;
+uniform float band_thickness = 0.045;
+uniform float noise_strength = 12.0;
+
+// Cheap value-noise approximation so the contour bands wobble
+// like real topography without uploading a texture.
+float hash21(vec2 p) {
+	p = fract(p * vec2(123.34, 456.21));
+	p += dot(p, p + 78.233);
+	return fract(p.x * p.y);
+}
+
+float vnoise(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	float a = hash21(i);
+	float b = hash21(i + vec2(1.0, 0.0));
+	float c = hash21(i + vec2(0.0, 1.0));
+	float d = hash21(i + vec2(1.0, 1.0));
+	vec2 u = f * f * (3.0 - 2.0 * f);
+	return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+}
+
+void fragment() {
+	// World position so the bands stay anchored regardless of plane
+	// size. The plane is huge but bands should still feel scaled to
+	// the map.
+	vec3 world_pos = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	float n = vnoise(world_pos.xz * 0.012);
+	float h = n * noise_strength;
+	// Distance to nearest contour band -- the closer to a band
+	// boundary, the brighter the line.
+	float band = abs(fract(h) - 0.5);
+	float line_intensity = smoothstep(0.5, 0.5 - band_thickness, band);
+	vec3 col = base_color;
+	col = mix(col, line_color, line_intensity * 0.85);
+	// Bright accent at every Nth band for the major-contour pop.
+	float major_band = abs(fract(h * 0.25) - 0.5);
+	float major_intensity = smoothstep(0.5, 0.5 - band_thickness * 0.9, major_band);
+	col = mix(col, line_glow, major_intensity * 0.55);
+	ALBEDO = col;
+}
+"""
+	var mat := ShaderMaterial.new()
+	mat.shader = shader
+	backdrop.material_override = mat
+	add_child(backdrop)
+	# Render BEFORE the playable ground so the playable ground (Y=0)
+	# overpaints it where they overlap. We're already at Y=-0.05, so
+	# painters-order works without tweaking render priority.
 
 
 func _setup_terrain() -> void:
@@ -4893,8 +4980,18 @@ func _vent_overlaps_terrain(pos: Vector3) -> bool:
 	## to) any registered plateau / ramp / hill footprint. Vents need
 	## flat ground at Y=0 to host a generator; embedding in raised
 	## terrain leaves the generator un-buildable and the steam VFX
-	## clipping through ramp geometry reads as a bug. Keepout = 4.0u
-	## so the vent + its concrete pad clears the slope foot.
+	## clipping through ramp geometry reads as a bug.
+	##
+	## The previous distance-from-center check rejected vents that
+	## fell inside a fixed-radius circle around each plateau's
+	## origin, which routinely failed on bigger plateaus + their
+	## attached ramps -- the ramp geometry can extend 8-12u past the
+	## plateau body, and the radius check would wave a candidate
+	## through that was sitting right on a slope. Now we union all
+	## of each plateau's CollisionShape AABBs in world space and
+	## reject candidates inside that XZ rectangle, padded by
+	## VENT_TERRAIN_KEEPOUT so the vent's concrete pad clears the
+	## slope foot.
 	const VENT_TERRAIN_KEEPOUT: float = 4.0
 	for node: Node in get_tree().get_nodes_in_group("elevation"):
 		if not is_instance_valid(node):
@@ -4902,15 +4999,7 @@ func _vent_overlaps_terrain(pos: Vector3) -> bool:
 		var n3: Node3D = node as Node3D
 		if not n3:
 			continue
-		# Each plateau StaticBody sits at the centre of its top
-		# footprint at y=0; a simple horizontal-distance check
-		# against the body's broad bounding extent is enough to
-		# reject vents that would land on or near a slope.
-		if pos.distance_to(Vector3(n3.global_position.x, 0.0, n3.global_position.z)) < VENT_TERRAIN_KEEPOUT * 4.0:
-			# Closer inspection: any child collision shape's AABB
-			# in world space. Use a generous 2D inflation around
-			# the body centre to catch ramp wedges that extend
-			# past the plateau body.
+		if _point_inside_padded_aabb(pos, n3, VENT_TERRAIN_KEEPOUT):
 			return true
 	# Also reject vents that overlap fuel deposits / wrecks / other
 	# terrain features so a vent isn't stuck inside a refinery rig.
@@ -4926,6 +5015,65 @@ func _vent_overlaps_terrain(pos: Vector3) -> bool:
 				continue
 			if pos.distance_to(Vector3(n3b.global_position.x, 0.0, n3b.global_position.z)) < VENT_TERRAIN_KEEPOUT:
 				return true
+	return false
+
+
+func _point_inside_padded_aabb(point_xz: Vector3, body: Node3D, padding: float) -> bool:
+	## Walks `body`'s child CollisionShape3D nodes and returns true
+	## if (point_xz.x, point_xz.z) falls inside any child's world-
+	## space XZ AABB padded by `padding`. Used so the vent placement
+	## check rejects any spot that's actually on a plateau's top OR
+	## on one of its attached ramp wedges, not just a circle around
+	## the plateau centre.
+	for child: Node in body.get_children():
+		var cs: CollisionShape3D = child as CollisionShape3D
+		if not cs or not cs.shape:
+			continue
+		var local_aabb: AABB = AABB()
+		var shape: Shape3D = cs.shape
+		# BoxShape3D and ConvexPolygonShape3D cover the cases the
+		# elevation builders use; fall back to get_debug_mesh for
+		# anything else (slow but rare during placement).
+		if shape is BoxShape3D:
+			var half: Vector3 = (shape as BoxShape3D).size * 0.5
+			local_aabb = AABB(-half, half * 2.0)
+		elif shape is ConvexPolygonShape3D:
+			var pts: PackedVector3Array = (shape as ConvexPolygonShape3D).points
+			if pts.is_empty():
+				continue
+			local_aabb = AABB(pts[0], Vector3.ZERO)
+			for p: Vector3 in pts:
+				local_aabb = local_aabb.expand(p)
+		else:
+			var dbg: Mesh = shape.get_debug_mesh()
+			if not dbg:
+				continue
+			local_aabb = dbg.get_aabb()
+		# Transform AABB into world space via the shape's global
+		# transform so any rotation/translation on the plateau body
+		# is honoured.
+		var xform: Transform3D = cs.global_transform
+		var corners: PackedVector3Array = []
+		for x_s: int in 2:
+			for y_s: int in 2:
+				for z_s: int in 2:
+					corners.append(xform * (local_aabb.position + Vector3(
+						local_aabb.size.x if x_s == 1 else 0.0,
+						local_aabb.size.y if y_s == 1 else 0.0,
+						local_aabb.size.z if z_s == 1 else 0.0,
+					)))
+		var min_x: float = corners[0].x
+		var max_x: float = corners[0].x
+		var min_z: float = corners[0].z
+		var max_z: float = corners[0].z
+		for c: Vector3 in corners:
+			min_x = minf(min_x, c.x)
+			max_x = maxf(max_x, c.x)
+			min_z = minf(min_z, c.z)
+			max_z = maxf(max_z, c.z)
+		if point_xz.x >= min_x - padding and point_xz.x <= max_x + padding \
+				and point_xz.z >= min_z - padding and point_xz.z <= max_z + padding:
+			return true
 	return false
 
 
