@@ -21,10 +21,10 @@ role_tag = &"Universal"
 damage_tier = &"moderate"
 range_tier = &"medium"
 rof_tier = &"moderate"
-salvo_count = 2
+salvo_count = 4
 is_drone_release = true
 drone_variant = &"default"
-max_active_drones = 4
+max_active_drones = 6
 
 [resource]
 script = ExtResource("1")

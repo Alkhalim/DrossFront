@@ -7,9 +7,10 @@ extends Node3D
 
 const SPEED: float = 14.0
 const DOCK_RADIUS: float = 2.0     # how close to the carrier counts as "docked"
-const STRAFE_RADIUS: float = 4.5   # offset distance the drone holds while strafing past the target
-const STRAFE_SHOTS: int = 3        # rounds the drone fires during a strafe pass
-const STRAFE_SHOT_INTERVAL: float = 0.45  # seconds between consecutive strafe shots
+const ORBIT_RADIUS: float = 5.0    # distance the drone holds from the target while circling
+const ORBIT_ANGULAR_SPEED: float = 2.6  # radians/sec around the target (~150°/s)
+const STRAFE_SHOTS: int = 4        # shots the drone fires per orbit pass
+const STRAFE_SHOT_INTERVAL: float = 0.40  # seconds between consecutive shots
 const APPROACH_CURVE_HEIGHT: float = 3.0  # max sideways arc magnitude on the launching path
 
 enum State { LAUNCHING, ATTACKING, RETURNING }
@@ -29,9 +30,19 @@ var variant: StringName = &"default"
 var _state: int = State.LAUNCHING
 var _shots_fired: int = 0
 var _shot_timer: float = 0.0
-## Side direction the drone offsets to during a strafing pass --
-## randomized at launch so consecutive drones in a salvo arc out
-## along different sides of the target.
+## Current angle (radians) around the target during the orbit
+## phase. Initialised at the angle from target -> drone when
+## ATTACKING starts so the orbit picks up smoothly from the
+## approach vector instead of snapping to a fixed start angle.
+var _orbit_angle: float = 0.0
+## Direction of orbit (+1 clockwise, -1 counter-clockwise). Picked
+## randomly per drone so a salvo of N drones doesn't all spin the
+## same way (visually reads as a chaotic swarm rather than a
+## drill team).
+var _orbit_dir: float = 1.0
+## Side direction the drone offsets to when entering the orbit --
+## still uses the strafe_anchor concept for the LAUNCHING approach
+## so each drone arcs in to a different starting angle.
 var _strafe_side: Vector3 = Vector3.ZERO
 ## Curve magnitude for the launch arc. Each drone picks a random
 ## sign so a salvo of 2-3 spreads laterally rather than all
@@ -226,22 +237,31 @@ func _process(delta: float) -> void:
 			if global_position.distance_to(aim) < 1.5:
 				_enter_attacking()
 		State.ATTACKING:
-			# Strafe past the target while firing STRAFE_SHOTS rounds
-			# spaced STRAFE_SHOT_INTERVAL apart. Movement keeps going
-			# along the strafe vector so the drone visibly flies past
-			# the target instead of hovering on top of it.
+			# Orbit the target at ORBIT_RADIUS while firing STRAFE_SHOTS
+			# rounds spaced STRAFE_SHOT_INTERVAL apart. Drones arc
+			# tightly around the target instead of flying erratically
+			# all over the screen, fire a short burst, then peel off
+			# back to the carrier. Each orbit step rebuilds the
+			# position from (target_centre + circle offset) so the
+			# drone tracks a moving target without drifting away.
 			if not target or not is_instance_valid(target):
 				_state = State.RETURNING
 				return
 			if "alive_count" in target and (target.get("alive_count") as int) <= 0:
 				_state = State.RETURNING
 				return
-			# Drift across the target along the strafe axis. The
-			# drone's nose still tracks the target so the laser /
-			# missile shots come out the front.
-			var across: Vector3 = -_strafe_side
-			global_position += across * (SPEED * 0.7) * delta
-			look_at(target.global_position, Vector3.UP)
+			_orbit_angle += ORBIT_ANGULAR_SPEED * _orbit_dir * delta
+			var t_pos: Vector3 = target.global_position
+			var ring_pos: Vector3 = t_pos + Vector3(
+				cos(_orbit_angle) * ORBIT_RADIUS,
+				0.0,
+				sin(_orbit_angle) * ORBIT_RADIUS,
+			)
+			# Hold the drone's flight altitude (set by carrier spawn);
+			# only x/z come from the orbit ring.
+			ring_pos.y = global_position.y
+			global_position = ring_pos
+			look_at(t_pos, Vector3.UP)
 			_shot_timer -= delta
 			if _shot_timer <= 0.0 and _shots_fired < STRAFE_SHOTS:
 				_fire_at_target()
@@ -267,11 +287,11 @@ func _strafe_anchor() -> Vector3:
 	var to_target: Vector3 = t_pos - _launch_anchor
 	to_target.y = 0.0
 	if to_target.length_squared() < 0.001:
-		_strafe_side = Vector3(STRAFE_RADIUS, 0.0, 0.0)
+		_strafe_side = Vector3(ORBIT_RADIUS, 0.0, 0.0)
 	else:
 		# Perpendicular in the XZ plane (rotate 90 deg).
 		var perp: Vector3 = Vector3(-to_target.z, 0.0, to_target.x).normalized()
-		_strafe_side = perp * STRAFE_RADIUS * _curve_sign
+		_strafe_side = perp * ORBIT_RADIUS * _curve_sign
 	return t_pos + _strafe_side
 
 
@@ -279,6 +299,16 @@ func _enter_attacking() -> void:
 	_state = State.ATTACKING
 	_shots_fired = 0
 	_shot_timer = 0.0
+	# Seed the orbit angle from the current drone -> target offset
+	# so the orbit picks up smoothly from wherever the approach
+	# vector landed (no snap-jump). Random orbit direction so a
+	# salvo doesn't all spin the same way.
+	_orbit_dir = 1.0 if randf() < 0.5 else -1.0
+	if target and is_instance_valid(target):
+		var off: Vector3 = global_position - target.global_position
+		_orbit_angle = atan2(off.z, off.x)
+	else:
+		_orbit_angle = randf_range(0.0, TAU)
 
 
 func _fly_toward_curved(target_pos: Vector3, delta: float) -> void:
