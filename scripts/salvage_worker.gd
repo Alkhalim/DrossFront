@@ -382,6 +382,20 @@ func _physics_process(delta: float) -> void:
 		for k in stale:
 			_blacklisted_wrecks.erase(k)
 
+	# Drop the worker's unit-layer collision mask while it's
+	# approaching its home Crawler within docking range. Without
+	# this, a moving Crawler and a returning worker physically
+	# wedge each other (both bodies live on overlapping collision
+	# layers), and the Crawler's stuck-rescue then has to fight
+	# the worker that's trying to dock with it. Mask 1 = ground
+	# only; restore mask 3 (ground + units) once the worker isn't
+	# returning anymore. Cheap to set every tick -- Godot only
+	# rebuilds the collision broadphase when the value changes.
+	if state == State.RETURNING and is_instance_valid(home_yard):
+		var dock_dist: float = global_position.distance_to(home_yard.global_position)
+		collision_mask = 1 if dock_dist < 8.0 else 3
+	else:
+		collision_mask = 3
 	match state:
 		State.IDLE:
 			_find_wreck()
