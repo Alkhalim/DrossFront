@@ -1945,6 +1945,22 @@ func _setup_terrain_ashplains() -> void:
 		# reads as the contested high-stakes zone.
 		Vector3(90, 0, 18), Vector3(-90, 0, 18),
 		Vector3(90, 0, -18), Vector3(-90, 0, -18),
+		# Starter piles within HQ LOS -- each player gets two small
+		# salvage piles inside ~16u of their starting HQ so the
+		# match opens with visible scouting targets, not an empty
+		# 35u walk to the first pile. Mirrored across z=0.
+		Vector3( 12, 0, 122), Vector3(-12, 0, 122),
+		Vector3( 12, 0, -122), Vector3(-12, 0, -122),
+		# Additional sparse-edge piles that fill the dead zones at
+		# the map's sides (x close to ±125) -- the ashplains felt
+		# starved compared to other maps because the playable area
+		# extends further than the previous pile spread.
+		Vector3(125, 0, 25), Vector3(-125, 0, 25),
+		Vector3(125, 0, -25), Vector3(-125, 0, -25),
+		Vector3(125, 0, 75), Vector3(-125, 0, 75),
+		Vector3(125, 0, -75), Vector3(-125, 0, -75),
+		Vector3(125, 0, 105), Vector3(-125, 0, 105),
+		Vector3(125, 0, -105), Vector3(-125, 0, -105),
 	]
 	for sp: Vector3 in scrap_pile_positions:
 		# Per-pile size jitter so the scattering doesn't look stamped.

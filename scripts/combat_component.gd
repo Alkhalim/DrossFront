@@ -591,6 +591,32 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	# Mesh reload factor so both effects compound multiplicatively.
 	if _garrison_active:
 		rof = rof / GARRISON_FIRE_RATE_MULT
+	# RoF-ramp passive (UnitStatResource.rof_ramp_*): each
+	# consecutive shot at the same target shortens the next cycle.
+	# Reuses _ramp_hit_count from the damage-ramp tracker so a unit
+	# carrying both ramps shares one counter (e.g. Breacher Salvo
+	# could ramp both damage and rof on the same target). Cap is
+	# applied to the multiplier, not the cycle, so 0.6 max ramp
+	# means cycles never drop below 40% of the base rof.
+	# `in` guards prevent a crash when an older cached
+	# UnitStatResource doesn't carry the new fields yet (Godot's
+	# resource cache survives a script reload, so the live
+	# instance can lag the script schema for one match).
+	var rof_ramp_stats: UnitStatResource = _unit.get("stats") as UnitStatResource
+	if rof_ramp_stats and "rof_ramp_per_hit" in rof_ramp_stats and "rof_ramp_max" in rof_ramp_stats and _current_target:
+		var ramp_per: float = rof_ramp_stats.rof_ramp_per_hit
+		var ramp_cap: float = rof_ramp_stats.rof_ramp_max
+		if ramp_per > 0.0 and ramp_cap > 0.0:
+			var rt_id: int = _current_target.get_instance_id()
+			# Note: _ramp_hit_count is bumped AFTER damage in the
+			# damage-ramp branch below, so it represents the count
+			# BEFORE this shot (0 for first shot, 1 for second, ...).
+			# That gives the first shot the full base cycle and only
+			# starts shortening from shot 2 onwards.
+			var hits_so_far: int = _ramp_hit_count if rt_id == _ramp_target_id else 0
+			var rof_cut: float = float(hits_so_far) * ramp_per
+			rof_cut = minf(rof_cut, ramp_cap)
+			rof *= 1.0 - rof_cut
 	if is_primary:
 		# Burst pattern for very high RoF: BURST_SHOTS quick shots, then a
 		# longer pause that keeps the average DPS the same.
@@ -693,7 +719,7 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	# primary AND secondary so a Plow-branch Grinder ramps on both
 	# its missile launchers. Skipped silently for any unit whose
 	# stats don't opt in (default ramp_per_hit / ramp_max = 0).
-	if stats and stats.damage_ramp_per_hit > 0.0 and stats.damage_ramp_max > 0.0:
+	if stats and "damage_ramp_per_hit" in stats and "damage_ramp_max" in stats and stats.damage_ramp_per_hit > 0.0 and stats.damage_ramp_max > 0.0:
 		var ramp_target_id: int = _current_target.get_instance_id()
 		if ramp_target_id != _ramp_target_id:
 			# New target -- start the ramp from scratch.

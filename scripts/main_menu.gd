@@ -213,7 +213,7 @@ func _build_main_buttons() -> void:
 	_root_vbox.add_child(_main_buttons)
 
 	for entry: Dictionary in [
-		{ "label": "Play",      "callback": Callable(self, "_on_play_pressed") },
+		{ "label": "Skirmish",  "callback": Callable(self, "_on_play_pressed") },
 		{ "label": "Campaigns", "callback": Callable(self, "_on_campaigns_pressed") },
 		{ "label": "Tutorial",  "callback": Callable(self, "_on_tutorial_pressed") },
 		{ "label": "Settings",  "callback": Callable(self, "_on_settings_pressed") },

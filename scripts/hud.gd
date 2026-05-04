@@ -4948,8 +4948,8 @@ func _compute_dps_vs(stat: UnitStatResource, armor_class: StringName) -> float:
 	# Escort's AA Barrage doesn't pad DPS Gnd. Manual abilities
 	# (ability_autocast = false) don't contribute -- the player
 	# chooses when to fire those.
-	if stat.ability_autocast and stat.ability_autocast_damage > 0 and stat.ability_cooldown > 0.0:
-		var ab_target: int = stat.ability_autocast_target
+	if stat.ability_autocast and "ability_autocast_damage" in stat and stat.ability_autocast_damage > 0 and stat.ability_cooldown > 0.0:
+		var ab_target: int = stat.ability_autocast_target if "ability_autocast_target" in stat else 2
 		var hits_this_class: bool = (
 			ab_target == 2
 			or (ab_target == 0 and not is_air_query)

@@ -2,8 +2,8 @@
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
-[ext_resource type="Resource" path="res://resources/units/anvil_breacher_tank_demolisher.tres" id="3"]
-[ext_resource type="Resource" path="res://resources/units/anvil_breacher_tank_battering_ram.tres" id="4"]
+[ext_resource type="Resource" path="res://resources/units/anvil_breacher_tank_salvo.tres" id="3"]
+[ext_resource type="Resource" path="res://resources/units/anvil_breacher_tank_mortar.tres" id="4"]
 
 [sub_resource type="Resource" id="weapon_breacher_cannon"]
 script = ExtResource("2")
@@ -39,8 +39,8 @@ cost_fuel = 40
 build_time = 33.0
 built_at = &"advanced_foundry"
 primary_weapon = SubResource("weapon_breacher_cannon")
-special_description = "Anvil tracked tank hunter. Casemate hull with a fixed forward-mounted heavy AT cannon — high-caliber slow-firing shell tuned vs armour. Loses payload against structures (0.7x). Branches: Demolisher (siege specialist) or Battering Ram (charge ability)."
-branch_a_name = "Demolisher"
-branch_b_name = "Battering Ram"
+special_description = "Anvil tracked tank hunter. Casemate hull with a fixed forward-mounted heavy AT cannon — high-caliber slow-firing shell tuned vs armour. Loses payload against structures (0.7x). Branches: Salvo (twin-linked missile pod with a fire-rate ramp) or Mortar (high-arc anti-light artillery)."
+branch_a_name = "Salvo"
+branch_b_name = "Mortar"
 branch_a_stats = ExtResource("3")
 branch_b_stats = ExtResource("4")

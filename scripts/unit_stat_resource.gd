@@ -267,6 +267,17 @@ func can_target_air() -> bool:
 @export_range(0.0, 0.5, 0.01) var damage_ramp_per_hit: float = 0.0
 @export_range(0.0, 2.0, 0.05) var damage_ramp_max: float = 0.0
 
+## Rate-of-fire ramp passive. Sibling of damage_ramp_*: each
+## consecutive shot at the same target shortens the next reload
+## by `rof_ramp_per_hit` of the base cycle, capped at
+## `rof_ramp_max`. Resets when the target changes (shares the
+## same _ramp_target_id state in CombatComponent). Used by the
+## Breacher Salvo branch to model 'twin-linked missile pod
+## locking on -- each shot warms up the launcher for a faster
+## next salvo'. Defaults 0 = inert.
+@export_range(0.0, 0.4, 0.01) var rof_ramp_per_hit: float = 0.0
+@export_range(0.0, 0.8, 0.05) var rof_ramp_max: float = 0.0
+
 ## Target-selection flag. When true, pressing the ability button
 ## puts the cursor into ABILITY targeting mode (blue glow); the
 ## next LEFT-click sets the target world position passed to

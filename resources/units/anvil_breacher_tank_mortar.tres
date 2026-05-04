@@ -1,0 +1,42 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_breacher_mortar"]
+script = ExtResource("2")
+weapon_name = "Heavy Basilisk Mortar"
+role_tag = &"AP"
+damage_tier = &"high"
+range_tier = &"very_long"
+rof_tier = &"single"
+damage_value = 130
+rof_seconds_value = 6.0
+projectile_style = &"missile"
+base_accuracy = 0.74
+can_damage_trees = true
+mult_vs_light = 1.10
+mult_vs_medium = 0.85
+mult_vs_heavy = 0.30
+structure_damage_mult = 0.70
+
+[resource]
+script = ExtResource("1")
+unit_name = "Breacher Tank (Mortar)"
+display_name = "VA-9M Breacher (Mortar)"
+unit_class = &"transport"
+hp_total = 1380
+hp_per_unit = 460
+armor_class = &"medium"
+speed_tier = &"slow"
+sight_tier = &"long"
+squad_size = 3
+population = 14
+cost_salvage = 360
+cost_fuel = 42
+build_time = 34.0
+built_at = &"advanced_foundry"
+primary_weapon = SubResource("weapon_breacher_mortar")
+special_description = "Breacher Mortar branch — main gun replaced by a long-range high-arc Basilisk mortar. Strong vs light squads, decent vs medium, falls off vs heavy armour. Sit back and lob shells over enemy turret cover. 0.7x vs structures."
+passive_description = "High-Arc Mortar — fires over cover and obstacles. Long reload, but the splash chews through light formations from beyond direct-fire range."
+branch_summary = "Mobile mortar platform. Trades raw AT damage for a high-arc anti-light shell that fires from outside return-fire range."
