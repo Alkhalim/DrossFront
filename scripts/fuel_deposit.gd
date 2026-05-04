@@ -113,6 +113,13 @@ func _update_capture(delta: float) -> void:
 		var node_stats: UnitStatResource = (node.get("stats") as UnitStatResource) if "stats" in node else null
 		if node_stats and node_stats.can_build:
 			continue
+		# Aircraft can't claim oil either -- the deposit is a
+		# physical pump rig that needs ground forces to secure.
+		# Without this rule a swarm of Switchblades could flip the
+		# enemy's deposit by orbiting over it, which trivialises
+		# territorial play.
+		if node.is_in_group("aircraft"):
+			continue
 		var uid: int = node.get("owner_id")
 		var dist: float = global_position.distance_to(node.global_position)
 		if dist > capture_radius:
