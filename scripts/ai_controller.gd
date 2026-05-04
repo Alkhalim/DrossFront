@@ -112,6 +112,14 @@ var _agg_mul: float = 1.0
 ## call below can use the same path without re-querying MatchSettings.
 var _turret_path: String = "res://resources/buildings/gun_emplacement.tres"
 
+## AI's own FactionId (0 = Anvil, 1 = Sable). Resolved in _enter_tree
+## from MatchSettings + PlayerRegistry team. Drives every unit-resource
+## lookup below so a Sable AI never tries to queue an Anvil unit at its
+## HQ / foundry (which silently fails the producibility check inside
+## Building.queue_unit, dropping the salvage cost on the floor — the
+## cause of the "AI keeps draining to 0 with nothing to show" bug).
+var _my_faction: int = 0
+
 
 func _enter_tree() -> void:
 	var settings: Node = get_node_or_null("/root/MatchSettings")
@@ -127,8 +135,54 @@ func _enter_tree() -> void:
 			_agg_mul = settings.get_ai_aggression_multiplier()
 		# Sable AI picks the basic ground turret; Anvil keeps the
 		# specialised one. Faction id 1 = Sable (per MatchSettings.FactionId).
-		if "enemy_faction" in settings and (settings.get("enemy_faction") as int) == 1:
+		_my_faction = _resolve_my_faction(settings)
+		if _my_faction == 1:
 			_turret_path = "res://resources/buildings/gun_emplacement_basic.tres"
+
+
+func _resolve_my_faction(settings: Node) -> int:
+	## Mirrors test_arena_controller._faction_for_player so the AI
+	## resolves its own faction the same way the spawner does — checks
+	## the per-AI override first, then falls back to team-based default
+	## (team 0 = ally → player_faction; team 1 = enemy → enemy_faction).
+	if not settings:
+		return 0
+	if settings.has_method("has_ai_faction") and settings.call("has_ai_faction", owner_id):
+		return settings.call("get_ai_faction", owner_id) as int
+	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	if registry and registry.has_method("get_state"):
+		var st: Variant = registry.call("get_state", owner_id)
+		if st and "team_id" in st and (st.team_id as int) == 0:
+			return settings.get("player_faction") as int
+	return settings.get("enemy_faction") as int
+
+
+func _engineer_path() -> String:
+	## Per-faction engineer resource. Sable's HQ producible list does NOT
+	## contain anvil_ratchet, so a hardcoded Anvil path silently fails the
+	## queue and bleeds salvage every tick.
+	if _my_faction == 1:
+		return "res://resources/units/sable_rigger.tres"
+	return "res://resources/units/anvil_ratchet.tres"
+
+
+func _basic_foundry_unit_paths() -> Array[String]:
+	## Per-faction roster the AI can queue at basic_foundry. Mirrors the
+	## Sable producibility list in Building._faction_producible_list. Order
+	## here is { light, medium, heavy } so callers can index the same way
+	## across factions even though Sable basic has no heavy (returns ""
+	## for the heavy slot — caller must handle).
+	if _my_faction == 1:
+		return ["res://resources/units/sable_specter.tres", "res://resources/units/sable_jackal.tres", ""]
+	return ["res://resources/units/anvil_rook.tres", "res://resources/units/anvil_hound.tres", "res://resources/units/anvil_bulwark.tres"]
+
+
+func _adv_foundry_heavy_path() -> String:
+	## Per-faction heavy unit path used at advanced_foundry. Sable's
+	## Harbinger sits in the adv list, not basic — same role as Bulwark.
+	if _my_faction == 1:
+		return "res://resources/units/sable_harbinger.tres"
+	return "res://resources/units/anvil_bulwark.tres"
 
 
 func _econ_mul_for_difficulty(d: int) -> float:
@@ -684,13 +738,30 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 	if not engineer:
 		return
 
-	# Find a placement that doesn't overlap a building, unit, fuel deposit,
-	# or wreck. Hard-coded offsets occasionally collide; spiral outward from
-	# the desired position until something fits.
+	# Geothermic-vent gate -- generators (basic + advanced) snap to the
+	# nearest free vent that doesn't already host a generator. The
+	# player follows the same rule (selection_manager enforces it via
+	# requires_geothermic_vent), and the AI used to bypass it because
+	# place_building doesn't re-check the gate. With this snap the AI
+	# also chains correctly on bigger maps: when a vent near home is
+	# taken, the picker walks outward to the next-closest free vent
+	# that's nearer to OUR HQ than to any allied HQ — so we don't
+	# steal the ally's expansion vent or sprint into hostile territory.
 	var desired: Vector3 = _hq.global_position + offset
+	if bstats.get("requires_geothermic_vent"):
+		var vent_pos: Vector3 = _pick_free_generator_vent()
+		if vent_pos == Vector3.INF:
+			return  # No free vent right now; retry next tick.
+		desired = vent_pos
 	var pos: Vector3 = _find_clear_placement(desired, bstats.footprint_size)
 	if pos == Vector3.INF:
 		return  # retry next tick once the area clears
+	# For vent-gated buildings, snapping to anything but the vent
+	# centre invalidates the placement (selection_manager allows a
+	# 1.4u tolerance). If _find_clear_placement spiralled too far,
+	# bail and retry next tick.
+	if bstats.get("requires_geothermic_vent") and pos.distance_to(desired) > 1.4:
+		return
 
 	# Use the same path as the player: BuilderComponent.place_building spends
 	# resources, instantiates the building, calls begin_construction, and
@@ -751,19 +822,23 @@ func _maintain_engineers() -> void:
 			engineer_count += 1
 	if engineer_count >= 1:
 		return
-	# Don't pile up Ratchets in the queue; only request one at a time.
+	# Don't pile up engineers in the queue; only request one at a time.
 	if _hq.has_method("get_queue_size") and _hq.get_queue_size() > 0:
 		return
-	var ratchet: UnitStatResource = load("res://resources/units/anvil_ratchet.tres") as UnitStatResource
-	if not ratchet:
+	var engineer_stats: UnitStatResource = load(_engineer_path()) as UnitStatResource
+	if not engineer_stats:
 		return
 	if not _ai_resource_manager:
 		return
 	var salvage: int = _ai_resource_manager.get("salvage")
-	if salvage < ratchet.cost_salvage:
+	if salvage < engineer_stats.cost_salvage:
 		return
-	_ai_resource_manager.spend(ratchet.cost_salvage, ratchet.cost_fuel)
-	_hq.queue_unit(ratchet)
+	# Queue first, spend only on success. queue_unit returns false when
+	# the unit isn't in the HQ's faction-resolved producible list — for
+	# example a Sable HQ rejecting an Anvil Ratchet — and pre-spending
+	# would silently drain salvage every tick until the AI bankrupts.
+	if _hq.queue_unit(engineer_stats):
+		_ai_resource_manager.spend(engineer_stats.cost_salvage, engineer_stats.cost_fuel)
 
 
 func _maintain_crawlers() -> void:
@@ -802,8 +877,12 @@ func _maintain_crawlers() -> void:
 	# the rest of the economy on a single buy.
 	if salvage < crawler_stats.cost_salvage + 150:
 		return
-	_ai_resource_manager.spend(crawler_stats.cost_salvage, crawler_stats.cost_fuel)
-	_hq.queue_unit(crawler_stats)
+	# Queue first, spend only on success — same drain-prevention pattern
+	# as _maintain_engineers. Crawler is currently in both factions'
+	# rosters, but the defensive check costs nothing and inoculates
+	# against future roster splits.
+	if _hq.queue_unit(crawler_stats):
+		_ai_resource_manager.spend(crawler_stats.cost_salvage, crawler_stats.cost_fuel)
 
 
 ## How fresh "took damage" must be to count as under-fire (seconds).
@@ -1252,6 +1331,104 @@ func _find_building_at(pos: Vector3, footprint: Vector3) -> Node:
 	return null
 
 
+func _pick_free_generator_vent() -> Vector3:
+	## Returns the world position of the closest geothermic vent that
+	## (a) doesn't already host one of our generators and
+	## (b) sits closer to OUR HQ than to any allied HQ
+	##     (so we don't poach the ally's expansion vent on shared maps).
+	## Returns Vector3.INF when nothing qualifies — _try_place will
+	## just retry next tick.
+	if not is_instance_valid(_hq):
+		return Vector3.INF
+	var my_hq: Vector3 = _hq.global_position
+	var ally_hq_positions: Array[Vector3] = _ally_hq_positions()
+	var taken: Array[Vector3] = _existing_generator_positions()
+	var best: Vector3 = Vector3.INF
+	var best_dist: float = INF
+	for node: Node in get_tree().get_nodes_in_group("geothermic_vents"):
+		if not is_instance_valid(node):
+			continue
+		var n3: Node3D = node as Node3D
+		if not n3:
+			continue
+		var vp: Vector3 = n3.global_position
+		# Skip vents that already have a generator on them (within
+		# the same 1.4u tolerance the player gate uses).
+		var occupied: bool = false
+		for tp: Vector3 in taken:
+			if vp.distance_to(tp) < 1.6:
+				occupied = true
+				break
+		if occupied:
+			continue
+		# Don't pick vents that are closer to an allied HQ than to
+		# ours — the ally should get those for their own expansion.
+		var d_self: float = my_hq.distance_to(vp)
+		var poach: bool = false
+		for ahq: Vector3 in ally_hq_positions:
+			if ahq.distance_to(vp) < d_self - 1.0:
+				poach = true
+				break
+		if poach:
+			continue
+		if d_self < best_dist:
+			best_dist = d_self
+			best = vp
+	return best
+
+
+func _ally_hq_positions() -> Array[Vector3]:
+	## Returns world positions of all friendly HQs other than ours.
+	## Used by the vent picker to avoid stealing an ally's expansion vent.
+	var out: Array[Vector3] = []
+	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	if not registry or not registry.has_method("get_state"):
+		return out
+	var my_team: int = -1
+	var my_state: Variant = registry.call("get_state", owner_id)
+	if my_state and "team_id" in my_state:
+		my_team = my_state.team_id as int
+	if my_team < 0:
+		return out
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var oid: int = node.get("owner_id") as int
+		if oid == owner_id:
+			continue
+		var stats_v: BuildingStatResource = node.get("stats") as BuildingStatResource
+		if not stats_v or stats_v.building_id != &"headquarters":
+			continue
+		var st: Variant = registry.call("get_state", oid)
+		if not st or not ("team_id" in st):
+			continue
+		if (st.team_id as int) != my_team:
+			continue
+		var b: Node3D = node as Node3D
+		if b:
+			out.append(b.global_position)
+	return out
+
+
+func _existing_generator_positions() -> Array[Vector3]:
+	## Returns world positions of every constructed-or-being-built
+	## generator owned by anyone -- vent picker avoids any vent that
+	## already has one (regardless of owner; vents are exclusive).
+	var out: Array[Vector3] = []
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var stats_v: BuildingStatResource = node.get("stats") as BuildingStatResource
+		if not stats_v:
+			continue
+		if not stats_v.get("requires_geothermic_vent"):
+			continue
+		var b: Node3D = node as Node3D
+		if b:
+			out.append(b.global_position)
+	return out
+
+
 func _find_clear_placement(desired: Vector3, footprint: Vector3) -> Vector3:
 	if _is_placement_clear(desired, footprint):
 		return desired
@@ -1370,9 +1547,34 @@ func _try_queue_at(foundry_node: Node) -> void:
 	if foundry_node.get_queue_size() >= 2:
 		return
 
-	var rook_stats: UnitStatResource = load("res://resources/units/anvil_rook.tres") as UnitStatResource
-	var hound_stats: UnitStatResource = load("res://resources/units/anvil_hound.tres") as UnitStatResource
-	var bulwark_stats: UnitStatResource = load("res://resources/units/anvil_bulwark.tres") as UnitStatResource
+	# Faction-correct unit roster -- the foundry will silently reject
+	# cross-faction units (Sable basic_foundry can't queue Rook /
+	# Hound; Anvil basic_foundry can't queue Specter / Jackal) and
+	# every reject would drain salvage if we spent before queuing.
+	var basic_paths: Array[String] = _basic_foundry_unit_paths()
+	var heavy_path: String = _adv_foundry_heavy_path()
+	# Decide which roster to draw from based on the foundry's
+	# building_id. Bulwark / Harbinger only ever live at adv_foundry,
+	# so a basic foundry call never tries to queue them.
+	var foundry_id: StringName = &""
+	var foundry_stats: BuildingStatResource = foundry_node.get("stats") as BuildingStatResource
+	if foundry_stats:
+		foundry_id = foundry_stats.building_id
+	var is_adv: bool = foundry_id == &"advanced_foundry"
+	var rook_stats: UnitStatResource = null
+	var hound_stats: UnitStatResource = null
+	var bulwark_stats: UnitStatResource = null
+	if basic_paths.size() >= 2:
+		if basic_paths[0] != "":
+			rook_stats = load(basic_paths[0]) as UnitStatResource
+		if basic_paths[1] != "":
+			hound_stats = load(basic_paths[1]) as UnitStatResource
+	if is_adv and heavy_path != "":
+		bulwark_stats = load(heavy_path) as UnitStatResource
+	elif basic_paths.size() >= 3 and basic_paths[2] != "":
+		# Anvil basic_foundry historically also produces Bulwark — keep
+		# that behaviour so the existing weights still resolve.
+		bulwark_stats = load(basic_paths[2]) as UnitStatResource
 
 	# Strategy archetypes bias the unit roll. The Rook / Hound / Bulwark
 	# weights below sum to 10 so a `randi() % 10` lookup picks the right
@@ -1411,5 +1613,7 @@ func _try_queue_at(foundry_node: Node) -> void:
 
 	var salvage: int = _ai_resource_manager.get("salvage")
 	if salvage >= unit_stats.cost_salvage:
-		_ai_resource_manager.spend(unit_stats.cost_salvage, unit_stats.cost_fuel)
-		foundry_node.queue_unit(unit_stats)
+		# Queue first, spend only on success — see _maintain_engineers
+		# for the drain-prevention rationale.
+		if foundry_node.queue_unit(unit_stats):
+			_ai_resource_manager.spend(unit_stats.cost_salvage, unit_stats.cost_fuel)
