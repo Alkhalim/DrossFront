@@ -468,7 +468,14 @@ func _force_attack_if_dormant() -> bool:
 	var since_last: float = _match_clock_sec - _last_attack_clock_sec
 	if since_last < _personality_dormant_timeout_sec():
 		return false
-	# Need at least one combat unit (skip engineers / crawlers).
+	# Need at least MIN_DORMANT_FORCE_UNITS combat units (skip
+	# engineers / crawlers). Bumped from 1 -> 3 so the dormant
+	# safety net doesn't trickle a single unit at the enemy base
+	# the moment the timeout expires -- the previous single-unit
+	# floor produced the player-visible "AI trains 1, sends 1, it
+	# dies, repeat" pattern. With 3 units the AI at least shows up
+	# as a recognisable squad.
+	const MIN_DORMANT_FORCE_UNITS: int = 3
 	var combat_count: int = 0
 	for node: Node in _units:
 		if not is_instance_valid(node):
@@ -476,9 +483,9 @@ func _force_attack_if_dormant() -> bool:
 		if node.has_method("get_builder") and node.get_builder():
 			continue
 		combat_count += 1
-		if combat_count >= 1:
+		if combat_count >= MIN_DORMANT_FORCE_UNITS:
 			break
-	if combat_count == 0:
+	if combat_count < MIN_DORMANT_FORCE_UNITS:
 		return false
 	_state = AIState.ATTACK
 	_state_timer = 0.0
