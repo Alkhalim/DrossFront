@@ -919,6 +919,42 @@ func _stamp_visibility(world_pos: Vector3, radius: float, observer_elevated: boo
 			_cells[idx] = CellState.VISIBLE
 			if collect_cells:
 				collected.append(idx)
+	# Multi-cell occluder fix: a 2x2 (or thicker) rock has interior
+	# cells that the LOS walk can't reach (the rock's near edge
+	# blocks the walk to the far edge), leaving black slivers on
+	# rocks the player can clearly see. Post-sweep the bounding
+	# box once: any occluder cell adjacent (4-neighbours) to a
+	# currently-VISIBLE cell becomes VISIBLE itself. One pass only,
+	# so an occluder cluster only spreads visibility to its first
+	# ring of cells -- prevents revealing rocks-behind-rocks.
+	if honour_occluders:
+		var newly_visible: PackedInt32Array = PackedInt32Array()
+		for cz2: int in range(z0, z1 + 1):
+			for cx2: int in range(x0, x1 + 1):
+				var nidx: int = _cell_index(cx2, cz2)
+				if _occluder_cells[nidx] != 1:
+					continue
+				if _cells[nidx] == CellState.VISIBLE:
+					continue
+				# Adjacent visible-cell check.
+				var has_visible_neighbour: bool = false
+				if cx2 > 0 and _cells[_cell_index(cx2 - 1, cz2)] == CellState.VISIBLE:
+					has_visible_neighbour = true
+				elif cx2 < GRID_SIZE - 1 and _cells[_cell_index(cx2 + 1, cz2)] == CellState.VISIBLE:
+					has_visible_neighbour = true
+				elif cz2 > 0 and _cells[_cell_index(cx2, cz2 - 1)] == CellState.VISIBLE:
+					has_visible_neighbour = true
+				elif cz2 < GRID_SIZE - 1 and _cells[_cell_index(cx2, cz2 + 1)] == CellState.VISIBLE:
+					has_visible_neighbour = true
+				if has_visible_neighbour:
+					newly_visible.append(nidx)
+		# Apply after the scan so we don't cascade past the first
+		# ring (would otherwise progressively reveal rocks behind
+		# rocks via chained adjacency).
+		for nidx2: int in newly_visible:
+			_cells[nidx2] = CellState.VISIBLE
+			if collect_cells:
+				collected.append(nidx2)
 	return collected
 
 
