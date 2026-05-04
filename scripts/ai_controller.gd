@@ -548,7 +548,7 @@ func _process_economy() -> void:
 			_place_next_power_building("generator2", _offset_for("generator2", Vector3(22, 0, 18)))
 			_try_place("basic_armory", "res://resources/buildings/basic_armory.tres", _offset_for("basic_armory", Vector3(18, 0, -4)))
 			_try_place("sam_site", "res://resources/buildings/sam_site.tres", _offset_for("sam_site", Vector3(0, 0, -22)))
-			_try_place("salvage_yard_2", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_2", Vector3(-12, 0, 28)))
+			_try_place_salvage_yard("salvage_yard_2", _offset_for("salvage_yard_2", Vector3(-12, 0, 28)))
 			# Group B — forward right cluster. Far enough from Group A
 			# that the two range-circles don't kiss; protects the right-
 			# flank lane / scrap-pile cluster.
@@ -564,7 +564,7 @@ func _process_economy() -> void:
 			_try_place("turret_c2", _turret_path, _offset_for("turret_c", Vector3(-35, 0, -45)) + Vector3(-7, 0, -3))
 			_try_place("turret_c3", _turret_path, _offset_for("turret_c", Vector3(-35, 0, -45)) + Vector3(3, 0, -7))
 			_try_place("advanced_armory", "res://resources/buildings/advanced_armory.tres", _offset_for("advanced_armory", Vector3(-18, 0, -4)))
-			_try_place("salvage_yard_3", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_3", Vector3(12, 0, 28)))
+			_try_place_salvage_yard("salvage_yard_3", _offset_for("salvage_yard_3", Vector3(12, 0, 28)))
 			_place_next_power_building("generator3", _offset_for("generator3", Vector3(28, 0, 8)))
 		Strategy.ECONOMY_HEAVY:
 			# Eco opener: 2nd generator + advanced foundry early,
@@ -574,16 +574,16 @@ func _process_economy() -> void:
 			# generators. Salvage-yard cap raised to 5 (yard_2..5).
 			_place_next_power_building("generator2", _offset_for("generator2", Vector3(22, 0, 18)))
 			_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
-			_try_place("salvage_yard_2", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_2", Vector3(-12, 0, 28)))
+			_try_place_salvage_yard("salvage_yard_2", _offset_for("salvage_yard_2", Vector3(-12, 0, 28)))
 			_try_place("basic_armory", "res://resources/buildings/basic_armory.tres", _offset_for("basic_armory", Vector3(18, 0, -4)))
 			_try_place("aerodrome", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome", Vector3(28, 0, -8)))
-			_try_place("salvage_yard_3", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_3", Vector3(12, 0, 28)))
+			_try_place_salvage_yard("salvage_yard_3", _offset_for("salvage_yard_3", Vector3(12, 0, 28)))
 			_try_place("turret", _turret_path, _offset_for("turret", Vector3(0, 0, -14)))
 			_try_place("advanced_armory", "res://resources/buildings/advanced_armory.tres", _offset_for("advanced_armory", Vector3(-18, 0, -4)))
 			_try_place("sam_site", "res://resources/buildings/sam_site.tres", _offset_for("sam_site", Vector3(0, 0, -22)))
 			_place_next_power_building("generator3", _offset_for("generator3", Vector3(28, 0, 8)))
-			_try_place("salvage_yard_4", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_4", Vector3(-22, 0, 32)))
-			_try_place("salvage_yard_5", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_5", Vector3(22, 0, 32)))
+			_try_place_salvage_yard("salvage_yard_4", _offset_for("salvage_yard_4", Vector3(-22, 0, 32)))
+			_try_place_salvage_yard("salvage_yard_5", _offset_for("salvage_yard_5", Vector3(22, 0, 32)))
 		Strategy.RUSH:
 			# Aggressive: extra production fast (gen + adv foundry +
 			# aerodrome for air rush), basic armory for branch
@@ -593,36 +593,41 @@ func _process_economy() -> void:
 			_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
 			_try_place("aerodrome", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome", Vector3(28, 0, -8)))
 			_try_place("sam_site", "res://resources/buildings/sam_site.tres", _offset_for("sam_site", Vector3(0, 0, -22)))
-			_try_place("salvage_yard_2", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_2", Vector3(-12, 0, 28)))
+			_try_place_salvage_yard("salvage_yard_2", _offset_for("salvage_yard_2", Vector3(-12, 0, 28)))
 			_try_place("advanced_armory", "res://resources/buildings/advanced_armory.tres", _offset_for("advanced_armory", Vector3(-18, 0, -4)))
-			_try_place("salvage_yard_3", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_3", Vector3(12, 0, 28)))
+			_try_place_salvage_yard("salvage_yard_3", _offset_for("salvage_yard_3", Vector3(12, 0, 28)))
 		Strategy.AIR:
 			# Air doctrine: ONLY one basic foundry (the starter),
 			# then go straight into 2 aerodromes, THEN add a second
 			# basic foundry as ground-defence backup. Never builds
 			# advanced_foundry. Power + armoury still scale via the
-			# generic helpers.
+			# generic helpers. Both armoury tiers included so the
+			# tech-gated aircraft (Hammerhead etc.) actually unlock
+			# -- without them the aerodrome's filtered roster is
+			# empty and no aircraft ever queue.
 			_place_next_power_building("generator2", _offset_for("generator2", Vector3(22, 0, 18)))
+			_try_place("basic_armory", "res://resources/buildings/basic_armory.tres", _offset_for("basic_armory", Vector3(18, 0, -4)))
 			_try_place("aerodrome", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome", Vector3(28, 0, -8)))
 			_try_place("aerodrome_2", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome_2", Vector3(-28, 0, -8)))
-			_try_place("foundry_2", "res://resources/buildings/basic_foundry.tres", _offset_for("foundry_2", Vector3(0, 0, 14)))
+			_try_place("advanced_armory", "res://resources/buildings/advanced_armory.tres", _offset_for("advanced_armory", Vector3(-18, 0, -4)))
 			_try_place("sam_site", "res://resources/buildings/sam_site.tres", _offset_for("sam_site", Vector3(0, 0, -22)))
-			_try_place("basic_armory", "res://resources/buildings/basic_armory.tres", _offset_for("basic_armory", Vector3(18, 0, -4)))
-			_try_place("salvage_yard_2", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_2", Vector3(-12, 0, 28)))
+			_try_place("foundry_2", "res://resources/buildings/basic_foundry.tres", _offset_for("foundry_2", Vector3(0, 0, 14)))
+			_try_place_salvage_yard("salvage_yard_2", _offset_for("salvage_yard_2", Vector3(-12, 0, 28)))
 			_try_place("turret", _turret_path, _offset_for("turret", Vector3(0, 0, -14)))
-			_try_place("salvage_yard_3", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_3", Vector3(12, 0, 28)))
+			_try_place_salvage_yard("salvage_yard_3", _offset_for("salvage_yard_3", Vector3(12, 0, 28)))
 			_place_next_power_building("generator3", _offset_for("generator3", Vector3(28, 0, 8)))
+			_place_next_power_building("generator4", _offset_for("generator4", Vector3(-28, 0, 8)))
 		_:
 			# BALANCED — covers everything in a stable order.
 			_place_next_power_building("generator2", _offset_for("generator2", Vector3(22, 0, 18)))
 			_try_place("turret", _turret_path, _offset_for("turret", Vector3(0, 0, -14)))
 			_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
 			_try_place("basic_armory", "res://resources/buildings/basic_armory.tres", _offset_for("basic_armory", Vector3(18, 0, -4)))
-			_try_place("salvage_yard_2", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_2", Vector3(-12, 0, 28)))
+			_try_place_salvage_yard("salvage_yard_2", _offset_for("salvage_yard_2", Vector3(-12, 0, 28)))
 			_try_place("aerodrome", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome", Vector3(28, 0, -8)))
 			_try_place("sam_site", "res://resources/buildings/sam_site.tres", _offset_for("sam_site", Vector3(0, 0, -22)))
 			_try_place("advanced_armory", "res://resources/buildings/advanced_armory.tres", _offset_for("advanced_armory", Vector3(-18, 0, -4)))
-			_try_place("salvage_yard_3", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_3", Vector3(12, 0, 28)))
+			_try_place_salvage_yard("salvage_yard_3", _offset_for("salvage_yard_3", Vector3(12, 0, 28)))
 
 	# Dormant-attack safety net -- if we've had ANY combat units
 	# for too long without launching an attack, push out now.
@@ -774,6 +779,41 @@ func _ai_prerequisites_met(bstats: BuildingStatResource) -> bool:
 		if not have.has(req):
 			return false
 	return true
+
+
+func _try_place_salvage_yard(key: String, offset: Vector3) -> void:
+	## Wraps _try_place for salvage yards with an ROI check: only
+	## drops the yard if there's at least 150 salvage worth of
+	## reachable wrecks within ~30u of the placement spot. Without
+	## this, the AI happily places a 100-salvage yard on an empty
+	## stretch of map and the workers idle forever, which read as
+	## the AI burning income on dead infrastructure.
+	if _buildings_placed.has(key):
+		return
+	# Compute the candidate world position we'd actually place at
+	# (HQ-relative offset, like _try_place does) so the ROI scan
+	# matches what the player sees.
+	if not is_instance_valid(_hq):
+		return
+	var anchor: Vector3 = _hq.global_position + offset
+	const YARD_HARVEST_SCAN_RADIUS: float = 30.0
+	const YARD_ROI_THRESHOLD: int = 150
+	var nearby_salvage: int = 0
+	for w_node: Node in get_tree().get_nodes_in_group("wrecks"):
+		if not is_instance_valid(w_node):
+			continue
+		var w3: Node3D = w_node as Node3D
+		if not w3:
+			continue
+		if anchor.distance_to(w3.global_position) > YARD_HARVEST_SCAN_RADIUS:
+			continue
+		var sv: int = (w_node.get("salvage_remaining") as int) if "salvage_remaining" in w_node else 0
+		nearby_salvage += sv
+		if nearby_salvage >= YARD_ROI_THRESHOLD:
+			break
+	if nearby_salvage < YARD_ROI_THRESHOLD:
+		return
+	_try_place(key, "res://resources/buildings/salvage_yard.tres", offset)
 
 
 func _place_next_power_building(key: String, offset: Vector3) -> void:

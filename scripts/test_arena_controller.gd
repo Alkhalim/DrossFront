@@ -4705,11 +4705,13 @@ func _setup_geothermic_vents() -> void:
 		# front of the HQ (was 11; bumped +50% per playtest so the
 		# pair doesn't crowd the base footprint). Pair spacing
 		# 6.5u along the perp axis so generators on top don't
-		# overlap.
+		# overlap. Each placement runs through _spawn_vent_safely
+		# which retries with small lateral nudges if the original
+		# position lands inside a ramp / plateau / terrain piece.
 		var perp: Vector3 = Vector3(-centre_dir_per_player[i].z, 0.0, centre_dir_per_player[i].x)
 		var pair_centre: Vector3 = hq_pos + centre_dir_per_player[i] * 17.0
-		_spawn_vent(pair_centre + perp * 3.25)
-		_spawn_vent(pair_centre - perp * 3.25)
+		_spawn_vent_safely(pair_centre + perp * 3.25, perp)
+		_spawn_vent_safely(pair_centre - perp * 3.25, perp)
 		# 1 forward vent further toward map centre (was 32u, now
 		# 48u -- same +50% bump). On Schwarzwald the corridor is a
 		# narrow choke at this Z; nudge the vent ~12u laterally so
@@ -4725,7 +4727,7 @@ func _setup_geothermic_vents() -> void:
 			# of their corridor, odd-index go LEFT.
 			var side_sign: float = 1.0 if (i % 2) == 0 else -1.0
 			forward_vent += perp * 12.0 * side_sign
-		_spawn_vent(forward_vent)
+		_spawn_vent_safely(forward_vent, perp)
 	# Distributed vents -- ~3 per player spread across the open
 	# map area. Uses Mitchell's best-candidate sampling so the
 	# vent network reads as evenly distributed instead of pooling
@@ -4836,6 +4838,32 @@ func _vent_overlaps_terrain(pos: Vector3) -> bool:
 			if pos.distance_to(Vector3(n3b.global_position.x, 0.0, n3b.global_position.z)) < VENT_TERRAIN_KEEPOUT:
 				return true
 	return false
+
+
+func _spawn_vent_safely(pos: Vector3, nudge_axis: Vector3) -> void:
+	## Spawns a vent at `pos` if the position is clear of terrain.
+	## Otherwise nudges along `nudge_axis` (and its opposite) up to
+	## three times to find a safe landing spot. Used by the starter
+	## pair + forward vent placements which previously bypassed the
+	## terrain check used by the distributed-vent Mitchell sampler.
+	var safe_pos: Vector3 = pos
+	if _vent_overlaps_terrain(safe_pos):
+		var nudged_ok: bool = false
+		for step: int in 6:
+			# Alternate sides each step: +1, -1, +2, -2, +3, -3 etc.
+			var sign: float = 1.0 if (step % 2) == 0 else -1.0
+			var dist: float = float(step / 2 + 1) * 4.0
+			var candidate: Vector3 = pos + nudge_axis * sign * dist
+			if not _vent_overlaps_terrain(candidate):
+				safe_pos = candidate
+				nudged_ok = true
+				break
+		if not nudged_ok:
+			# Give up nudging -- spawn at original anyway. The
+			# vent's bury under terrain is at least visible to the
+			# player as a bug, vs silently failing to spawn.
+			safe_pos = pos
+	_spawn_vent(safe_pos)
 
 
 func _spawn_vent(pos: Vector3) -> void:
