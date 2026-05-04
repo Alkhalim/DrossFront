@@ -770,6 +770,21 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 		var vent_keepout: float = maxf(bstats.footprint_size.x, bstats.footprint_size.z) * 0.5 + 1.4
 		if GeothermicVent.find_vent_at(get_tree().current_scene, pos, vent_keepout) != null:
 			return
+	# Plateau / ramp keepout. Building right at the foot of a ramp
+	# wedges the AI's Crawlers + military between the building and
+	# the slope, where pathing fails and units bounce / stall. Use
+	# a wider keepout for plateaus (footprints are large) and a
+	# tight keepout for hills (~footprint_half + 4u).
+	if not bstats.get("requires_geothermic_vent"):
+		var plat_keepout: float = maxf(bstats.footprint_size.x, bstats.footprint_size.z) * 0.5 + 4.0
+		for plat: Node in get_tree().get_nodes_in_group("elevation"):
+			if not is_instance_valid(plat):
+				continue
+			var p3: Node3D = plat as Node3D
+			if not p3:
+				continue
+			if pos.distance_to(Vector3(p3.global_position.x, 0.0, p3.global_position.z)) < plat_keepout:
+				return
 
 	# Use the same path as the player: BuilderComponent.place_building spends
 	# resources, instantiates the building, calls begin_construction, and

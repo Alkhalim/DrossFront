@@ -983,7 +983,21 @@ func _physics_process(delta: float) -> void:
 		if _stuck_timer >= 1.5 and _stuck_timer < 1.5 + delta * 1.5:
 			if _nav_agent:
 				_nav_agent.target_position = move_target
-		elif _stuck_timer > 5.0:
+		elif _stuck_timer > 5.0 and _stuck_timer < 5.0 + delta * 1.5:
+			# First-pass nudge -- shove the Crawler 2.5u in a random
+			# direction and re-target. This unwedges the common case
+			# where the body is jammed against a wreck / pile that
+			# the navmesh treats as reachable from the goal side
+			# but not the current side.
+			var nudge_ang: float = randf_range(0.0, TAU)
+			var nudge_off: Vector3 = Vector3(cos(nudge_ang), 0.0, sin(nudge_ang)) * 2.5
+			global_position += nudge_off
+			if _nav_agent:
+				_nav_agent.target_position = move_target
+		elif _stuck_timer > 8.0:
+			# Still stuck after the nudge -- give up on the current
+			# target so the AI's _command_idle_crawler_to_wreck
+			# tick can re-pick a fresh wreck cluster.
 			stop()
 			return
 	else:
