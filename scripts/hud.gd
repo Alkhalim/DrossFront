@@ -2808,16 +2808,17 @@ func _build_building_stat_sheet(building: Node3D, bstats: BuildingStatResource, 
 	# bar above the building shows damage state, but the player also
 	# wants the numeric value next to the rest of the building stats
 	# so they can compare 'is this HQ at half HP' without eyeballing
-	# the bar.
-	var hp_color: Color = STAT_LABEL_COLOR_DEFENSE
+	# the bar. Tint shifts to orange under 66% HP / red under 33%
+	# so the row colour matches how hurt the building is.
+	var hp_color_hex: String = STAT_LABEL_COLOR_HP
 	if hp_max > 0:
 		var pct: float = clampf(float(hp_now) / float(hp_max), 0.0, 1.0)
 		if pct < 0.33:
-			hp_color = STAT_LABEL_COLOR_DAMAGE
+			hp_color_hex = STAT_LABEL_COLOR_DAMAGE
 		elif pct < 0.66:
-			hp_color = STAT_LABEL_COLOR_RANGE
+			hp_color_hex = STAT_LABEL_COLOR_RANGE
 	var defense_row: Array = [
-		_stat_chip("HP", "%d / %d" % [hp_now, hp_max], hp_color),
+		_stat_chip("HP", "%d / %d" % [hp_now, hp_max], hp_color_hex),
 		_stat_chip("Class", "Structure", STAT_LABEL_COLOR_DEFENSE),
 	]
 	if bstats.power_production > 0:
