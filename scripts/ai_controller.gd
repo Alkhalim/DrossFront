@@ -581,13 +581,18 @@ func _process_army() -> void:
 	# keep working through the army-build state.
 	_maintain_engineers()
 	_maintain_crawlers()
-	# Queue at basic foundry (validate not destroyed)
-	if is_instance_valid(_foundry):
-		_try_queue_at(_foundry)
-
-	# Queue at advanced foundry if available
-	if _wave_count >= 2 and is_instance_valid(_adv_foundry):
-		_try_queue_at(_adv_foundry)
+	# Queue at every constructed friendly foundry, not just the
+	# first basic + first advanced one tracked in _foundry /
+	# _adv_foundry. With 2+ basic foundries (which the ally on a
+	# big map naturally builds for parallel production), the older
+	# code only fed the first one, leaving the rest idle and
+	# salvage piling up uncollected. The wave_count >= 2 gate on
+	# adv_foundry is gone too -- it never tripped for an ally
+	# losing single units (wave_count only increments on a
+	# completed attack), which kept the entire adv production
+	# offline.
+	for foundry: Node in _all_friendly_foundries():
+		_try_queue_at(foundry)
 
 	# Wave size pulls from the personality base, scaled by wave
 	# count + aggression. Personality drives the OPENING wave size:
@@ -1560,6 +1565,33 @@ func _is_placement_clear(pos: Vector3, footprint: Vector3) -> bool:
 	return true
 
 
+func _all_friendly_foundries() -> Array[Node]:
+	## Returns every constructed basic_foundry / advanced_foundry /
+	## aerodrome owned by us. Replaces the legacy _foundry +
+	## _adv_foundry singleton tracking so a third / fourth foundry
+	## the AI builds on bigger maps actually contributes to the
+	## production budget instead of sitting idle while salvage piles
+	## up. Aerodromes also produce units, so they queue through the
+	## same path -- their producible list resolves to the aircraft
+	## roster in Building._faction_producible_list, which our
+	## faction-correct unit picker then queues from.
+	var out: Array[Node] = []
+	var production_ids: Array[StringName] = [&"basic_foundry", &"advanced_foundry", &"aerodrome"]
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		if node.get("owner_id") != owner_id:
+			continue
+		if not node.get("is_constructed"):
+			continue
+		var bstats: BuildingStatResource = node.get("stats") as BuildingStatResource
+		if not bstats:
+			continue
+		if bstats.building_id in production_ids:
+			out.append(node)
+	return out
+
+
 func _try_queue_at(foundry_node: Node) -> void:
 	if not foundry_node or not is_instance_valid(foundry_node):
 		return
@@ -1569,74 +1601,93 @@ func _try_queue_at(foundry_node: Node) -> void:
 		return
 	if foundry_node.get_queue_size() >= 2:
 		return
-
-	# Faction-correct unit roster -- the foundry will silently reject
-	# cross-faction units (Sable basic_foundry can't queue Rook /
-	# Hound; Anvil basic_foundry can't queue Specter / Jackal) and
-	# every reject would drain salvage if we spent before queuing.
-	var basic_paths: Array[String] = _basic_foundry_unit_paths()
-	var heavy_path: String = _adv_foundry_heavy_path()
-	# Decide which roster to draw from based on the foundry's
-	# building_id. Bulwark / Harbinger only ever live at adv_foundry,
-	# so a basic foundry call never tries to queue them.
-	var foundry_id: StringName = &""
+	# Use the foundry's OWN producibility list as the source of
+	# truth -- this resolves through Building._faction_producible_list
+	# so a Sable adv_foundry returns Harbinger / Pulsefont, an Anvil
+	# basic returns Rook / Hound, an Aerodrome returns aircraft, etc.
+	# Avoids the previous trap where the AI hardcoded Rook+Hound for
+	# every foundry kind and adv_foundry / aerodrome silently
+	# rejected 80% of attempts (no spend, but a wasted tick + a
+	# silent 'why isn't the AI building anything').
+	var roster: Array = []
+	if foundry_node.has_method("get_producible_units"):
+		roster = foundry_node.call("get_producible_units")
+	if roster.is_empty():
+		return
+	# Strategy + foundry-kind weighting. Heavies live at adv tier
+	# (Bulwark, Forgemaster); the basic tier is light/medium only.
+	# The picker's job here is just 'roll within the foundry's
+	# actual roster' -- we no longer try to fish a Bulwark out of
+	# a basic foundry that never had one.
 	var foundry_stats: BuildingStatResource = foundry_node.get("stats") as BuildingStatResource
-	if foundry_stats:
-		foundry_id = foundry_stats.building_id
-	var is_adv: bool = foundry_id == &"advanced_foundry"
-	var rook_stats: UnitStatResource = null
-	var hound_stats: UnitStatResource = null
-	var bulwark_stats: UnitStatResource = null
-	if basic_paths.size() >= 2:
-		if basic_paths[0] != "":
-			rook_stats = load(basic_paths[0]) as UnitStatResource
-		if basic_paths[1] != "":
-			hound_stats = load(basic_paths[1]) as UnitStatResource
-	if is_adv and heavy_path != "":
-		bulwark_stats = load(heavy_path) as UnitStatResource
-	elif basic_paths.size() >= 3 and basic_paths[2] != "":
-		# Anvil basic_foundry historically also produces Bulwark — keep
-		# that behaviour so the existing weights still resolve.
-		bulwark_stats = load(basic_paths[2]) as UnitStatResource
-
-	# Strategy archetypes bias the unit roll. The Rook / Hound / Bulwark
-	# weights below sum to 10 so a `randi() % 10` lookup picks the right
-	# stats for that archetype's character. Bulwarks are gated on
-	# `_wave_count >= 2` everywhere — early waves can't field heavies
-	# regardless of roll.
-	var weights: Dictionary
-	match _strategy:
-		Strategy.TURRET_HEAVY:
-			# Defensive doctrine — heavies anchor the line, with
-			# Hounds as second-line and very few Rooks.
-			weights = {"rook": 2, "hound": 4, "bulwark": 4}
-		Strategy.RUSH:
-			# Speed-focused — flood Rooks early, very few heavies.
-			weights = {"rook": 7, "hound": 3, "bulwark": 0}
-		Strategy.ECONOMY_HEAVY:
-			# Late-tech doctrine — Hound spam mid-game, Bulwarks
-			# once the advanced foundry is online.
-			weights = {"rook": 3, "hound": 5, "bulwark": 2}
-		_:
-			# Balanced — current v1 default.
-			weights = {"rook": 5, "hound": 3, "bulwark": 2}
-
-	var roll: int = randi() % 10
-	var unit_stats: UnitStatResource = rook_stats
-	var cumulative: int = 0
-	cumulative += weights.get("rook", 0) as int
-	if roll >= cumulative and hound_stats:
-		unit_stats = hound_stats
-	cumulative += weights.get("hound", 0) as int
-	if roll >= cumulative and _wave_count >= 2 and bulwark_stats:
-		unit_stats = bulwark_stats
-
+	var foundry_id: StringName = foundry_stats.building_id if foundry_stats else &""
+	var unit_stats: UnitStatResource = _pick_unit_for_foundry(roster, foundry_id)
 	if not unit_stats:
 		return
-
+	# Affordability gate. The AI doesn't reserve population (player
+	# does), so we only check salvage / fuel here. Pop overflow
+	# affects the player but the AI has its own resource manager.
 	var salvage: int = _ai_resource_manager.get("salvage")
-	if salvage >= unit_stats.cost_salvage:
-		# Queue first, spend only on success — see _maintain_engineers
-		# for the drain-prevention rationale.
-		if foundry_node.queue_unit(unit_stats):
-			_ai_resource_manager.spend(unit_stats.cost_salvage, unit_stats.cost_fuel)
+	if salvage < unit_stats.cost_salvage:
+		return
+	var fuel: int = _ai_resource_manager.get("fuel")
+	if fuel < unit_stats.cost_fuel:
+		return
+	# Queue first, spend only on success — see _maintain_engineers
+	# for the drain-prevention rationale.
+	if foundry_node.queue_unit(unit_stats):
+		_ai_resource_manager.spend(unit_stats.cost_salvage, unit_stats.cost_fuel)
+
+
+func _pick_unit_for_foundry(roster: Array, foundry_id: StringName) -> UnitStatResource:
+	## Picks a unit from the foundry's actual producible list,
+	## weighted by strategy. roster[0] is treated as the
+	## light/scout option, roster[1] as the medium/main, roster[2+]
+	## as heavies/specialists. With aerodrome (3+ entries -- bomber,
+	## escort, drone) the heavies bucket folds the late-tier
+	## variants together so the AI doesn't fixate on one frame.
+	if roster.is_empty():
+		return null
+	# Drop locked entries (tech-gated units the AI hasn't unlocked
+	# yet would queue-reject and waste the tick). get_producible_units
+	# already filters these in the building, but be defensive.
+	var available: Array[UnitStatResource] = []
+	for r: Variant in roster:
+		var u: UnitStatResource = r as UnitStatResource
+		if u:
+			available.append(u)
+	if available.is_empty():
+		return null
+	# Weights by index slot (0 = light, 1 = medium, 2+ = heavy/spec)
+	# blended with the AI's strategy. RUSH spams the cheapest slot;
+	# ECONOMY / TURRET lean into the heaviest available.
+	var w_light: int = 5
+	var w_med: int = 3
+	var w_heavy: int = 2
+	match _strategy:
+		Strategy.TURRET_HEAVY:
+			w_light = 2; w_med = 4; w_heavy = 4
+		Strategy.RUSH:
+			w_light = 7; w_med = 3; w_heavy = 0
+		Strategy.ECONOMY_HEAVY:
+			w_light = 3; w_med = 5; w_heavy = 2
+	# Aerodrome / advanced foundry should bias heavier; basic stays
+	# light-led.
+	if foundry_id == &"advanced_foundry" or foundry_id == &"aerodrome":
+		w_light = 0
+		w_med = 5
+		w_heavy = 5
+	var total: int = w_light + w_med + w_heavy
+	if total <= 0:
+		return available[0]
+	var roll: int = randi() % total
+	var bucket: int = 0
+	if roll < w_light:
+		bucket = 0
+	elif roll < w_light + w_med:
+		bucket = 1
+	else:
+		bucket = 2
+	# Map bucket onto the actual roster, clamping to roster size.
+	var idx: int = mini(bucket, available.size() - 1)
+	return available[idx]
