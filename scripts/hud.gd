@@ -4249,12 +4249,42 @@ func _rebuild_build_buttons() -> void:
 	const BUILD_HOTKEYS: Array[String] = ["Q", "W", "E", "R", "A", "S", "D", "F"]
 	_visible_build_stats.clear()
 	var visible_index: int = 0
+	# On the Advanced tab we want the superweapon (faction-locked
+	# unique structure -- Anvil's MOLOT, Sable's Echo Array) to land
+	# at slot S (button 6) regardless of how many other advanced
+	# buildings the player's faction has. Anvil players see only one
+	# pre-superweapon advanced item beyond Q/W/E/R, which would put
+	# the superweapon at A (slot 5); Sable players have Black Pylon
+	# at A and the Echo Array at S already. To unify, we precompute a
+	# "ghost slot" gap: when the advanced list contains a
+	# superweapon and there isn't already a button between R and the
+	# superweapon, we insert one disabled placeholder at slot 5 so
+	# the superweapon falls on slot 6 in both factions.
+	var advanced_in_buildable: Array[BuildingStatResource] = []
+	for stat_iter: BuildingStatResource in buildable:
+		if stat_iter and stat_iter.is_advanced:
+			advanced_in_buildable.append(stat_iter)
+	var superweapon_idx: int = -1
+	for ai: int in advanced_in_buildable.size():
+		var sw: BuildingStatResource = advanced_in_buildable[ai]
+		if sw and sw.faction_lock != 0:
+			superweapon_idx = ai
+			break
+	var advanced_ghost_slot: int = -1
+	if _build_tab == "advanced" and superweapon_idx == 4:
+		advanced_ghost_slot = 4  # superweapon would land at slot 5; bump it.
 	for i: int in buildable.size():
 		var bstat: BuildingStatResource = buildable[i]
 		var is_advanced: bool = bstat.is_advanced
 		var tab_match: bool = (is_advanced and _build_tab == "advanced") or (not is_advanced and _build_tab == "basic")
 		if not tab_match:
 			continue
+		# Insert the reserved-empty placeholder right before the
+		# superweapon so it lands at slot S.
+		if visible_index == advanced_ghost_slot and bstat.faction_lock != 0:
+			_add_build_grid_placeholder(BUILD_HOTKEYS[visible_index] if visible_index < BUILD_HOTKEYS.size() else "")
+			_visible_build_stats.append(null)
+			visible_index += 1
 		var prereqs_ok: bool = _prerequisites_met(bstat, built_ids)
 		var btn := _BuildingTooltipButton.new()
 		btn.bstat = bstat
@@ -4289,6 +4319,25 @@ func _rebuild_build_buttons() -> void:
 		var chip_refs: Dictionary = _attach_cost_widget(btn, bstat.cost_salvage, bstat.cost_fuel, 0)
 		_action_buttons.append({ "button": btn, "kind": "build", "stat": bstat, "locked": not prereqs_ok, "chips": chip_refs })
 		visible_index += 1
+
+
+func _add_build_grid_placeholder(letter: String) -> void:
+	## Inserts a disabled placeholder cell into the build grid so the
+	## next real button lands on the desired hotkey slot. Used to keep
+	## the superweapon at slot S in factions whose pre-superweapon
+	## advanced roster doesn't naturally fill slot A.
+	if not _button_grid:
+		return
+	var ph := Button.new()
+	ph.disabled = true
+	ph.focus_mode = Control.FOCUS_NONE
+	ph.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ph.custom_minimum_size = Vector2(124, 80)
+	ph.size_flags_horizontal = Control.SIZE_FILL
+	ph.size_flags_vertical = Control.SIZE_FILL
+	ph.text = "[%s]\n--" % letter if letter != "" else "--"
+	ph.modulate = Color(1, 1, 1, 0.35)
+	_button_grid.add_child(ph)
 
 
 func _ensure_build_tab_row() -> void:
