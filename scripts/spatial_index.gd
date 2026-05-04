@@ -59,9 +59,16 @@ func _ensure_fresh() -> void:
 		return
 	_last_rebuild_ms = now
 	_cells.clear()
-	# Bucket every alive unit + every constructed building.
-	for node: Node in get_tree().get_nodes_in_group("units"):
-		if not is_instance_valid(node):
+	# Bucket every alive unit + every constructed building. Untyped
+	# iteration -- get_nodes_in_group can return freed handles that
+	# haven't dropped from the group yet, and a typed for-loop
+	# variable assignment errors before the is_instance_valid check
+	# below ever runs.
+	for raw in get_tree().get_nodes_in_group("units"):
+		if raw == null or not is_instance_valid(raw):
+			continue
+		var node: Node = raw as Node
+		if not node:
 			continue
 		if "alive_count" in node and (node.get("alive_count") as int) <= 0:
 			continue
@@ -72,8 +79,11 @@ func _ensure_fresh() -> void:
 		if not _cells.has(idx):
 			_cells[idx] = []
 		(_cells[idx] as Array).append(n3)
-	for node2: Node in get_tree().get_nodes_in_group("buildings"):
-		if not is_instance_valid(node2):
+	for raw2 in get_tree().get_nodes_in_group("buildings"):
+		if raw2 == null or not is_instance_valid(raw2):
+			continue
+		var node2: Node = raw2 as Node
+		if not node2:
 			continue
 		var n3b: Node3D = node2 as Node3D
 		if not n3b:
