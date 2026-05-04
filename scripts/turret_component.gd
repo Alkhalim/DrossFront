@@ -37,7 +37,7 @@ const PROFILES: Dictionary = {
 	# brief intra-burst gaps for the visual stagger) so the salvo
 	# reads as a real MG nest, not single-tap shots. Targets both
 	# ground AND air -- HQ MGs work as light flak.
-	&"hq_defense": { "damage": 14, "fire": 1.0, "range": 22.0, "role": &"Universal", "name": "HQ Defense", "burst_count": 3, "burst_gap": 0.08, "targets_air": true },
+	&"hq_defense": { "damage": 18, "fire": 1.0, "range": 22.0, "role": &"Universal", "name": "HQ Defense", "burst_count": 3, "burst_gap": 0.08, "targets_air": true },
 }
 
 ## Anvil's industrial-doctrine turret hits harder than the baseline
@@ -237,12 +237,17 @@ func _fire_one_shot(damage: int) -> void:
 		return
 	if not _is_valid_target(_target):
 		return
-	# HQ-defense per-class profile. Ground multipliers tuned so a
-	# light scout rush stings (1.0x) while heavies and structures
-	# barely care (0.6x / 0.3x). Air branch uses a SEPARATE lower
-	# base damage so the HQ caps out at ~20 AA DPS regardless of
-	# which target class is in range -- the corner nests are an
-	# anti-aircraft deterrent, not a flak battery.
+	# HQ-defense per-class profile per balance brief:
+	#   vs light       1.0
+	#   vs medium      0.7
+	#   vs heavy       0.4
+	#   vs light_air   1.0
+	#   vs heavy_air   0.4
+	# AA branch caps at ~45% of AG DPS (an HQ is a deterrent
+	# against air, not a flak battery). With damage=18 + burst 3 /
+	# fire 1.0 = 54 ground DPS, the AA branch's 0.45 base scales to
+	# ~24 AA DPS before per-class mults. Both factions share this
+	# profile via the same _detail_hq_defense_turret build path.
 	var final_damage: int = damage
 	if profile == &"hq_defense":
 		var target_armor: StringName = _resolve_target_armor(_target)
@@ -252,23 +257,19 @@ func _fire_one_shot(damage: int) -> void:
 			&"light":
 				mult = 1.0
 			&"medium":
-				mult = 0.8
+				mult = 0.7
 			&"heavy":
-				mult = 0.6
+				mult = 0.4
 			&"structure":
 				mult = 0.3
 			&"light_air":
-				# AA branch: cap at ~20 DPS. profile damage 14 *
-				# burst 3 / fire 1.0 = 42 ground DPS; the AA cap
-				# is 20 / 42 ~= 0.48 of base, then folded with the
-				# vs-light_air 1.0 multiplier.
-				base_dmg = float(damage) * (20.0 / 42.0)
+				base_dmg = float(damage) * 0.45
 				mult = 1.0
 			&"heavy_air":
-				base_dmg = float(damage) * (20.0 / 42.0)
+				base_dmg = float(damage) * 0.45
 				mult = 0.4
 			_:
-				mult = 0.8
+				mult = 0.7
 		final_damage = int(round(base_dmg * mult))
 	_target.take_damage(final_damage, _building as Node3D)
 
