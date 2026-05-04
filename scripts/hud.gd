@@ -1129,6 +1129,29 @@ func _update_selection_display() -> void:
 				_progress_bar.visible = false
 
 
+func _resolve_inspect_owner_label(owner_id: int) -> String:
+	## Returns Ally / Enemy / Neutral depending on the inspected
+	## owner's team membership relative to the local player. Local
+	## player slot is always owner 0; PlayerRegistry resolves the
+	## team_id pairings (2v2 allied AI sits on team 0 with the
+	## human player). owner_id == 2 is the legacy neutral marker
+	## kept for back-compat with scenario seeding.
+	if owner_id < 0:
+		return "Enemy"
+	if owner_id == 2:
+		return "Neutral"
+	if owner_id == 0:
+		return "You"
+	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	if registry and registry.has_method("get_state"):
+		var local_state: Variant = registry.call("get_state", 0)
+		var other_state: Variant = registry.call("get_state", owner_id)
+		if local_state and other_state and "team_id" in local_state and "team_id" in other_state:
+			if (local_state.team_id as int) == (other_state.team_id as int):
+				return "Ally"
+	return "Enemy"
+
+
 func _update_enemy_inspect_panel(target: Node3D) -> void:
 	## Read-only panel for an enemy / neutral unit, Crawler, or
 	## building. No buttons, no progress bar interaction — just
@@ -1159,11 +1182,12 @@ func _update_enemy_inspect_panel(target: Node3D) -> void:
 		_show_progress(w_pct, Color(1.00, 0.55, 0.18, 0.95))
 		return
 
-	# Owner tag — Enemy / Neutral.
+	# Owner tag — Ally / Enemy / Neutral. PlayerRegistry is the
+	# authority on team membership; we treat owner 0 as the local
+	# player and any other owner on the same team as an ally so
+	# 2v2 allied units don't read as 'enemy unit'.
 	var owner_id: int = (target.get("owner_id") as int) if "owner_id" in target else -1
-	var owner_label: String = "Enemy"
-	if owner_id == 2:
-		owner_label = "Neutral"
+	var owner_label: String = _resolve_inspect_owner_label(owner_id)
 
 	var raw_stats: Resource = target.get("stats") as Resource if "stats" in target else null
 
