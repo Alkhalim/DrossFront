@@ -1063,6 +1063,12 @@ func _command_idle_crawler_to_wreck() -> void:
 		var anchored: bool = node.has_method("is_anchored") and node.is_anchored()
 		var under_fire: bool = (now - (_crawler_last_damage_at.get(iid, -999.0) as float)) < CRAWLER_RETREAT_WINDOW
 
+		# Escort assignment -- the Crawler always travels with N
+		# nearby combat units depending on difficulty (Easy 1,
+		# Normal 2, Hard 3). Re-checked every shepherd tick so
+		# casualties are replaced from the available pool.
+		_assign_crawler_escort(node as Node3D)
+
 		# Retreat takes priority — we route home even if a move order is
 		# already in flight (it might be heading toward the threat).
 		if under_fire and not anchored:
@@ -1100,6 +1106,113 @@ func _command_idle_crawler_to_wreck() -> void:
 		var target_pos: Vector3 = target_wreck.global_position - dir.normalized() * 4.0
 		if node.has_method("command_move"):
 			node.command_move(target_pos)
+
+
+## Per-Crawler escort assignments. Keyed by Crawler instance id;
+## value is an Array[int] of escort unit instance ids that this
+## Crawler currently 'owns'. Cleared / refilled per shepherd
+## tick so dead escorts get replaced from the available pool.
+var _crawler_escorts: Dictionary = {}
+
+
+func _crawler_escort_count() -> int:
+	## Difficulty-driven escort size. Easy 1, Normal 2, Hard 3.
+	## Mirrors the AiDifficulty enum mapping used by _econ_mul.
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if settings and settings.has_method("get_ai_difficulty"):
+		var d: int = settings.get_ai_difficulty(owner_id)
+		match d:
+			0: return 1  # EASY
+			2: return 3  # HARD
+			_: return 2  # NORMAL
+	return 2
+
+
+func _assign_crawler_escort(crawler: Node3D) -> void:
+	## Ensures the Crawler always travels with `_crawler_escort_count`
+	## non-engineer combat units. Scans the AI's available unit pool
+	## (skipping engineers + units already locked into another
+	## Crawler escort) and pulls the nearest ones into a follow
+	## order on this Crawler's position. Re-issued every shepherd
+	## tick so the Crawler's escort updates as it moves and
+	## casualties are replaced.
+	if not is_instance_valid(crawler):
+		return
+	var target_count: int = _crawler_escort_count()
+	if target_count <= 0:
+		return
+	var iid: int = crawler.get_instance_id()
+	# Filter the existing escort list to surviving units only.
+	var current_ids: Array = _crawler_escorts.get(iid, []) as Array
+	var alive_escorts: Array[Node] = []
+	var alive_ids: Array[int] = []
+	for esc_id_v: Variant in current_ids:
+		var esc_id: int = esc_id_v as int
+		var esc: Node = instance_from_id(esc_id) as Node
+		if not esc or not is_instance_valid(esc):
+			continue
+		if "alive_count" in esc and (esc.get("alive_count") as int) <= 0:
+			continue
+		alive_escorts.append(esc)
+		alive_ids.append(esc_id)
+	# Top up if we lost escorts.
+	if alive_escorts.size() < target_count:
+		# Build the set of unit ids currently committed to ANY
+		# Crawler escort so we don't poach an escort from another
+		# Crawler.
+		var taken_ids: Dictionary = {}
+		for crawler_id_v: Variant in _crawler_escorts.keys():
+			var ids_v: Array = _crawler_escorts[crawler_id_v] as Array
+			for tid_v: Variant in ids_v:
+				taken_ids[tid_v as int] = true
+		var crawler_pos: Vector3 = crawler.global_position
+		# Collect candidates: own non-engineer units, not already
+		# escorting, sorted by distance to the Crawler.
+		var candidates: Array[Dictionary] = []
+		for unit: Node in _units:
+			if not is_instance_valid(unit):
+				continue
+			if unit.has_method("get_builder") and unit.get_builder():
+				continue  # skip engineers / builders
+			if unit.is_in_group("crawlers"):
+				continue
+			var uid: int = unit.get_instance_id()
+			if taken_ids.has(uid):
+				continue
+			candidates.append({
+				"unit": unit,
+				"d": crawler_pos.distance_to((unit as Node3D).global_position),
+			})
+		candidates.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+			return (a["d"] as float) < (b["d"] as float)
+		)
+		for cand: Dictionary in candidates:
+			if alive_escorts.size() >= target_count:
+				break
+			var u: Node = cand["unit"] as Node
+			alive_escorts.append(u)
+			alive_ids.append(u.get_instance_id())
+	# Issue the follow order: each escort attack-moves to a small
+	# offset around the Crawler so they form a loose ring rather
+	# than stacking on the chassis. Attack-move so they engage
+	# en route -- mirrors the player's expectation for an escort.
+	var crawler_pos2: Vector3 = crawler.global_position
+	for esc_i: int in alive_escorts.size():
+		var esc_unit: Node = alive_escorts[esc_i]
+		if not is_instance_valid(esc_unit):
+			continue
+		var combat: Node = esc_unit.get_node_or_null("CombatComponent") as Node
+		if not combat or not combat.has_method("command_attack_move"):
+			continue
+		var ang: float = float(esc_i) / float(maxi(target_count, 1)) * TAU
+		var ring: Vector3 = Vector3(cos(ang), 0.0, sin(ang)) * 4.0
+		# Only re-issue when meaningfully far from the post --
+		# avoid spamming attack-move every AI tick which would
+		# starve the unit's normal pathing.
+		var post: Vector3 = crawler_pos2 + ring
+		if (esc_unit as Node3D).global_position.distance_to(post) > 6.0:
+			combat.command_attack_move(post)
+	_crawler_escorts[iid] = alive_ids
 
 
 func _dispatch_crawler_defenders(crawler_pos: Vector3) -> void:
