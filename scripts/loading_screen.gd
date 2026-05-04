@@ -162,7 +162,10 @@ func _resolve_target_lonlat() -> Vector2:
 
 func _start_zoom() -> void:
 	if not is_instance_valid(_map):
-		_finish_load()
+		# Map control didn't survive ready -- skip the visual phase
+		# entirely and let the _process polling loop handle the
+		# scene swap once the threaded preload reports done.
+		_mark_zoom_done()
 		return
 	var lonlat: Vector2 = _resolve_target_lonlat()
 	# Map.get_marker_position returns world-space pixels for a
