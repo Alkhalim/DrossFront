@@ -177,10 +177,14 @@ func _clear_telegraph() -> void:
 
 
 func _find_hud() -> Node:
+	## HUD lives at UILayer/HUD in the current arena scene. Two
+	## legacy paths kept as fallback for older scenes / tests.
 	var scene: Node = get_tree().current_scene if get_tree() else null
 	if not scene:
 		return null
-	var hud: Node = scene.get_node_or_null("HUD")
+	var hud: Node = scene.get_node_or_null("UILayer/HUD")
+	if not hud:
+		hud = scene.get_node_or_null("HUD")
 	if not hud:
 		var canvas: Node = scene.get_node_or_null("HUDCanvas")
 		if canvas:

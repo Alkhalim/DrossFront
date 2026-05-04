@@ -30,7 +30,16 @@ func emit_alert(message: String, severity: int = Severity.INFO, world_pos: Vecto
 	# determines the colour: critical = red, warning = orange,
 	# info = teal. Ignored when world_pos is the default zero.
 	if world_pos != Vector3.ZERO:
-		var minimap: Node = get_tree().current_scene.get_node_or_null("HUD/Minimap") if get_tree() else null
+		var scene: Node = get_tree().current_scene if get_tree() else null
+		var minimap: Node = null
+		if scene:
+			# HUD lives at UILayer/HUD in the current arena scene.
+			# Two legacy paths kept as fallback for older scenes.
+			minimap = scene.get_node_or_null("UILayer/HUD/Minimap")
+			if not minimap:
+				minimap = scene.get_node_or_null("HUD/Minimap")
+			if not minimap:
+				minimap = scene.get_node_or_null("HUDCanvas/HUD/Minimap")
 		if minimap and minimap.has_method("ping"):
 			var ping_color: Color = Color(0.4, 0.85, 1.0, 1.0)
 			if severity >= 2:

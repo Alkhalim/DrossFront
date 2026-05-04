@@ -207,9 +207,18 @@ func _ping_warning(pos: Vector3) -> void:
 
 
 func _find_hud() -> Node:
-	var hud: Node = get_tree().current_scene.get_node_or_null("HUD") if get_tree() else null
+	## The HUD scene is currently parented under UILayer in
+	## test_arena.tscn (UILayer/HUD). Two legacy paths kept as
+	## fallback (top-level HUD, HUDCanvas/HUD) so older scenes /
+	## tests still resolve.
+	var scene: Node = get_tree().current_scene if get_tree() else null
+	if not scene:
+		return null
+	var hud: Node = scene.get_node_or_null("UILayer/HUD")
 	if not hud:
-		var canvas: Node = get_tree().current_scene.get_node_or_null("HUDCanvas") if get_tree() else null
+		hud = scene.get_node_or_null("HUD")
+	if not hud:
+		var canvas: Node = scene.get_node_or_null("HUDCanvas")
 		if canvas:
 			hud = canvas.get_node_or_null("HUD")
 	return hud
