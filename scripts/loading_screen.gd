@@ -11,13 +11,18 @@ extends Control
 
 const ARENA_SCENE: String = "res://scenes/test_arena.tscn"
 
-## Zoom phase target duration. Bumped from 1.8s to 4.0s after
-## profiling showed change_scene_to_file alone spends ~2-3s on the
-## arena's _ready (terrain spawn, navmesh bake, AI setup, scenario
-## seeding); the threaded preload now happens during this window so
-## we wait for whichever finishes last instead of stacking the load
-## time on top of the zoom.
-const ZOOM_IN_SEC: float = 4.0
+## Pan phase -- mimics the operator turning to look at the map
+## monitor before honing in. Starts off-screen-right at small
+## scale and slides + grows to centred-and-fitting before the
+## zoom-in begins.
+const PAN_IN_SEC: float = 1.1
+## Zoom phase duration. Bumped from 1.8s to 3.2s after profiling
+## showed change_scene_to_file alone spends ~2-3s on the arena's
+## _ready (terrain spawn, navmesh bake, AI setup, scenario
+## seeding); the threaded preload now happens during this window
+## so we wait for whichever finishes last instead of stacking the
+## load time on top of the zoom.
+const ZOOM_IN_SEC: float = 3.2
 const FADE_OUT_SEC: float = 0.6
 const ZOOM_FACTOR: float = 2.4
 ## Hard ceiling -- if for some reason the threaded load hangs we
@@ -177,29 +182,59 @@ func _start_zoom() -> void:
 	var screen_size: Vector2 = get_viewport_rect().size
 	var screen_centre: Vector2 = screen_size * 0.5
 
-	# Initial: map sized to fit screen height, centered.
-	var initial_scale: float = minf(
+	# Centred / fitted resting state -- map sized to fit the screen
+	# height. The zoom-in target is computed off this scale.
+	var fit_scale: float = minf(
 		screen_size.x / map_size.x,
 		(screen_size.y - 140.0) / map_size.y,
 	)
-	initial_scale = clampf(initial_scale, 0.4, 1.4)
-	var initial_offset: Vector2 = screen_centre - (map_size * 0.5) * initial_scale
-	_map.scale = Vector2(initial_scale, initial_scale)
-	_map.position = initial_offset
+	fit_scale = clampf(fit_scale, 0.4, 1.4)
+	var fit_offset: Vector2 = screen_centre - (map_size * 0.5) * fit_scale
 
-	# Final: zoom by ZOOM_FACTOR with the target pixel pinned to
-	# screen centre.
-	var final_scale: float = initial_scale * ZOOM_FACTOR
+	# PAN-IN starting state -- the map sits off-screen-right at a
+	# smaller scale, as if it were a separate monitor on a wall the
+	# operator is just now turning toward. Pan-in tweens both scale
+	# and position to the fitted resting state.
+	var pan_start_scale: float = fit_scale * 0.55
+	var pan_start_offset: Vector2 = Vector2(
+		screen_size.x + map_size.x * pan_start_scale * 0.30,  # off-screen right
+		screen_centre.y - (map_size.y * 0.5) * pan_start_scale,
+	)
+	_map.scale = Vector2(pan_start_scale, pan_start_scale)
+	_map.position = pan_start_offset
+	# Slight tilt during the pan so the monitor reads as 'turning
+	# into view' rather than sliding flatly.
+	_map.rotation = deg_to_rad(-4.0)
+
+	var pan: Tween = create_tween()
+	pan.set_trans(Tween.TRANS_CUBIC)
+	pan.set_ease(Tween.EASE_OUT)
+	pan.set_parallel(true)
+	pan.tween_property(_map, "scale", Vector2(fit_scale, fit_scale), PAN_IN_SEC)
+	pan.tween_property(_map, "position", fit_offset, PAN_IN_SEC)
+	pan.tween_property(_map, "rotation", 0.0, PAN_IN_SEC)
+
+	# Final zoom -- pin the target lat/lon pixel to screen centre
+	# at ZOOM_FACTOR magnification, kicked off after the pan lands.
+	var final_scale: float = fit_scale * ZOOM_FACTOR
 	var final_offset: Vector2 = screen_centre - target_pixel * final_scale
 
+	get_tree().create_timer(PAN_IN_SEC).timeout.connect(
+		_run_zoom_phase.bind(final_scale, final_offset),
+		CONNECT_ONE_SHOT
+	)
+
+
+func _run_zoom_phase(final_scale: float, final_offset: Vector2) -> void:
+	if not is_instance_valid(_map):
+		_mark_zoom_done()
+		return
 	var tween: Tween = create_tween()
 	tween.set_trans(Tween.TRANS_QUAD)
 	tween.set_ease(Tween.EASE_IN_OUT)
 	tween.set_parallel(true)
 	tween.tween_property(_map, "scale", Vector2(final_scale, final_scale), ZOOM_IN_SEC)
 	tween.tween_property(_map, "position", final_offset, ZOOM_IN_SEC)
-
-	# Trigger scene change after the zoom + a brief fade-out flash.
 	get_tree().create_timer(ZOOM_IN_SEC).timeout.connect(_begin_fade_out, CONNECT_ONE_SHOT)
 
 
