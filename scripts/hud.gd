@@ -41,6 +41,19 @@ var _showing_build_buttons: bool = false
 ## Pool of buttons + cached metadata so we can update affordability tint each frame.
 ## Each entry: { button: Button, kind: "produce"|"build", index: int }
 var _action_buttons: Array[Dictionary] = []
+## Build buttons currently visible in the action grid (basic OR
+## advanced tab, after prereq filtering). Indexed in display order
+## so SelectionManager's engineer-build hotkey can pick the stat
+## the player actually sees under each Q/W/E/R/T key.
+var _visible_build_stats: Array[BuildingStatResource] = []
+
+
+func get_visible_build_stat_at(index: int) -> BuildingStatResource:
+	## Returns the i-th currently-visible build stat (0-indexed) or
+	## null if the index is out of range / no build menu showing.
+	if index < 0 or index >= _visible_build_stats.size():
+		return null
+	return _visible_build_stats[index]
 
 ## Optional progress bar shown inside the bottom panel for construction / queue / worker spawn.
 var _progress_bar: ProgressBar = null
@@ -4214,6 +4227,13 @@ func _rebuild_build_buttons() -> void:
 	_action_label.text = "Build — %s" % _build_tab.capitalize()
 	var built_ids: Dictionary = _local_player_built_ids()
 	var buildable: Array[BuildingStatResource] = _selection_manager.get_buildable_stats()
+	# Build-hotkey letters per visible button. Same flavour as the
+	# unit-train hotkeys (Q W E R T) but extended to seven slots so
+	# the basic / advanced tabs can each hold a full row of seven.
+	# `_visible_build_stats` mirrors the order the hotkeys map to
+	# so SelectionManager can route key events through it.
+	const BUILD_HOTKEYS: Array[String] = ["Q", "W", "E", "R", "T", "Y", "U"]
+	_visible_build_stats.clear()
 	var visible_index: int = 0
 	for i: int in buildable.size():
 		var bstat: BuildingStatResource = buildable[i]
@@ -4229,8 +4249,14 @@ func _rebuild_build_buttons() -> void:
 		btn.custom_minimum_size = Vector2(124, 80)
 		btn.size_flags_horizontal = Control.SIZE_FILL
 		btn.size_flags_vertical = Control.SIZE_FILL
-		var prefix: String = "[%d]" % (visible_index + 1) if prereqs_ok else "[Locked]"
+		var hotkey_letter: String = BUILD_HOTKEYS[visible_index] if visible_index < BUILD_HOTKEYS.size() else str(visible_index + 1)
+		var prefix: String = "[%s]" % hotkey_letter if prereqs_ok else "[Locked]"
 		_set_label_button(btn, prefix, bstat.building_name)
+		# Track the visible stat under the hotkey index so the
+		# SelectionManager engineer-build hotkey path picks the
+		# stat actually shown on this tab (not the wrong one from
+		# the unfiltered _buildable_stats list).
+		_visible_build_stats.append(bstat)
 		# tooltip_text stays plain so Godot still triggers the tooltip;
 		# _make_custom_tooltip on the subclass below renders the actual
 		# styled popup using BBCode + an opaque PanelContainer so the

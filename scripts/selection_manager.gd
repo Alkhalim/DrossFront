@@ -562,7 +562,12 @@ func _handle_build_hotkey(key: InputEventKey) -> void:
 			get_viewport().set_input_as_handled()
 			return
 
-	# Build placement hotkeys when an engineer is selected (1-7)
+	# Build placement hotkeys when an engineer is selected. Both
+	# Q/W/E/R/T/Y/U (matching the unit-train hotkey flavour) and
+	# 1-7 (legacy / power-user) work. The keys index the
+	# CURRENTLY-VISIBLE build buttons in the HUD's tab order, not
+	# the unfiltered _buildable_stats list -- otherwise pressing
+	# 'Q' on the Advanced tab would build the wrong thing.
 	_prune_selection()
 	var has_engineer: bool = false
 	for unit: Node3D in _selected_units:
@@ -574,17 +579,40 @@ func _handle_build_hotkey(key: InputEventKey) -> void:
 
 	var index: int = -1
 	match key.keycode:
-		KEY_1: index = 0
-		KEY_2: index = 1
-		KEY_3: index = 2
-		KEY_4: index = 3
-		KEY_5: index = 4
-		KEY_6: index = 5
-		KEY_7: index = 6
-
-	if index >= 0 and index < _buildable_stats.size():
-		start_build_placement(_buildable_stats[index])
+		KEY_Q, KEY_1: index = 0
+		KEY_W, KEY_2: index = 1
+		KEY_E, KEY_3: index = 2
+		KEY_R, KEY_4: index = 3
+		KEY_T, KEY_5: index = 4
+		KEY_Y, KEY_6: index = 5
+		KEY_U, KEY_7: index = 6
+	if index < 0:
+		return
+	# Prefer the HUD's visible-tab order so the displayed [Q]
+	# label routes to the actually-displayed building. Fall back
+	# to the unfiltered list if the HUD lookup fails (no build
+	# menu up).
+	var hud: Node = _find_hud_for_visible_build_stats()
+	var stat: BuildingStatResource = null
+	if hud and hud.has_method("get_visible_build_stat_at"):
+		stat = hud.call("get_visible_build_stat_at", index) as BuildingStatResource
+	if stat == null and index < _buildable_stats.size():
+		stat = _buildable_stats[index]
+	if stat:
+		start_build_placement(stat)
 		get_viewport().set_input_as_handled()
+
+
+func _find_hud_for_visible_build_stats() -> Node:
+	## HUD lives at UILayer/HUD in the current arena scene. Mirrors
+	## the lookup pattern used by AlertManager + SatelliteSpawner.
+	var scene: Node = get_tree().current_scene if get_tree() else null
+	if not scene:
+		return null
+	var hud: Node = scene.get_node_or_null("UILayer/HUD")
+	if not hud:
+		hud = scene.get_node_or_null("HUD")
+	return hud
 
 
 func _click_select(event: InputEventMouseButton) -> void:
