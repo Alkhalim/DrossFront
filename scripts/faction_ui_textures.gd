@@ -143,6 +143,7 @@ static func _build_anvil_button_face() -> Texture2D:
 		_blend_pixel(img, _BUTTON_SIZE - 2, i, _ANVIL_RIVET_SHADOW, 0.30)
 	# Horizontal panel-line at mid-height. The plate reads as two
 	# riveted halves bolted together.
+	@warning_ignore("integer_division")
 	var mid: int = _BUTTON_SIZE / 2
 	for x: int in _BUTTON_SIZE:
 		_blend_pixel(img, x, mid, _ANVIL_RIVET_SHADOW, 0.65)
@@ -156,7 +157,9 @@ static func _build_anvil_button_face() -> Texture2D:
 	_draw_rivet(img, _BUTTON_SIZE - rivet_inset, rivet_inset)
 	_draw_rivet(img, rivet_inset, _BUTTON_SIZE - rivet_inset)
 	_draw_rivet(img, _BUTTON_SIZE - rivet_inset, _BUTTON_SIZE - rivet_inset)
-	_draw_rivet(img, _BUTTON_SIZE / 2, mid)
+	@warning_ignore("integer_division")
+	var mid_x: int = _BUTTON_SIZE / 2
+	_draw_rivet(img, mid_x, mid)
 	img.generate_mipmaps()
 	return ImageTexture.create_from_image(img)
 
@@ -227,6 +230,7 @@ static func _build_anvil_top_bar() -> Texture2D:
 		for x: int in _TOP_BAR_W:
 			# Diagonal index — y offsets x so the stripe slants.
 			var s: int = ((x + y) % stripe_period)
+			@warning_ignore("integer_division")
 			var on_yellow: bool = s < stripe_period / 2
 			var c: Color = _ANVIL_CAUTION_YELLOW if on_yellow else _ANVIL_CAUTION_BLACK
 			img.set_pixel(x, y, c)
@@ -254,6 +258,7 @@ static func _build_anvil_frame_corner() -> Texture2D:
 			img.set_pixel(x, y, Color(0, 0, 0, 0))
 	# Brass bracket lines — short L pointing into the corner.
 	# Two-pixel-thick top + left bars, ending at half-size.
+	@warning_ignore("integer_division")
 	var bracket_len: int = _FRAME_CORNER / 2
 	for i: int in bracket_len:
 		_blend_pixel(img, i, 0, _ANVIL_HIGHLIGHT, 0.95)
@@ -372,6 +377,7 @@ static func _build_sable_frame_corner() -> Texture2D:
 			img.set_pixel(x, y, Color(0, 0, 0, 0))
 	# L bracket — 2px thick, inset 2px from the edge so it reads as
 	# a UI marker rather than the panel border itself.
+	@warning_ignore("integer_division")
 	var bracket_len: int = _FRAME_CORNER * 3 / 5
 	var inset: int = 3
 	for i: int in bracket_len:

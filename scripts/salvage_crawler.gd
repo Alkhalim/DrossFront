@@ -1070,14 +1070,14 @@ func _physics_process(delta: float) -> void:
 			stop()
 			return
 	else:
-		# Made meaningful progress this frame on the floor: this is
-		# a good "safe to retreat to" anchor for any future cliff
-		# clipping or stuck-rescue. Only update when actually on
-		# floor so we don't bake in a mid-air or mid-fall position.
+		# Made meaningful progress this frame: clear the stuck timer
+		# and (when on floor) bake the current position as the safe
+		# anchor any future cliff clip / stuck-rescue should retreat
+		# to. We only update the safe pos when grounded so a position
+		# captured mid-fall doesn't become the rescue target.
+		_stuck_timer = 0.0
 		if is_on_floor():
 			_last_safe_pos = global_position
-	else:
-		_stuck_timer = 0.0
 
 	# Face direction of travel.
 	var face_dir: Vector3 = velocity.normalized()
