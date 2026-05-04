@@ -1,0 +1,43 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+[ext_resource type="Resource" path="res://resources/units/anvil_grinder_tank_mortar.tres" id="3"]
+[ext_resource type="Resource" path="res://resources/units/anvil_grinder_tank_plow.tres" id="4"]
+
+[sub_resource type="Resource" id="weapon_grinder_cannon"]
+script = ExtResource("2")
+weapon_name = "Universal Cannon"
+role_tag = &"Universal"
+damage_tier = &"moderate"
+range_tier = &"medium"
+rof_tier = &"moderate"
+damage_value = 35
+rof_seconds_value = 1.0
+projectile_style = &"shell"
+base_accuracy = 0.82
+can_damage_trees = true
+
+[resource]
+script = ExtResource("1")
+unit_name = "Grinder Tank"
+display_name = "VA-5 Grinder Tank"
+unit_class = &"transport"
+hp_total = 1650
+hp_per_unit = 550
+armor_class = &"medium"
+speed_tier = &"moderate"
+sight_tier = &"medium"
+squad_size = 3
+population = 10
+cost_salvage = 260
+cost_fuel = 12
+build_time = 28.0
+built_at = &"basic_foundry"
+primary_weapon = SubResource("weapon_grinder_cannon")
+special_description = "Anvil medium tracked assault tank. Universal cannon for general-purpose fire + a dozer prow that grants +15% effective HP and chews through forest. Branches: Mortar (anti-light artillery) or Plow (twin AT missiles with focus-fire ramp)."
+passive_description = "Dozer Prow — +15% HP and the tank can drive through tree clusters. Designed as the early armor-rush option."
+branch_a_name = "Mortar"
+branch_b_name = "Plow"
+branch_a_stats = ExtResource("3")
+branch_b_stats = ExtResource("4")

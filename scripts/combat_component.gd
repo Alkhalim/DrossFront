@@ -51,6 +51,15 @@ const GARRISON_FIRE_RATE_MULT: float = 1.2
 ## at anything yet, so the first ever shot also takes the bonus.
 var _first_strike_target_id: int = 0
 
+## Damage-ramp passive bookkeeping (UnitStatResource.damage_ramp_*).
+## Tracks the most recent target's instance id and how many shots
+## have landed on it consecutively. Resets when the target changes.
+## Used by units like the Grinder Tank Plow branch to model a
+## 'each successive hit on the same target hits harder' effect
+## without a real lock-on system.
+var _ramp_target_id: int = 0
+var _ramp_hit_count: int = 0
+
 var _glowing_volley_mult: float = 0.0
 ## When true, the queued glowing volley fires as a 5-pellet shotgun
 ## salvo (Harbinger Heavy Volley). When false, it fires as a SINGLE
@@ -654,6 +663,22 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 		if target_id != _first_strike_target_id:
 			damage_per_member *= stats.first_strike_bonus
 			_first_strike_target_id = target_id
+	# Damage-ramp passive — every consecutive shot on the same
+	# target adds damage_ramp_per_hit to the multiplier, capped at
+	# damage_ramp_max. Resets when the target changes. Applied to
+	# primary AND secondary so a Plow-branch Grinder ramps on both
+	# its missile launchers. Skipped silently for any unit whose
+	# stats don't opt in (default ramp_per_hit / ramp_max = 0).
+	if stats and stats.damage_ramp_per_hit > 0.0 and stats.damage_ramp_max > 0.0:
+		var ramp_target_id: int = _current_target.get_instance_id()
+		if ramp_target_id != _ramp_target_id:
+			# New target -- start the ramp from scratch.
+			_ramp_target_id = ramp_target_id
+			_ramp_hit_count = 0
+		var ramp_bonus: float = float(_ramp_hit_count) * stats.damage_ramp_per_hit
+		ramp_bonus = minf(ramp_bonus, stats.damage_ramp_max)
+		damage_per_member *= 1.0 + ramp_bonus
+		_ramp_hit_count += 1
 	var per_member_dmg: int = maxi(int(damage_per_member), 1)
 
 	# Fire one projectile per alive squad member, originating at the actual

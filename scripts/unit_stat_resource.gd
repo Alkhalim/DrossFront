@@ -256,6 +256,17 @@ func can_target_air() -> bool:
 ## display: 0 = ground only, 1 = air only, 2 = both.
 @export var ability_autocast_target: int = 2
 
+## Damage-ramp passive. When > 0, every consecutive hit on the
+## same target by this unit adds `damage_ramp_per_hit` to the
+## damage multiplier, capped at `damage_ramp_max`. Resets to
+## zero when the unit acquires a new target. Used by the Grinder
+## Tank's Plow branch to model 'each attack against the same
+## target deals more damage' in place of a real lock-on system.
+## CombatComponent reads both fields per-shot; if either is 0 the
+## passive is inert (default for every other unit).
+@export_range(0.0, 0.5, 0.01) var damage_ramp_per_hit: float = 0.0
+@export_range(0.0, 2.0, 0.05) var damage_ramp_max: float = 0.0
+
 ## Target-selection flag. When true, pressing the ability button
 ## puts the cursor into ABILITY targeting mode (blue glow); the
 ## next LEFT-click sets the target world position passed to
