@@ -24,7 +24,7 @@ enum FactionId { ANVIL, SABLE }
 ## AI build / behaviour archetypes. RANDOM picks one of the four
 ## non-random options on match start (per-AI). Other values force the
 ## archetype, e.g. for the menu's "AI Charlie: Turret Heavy" picker.
-enum AiPersonality { RANDOM, BALANCED, TURRET_HEAVY, ECONOMY_HEAVY, RUSH }
+enum AiPersonality { RANDOM, BALANCED, TURRET_HEAVY, ECONOMY_HEAVY, RUSH, AIR }
 
 ## Optional scenario seed -- when set to anything other than NONE, the
 ## arena controller post-processes its standard setup with extra base

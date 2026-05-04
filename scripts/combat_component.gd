@@ -533,8 +533,15 @@ func _is_valid_target(target: Node3D) -> bool:
 		return false
 	if not target.has_method("take_damage"):
 		return false
-	var target_owner: int = target.get("owner_id")
-	var my_owner: int = _unit.get("owner_id")
+	# Guard against targets that don't carry owner_id (rare -- some
+	# neutral terrain features get picked up via stray-shot rules).
+	# Casting `null` to int would crash; default to enemy faction
+	# (-1) so the hostility check returns false and the targeting
+	# layer drops them silently.
+	if not "owner_id" in target or not "owner_id" in _unit:
+		return false
+	var target_owner: int = target.get("owner_id") as int
+	var my_owner: int = _unit.get("owner_id") as int
 	if not _is_hostile(my_owner, target_owner):
 		return false
 	# Check if unit is still alive

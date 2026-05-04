@@ -94,7 +94,7 @@ var _salvage_accumulator: float = 0.0
 ## produce visually identical bases. Resource buildings are NEVER skipped —
 ## every archetype builds a generator, foundry, and salvage yard early.
 ## The archetype shifts the *secondary* timing and footprint shape.
-enum Strategy { BALANCED, TURRET_HEAVY, ECONOMY_HEAVY, RUSH }
+enum Strategy { BALANCED, TURRET_HEAVY, ECONOMY_HEAVY, RUSH, AIR }
 var _strategy: int = Strategy.BALANCED
 ## World-space offsets from HQ for each placed building. Filled at _setup
 ## with randomly jittered values keyed by the same string the build flow
@@ -186,10 +186,14 @@ func _adv_foundry_heavy_path() -> String:
 
 
 func _econ_mul_for_difficulty(d: int) -> float:
-	# Mirror MatchSettings.get_ai_economy_multiplier mapping.
+	# Hard cap pulled 2.0 -> 1.4 so the AI doesn't outpace its
+	# build-plan with stockpiled income. Income trickle now sits
+	# closer to a player's typical economy and the AI has to
+	# actually convert it into structures + units rather than
+	# burying salvage under a single wave.
 	match d:
 		0: return 0.65  # EASY
-		2: return 2.0   # HARD
+		2: return 1.4   # HARD
 		_: return 1.1   # NORMAL
 
 
@@ -207,8 +211,8 @@ func _resolve_strategy_from_settings() -> int:
 	var settings: Node = get_node_or_null("/root/MatchSettings")
 	if settings and settings.has_method("get_ai_personality"):
 		var pick: int = settings.get_ai_personality(owner_id)
-		# AiPersonality: RANDOM=0, BALANCED=1, TURRET_HEAVY=2, ECONOMY_HEAVY=3, RUSH=4
-		# Strategy:                 BALANCED=0, TURRET_HEAVY=1, ECONOMY_HEAVY=2, RUSH=3
+		# AiPersonality: RANDOM=0, BALANCED=1, TURRET_HEAVY=2, ECONOMY_HEAVY=3, RUSH=4, AIR=5
+		# Strategy:                 BALANCED=0, TURRET_HEAVY=1, ECONOMY_HEAVY=2, RUSH=3, AIR=4
 		if pick == 1:
 			return Strategy.BALANCED
 		elif pick == 2:
@@ -217,6 +221,8 @@ func _resolve_strategy_from_settings() -> int:
 			return Strategy.ECONOMY_HEAVY
 		elif pick == 4:
 			return Strategy.RUSH
+		elif pick == 5:
+			return Strategy.AIR
 	return randi() % Strategy.size()
 
 
@@ -501,7 +507,9 @@ func _process_economy() -> void:
 
 	# Phase 1 — resource trio (generator + foundry + salvage yard). Always
 	# placed regardless of archetype; only their offsets vary per match
-	# (filled in by `_roll_strategy_and_layout`).
+	# (filled in by `_roll_strategy_and_layout`). AIR personality skips
+	# the second generator + advanced foundry entirely; its plan is
+	# handled below.
 	_try_place("generator", "res://resources/buildings/basic_generator.tres", _offset_for("generator", Vector3(15, 0, 10)))
 	_try_place("foundry", "res://resources/buildings/basic_foundry.tres", _offset_for("foundry", Vector3(-15, 0, 10)))
 	_try_place("salvage_yard", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard", Vector3(0, 0, 22)))
@@ -534,8 +542,10 @@ func _process_economy() -> void:
 			_try_place("turret_a1", _turret_path, _offset_for("turret_a", Vector3(0, 0, -14)))
 			_try_place("turret_a2", _turret_path, _offset_for("turret_a", Vector3(0, 0, -14)) + Vector3(8, 0, -2))
 			_try_place("turret_a3", _turret_path, _offset_for("turret_a", Vector3(0, 0, -14)) + Vector3(-8, 0, -2))
-			_try_place("generator2", "res://resources/buildings/basic_generator.tres", _offset_for("generator2", Vector3(22, 0, 18)))
+			_place_next_power_building("generator2", _offset_for("generator2", Vector3(22, 0, 18)))
+			_try_place("basic_armory", "res://resources/buildings/basic_armory.tres", _offset_for("basic_armory", Vector3(18, 0, -4)))
 			_try_place("sam_site", "res://resources/buildings/sam_site.tres", _offset_for("sam_site", Vector3(0, 0, -22)))
+			_try_place("salvage_yard_2", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_2", Vector3(-12, 0, 28)))
 			# Group B — forward right cluster. Far enough from Group A
 			# that the two range-circles don't kiss; protects the right-
 			# flank lane / scrap-pile cluster.
@@ -550,29 +560,66 @@ func _process_economy() -> void:
 			_try_place("turret_c1", _turret_path, _offset_for("turret_c", Vector3(-35, 0, -45)))
 			_try_place("turret_c2", _turret_path, _offset_for("turret_c", Vector3(-35, 0, -45)) + Vector3(-7, 0, -3))
 			_try_place("turret_c3", _turret_path, _offset_for("turret_c", Vector3(-35, 0, -45)) + Vector3(3, 0, -7))
+			_try_place("advanced_armory", "res://resources/buildings/advanced_armory.tres", _offset_for("advanced_armory", Vector3(-18, 0, -4)))
+			_try_place("salvage_yard_3", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_3", Vector3(12, 0, 28)))
+			_place_next_power_building("generator3", _offset_for("generator3", Vector3(28, 0, 8)))
 		Strategy.ECONOMY_HEAVY:
-			# Eco opener: extra generator + advanced foundry early,
-			# then aerodrome (extra production), then defensive structures.
-			_try_place("generator2", "res://resources/buildings/basic_generator.tres", _offset_for("generator2", Vector3(22, 0, 18)))
+			# Eco opener: 2nd generator + advanced foundry early,
+			# then aerodrome (extra production), then defensive
+			# structures. Uses the smart-power picker so the 3rd+
+			# generator slots place Reactors instead of basic
+			# generators. Salvage-yard cap raised to 5 (yard_2..5).
+			_place_next_power_building("generator2", _offset_for("generator2", Vector3(22, 0, 18)))
 			_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
+			_try_place("salvage_yard_2", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_2", Vector3(-12, 0, 28)))
+			_try_place("basic_armory", "res://resources/buildings/basic_armory.tres", _offset_for("basic_armory", Vector3(18, 0, -4)))
 			_try_place("aerodrome", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome", Vector3(28, 0, -8)))
+			_try_place("salvage_yard_3", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_3", Vector3(12, 0, 28)))
 			_try_place("turret", _turret_path, _offset_for("turret", Vector3(0, 0, -14)))
+			_try_place("advanced_armory", "res://resources/buildings/advanced_armory.tres", _offset_for("advanced_armory", Vector3(-18, 0, -4)))
 			_try_place("sam_site", "res://resources/buildings/sam_site.tres", _offset_for("sam_site", Vector3(0, 0, -22)))
+			_place_next_power_building("generator3", _offset_for("generator3", Vector3(28, 0, 8)))
+			_try_place("salvage_yard_4", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_4", Vector3(-22, 0, 32)))
+			_try_place("salvage_yard_5", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_5", Vector3(22, 0, 32)))
 		Strategy.RUSH:
 			# Aggressive: extra production fast (gen + adv foundry +
-			# aerodrome for air rush), no turret, SAM only as
-			# afterthought against player air.
-			_try_place("generator2", "res://resources/buildings/basic_generator.tres", _offset_for("generator2", Vector3(22, 0, 18)))
+			# aerodrome for air rush), basic armory for branch
+			# unlocks, then defensive structures.
+			_place_next_power_building("generator2", _offset_for("generator2", Vector3(22, 0, 18)))
+			_try_place("basic_armory", "res://resources/buildings/basic_armory.tres", _offset_for("basic_armory", Vector3(18, 0, -4)))
 			_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
 			_try_place("aerodrome", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome", Vector3(28, 0, -8)))
 			_try_place("sam_site", "res://resources/buildings/sam_site.tres", _offset_for("sam_site", Vector3(0, 0, -22)))
+			_try_place("salvage_yard_2", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_2", Vector3(-12, 0, 28)))
+			_try_place("advanced_armory", "res://resources/buildings/advanced_armory.tres", _offset_for("advanced_armory", Vector3(-18, 0, -4)))
+			_try_place("salvage_yard_3", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_3", Vector3(12, 0, 28)))
+		Strategy.AIR:
+			# Air doctrine: ONLY one basic foundry (the starter),
+			# then go straight into 2 aerodromes, THEN add a second
+			# basic foundry as ground-defence backup. Never builds
+			# advanced_foundry. Power + armoury still scale via the
+			# generic helpers.
+			_place_next_power_building("generator2", _offset_for("generator2", Vector3(22, 0, 18)))
+			_try_place("aerodrome", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome", Vector3(28, 0, -8)))
+			_try_place("aerodrome_2", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome_2", Vector3(-28, 0, -8)))
+			_try_place("foundry_2", "res://resources/buildings/basic_foundry.tres", _offset_for("foundry_2", Vector3(0, 0, 14)))
+			_try_place("sam_site", "res://resources/buildings/sam_site.tres", _offset_for("sam_site", Vector3(0, 0, -22)))
+			_try_place("basic_armory", "res://resources/buildings/basic_armory.tres", _offset_for("basic_armory", Vector3(18, 0, -4)))
+			_try_place("salvage_yard_2", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_2", Vector3(-12, 0, 28)))
+			_try_place("turret", _turret_path, _offset_for("turret", Vector3(0, 0, -14)))
+			_try_place("salvage_yard_3", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_3", Vector3(12, 0, 28)))
+			_place_next_power_building("generator3", _offset_for("generator3", Vector3(28, 0, 8)))
 		_:
 			# BALANCED — covers everything in a stable order.
-			_try_place("generator2", "res://resources/buildings/basic_generator.tres", _offset_for("generator2", Vector3(22, 0, 18)))
+			_place_next_power_building("generator2", _offset_for("generator2", Vector3(22, 0, 18)))
 			_try_place("turret", _turret_path, _offset_for("turret", Vector3(0, 0, -14)))
 			_try_place("adv_foundry", "res://resources/buildings/advanced_foundry.tres", _offset_for("adv_foundry", Vector3(-22, 0, 18)))
+			_try_place("basic_armory", "res://resources/buildings/basic_armory.tres", _offset_for("basic_armory", Vector3(18, 0, -4)))
+			_try_place("salvage_yard_2", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_2", Vector3(-12, 0, 28)))
 			_try_place("aerodrome", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome", Vector3(28, 0, -8)))
 			_try_place("sam_site", "res://resources/buildings/sam_site.tres", _offset_for("sam_site", Vector3(0, 0, -22)))
+			_try_place("advanced_armory", "res://resources/buildings/advanced_armory.tres", _offset_for("advanced_armory", Vector3(-18, 0, -4)))
+			_try_place("salvage_yard_3", "res://resources/buildings/salvage_yard.tres", _offset_for("salvage_yard_3", Vector3(12, 0, 28)))
 
 	# Dormant-attack safety net -- if we've had ANY combat units
 	# for too long without launching an attack, push out now.
@@ -724,6 +771,51 @@ func _ai_prerequisites_met(bstats: BuildingStatResource) -> bool:
 		if not have.has(req):
 			return false
 	return true
+
+
+func _place_next_power_building(key: String, offset: Vector3) -> void:
+	## Smart power-building placer. Once the AI owns 2+ basic
+	## generators (player rule: each must sit on a vent), every
+	## subsequent power slot tries the Reactor (advanced_generator)
+	## first since it puts more capacity per vent. Falls back to
+	## basic_generator if the Reactor isn't reachable yet (no
+	## prerequisites met) or no Reactor-eligible vent is free.
+	## Skips entirely if `key` is already in `_buildings_placed`.
+	if _buildings_placed.has(key):
+		return
+	var basic_count: int = _count_constructed("basic_generator")
+	var reactor_path: String = "res://resources/buildings/advanced_generator.tres"
+	if basic_count >= 2:
+		var reactor_stats: BuildingStatResource = load(reactor_path) as BuildingStatResource
+		# _try_place will quietly bail if the prereq chain isn't met
+		# (Reactor needs basic_generator first, which is satisfied at
+		# basic_count >= 2). If it fails for any other reason we'll
+		# pick it up next tick instead of falling through.
+		if reactor_stats and _ai_prerequisites_met(reactor_stats):
+			_try_place(key, reactor_path, offset)
+			if _buildings_placed.has(key):
+				return
+	# Default / fallback: basic generator on a vent.
+	_try_place(key, "res://resources/buildings/basic_generator.tres", offset)
+
+
+func _count_constructed(building_id: String) -> int:
+	## Counts every constructed friendly building matching the given
+	## building_id. Used by _place_next_power_building to switch from
+	## basic generators to Reactors after the second generator lands.
+	var bid: StringName = StringName(building_id)
+	var n: int = 0
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		if node.get("owner_id") != owner_id:
+			continue
+		if not node.get("is_constructed"):
+			continue
+		var bstats: BuildingStatResource = node.get("stats") as BuildingStatResource
+		if bstats and bstats.building_id == bid:
+			n += 1
+	return n
 
 
 func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
