@@ -1081,6 +1081,15 @@ func _setup_player() -> void:
 	# living squad against the player's resource manager so the pop
 	# counter starts at the correct value rather than 0.
 	_account_starter_unit_population()
+	# Refresh starter unit visuals so they pick up the player's
+	# resolved colour. The .tscn-instantiated Units run their
+	# _ready (and bake materials with whatever colour is available)
+	# BEFORE _setup_player_registry adds the chosen player_color
+	# to the registry -- which left Anvil players seeing their
+	# starter army in the default blue regardless of the colour
+	# they picked. Calling _build_squad_visuals here rebuilds with
+	# the now-correct registry colour.
+	_refresh_starter_unit_visuals()
 
 	# Snap the camera so the match opens looking at the player's
 	# base — or, in tutorial mode, the player's lone Rook squad at
@@ -1514,6 +1523,26 @@ func _account_starter_unit_population() -> void:
 		var pop: int = stats_v.get("population") as int
 		if pop > 0:
 			rm.add_population(pop)
+
+
+func _refresh_starter_unit_visuals() -> void:
+	## Rebuilds the .tscn-spawned starter Units' visuals after the
+	## PlayerRegistry has the player's chosen colour, so an Anvil
+	## player who picked a non-default colour doesn't see their
+	## starter army stuck in the .tscn's bake-time blue. Sable
+	## players go through the swap path which respawns the units
+	## with the right colour anyway.
+	var units_node: Node = get_node_or_null("Units")
+	if not units_node:
+		return
+	for child: Node in units_node.get_children():
+		if not (child is Unit):
+			continue
+		var u: Unit = child as Unit
+		if not is_instance_valid(u) or u.is_queued_for_deletion():
+			continue
+		if u.has_method("_build_squad_visuals"):
+			u.call("_build_squad_visuals")
 
 
 func _swap_starter_units_to_player_faction() -> void:

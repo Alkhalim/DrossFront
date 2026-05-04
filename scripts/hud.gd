@@ -692,69 +692,20 @@ func _build_pause_overlay() -> void:
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(hint)
 
-	# Spacer.
-	var spacer := Control.new()
-	spacer.custom_minimum_size = Vector2(0, 18)
-	vbox.add_child(spacer)
-
-	# Three bus sliders — SFX / Voices / Music — same controls the
-	# main menu Settings page exposes, accessible mid-match without
-	# leaving the game. Each slider binds directly to its bus's
-	# volume_db so the change is live.
-	for entry: Dictionary in [
-		{"label": "SFX", "bus": "SFX"},
-		{"label": "Voices", "bus": "Voiceline"},
-		{"label": "Music", "bus": "Music"},
-	]:
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 8)
-		row.process_mode = Node.PROCESS_MODE_ALWAYS
-		vbox.add_child(row)
-		var label := Label.new()
-		label.text = entry["label"] as String
-		label.add_theme_font_size_override("font_size", 16)
-		label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85, 1.0))
-		label.custom_minimum_size = Vector2(70, 22)
-		row.add_child(label)
-		var slider := HSlider.new()
-		slider.custom_minimum_size = Vector2(280, 22)
-		slider.min_value = -40.0
-		slider.max_value = 6.0
-		slider.step = 1.0
-		var bus_idx: int = AudioServer.get_bus_index(entry["bus"] as String)
-		if bus_idx >= 0:
-			slider.value = AudioServer.get_bus_volume_db(bus_idx)
-		else:
-			slider.value = 0.0
-		slider.value_changed.connect(_on_bus_volume_changed.bind(entry["bus"] as String))
-		slider.process_mode = Node.PROCESS_MODE_ALWAYS
-		row.add_child(slider)
-
-	# Extended-stats default toggle. When checked, unit/building info
-	# panels show the full stat breakdown by default and SHIFT
-	# collapses back to the basic view. When unchecked (the default)
-	# basic is the default and SHIFT expands. Lives in the pause
-	# panel because the player only sees its effect once they're
-	# in-match looking at unit info.
-	var ext_row := HBoxContainer.new()
-	ext_row.add_theme_constant_override("separation", 8)
-	ext_row.process_mode = Node.PROCESS_MODE_ALWAYS
-	vbox.add_child(ext_row)
-	var ext_check := CheckBox.new()
-	ext_check.text = "Show extended stats by default"
-	ext_check.button_pressed = _extended_stats_default
-	ext_check.process_mode = Node.PROCESS_MODE_ALWAYS
-	ext_check.toggled.connect(_on_extended_stats_toggled)
-	ext_row.add_child(ext_check)
-
-	# Spacer + Restart + Return-to-menu buttons. Restart is the more
-	# common 'I want to redo this' affordance (mistake first 30 sec,
-	# wrong faction pick, lost the opening); Main Menu is the harder
-	# bail-out. Restart drops above so it's the visually default
-	# action.
 	var menu_spacer := Control.new()
-	menu_spacer.custom_minimum_size = Vector2(0, 14)
+	menu_spacer.custom_minimum_size = Vector2(0, 18)
 	vbox.add_child(menu_spacer)
+
+	# Action buttons -- vertical stack of fixed-width entries so
+	# the pause menu reads as a tactical command list. Settings
+	# opens a tabbed dialog (audio + gameplay) instead of jamming
+	# every option directly into this panel.
+	var settings_btn := Button.new()
+	settings_btn.text = "Settings"
+	settings_btn.custom_minimum_size = Vector2(220, 36)
+	settings_btn.process_mode = Node.PROCESS_MODE_ALWAYS
+	settings_btn.pressed.connect(_on_pause_settings)
+	vbox.add_child(settings_btn)
 
 	var restart_btn := Button.new()
 	restart_btn.text = "Restart Match"
@@ -771,6 +722,139 @@ func _build_pause_overlay() -> void:
 	vbox.add_child(menu_btn)
 
 	_pause_overlay = overlay
+	# Build the settings dialog up front (hidden); it's revealed
+	# when the player presses the Settings button on this overlay.
+	_build_pause_settings_dialog()
+
+
+## --- Pause-screen Settings dialog -------------------------------------
+## Tabbed dialog opened from the Settings button on the pause overlay.
+## Holds Audio (SFX / Voices / Music sliders) and Gameplay (extended-
+## stats default + AI investigation tool) tabs. Built once at HUD
+## startup and shown / hidden on demand so each open doesn't recreate
+## widget state.
+var _pause_settings_dialog: Control = null
+
+
+func _build_pause_settings_dialog() -> void:
+	## Builds (but doesn't show) the tabbed Settings dialog. Kept
+	## as a sibling of the pause overlay so it sits in the same
+	## modal layer; visibility flips on the Settings button press.
+	var overlay := ColorRect.new()
+	overlay.color = Color(0.0, 0.0, 0.0, 0.65)
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	overlay.visible = false
+	overlay.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(overlay)
+	_pause_settings_dialog = overlay
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.add_child(center)
+
+	var faction_id: int = _local_player_faction()
+	var panel := PanelContainer.new()
+	panel.add_theme_stylebox_override("panel", FactionUIStyle.make_panel(faction_id))
+	panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	center.add_child(panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 8)
+	panel.add_child(vbox)
+
+	var heading := Label.new()
+	heading.text = "SETTINGS"
+	heading.add_theme_font_size_override("font_size", 28)
+	heading.add_theme_color_override("font_color", Color(0.95, 0.92, 0.78, 1.0))
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(heading)
+
+	var tabs := TabContainer.new()
+	tabs.custom_minimum_size = Vector2(440, 280)
+	tabs.process_mode = Node.PROCESS_MODE_ALWAYS
+	vbox.add_child(tabs)
+
+	# --- Audio tab ---
+	var audio_tab := VBoxContainer.new()
+	audio_tab.name = "Audio"
+	audio_tab.add_theme_constant_override("separation", 10)
+	audio_tab.process_mode = Node.PROCESS_MODE_ALWAYS
+	tabs.add_child(audio_tab)
+	for entry: Dictionary in [
+		{"label": "SFX", "bus": "SFX"},
+		{"label": "Voices", "bus": "Voiceline"},
+		{"label": "Music", "bus": "Music"},
+	]:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 12)
+		row.process_mode = Node.PROCESS_MODE_ALWAYS
+		audio_tab.add_child(row)
+		var label := Label.new()
+		label.text = entry["label"] as String
+		label.add_theme_font_size_override("font_size", 16)
+		label.custom_minimum_size = Vector2(80, 24)
+		label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85, 1.0))
+		row.add_child(label)
+		var slider := HSlider.new()
+		slider.custom_minimum_size = Vector2(280, 24)
+		slider.min_value = -40.0
+		slider.max_value = 6.0
+		slider.step = 1.0
+		var bus_idx: int = AudioServer.get_bus_index(entry["bus"] as String)
+		slider.value = AudioServer.get_bus_volume_db(bus_idx) if bus_idx >= 0 else 0.0
+		slider.value_changed.connect(_on_bus_volume_changed.bind(entry["bus"] as String))
+		slider.process_mode = Node.PROCESS_MODE_ALWAYS
+		row.add_child(slider)
+
+	# --- Gameplay tab ---
+	var gameplay_tab := VBoxContainer.new()
+	gameplay_tab.name = "Gameplay"
+	gameplay_tab.add_theme_constant_override("separation", 12)
+	gameplay_tab.process_mode = Node.PROCESS_MODE_ALWAYS
+	tabs.add_child(gameplay_tab)
+
+	var ext_check := CheckBox.new()
+	ext_check.text = "Show extended stats by default"
+	ext_check.button_pressed = _extended_stats_default
+	ext_check.process_mode = Node.PROCESS_MODE_ALWAYS
+	ext_check.toggled.connect(_on_extended_stats_toggled)
+	gameplay_tab.add_child(ext_check)
+
+	var dbg_check := CheckBox.new()
+	dbg_check.text = "Show AI investigation tool"
+	dbg_check.button_pressed = AIDebugOverlay.user_enabled
+	dbg_check.process_mode = Node.PROCESS_MODE_ALWAYS
+	dbg_check.toggled.connect(_on_ai_debug_toggled)
+	gameplay_tab.add_child(dbg_check)
+
+	# --- Close button ---
+	var close_spacer := Control.new()
+	close_spacer.custom_minimum_size = Vector2(0, 12)
+	vbox.add_child(close_spacer)
+	var close_btn := Button.new()
+	close_btn.text = "Close"
+	close_btn.custom_minimum_size = Vector2(180, 34)
+	close_btn.process_mode = Node.PROCESS_MODE_ALWAYS
+	close_btn.pressed.connect(_on_pause_settings_close)
+	vbox.add_child(close_btn)
+
+
+func _on_pause_settings() -> void:
+	if _pause_settings_dialog:
+		_pause_settings_dialog.visible = true
+
+
+func _on_pause_settings_close() -> void:
+	if _pause_settings_dialog:
+		_pause_settings_dialog.visible = false
+
+
+func _on_ai_debug_toggled(pressed: bool) -> void:
+	## Flip the runtime AIDebugOverlay opt-in. The overlay's _process
+	## reads the static var every tick and shows / hides itself
+	## accordingly, so no scene-tree juggling is needed here.
+	AIDebugOverlay.user_enabled = pressed
 
 
 func _on_return_to_menu() -> void:

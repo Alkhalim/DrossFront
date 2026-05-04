@@ -6,20 +6,28 @@ extends CanvasLayer
 ## per AI in a vertical stack on the right side of the screen.
 ##
 ## ## Toggling
-## Flip DEBUG_HARNESS_ENABLED below to false to silently disable the
-## overlay across the project. test_arena_controller checks the const
-## before instantiating, so a false value means this whole file has
-## zero runtime cost. The AIController-side instrumentation (kill /
-## loss tallies, blocker capture in _try_place) stays cheap and
-## always-on so flipping back to true requires no other changes.
-##
-## ## Why a const not a setting
-## The user asked for an "internal" toggle so the harness can be
-## hidden / re-revealed in later versions without deletion + rewrite.
-## A class-level const reads at editor time, so the overlay vanishes
-## from the scene tree entirely when off -- no draw calls, no polling.
+## Off by default. The pause-screen Settings dialog has a
+## "Show AI investigation tool" toggle that flips
+## AIDebugOverlay.user_enabled at runtime. The overlay always
+## instantiates so the toggle can flip it back on without a
+## scene reload, but its CanvasLayer stays hidden + its tick
+## work skips while user_enabled is false. The AIController-side
+## instrumentation (kill / loss tallies, blocker capture in
+## _try_place) stays cheap and always-on so the overlay never
+## has a 'cold start' lag when re-enabled.
 
+## Backwards-compat const -- left as a hard kill switch in case
+## the overlay file itself ever needs to be removed from the
+## build entirely. Defaults true; the runtime user_enabled flag
+## below is the regular on/off.
 const DEBUG_HARNESS_ENABLED: bool = true
+
+## Per-session opt-in flag. Static so the value persists when
+## the pause overlay rebuilds and so a future Settings panel
+## save/load can write to it directly. Defaults to false so a
+## regular player never sees the harness without explicitly
+## opting in via the Settings dialog.
+static var user_enabled: bool = false
 
 ## Layout knobs.
 const PANEL_WIDTH: float = 300.0
@@ -38,6 +46,10 @@ func _ready() -> void:
 	# Float above the regular HUD so it doesn't compete for input.
 	# Layer 50 sits above HUD (default 0) but below pause menus (100).
 	layer = 50
+	# Initial visibility tracks the runtime opt-in flag. The
+	# Settings dialog flips user_enabled at runtime, so this just
+	# sets the start state -- _process re-syncs every tick.
+	visible = user_enabled
 	_container = VBoxContainer.new()
 	_container.name = "AIDebugContainer"
 	_container.add_theme_constant_override("separation", int(PANEL_GAP))
@@ -56,6 +68,15 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	# Sync visibility to the runtime opt-in flag. When toggled off
+	# we hide the layer and skip the per-tick refresh entirely so
+	# the harness costs nothing while the player isn't looking at
+	# it. Toggling back on re-shows the panels on the next tick
+	# without a scene reload.
+	if visible != user_enabled:
+		visible = user_enabled
+	if not user_enabled:
+		return
 	_refresh_accum += delta
 	if _refresh_accum < REFRESH_INTERVAL:
 		return
