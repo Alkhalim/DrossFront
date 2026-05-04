@@ -180,6 +180,15 @@ func _ready() -> void:
 		var player_faction: int = _faction_id_for_player(0)
 		music_mgr.call("start", player_faction)
 
+	# AI debug harness overlay -- gated on the script-level const
+	# inside ai_debug_overlay.gd so it can be hidden / re-revealed
+	# in later versions without deleting any code. Costs nothing
+	# when disabled (the CanvasLayer never enters the scene).
+	if AIDebugOverlay.DEBUG_HARNESS_ENABLED:
+		var dbg := AIDebugOverlay.new()
+		dbg.name = "AIDebugOverlay"
+		add_child(dbg)
+
 	# Tutorial mission scaffold — only when MatchSettings.tutorial_mode
 	# is true. Adds a TutorialMission node that owns the stage state,
 	# spawns reinforcements at trigger zones, and ends the match on

@@ -144,8 +144,43 @@ var _turret_path: String = "res://resources/buildings/gun_emplacement.tres"
 ## cause of the "AI keeps draining to 0 with nothing to show" bug).
 var _my_faction: int = 0
 
+## --- Debug harness state ---------------------------------------------
+## Surface points the AIDebugOverlay reads via get_debug_snapshot(). All
+## off-by-default behaviour is gated on the overlay's own DEBUG_HARNESS_
+## ENABLED const; the controller always tracks the values so toggling the
+## overlay back on doesn't require any other change. Costs are negligible.
+enum BuildBlocker {
+	NONE,
+	RESOURCE_LOAD_FAIL,
+	PREREQ_NOT_MET,
+	PRODUCTION_GATE,
+	CANT_AFFORD,
+	NO_ENGINEER,
+	NO_FREE_VENT,
+	NO_CLEAR_SPOT,
+	VENT_SNAP_TOO_FAR,
+	VENT_KEEPOUT,
+	NEAR_PLATEAU,
+}
+## Most recent un-placed building plan + why it didn't go down this tick.
+## Captured for the FIRST not-yet-placed `_try_place` call that hit a
+## blocker per tick (priority order), so the overlay shows the highest-
+## priority pending build, not the lowest.
+var _next_build_key: String = ""
+var _next_build_blocker: int = BuildBlocker.NONE
+var _blocker_captured_this_tick: bool = false
+## Cumulative kill / loss tallies surfaced by the overlay. Both update
+## via squad_destroyed signal connections that we attach lazily in
+## _track_unit_lifecycle().
+var _kills: int = 0
+var _losses: int = 0
+## Map of unit instance_id -> "ally" / "enemy" so we know which counter
+## to bump when squad_destroyed fires.
+var _tracked_units: Dictionary = {}
+
 
 func _enter_tree() -> void:
+	add_to_group("ai_controllers")
 	var settings: Node = get_node_or_null("/root/MatchSettings")
 	if settings:
 		# Per-AI difficulty override if the menu set one for this slot;
@@ -427,6 +462,11 @@ func _process(delta: float) -> void:
 				_units.append(node)
 	# Refresh the enemy-composition tally for counter training.
 	_refresh_enemy_armor_counts()
+	# Wire kill / loss tracking onto any newly seen units (debug harness).
+	_track_unit_lifecycle()
+	# Reset the per-tick "first blocked build" capture so each tick starts
+	# fresh. Cleared up here, populated by _try_place's early-returns below.
+	_blocker_captured_this_tick = false
 
 	# Match wall-clock advances regardless of state. Drives the
 	# dormant-attack safety net so a stuck ECONOMY/ARMY/REBUILD
@@ -955,12 +995,14 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 		return
 	var bstats: BuildingStatResource = load(stats_path) as BuildingStatResource
 	if not bstats:
+		_record_blocker(key, BuildBlocker.RESOURCE_LOAD_FAIL)
 		return
 	# Tech-tree gate: skip if any prerequisite isn't yet constructed.
 	# Same rule the player follows, so the AI naturally chains through
 	# basic_foundry → advanced_foundry → aerodrome instead of teleporting
 	# straight to the late-tier structure.
 	if not _ai_prerequisites_met(bstats):
+		_record_blocker(key, BuildBlocker.PREREQ_NOT_MET)
 		return
 	# Production-building cadence gate: the AI can't carpet the
 	# base with foundries / aerodromes before fielding any army.
@@ -971,17 +1013,20 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 	# 0 and the gate compares 0 >= 0 * 2.
 	if _is_production_building_id(bstats.building_id):
 		if _military_units_trained < _production_buildings_built * PRODUCTION_BUILDING_TRAINING_GATE:
+			_record_blocker(key, BuildBlocker.PRODUCTION_GATE)
 			return
 	# AI must afford the building, just like the player. _ai_resource_manager
 	# handles the spending inside builder.place_building.
 	if _ai_resource_manager and _ai_resource_manager.has_method("can_afford"):
 		if not _ai_resource_manager.can_afford(bstats.cost_salvage, bstats.cost_fuel):
+			_record_blocker(key, BuildBlocker.CANT_AFFORD)
 			return
 
 	# AI now needs an engineer to build. If none are free, skip — the AI
 	# will retry next tick (or after producing more engineers).
 	var engineer: Node = _find_free_engineer()
 	if not engineer:
+		_record_blocker(key, BuildBlocker.NO_ENGINEER)
 		return
 
 	# Geothermic-vent gate -- generators (basic + advanced) snap to the
@@ -997,16 +1042,19 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 	if bstats.get("requires_geothermic_vent"):
 		var vent_pos: Vector3 = _pick_free_generator_vent()
 		if vent_pos == Vector3.INF:
+			_record_blocker(key, BuildBlocker.NO_FREE_VENT)
 			return  # No free vent right now; retry next tick.
 		desired = vent_pos
 	var pos: Vector3 = _find_clear_placement(desired, bstats.footprint_size)
 	if pos == Vector3.INF:
+		_record_blocker(key, BuildBlocker.NO_CLEAR_SPOT)
 		return  # retry next tick once the area clears
 	# For vent-gated buildings, snapping to anything but the vent
 	# centre invalidates the placement (selection_manager allows a
 	# 1.4u tolerance). If _find_clear_placement spiralled too far,
 	# bail and retry next tick.
 	if bstats.get("requires_geothermic_vent") and pos.distance_to(desired) > 1.4:
+		_record_blocker(key, BuildBlocker.VENT_SNAP_TOO_FAR)
 		return
 	# Symmetric vent keepout for non-generator buildings -- the AI
 	# can't drop a foundry / yard / turret on or right next to a
@@ -1015,6 +1063,7 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 	if not bstats.get("requires_geothermic_vent"):
 		var vent_keepout: float = maxf(bstats.footprint_size.x, bstats.footprint_size.z) * 0.5 + 1.4
 		if GeothermicVent.find_vent_at(get_tree().current_scene, pos, vent_keepout) != null:
+			_record_blocker(key, BuildBlocker.VENT_KEEPOUT)
 			return
 	# Plateau / ramp keepout. Building right at the foot of a ramp
 	# wedges the AI's Crawlers + military between the building and
@@ -1030,6 +1079,7 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 			if not p3:
 				continue
 			if pos.distance_to(Vector3(p3.global_position.x, 0.0, p3.global_position.z)) < plat_keepout:
+				_record_blocker(key, BuildBlocker.NEAR_PLATEAU)
 				return
 
 	# Use the same path as the player: BuilderComponent.place_building spends
@@ -2068,3 +2118,150 @@ func _pick_unit_for_foundry(roster: Array, foundry_id: StringName) -> UnitStatRe
 	# Map bucket onto the actual roster, clamping to roster size.
 	var idx: int = mini(bucket, available.size() - 1)
 	return available[idx]
+
+
+## --- Debug harness helpers -------------------------------------------
+## All read-only / observer code below. Always-on (zero cost when no
+## overlay is reading the snapshot); the overlay itself is gated by its
+## own DEBUG_HARNESS_ENABLED const so this stays cheap to leave in place.
+
+func _record_blocker(key: String, blocker: int) -> void:
+	## First not-yet-placed `_try_place` call that hits a blocker each
+	## tick wins -- everything called after it stays silent so the
+	## overlay surfaces the highest-priority pending build, not the
+	## last one in the call list. Cleared at the top of _process via
+	## _blocker_captured_this_tick.
+	if _blocker_captured_this_tick:
+		return
+	_blocker_captured_this_tick = true
+	_next_build_key = key
+	_next_build_blocker = blocker
+
+
+func _track_unit_lifecycle() -> void:
+	## Lazily wires squad_destroyed signal connections so we can tally
+	## kills (enemy units that died) and losses (our units that died)
+	## across the match. Walks the units group once per AI tick, only
+	## connecting newly seen units. The dictionary is keyed by
+	## get_instance_id so we don't re-connect on each tick.
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node):
+			continue
+		var iid: int = node.get_instance_id()
+		if _tracked_units.has(iid):
+			continue
+		var n_owner: int = -1
+		if "owner_id" in node:
+			n_owner = node.get("owner_id") as int
+		if n_owner < 0:
+			continue
+		# Treat anything not on our team as an enemy -- 2v2 alliances are
+		# resolved via PlayerRegistry.are_enemies(...) when present, else
+		# straight owner_id comparison.
+		var is_enemy: bool = (n_owner != owner_id)
+		var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+		if registry and registry.has_method("are_allied"):
+			is_enemy = not registry.are_allied(owner_id, n_owner) and n_owner != owner_id
+		_tracked_units[iid] = "enemy" if is_enemy else "ally"
+		if node.has_signal("squad_destroyed"):
+			node.connect("squad_destroyed", Callable(self, "_on_tracked_unit_destroyed").bind(iid))
+
+
+func _on_tracked_unit_destroyed(iid: int) -> void:
+	if not _tracked_units.has(iid):
+		return
+	var side: String = _tracked_units[iid] as String
+	if side == "enemy":
+		_kills += 1
+	else:
+		_losses += 1
+	_tracked_units.erase(iid)
+
+
+func _state_label() -> String:
+	match _state:
+		AIState.SETUP:    return "SETUP"
+		AIState.ECONOMY:  return "ECONOMY"
+		AIState.ARMY:     return "ARMY"
+		AIState.ATTACK:   return "ATTACK"
+		AIState.REBUILD:  return "REBUILD"
+	return "?"
+
+
+func _strategy_label() -> String:
+	match _strategy:
+		Strategy.BALANCED:       return "BAL"
+		Strategy.TURRET_HEAVY:   return "TURRET"
+		Strategy.ECONOMY_HEAVY:  return "ECON"
+		Strategy.RUSH:           return "RUSH"
+		Strategy.AIR:            return "AIR"
+	return "?"
+
+
+func _blocker_label(b: int) -> String:
+	match b:
+		BuildBlocker.NONE:               return ""
+		BuildBlocker.RESOURCE_LOAD_FAIL: return "resource load failed"
+		BuildBlocker.PREREQ_NOT_MET:     return "prereq missing"
+		BuildBlocker.PRODUCTION_GATE:    return "training gate"
+		BuildBlocker.CANT_AFFORD:        return "can't afford"
+		BuildBlocker.NO_ENGINEER:        return "no free engineer"
+		BuildBlocker.NO_FREE_VENT:       return "no free vent"
+		BuildBlocker.NO_CLEAR_SPOT:      return "no clear spot"
+		BuildBlocker.VENT_SNAP_TOO_FAR:  return "vent too crowded"
+		BuildBlocker.VENT_KEEPOUT:       return "blocks a vent"
+		BuildBlocker.NEAR_PLATEAU:       return "ramp keepout"
+	return "?"
+
+
+func _time_until_next_attack() -> float:
+	## Best-effort estimate of seconds until the AI's next ATTACK
+	## transition. Returns negative when already attacking. The dormant
+	## safety-net path is reliable; the wave-size path can't be predicted
+	## exactly because it depends on production + attrition rates, so
+	## we expose the dormant timer as the worst-case upper bound.
+	if _state == AIState.ATTACK:
+		return -1.0
+	var dormant_left: float = _personality_dormant_timeout_sec() - (_match_clock_sec - _last_attack_clock_sec)
+	# REBUILD must finish before we can re-enter ECONOMY, then ARMY.
+	if _state == AIState.REBUILD:
+		var rebuild_left: float = REBUILD_DURATION - _state_timer
+		dormant_left = maxf(dormant_left, rebuild_left)
+	return maxf(dormant_left, 0.0)
+
+
+func get_debug_snapshot() -> Dictionary:
+	## One-shot read of every value the AIDebugOverlay renders. Cheap to
+	## call: all the work happens in the regular AI tick. Returning a
+	## plain Dictionary keeps the overlay decoupled from this file's
+	## internals so future refactors don't break the harness.
+	var salvage_now: int = 0
+	var fuel_now: int = 0
+	var income: Vector2 = Vector2.ZERO
+	if _ai_resource_manager:
+		if "salvage" in _ai_resource_manager:
+			salvage_now = _ai_resource_manager.get("salvage") as int
+		if "fuel" in _ai_resource_manager:
+			fuel_now = _ai_resource_manager.get("fuel") as int
+		if _ai_resource_manager.has_method("get_average_income"):
+			income = _ai_resource_manager.get_average_income() as Vector2
+	var wave_target: int = maxi(int(round(float(_personality_wave_size_base() + _wave_count * 2) * _agg_mul)), 2)
+	return {
+		"owner_id": owner_id,
+		"faction": _my_faction,
+		"strategy": _strategy_label(),
+		"state": _state_label(),
+		"salvage": salvage_now,
+		"fuel": fuel_now,
+		"salvage_per_sec": income.x,
+		"fuel_per_sec": income.y,
+		"unit_count": _units.size(),
+		"wave_target": wave_target,
+		"wave_count": _wave_count,
+		"kills": _kills,
+		"losses": _losses,
+		"next_build": _next_build_key,
+		"next_build_blocker": _blocker_label(_next_build_blocker),
+		"sec_until_attack": _time_until_next_attack(),
+		"match_clock": _match_clock_sec,
+	}
