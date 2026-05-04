@@ -160,6 +160,61 @@ func _refresh_fog_tint_texture(fow: FogOfWar) -> void:
 	_fog_tint_texture.update(_fog_tint_image)
 
 
+func _draw_path_blockers(fow: FogOfWar, map_size: Vector2, half_world: float) -> void:
+	## Paints small dots at each path-blocking terrain piece + tree
+	## + elevation footprint so the minimap shows where units can't
+	## walk. The colour is offset from the ground tint just enough
+	## to be readable without competing with unit / building dots.
+	## Cells the player hasn't explored render nothing -- discovering
+	## the layout is the player's job.
+	const TERRAIN_DOT: float = 1.6
+	const ELEVATION_DOT: float = 2.6
+	const TREE_DOT: float = 1.0
+	# Warm grey-brown that differs from the dark ground (0.08 base)
+	# and the various team / deposit colours.
+	var blocker_color := Color(0.32, 0.27, 0.22, 0.78)
+	var elevation_color := Color(0.46, 0.36, 0.26, 0.85)
+	var tree_color := Color(0.18, 0.34, 0.20, 0.85)
+
+	var _draw_dot := func(world_pos: Vector3, dot: float, col: Color) -> void:
+		if fow and not fow.is_explored_world(world_pos):
+			return
+		var p: Vector2 = _world_to_map(world_pos, map_size, half_world)
+		draw_rect(Rect2(p - Vector2(dot, dot), Vector2(dot * 2.0, dot * 2.0)), col, true)
+
+	# Terrain pieces (rocks, ruins, refinery slabs) -- many entries
+	# but most are tiny, so this pass is the densest part of the
+	# overlay. Trees + elevation are split out so they can use
+	# different dot sizes / colours to read distinctly.
+	for node: Node in get_tree().get_nodes_in_group("terrain"):
+		if not is_instance_valid(node):
+			continue
+		# Skip elevation -- those nodes are also in the "terrain"
+		# group but rendered separately below with a brighter dot.
+		if node.is_in_group("elevation"):
+			continue
+		var n3: Node3D = node as Node3D
+		if not n3:
+			continue
+		_draw_dot.call(n3.global_position, TERRAIN_DOT, blocker_color)
+
+	for node: Node in get_tree().get_nodes_in_group("elevation"):
+		if not is_instance_valid(node):
+			continue
+		var n3: Node3D = node as Node3D
+		if not n3:
+			continue
+		_draw_dot.call(n3.global_position, ELEVATION_DOT, elevation_color)
+
+	for node: Node in get_tree().get_nodes_in_group("trees"):
+		if not is_instance_valid(node):
+			continue
+		var n3: Node3D = node as Node3D
+		if not n3:
+			continue
+		_draw_dot.call(n3.global_position, TREE_DOT, tree_color)
+
+
 func _draw_fog_tint(fow: FogOfWar, map_origin: Vector2, map_size: Vector2, half_world: float) -> void:
 	## Builds / sizes the fog overlay child rect and refreshes the
 	## fog texture. The actual drawing is handled by the child
@@ -285,6 +340,16 @@ func _draw() -> void:
 	# under the explored tint, which softens but doesn't hide).
 	if fow:
 		_draw_fog_tint(fow, map_origin, map_size, half_world)
+
+	# Pathing obstacles -- terrain pieces (rocks, ruins, refinery
+	# blocks), plateau / elevation footprints, and trees. Drawn as
+	# small distinct-colour dots behind buildings + units so the
+	# player can scan the minimap and see "which areas are
+	# walkable, which aren't" at a glance instead of inferring
+	# from the bare ground texture. Restricted to cells the player
+	# has explored so an unscouted forest doesn't spoil the
+	# canopy density.
+	_draw_path_blockers(fow, map_size, half_world)
 
 	# Draw buildings
 	var buildings: Array[Node] = get_tree().get_nodes_in_group("buildings")

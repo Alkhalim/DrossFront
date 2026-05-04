@@ -2200,6 +2200,33 @@ func _setup_terrain_schwarzwald() -> void:
 	for r: Dictionary in _current_roster():
 		var pid: int = r["id"] as int
 		hq_positions.append(_hq_position_for(pid))
+
+	# Starter wrecks per HQ clearing. Schwarzwald's dense canopy
+	# pushes players into a tighter early game than the other
+	# maps, so each HQ gets a medium + small salvage pile inside
+	# its cleared radius. Workers can chew on these immediately
+	# while the Crawler relocates toward the corridor's deeper
+	# wreck fields.
+	for hq_pos: Vector3 in hq_positions:
+		var to_centre: Vector3 = (Vector3.ZERO - hq_pos)
+		to_centre.y = 0.0
+		var fwd: Vector3 = to_centre.normalized() if to_centre.length_squared() > 0.0001 else Vector3(0, 0, -1)
+		var perp: Vector3 = Vector3(-fwd.z, 0.0, fwd.x)
+		# Medium wreck -- ~12u in front of the HQ, slightly to one
+		# side so it doesn't park on the rally line.
+		var medium := Wreck.new()
+		medium.salvage_value = 130
+		medium.salvage_remaining = 130
+		medium.wreck_size = Vector3(1.4, 0.55, 1.4)
+		medium.position = hq_pos + fwd * 12.0 + perp * 4.5
+		add_child.call_deferred(medium)
+		# Small wreck -- mirrored to the other side, closer in.
+		var small := Wreck.new()
+		small.salvage_value = 55
+		small.salvage_remaining = 55
+		small.wreck_size = Vector3(0.8, 0.4, 0.8)
+		small.position = hq_pos + fwd * 8.0 - perp * 5.0
+		add_child.call_deferred(small)
 	# Also clear a smaller radius around upcoming fuel deposit
 	# positions so a deposit isn't half-buried inside the canopy.
 	# _setup_fuel_deposits runs after this, so we reach into the
