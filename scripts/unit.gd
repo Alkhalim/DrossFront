@@ -3283,12 +3283,14 @@ func _build_legs_chicken(member: Node3D, shape: Dictionary, mats: Array[Standard
 	var hip_y: float = shape["hip_y"] as float
 	var leg_x: float = shape["leg_x"] as float
 	var base_color: Color = shape["color"] as Color
-	# Segment lengths chosen so the bent geometry plants the foot near
-	# y=0 with minimal stretch. Thigh tilts -0.55 (cos 0.85), shin tilts
-	# back forward by +1.0 (cos 0.54). Vertical reach ≈ thigh*0.85 +
-	# shin*0.54 ≈ hip_y.
-	var thigh_len: float = hip_y * 0.58
-	var shin_len: float = hip_y * 0.58
+	# Segment lengths chosen so the bent geometry plants the foot at
+	# y=0. Thigh tilts -0.55 (cos 0.85), shin tilts forward by +1.0
+	# (cos 0.54). Vertical reach = (thigh + shin) * 0.72 ≈ hip_y, so
+	# the foot lands flat instead of dangling 0.2u above the floor
+	# (the previous 0.58 scalar produced a visible gap on Hound /
+	# medium chicken-walkers).
+	var thigh_len: float = hip_y * 0.72
+	var shin_len: float = hip_y * 0.72
 	var thigh_size := Vector3(leg_size.x, thigh_len, leg_size.z)
 	var shin_size := Vector3(leg_size.x * 0.85, shin_len, leg_size.z * 0.85)
 
@@ -3558,7 +3560,12 @@ func _attach_leg_segment(parent: Node3D, leg_size: Vector3, base_color: Color, m
 		var foot_box := BoxMesh.new()
 		foot_box.size = Vector3(leg_size.x * 1.4, 0.08, leg_size.z * 1.6)
 		foot.mesh = foot_box
-		foot.position.y = -leg_size.y - 0.04
+		# Foot pad sits AT ground level (top face touching ground at
+		# y=0). The previous offset of -leg_size.y - 0.04 dropped the
+		# bottom of the pad to y=-0.08 -- the foot was clipping into
+		# the ground plane. With a 0.08-tall pad we want its centre
+		# at -leg_size.y + 0.04 so the bottom face rests on y=0.
+		foot.position.y = -leg_size.y + 0.04
 		var foot_mat := _make_metal_mat(Color(base_color.r * 0.7, base_color.g * 0.7, base_color.b * 0.7))
 		foot.set_surface_override_material(0, foot_mat)
 		parent.add_child(foot)

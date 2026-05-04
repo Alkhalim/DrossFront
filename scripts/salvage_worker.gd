@@ -83,12 +83,15 @@ func _ready() -> void:
 	add_to_group("owner_%d" % owner_id)
 
 	# Make the worker collidable as a unit so enemies can shoot it.
-	# Mask now includes the unit layer (bit 2) so other units can't
-	# walk straight through workers and stack on top of them at the
-	# yard / wreck. CharacterBody3D collision keeps them physically
-	# separated; nav avoidance still routes around them.
-	collision_layer = 2  # unit layer
-	collision_mask = 3   # ground + units
+	# Mask is GROUND ONLY -- workers don't push back against other
+	# units / crawlers / structures. The previous unit-mask version
+	# wedged returning workers against their home Crawler and
+	# friendly mechs walking past, which the dock-distance hack
+	# only papered over. Letting workers phase through other units
+	# costs a tiny bit of physical realism for a big reduction in
+	# stuck-pathfinding cases.
+	collision_layer = 2  # unit layer (so enemies can still shoot us)
+	collision_mask = 1   # ground only
 
 	# Round-robin half-frame stagger across worker fleet.
 	# Third-frame stagger across the worker fleet. Worker state-
@@ -382,20 +385,6 @@ func _physics_process(delta: float) -> void:
 		for k in stale:
 			_blacklisted_wrecks.erase(k)
 
-	# Drop the worker's unit-layer collision mask while it's
-	# approaching its home Crawler within docking range. Without
-	# this, a moving Crawler and a returning worker physically
-	# wedge each other (both bodies live on overlapping collision
-	# layers), and the Crawler's stuck-rescue then has to fight
-	# the worker that's trying to dock with it. Mask 1 = ground
-	# only; restore mask 3 (ground + units) once the worker isn't
-	# returning anymore. Cheap to set every tick -- Godot only
-	# rebuilds the collision broadphase when the value changes.
-	if state == State.RETURNING and is_instance_valid(home_yard):
-		var dock_dist: float = global_position.distance_to(home_yard.global_position)
-		collision_mask = 1 if dock_dist < 8.0 else 3
-	else:
-		collision_mask = 3
 	match state:
 		State.IDLE:
 			_find_wreck()
