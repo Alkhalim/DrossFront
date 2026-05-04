@@ -532,6 +532,14 @@ func _process(delta: float) -> void:
 	if _difficulty_is_hard() and _state != AIState.SETUP:
 		_try_hard_target_composition()
 
+	# Idle-yard reaper. Demolishes any of our salvage yards that
+	# haven't taken a worker delivery in IDLE_YARD_TIMEOUT_SEC --
+	# usually because the surrounding wreck pile dried up. Stops
+	# late-game power drain from yards that are paying upkeep
+	# without producing anything.
+	if _state != AIState.SETUP:
+		_reap_idle_salvage_yards()
+
 
 func _personality_wave_size_base() -> int:
 	## Per-personality base wave size before _agg_mul + _wave_count
@@ -1082,6 +1090,91 @@ func _try_place_pad_production(current: int, target: int) -> void:
 		off += Vector3(cos(float(i) * 1.7) * 4.0, 0.0, sin(float(i) * 1.7) * 4.0).normalized() * PAD_RING_RADIUS * 0.0
 		var path: String = paths[i % paths.size()]
 		_try_place(key, path, _offset_for(key, off))
+
+
+## --- Idle-yard reaper -------------------------------------------------
+## Salvage yards keep their power upkeep regardless of throughput, so a
+## yard that's outlived its surrounding wreck pile silently drains the
+## AI's energy grid in the late game. Track each yard's most recent
+## delivery (stamped by salvage_worker on dock) and queue a demolish
+## call once it's been silent for IDLE_YARD_TIMEOUT_SEC.
+const IDLE_YARD_TIMEOUT_SEC: float = 150.0  # 2.5 minutes
+## Grace window after a yard finishes construction before the reaper
+## even considers it -- a freshly-placed yard hasn't had time to send
+## workers and dock a delivery yet, so we'd otherwise demolish it on
+## the first AI tick.
+const IDLE_YARD_GRACE_SEC: float = 90.0
+
+
+func _reap_idle_salvage_yards() -> void:
+	## Walks our salvage yards and demolishes any whose
+	## last_delivery_msec was longer than IDLE_YARD_TIMEOUT_SEC ago.
+	## Buildings without a recorded delivery use their construction
+	## complete time + IDLE_YARD_GRACE_SEC as the deadline.
+	var now_msec: int = Time.get_ticks_msec()
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var b: Building = node as Building
+		if not b or not b.stats:
+			continue
+		if b.owner_id != owner_id:
+			continue
+		if b.stats.building_id != &"salvage_yard":
+			continue
+		# Skip yards still being built; the reaper only acts on
+		# operational yards.
+		if "is_constructed" in b and not (b.get("is_constructed") as bool):
+			continue
+		var last_msec: int = b.get_meta("last_delivery_msec", -1) as int
+		var deadline_msec: int = -1
+		if last_msec >= 0:
+			deadline_msec = last_msec + int(IDLE_YARD_TIMEOUT_SEC * 1000.0)
+		else:
+			# Never delivered. Use the yard's existence age via the
+			# spawn-time meta the building stamps in _ready, falling
+			# back to a one-time grace mark we set here so the timer
+			# starts ticking from now if there's nothing else.
+			var spawn_msec: int = b.get_meta("ai_spawn_msec", -1) as int
+			if spawn_msec < 0:
+				spawn_msec = now_msec
+				b.set_meta("ai_spawn_msec", spawn_msec)
+			deadline_msec = spawn_msec + int((IDLE_YARD_GRACE_SEC + IDLE_YARD_TIMEOUT_SEC) * 1000.0)
+		if now_msec < deadline_msec:
+			continue
+		_demolish_yard(b)
+
+
+func _demolish_yard(yard: Building) -> void:
+	## Drops a yard. Calls take_damage with its remaining HP so the
+	## standard collapse path runs (wreck spawn + power recompute +
+	## navmesh rebake). Done over manual queue_free so the player
+	## sees a real demolition rather than a silent vanish.
+	if not yard or not is_instance_valid(yard):
+		return
+	# Free up the AI's _buildings_placed key so a future yard can
+	# claim that slot. Walk the dictionary in case the same yard
+	# was registered under multiple keys (rare, but possible from
+	# scenario-seeding paths).
+	var node_iid: int = yard.get_instance_id()
+	for k_v: Variant in _buildings_placed.keys().duplicate():
+		var k: String = k_v as String
+		# We don't store node refs in _buildings_placed -- it's
+		# string keys only. A salvage yard's keys are
+		# 'salvage_yard', 'salvage_yard_2', etc. Free them all so
+		# the AI can re-place; the wreck blocks the spot for a
+		# few seconds either way.
+		if k.begins_with("salvage_yard") or k.begins_with("pad_") and k.find("yard") >= 0:
+			_buildings_placed.erase(k)
+	if yard.has_method("take_damage"):
+		var hp_v: Variant = yard.get("current_hp")
+		var hp: int = (hp_v as int) if typeof(hp_v) == TYPE_INT else 1
+		yard.take_damage(maxi(hp, 1), null)
+	else:
+		yard.queue_free()
+	# Suppress the unused warning by referencing iid (kept for
+	# future-extension where we might dedupe demolish calls).
+	var _iid: int = node_iid
 
 
 func _try_place_pad_energy(current: int, target: int) -> void:

@@ -505,6 +505,12 @@ func _return_to_yard(delta: float) -> void:
 			resource_manager.add_salvage(_carried_salvage)
 			if _carried_microchips > 0 and resource_manager.has_method("add_microchips"):
 				resource_manager.add_microchips(_carried_microchips)
+		# Stamp the home yard with this delivery so the AI's
+		# idle-yard reaper can detect dead-investment yards
+		# (no salvage / chips delivered for >2.5min) and demolish
+		# them before they keep draining power.
+		if is_instance_valid(home_yard) and (_carried_salvage > 0 or _carried_microchips > 0):
+			home_yard.set_meta("last_delivery_msec", Time.get_ticks_msec())
 		# Floating "+N S" / "+N M" readouts above the home yard
 		# every time a worker drops cargo. Player-side only so
 		# enemy economy doesn't broadcast through visible yards.
