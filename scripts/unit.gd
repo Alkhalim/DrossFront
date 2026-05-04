@@ -1355,10 +1355,14 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 				_apply_hound_tracker_overlay(torso_pivot, torso_size)
 			"Hound — Ripper":
 				_apply_hound_ripper_overlay(torso_pivot, torso_size)
+			"Bulwark":
+				_apply_bulwark_imposing_stance(member)
 			"Bulwark (Ironwall)":
 				_apply_bulwark_ironwall_overlay(torso_pivot, torso_size)
+				_apply_bulwark_imposing_stance(member)
 			"Bulwark (Siegebreaker)":
 				_apply_bulwark_siegebreaker_overlay(torso_pivot, torso_size)
+				_apply_bulwark_imposing_stance(member)
 			"Specter (Ghost)":
 				_apply_specter_ghost_overlay(torso_pivot, torso_size, mats)
 			"Specter (Glitch)":
@@ -1534,6 +1538,31 @@ func _apply_sable_silhouette(
 	tip.position = Vector3(0.0, spire_h * 0.5 + 0.04, 0.0)
 	tip.set_surface_override_material(0, accent_mat)
 	spire.add_child(tip)
+
+
+func _apply_bulwark_imposing_stance(member: Node3D) -> void:
+	## Makes the Bulwark read as 'engine of destruction' instead
+	## of 'standard heavy mech'. Three changes layer:
+	##   - +10% chassis scale so the silhouette towers over Hounds.
+	##   - Slight forward lean (~4deg pitch) so the chassis reads
+	##     as advancing under its own weight.
+	##   - Per-member walk-feel override: slower stride, deeper
+	##     bob, narrower swing arc -- the parade gait gets replaced
+	##     with a heavy stomp. Idle weight-shift slows too.
+	_apply_special_chassis_scale(member, 1.10)
+	# Forward lean is applied to the chassis root so legs + torso
+	# tilt as one unit. Small enough to read as posture, not
+	# falling.
+	member.rotation.x = deg_to_rad(-4.0)
+	# Walk + idle parameter override -- find this member's data
+	# entry and rewrite the stride / bob / idle params.
+	for entry: Dictionary in _member_data:
+		if entry.get("root", null) == member:
+			entry["stride_speed"] = randf_range(0.55, 0.68)
+			entry["stride_swing"] = randf_range(0.22, 0.32)
+			entry["bob_amount"] = randf_range(0.13, 0.18)
+			entry["idle_speed"] = randf_range(0.30, 0.45)
+			break
 
 
 func _apply_special_chassis_scale(member: Node3D, scale: float) -> void:
@@ -4660,6 +4689,21 @@ func _reset_walk_bob() -> void:
 			member.position.y = sin(idle_phase) * 0.012
 			# Tiny lean — unit-local X — gives a relaxed feel without breaking formation.
 			member.rotation.z = sin(idle_phase * 0.7) * 0.012
+			# Expressive idle -- the head (chicken-leg walker top
+			# turret) slowly swivels left/right and the cannons
+			# tilt up/down a touch. Sells the unit as 'alert,
+			# scanning' rather than statically frozen. Very small
+			# arc + slow phase per-member so a squad doesn't sway
+			# in lockstep.
+			var head: Node3D = data.get("head", null) as Node3D
+			if head and is_instance_valid(head):
+				head.rotation.y = sin(idle_phase * 0.35) * 0.18
+			var cannons: Array = data.get("cannons", []) as Array
+			if not cannons.is_empty():
+				var cannon_pitch: float = sin(idle_phase * 0.5 + 1.7) * 0.08
+				for c_node in cannons:
+					if c_node and is_instance_valid(c_node):
+						(c_node as Node3D).rotation.x = cannon_pitch
 
 
 ## --- Shooting Animation ---
