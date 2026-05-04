@@ -5,20 +5,20 @@
 
 [sub_resource type="Resource" id="weapon_ram_cannon"]
 script = ExtResource("2")
-weapon_name = "Breacher AP Cannon"
+weapon_name = "Breacher AT Cannon"
 role_tag = &"AP"
 damage_tier = &"high"
 range_tier = &"medium"
 rof_tier = &"moderate"
-damage_value = 95
-rof_seconds_value = 1.4
+damage_value = 110
+rof_seconds_value = 5.0
 projectile_style = &"shell"
-base_accuracy = 0.82
+base_accuracy = 0.85
 can_damage_trees = true
-mult_vs_light = 0.5
-mult_vs_medium = 0.85
-mult_vs_heavy = 1.1
-structure_damage_mult = 0.7
+mult_vs_light = 0.55
+mult_vs_medium = 0.90
+mult_vs_heavy = 1.15
+structure_damage_mult = 0.70
 
 [sub_resource type="Resource" id="weapon_ram_coax"]
 script = ExtResource("2")
@@ -35,11 +35,11 @@ unit_name = "Breacher Tank (Battering Ram)"
 display_name = "VA-9R Breacher (Battering Ram)"
 unit_class = &"transport"
 hp_total = 1320
-hp_per_unit = 1320
-armor_class = &"heavy"
+hp_per_unit = 440
+armor_class = &"medium"
 speed_tier = &"moderate"
 sight_tier = &"medium"
-squad_size = 1
+squad_size = 3
 population = 14
 cost_salvage = 340
 cost_fuel = 38
@@ -53,6 +53,6 @@ ability_cooldown = 14.0
 ability_radius = 0.0
 ability_duration = 2.5
 ability_description = "Slam forward at +120% speed for 2.5s. Units knocked aside in the path take 60 damage and a 1.0s slow."
-special_description = "Breacher Tank — Battering Ram branch. Faster reload + Charge ability turns the tank into an anti-armor lancer. Best at flanking heavies and overrunning a wounded line."
+special_description = "Breacher Tank — Battering Ram branch. Faster reload, lighter chassis, gains a Charge ability for flanking heavies. Same 0.7x structure penalty -- this variant chases mechs, not buildings."
 passive_description = "Reinforced Prow — Charge contacts deal 60 damage and slow targets."
 branch_summary = "Faster cycle + a charge ability. Built to break a flank and chase wounded mechs."

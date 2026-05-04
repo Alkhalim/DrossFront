@@ -7,29 +7,20 @@
 
 [sub_resource type="Resource" id="weapon_breacher_cannon"]
 script = ExtResource("2")
-weapon_name = "Breacher AP Cannon"
+weapon_name = "Heavy AT Cannon"
 role_tag = &"AP"
 damage_tier = &"high"
-range_tier = &"medium"
-rof_tier = &"moderate"
-damage_value = 95
-rof_seconds_value = 1.6
+range_tier = &"long"
+rof_tier = &"slow"
+damage_value = 130
+rof_seconds_value = 6.5
 projectile_style = &"shell"
-base_accuracy = 0.80
+base_accuracy = 0.85
 can_damage_trees = true
 mult_vs_light = 0.55
-mult_vs_medium = 0.80
-mult_vs_heavy = 1.0
-structure_damage_mult = 1.4
-
-[sub_resource type="Resource" id="weapon_breacher_coax"]
-script = ExtResource("2")
-weapon_name = "Coaxial Suppressor"
-role_tag = &"Universal"
-damage_tier = &"low"
-range_tier = &"medium"
-rof_tier = &"rapid"
-base_accuracy = 0.80
+mult_vs_medium = 0.85
+mult_vs_heavy = 1.10
+structure_damage_mult = 0.70
 
 [resource]
 script = ExtResource("1")
@@ -37,19 +28,18 @@ unit_name = "Breacher Tank"
 display_name = "VA-9 Breacher Tank"
 unit_class = &"transport"
 hp_total = 1380
-hp_per_unit = 1380
-armor_class = &"heavy"
+hp_per_unit = 460
+armor_class = &"medium"
 speed_tier = &"slow"
 sight_tier = &"medium"
-squad_size = 1
+squad_size = 3
 population = 14
 cost_salvage = 350
 cost_fuel = 40
 build_time = 33.0
 built_at = &"advanced_foundry"
 primary_weapon = SubResource("weapon_breacher_cannon")
-secondary_weapon = SubResource("weapon_breacher_coax")
-special_description = "Anvil heavy tracked tank built to crack defensive lines. Heavy AP cannon with a structure damage bonus + a coaxial suppressor for chip damage on lights. Branches: Demolisher (siege specialist) or Battering Ram (charge ability)."
+special_description = "Anvil tracked tank hunter. Casemate hull with a fixed forward-mounted heavy AT cannon — high-caliber slow-firing shell tuned vs armour. Loses payload against structures (0.7x). Branches: Demolisher (siege specialist) or Battering Ram (charge ability)."
 branch_a_name = "Demolisher"
 branch_b_name = "Battering Ram"
 branch_a_stats = ExtResource("3")

@@ -605,6 +605,15 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 	# builder instead. Returns the same dictionary shape so the caller's
 	# squad-visuals bookkeeping keeps working.
 	if stats and stats.unit_class == &"transport":
+		# Per-name dispatch within transport class so different
+		# tracked vehicles get distinct silhouettes. Breacher Tank
+		# uses a casemate (no-turret) tank-destroyer build that
+		# diverges from the Sable Courier Tank's turreted
+		# transport silhouette; defaults route to Courier Tank.
+		if stats.unit_name.findn("Breacher") >= 0:
+			return _build_breacher_tank_member(index, offset, team_color)
+		if stats.unit_name.findn("Grinder") >= 0:
+			return _build_grinder_tank_member(index, offset, team_color)
 		return _build_courier_tank_member(index, offset, team_color)
 	var hip_y: float = shape["hip_y"] as float
 	var torso_size: Vector3 = shape["torso"] as Vector3
@@ -1590,13 +1599,21 @@ func _apply_bulwark_imposing_stance(member: Node3D) -> void:
 	# tilt as one unit. Small enough to read as posture, not
 	# falling.
 	member.rotation.x = deg_to_rad(-4.0)
-	# Walk + idle parameter override -- find this member's data
-	# entry and rewrite the stride / bob / idle params.
+	# Walk + idle parameter override. Previous override pinched
+	# stride_swing down to 0.22-0.32 and pumped bob_amount up to
+	# 0.13-0.18, which read as 'waddle': torso heaving up and
+	# down while legs barely moved. The Bulwark IS slow but it
+	# should still actually USE its legs; player feedback was
+	# 'looks like it's wagging, not walking'. New values:
+	#   - bigger stride swing (0.45-0.60) so the leg visibly
+	#     lifts forward each step,
+	#   - smaller torso bob (0.05-0.07) so the heaviness comes
+	#     from leg weight, not body roll.
 	for entry: Dictionary in _member_data:
 		if entry.get("root", null) == member:
 			entry["stride_speed"] = randf_range(0.55, 0.68)
-			entry["stride_swing"] = randf_range(0.22, 0.32)
-			entry["bob_amount"] = randf_range(0.13, 0.18)
+			entry["stride_swing"] = randf_range(0.45, 0.60)
+			entry["bob_amount"] = randf_range(0.05, 0.07)
 			entry["idle_speed"] = randf_range(0.30, 0.45)
 			break
 
@@ -3104,6 +3121,427 @@ func _maybe_override_shape_for_unit(base: Dictionary) -> Dictionary:
 	return base
 
 
+func _build_breacher_tank_member(index: int, offset: Vector3, team_color: Color) -> Dictionary:
+	## Anvil VA-9 Breacher Tank — casemate-style tank destroyer with
+	## a fixed forward-mounted heavy gun (no turret). Lower + wider
+	## silhouette than the Bulwark biped, longer than the Sable
+	## Courier Tank's turreted hull. Distinct visual identity:
+	##   - twin track rails like the Courier
+	##   - sloped forward casemate hosting a single heavy cannon
+	##   - twin exhaust stacks on the rear deck
+	##   - Anvil amber side stripe instead of Sable violet
+	var member := Node3D.new()
+	member.name = "Member_%d" % index
+	member.position = offset
+	add_child(member)
+
+	var mats: Array[StandardMaterial3D] = []
+	# Warmer tones than the previous cool grey-brown so the Anvil
+	# tank-hunter reads as iron-rust industrial rather than cold
+	# steel. Bumped reds + dropped blues for the warmth shift.
+	var anvil_dark: Color = _faction_tint_chassis(Color(0.34, 0.24, 0.16))
+	var anvil_mid: Color = _faction_tint_chassis(Color(0.46, 0.32, 0.20))
+	var anvil_amber: Color = Color(1.00, 0.55, 0.18)
+
+	# --- Tracks (two side rails). WIDER tracks per the tank-hunter
+	# rework so the chassis reads as 'serious tracked vehicle'.
+	var track_len: float = 3.40
+	var track_h: float = 0.50
+	var track_w: float = 0.68
+	for side: int in 2:
+		var sx: float = -1.10 if side == 0 else 1.10
+		var track := MeshInstance3D.new()
+		var track_box := BoxMesh.new()
+		track_box.size = Vector3(track_w, track_h, track_len)
+		track.mesh = track_box
+		track.position = Vector3(sx, track_h * 0.5, 0.0)
+		var track_mat := _make_metal_mat(Color(0.08, 0.08, 0.08))
+		track.set_surface_override_material(0, track_mat)
+		member.add_child(track)
+		mats.append(track_mat)
+		# Six visible rib stripes per side -- consistent with the
+		# Courier Tank read so tracked vehicles share a visual
+		# language even with different chassis above.
+		for r_i: int in 6:
+			var rib := MeshInstance3D.new()
+			var rib_box := BoxMesh.new()
+			rib_box.size = Vector3(track_w + 0.06, 0.06, 0.20)
+			rib.mesh = rib_box
+			var rt: float = (float(r_i) + 0.5) / 6.0
+			rib.position = Vector3(sx, track_h, -track_len * 0.5 + rt * track_len)
+			var rib_mat := _make_metal_mat(Color(0.05, 0.05, 0.05))
+			rib.set_surface_override_material(0, rib_mat)
+			member.add_child(rib)
+			mats.append(rib_mat)
+
+	# --- Lower hull -- thin floor between the tracks. Narrower
+	# than the previous build per rework feedback, and sitting
+	# slightly lower (closer to the tracks) for the squat
+	# tank-hunter stance. Hull bottom now meets the tracks at
+	# track_h + small overlap so the hull sits 'on' the tracks
+	# rather than floating above them.
+	var hull_w: float = 1.55
+	var hull_h: float = 0.34
+	var hull_len: float = 2.85
+	var hull_y: float = track_h * 0.85 + hull_h * 0.5
+	var hull := MeshInstance3D.new()
+	var hull_box := BoxMesh.new()
+	hull_box.size = Vector3(hull_w, hull_h, hull_len)
+	hull.mesh = hull_box
+	hull.position = Vector3(0.0, hull_y, 0.0)
+	var hull_mat := _make_metal_mat(anvil_mid)
+	hull.set_surface_override_material(0, hull_mat)
+	member.add_child(hull)
+	mats.append(hull_mat)
+
+	# --- Casemate -- the SLOPED FORWARD-FACING superstructure that
+	# defines the tank-destroyer silhouette. A trapezoidal block
+	# leaning forward, fully replacing the turret + ring of the
+	# Courier build. Two stacked plates so the slope reads at any
+	# camera angle.
+	var case_y: float = hull_y + hull_h * 0.5
+	var case_lower := MeshInstance3D.new()
+	var case_lower_box := BoxMesh.new()
+	case_lower_box.size = Vector3(hull_w * 1.05, 0.65, hull_len * 0.78)
+	case_lower.mesh = case_lower_box
+	case_lower.position = Vector3(0.0, case_y + 0.32, 0.05)
+	case_lower.rotation.x = deg_to_rad(-8.0)
+	var case_mat := _make_metal_mat(anvil_dark)
+	case_lower.set_surface_override_material(0, case_mat)
+	member.add_child(case_lower)
+	mats.append(case_mat)
+	# Upper plate -- narrower, steeper slope, gives the casemate a
+	# 'leaning into the shot' read.
+	var case_upper := MeshInstance3D.new()
+	var case_upper_box := BoxMesh.new()
+	case_upper_box.size = Vector3(hull_w * 0.85, 0.40, hull_len * 0.55)
+	case_upper.mesh = case_upper_box
+	case_upper.position = Vector3(0.0, case_y + 0.78, -0.10)
+	case_upper.rotation.x = deg_to_rad(-18.0)
+	var case_upper_mat := _make_metal_mat(anvil_dark)
+	case_upper.set_surface_override_material(0, case_upper_mat)
+	member.add_child(case_upper)
+	mats.append(case_upper_mat)
+
+	# --- Fixed forward cannon -- the giant gun that defines the
+	# tank-destroyer identity. No turret pivot; the whole vehicle
+	# rotates to aim. CannonPivot_top still exists so combat code
+	# (recoil + muzzle lookup) keeps working.
+	var cannon_pivot := Node3D.new()
+	cannon_pivot.name = "CannonPivot_top"
+	cannon_pivot.position = Vector3(0.0, case_y + 0.55, -hull_len * 0.55)
+	member.add_child(cannon_pivot)
+
+	# Mantlet (armoured collar where the gun meets the casemate).
+	# Slightly bigger to match the higher-caliber gun.
+	var mantlet := MeshInstance3D.new()
+	var mantlet_cyl := CylinderMesh.new()
+	mantlet_cyl.top_radius = 0.42
+	mantlet_cyl.bottom_radius = 0.50
+	mantlet_cyl.height = 0.36
+	mantlet_cyl.radial_segments = 24
+	mantlet.mesh = mantlet_cyl
+	mantlet.rotate_object_local(Vector3.RIGHT, -PI / 2)
+	mantlet.position.z = 0.05
+	var mantlet_mat := _make_metal_mat(anvil_dark)
+	mantlet.set_surface_override_material(0, mantlet_mat)
+	cannon_pivot.add_child(mantlet)
+	mats.append(mantlet_mat)
+
+	# Barrel -- LONGER + THICKER per the higher-caliber tank-gun
+	# rework. Reads as a real WW2 tank-destroyer cannon (Jagdtiger
+	# / Hetzer feel) rather than a medium AT slug-thrower.
+	var barrel_len: float = 2.10
+	var barrel := MeshInstance3D.new()
+	var barrel_cyl := CylinderMesh.new()
+	barrel_cyl.top_radius = 0.20
+	barrel_cyl.bottom_radius = 0.26
+	barrel_cyl.height = barrel_len
+	barrel_cyl.radial_segments = 32
+	barrel.mesh = barrel_cyl
+	barrel.rotate_object_local(Vector3.RIGHT, -PI / 2)
+	barrel.position.z = -barrel_len * 0.5
+	var barrel_mat := _make_metal_mat(Color(0.16, 0.15, 0.14))
+	barrel.set_surface_override_material(0, barrel_mat)
+	cannon_pivot.add_child(barrel)
+	mats.append(barrel_mat)
+
+	# Muzzle brake -- distinctly wider than the barrel so the gun
+	# silhouette reads as 'serious AT cannon'.
+	var muzzle := MeshInstance3D.new()
+	var muzzle_cyl := CylinderMesh.new()
+	muzzle_cyl.top_radius = 0.34
+	muzzle_cyl.bottom_radius = 0.30
+	muzzle_cyl.height = 0.22
+	muzzle_cyl.radial_segments = 24
+	muzzle.mesh = muzzle_cyl
+	muzzle.rotate_object_local(Vector3.RIGHT, -PI / 2)
+	muzzle.position.z = -barrel_len - 0.10
+	var muzzle_mat := _make_metal_mat(Color(0.10, 0.09, 0.08))
+	muzzle.set_surface_override_material(0, muzzle_mat)
+	cannon_pivot.add_child(muzzle)
+	mats.append(muzzle_mat)
+	# Bore -- protruding dark cylinder so the barrel reads hollow.
+	var bore := MeshInstance3D.new()
+	var bore_cyl := CylinderMesh.new()
+	bore_cyl.top_radius = 0.13
+	bore_cyl.bottom_radius = 0.13
+	bore_cyl.height = 0.26
+	bore_cyl.radial_segments = 16
+	bore.mesh = bore_cyl
+	bore.rotate_object_local(Vector3.RIGHT, -PI / 2)
+	bore.position.z = -barrel_len - 0.24
+	var bore_mat := StandardMaterial3D.new()
+	bore_mat.albedo_color = Color(0.03, 0.03, 0.04, 1.0)
+	bore_mat.emission_enabled = true
+	bore_mat.emission = Color(0.03, 0.03, 0.04, 1.0)
+	bore_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bore.set_surface_override_material(0, bore_mat)
+	cannon_pivot.add_child(bore)
+	mats.append(bore_mat)
+	# Marker so muzzle-position lookups land on the barrel tip.
+	var muzzle_marker := Marker3D.new()
+	muzzle_marker.name = "Muzzle"
+	muzzle_marker.position = Vector3(0.0, 0.0, -barrel_len - 0.20)
+	cannon_pivot.add_child(muzzle_marker)
+
+	# --- Twin exhaust stacks on the rear deck. Anvil industrial-
+	# diesel signature -- visible from any angle.
+	for ex_i: int in 2:
+		var ex_x: float = -0.55 if ex_i == 0 else 0.55
+		var stack := MeshInstance3D.new()
+		var stack_cyl := CylinderMesh.new()
+		stack_cyl.top_radius = 0.10
+		stack_cyl.bottom_radius = 0.13
+		stack_cyl.height = 0.55
+		stack_cyl.radial_segments = 14
+		stack.mesh = stack_cyl
+		stack.position = Vector3(ex_x, case_y + 0.90, hull_len * 0.42)
+		var stack_mat := _make_metal_mat(Color(0.08, 0.08, 0.08))
+		stack.set_surface_override_material(0, stack_mat)
+		member.add_child(stack)
+		mats.append(stack_mat)
+		# Heat-glow cap.
+		var heat := MeshInstance3D.new()
+		var heat_cyl := CylinderMesh.new()
+		heat_cyl.top_radius = 0.09
+		heat_cyl.bottom_radius = 0.09
+		heat_cyl.height = 0.04
+		heat.mesh = heat_cyl
+		heat.position = Vector3(ex_x, case_y + 1.18, hull_len * 0.42)
+		var heat_mat := StandardMaterial3D.new()
+		heat_mat.albedo_color = Color(0.85, 0.32, 0.10, 1.0)
+		heat_mat.emission_enabled = true
+		heat_mat.emission = Color(0.95, 0.40, 0.15, 1.0)
+		heat_mat.emission_energy_multiplier = 2.2
+		heat_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		heat.set_surface_override_material(0, heat_mat)
+		member.add_child(heat)
+		mats.append(heat_mat)
+
+	# --- Amber side stripes (Anvil identity, opposite of Sable
+	# Courier Tank's violet seams).
+	for as_i: int in 2:
+		var asx: float = -hull_w * 0.5 + 0.04 if as_i == 0 else hull_w * 0.5 - 0.04
+		var accent := MeshInstance3D.new()
+		var accent_box := BoxMesh.new()
+		accent_box.size = Vector3(0.05, 0.06, hull_len * 0.85)
+		accent.mesh = accent_box
+		accent.position = Vector3(asx, hull_y - hull_h * 0.5 + 0.03, 0.0)
+		var accent_mat := StandardMaterial3D.new()
+		accent_mat.albedo_color = anvil_amber
+		accent_mat.emission_enabled = true
+		accent_mat.emission = anvil_amber
+		accent_mat.emission_energy_multiplier = 1.4
+		accent_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		accent.set_surface_override_material(0, accent_mat)
+		member.add_child(accent)
+		mats.append(accent_mat)
+
+	# Team-colour spine stripe so allegiance reads from above.
+	var team_stripe := MeshInstance3D.new()
+	var ts_box := BoxMesh.new()
+	ts_box.size = Vector3(0.40, 0.05, hull_len * 0.55)
+	team_stripe.mesh = ts_box
+	team_stripe.position = Vector3(0.0, case_y + 1.05, hull_len * 0.10)
+	var ts_mat := StandardMaterial3D.new()
+	ts_mat.albedo_color = team_color
+	ts_mat.emission_enabled = true
+	ts_mat.emission = team_color
+	ts_mat.emission_energy_multiplier = 1.5
+	team_stripe.set_surface_override_material(0, ts_mat)
+	member.add_child(team_stripe)
+	mats.append(ts_mat)
+
+	return {
+		"root": member,
+		"legs": [] as Array,
+		"leg_phases": [] as Array,
+		"shoulders": [] as Array,
+		"cannons": [cannon_pivot] as Array[Node3D],
+		"cannon_rest_z": [cannon_pivot.position.z] as Array,
+		"cannon_muzzle_z": [barrel_len + 0.20] as Array,
+		"torso": null,
+		"head": null,
+		"mats": mats,
+		"recoil": [0.0],
+		"stride_phase": 0.0,
+		"stride_speed": 0.0,
+		"stride_swing": 0.0,
+		"bob_amount": 0.0,
+		"idle_phase": randf_range(0.0, TAU),
+		"idle_speed": 0.0,
+	}
+
+
+func _build_grinder_tank_member(index: int, offset: Vector3, team_color: Color) -> Dictionary:
+	## Anvil VA-5 Grinder Tank — medium tracked tank with a normal
+	## rotating turret and a dozer prow on the front. Distinct from
+	## the Breacher Tank (no casemate, has a turret) and the Sable
+	## Courier Tank (Anvil amber stripe + dozer blade out front).
+	var member := Node3D.new()
+	member.name = "Member_%d" % index
+	member.position = offset
+	add_child(member)
+
+	var mats: Array[StandardMaterial3D] = []
+	var anvil_dark: Color = _faction_tint_chassis(Color(0.22, 0.20, 0.18))
+	var anvil_mid: Color = _faction_tint_chassis(Color(0.32, 0.28, 0.24))
+	var anvil_amber: Color = Color(1.00, 0.55, 0.18)
+
+	# --- Tracks.
+	var track_len: float = 2.70
+	var track_h: float = 0.40
+	var track_w: float = 0.40
+	for side: int in 2:
+		var sx: float = -0.95 if side == 0 else 0.95
+		var track := MeshInstance3D.new()
+		var track_box := BoxMesh.new()
+		track_box.size = Vector3(track_w, track_h, track_len)
+		track.mesh = track_box
+		track.position = Vector3(sx, track_h * 0.5, 0.0)
+		var track_mat := _make_metal_mat(Color(0.08, 0.08, 0.10))
+		track.set_surface_override_material(0, track_mat)
+		member.add_child(track)
+		mats.append(track_mat)
+	# --- Hull (thicker than Courier; medium rather than the Breacher's
+	# wide casemate stance).
+	var hull_w: float = 1.65
+	var hull_h: float = 0.55
+	var hull_len: float = 2.20
+	var hull_y: float = track_h + hull_h * 0.5
+	var hull := MeshInstance3D.new()
+	var hull_box := BoxMesh.new()
+	hull_box.size = Vector3(hull_w, hull_h, hull_len)
+	hull.mesh = hull_box
+	hull.position = Vector3(0.0, hull_y, 0.0)
+	var hull_mat := _make_metal_mat(anvil_mid)
+	hull.set_surface_override_material(0, hull_mat)
+	member.add_child(hull)
+	mats.append(hull_mat)
+
+	# --- Dozer prow on the front. Wide angled blade clearly visible
+	# from above -- this is the unit's primary visual identity.
+	var blade := MeshInstance3D.new()
+	var blade_box := BoxMesh.new()
+	blade_box.size = Vector3(hull_w * 1.55, 0.45, 0.30)
+	blade.mesh = blade_box
+	blade.rotation.x = deg_to_rad(-30.0)  # tipped forward like a real plow
+	blade.position = Vector3(0.0, hull_y - hull_h * 0.10, -hull_len * 0.5 - 0.18)
+	var blade_mat := _make_metal_mat(anvil_dark)
+	blade.set_surface_override_material(0, blade_mat)
+	member.add_child(blade)
+	mats.append(blade_mat)
+	# Amber warning stripe along the prow's leading edge.
+	var blade_stripe := MeshInstance3D.new()
+	var bs_box := BoxMesh.new()
+	bs_box.size = Vector3(hull_w * 1.50, 0.04, 0.06)
+	blade_stripe.mesh = bs_box
+	blade_stripe.rotation.x = deg_to_rad(-30.0)
+	blade_stripe.position = Vector3(0.0, hull_y - hull_h * 0.32, -hull_len * 0.5 - 0.28)
+	var bs_mat := StandardMaterial3D.new()
+	bs_mat.albedo_color = anvil_amber
+	bs_mat.emission_enabled = true
+	bs_mat.emission = anvil_amber
+	bs_mat.emission_energy_multiplier = 1.4
+	bs_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	blade_stripe.set_surface_override_material(0, bs_mat)
+	member.add_child(blade_stripe)
+	mats.append(bs_mat)
+
+	# --- Turret on top.
+	var turret_y: float = hull_y + hull_h * 0.5
+	var turret_pivot := Node3D.new()
+	turret_pivot.name = "TurretPivot"
+	turret_pivot.position = Vector3(0.0, turret_y + 0.15, 0.0)
+	member.add_child(turret_pivot)
+	var turret := MeshInstance3D.new()
+	var turret_box := BoxMesh.new()
+	turret_box.size = Vector3(hull_w * 0.75, 0.40, hull_len * 0.50)
+	turret.mesh = turret_box
+	var turret_mat := _make_metal_mat(anvil_dark)
+	turret.set_surface_override_material(0, turret_mat)
+	turret_pivot.add_child(turret)
+	mats.append(turret_mat)
+	# Cannon pivot lives on the turret so recoil + muzzle resolve.
+	var cannon_pivot := Node3D.new()
+	cannon_pivot.name = "CannonPivot_top"
+	cannon_pivot.position = Vector3(0.0, 0.0, -hull_len * 0.20)
+	turret_pivot.add_child(cannon_pivot)
+	var barrel_len: float = 1.10
+	var barrel := MeshInstance3D.new()
+	var barrel_cyl := CylinderMesh.new()
+	barrel_cyl.top_radius = 0.10
+	barrel_cyl.bottom_radius = 0.12
+	barrel_cyl.height = barrel_len
+	barrel_cyl.radial_segments = 20
+	barrel.mesh = barrel_cyl
+	barrel.rotate_object_local(Vector3.RIGHT, -PI / 2)
+	barrel.position.z = -barrel_len * 0.5
+	var barrel_mat := _make_metal_mat(Color(0.16, 0.16, 0.16))
+	barrel.set_surface_override_material(0, barrel_mat)
+	cannon_pivot.add_child(barrel)
+	mats.append(barrel_mat)
+	var muzzle_marker := Marker3D.new()
+	muzzle_marker.name = "Muzzle"
+	muzzle_marker.position = Vector3(0.0, 0.0, -barrel_len - 0.05)
+	cannon_pivot.add_child(muzzle_marker)
+
+	# Single rear exhaust stack.
+	var stack := MeshInstance3D.new()
+	var stack_cyl := CylinderMesh.new()
+	stack_cyl.top_radius = 0.09
+	stack_cyl.bottom_radius = 0.11
+	stack_cyl.height = 0.42
+	stack_cyl.radial_segments = 14
+	stack.mesh = stack_cyl
+	stack.position = Vector3(hull_w * 0.32, turret_y + 0.55, hull_len * 0.40)
+	var stack_mat := _make_metal_mat(Color(0.08, 0.08, 0.08))
+	stack.set_surface_override_material(0, stack_mat)
+	member.add_child(stack)
+	mats.append(stack_mat)
+
+	return {
+		"root": member,
+		"legs": [] as Array,
+		"leg_phases": [] as Array,
+		"shoulders": [] as Array,
+		"cannons": [cannon_pivot] as Array[Node3D],
+		"cannon_rest_z": [cannon_pivot.position.z] as Array,
+		"cannon_muzzle_z": [barrel_len + 0.05] as Array,
+		"torso": null,
+		"head": null,
+		"mats": mats,
+		"recoil": [0.0],
+		"stride_phase": 0.0,
+		"stride_speed": 0.0,
+		"stride_swing": 0.0,
+		"bob_amount": 0.0,
+		"idle_phase": randf_range(0.0, TAU),
+		"idle_speed": 0.0,
+	}
+
+
 func _build_legs(member: Node3D, shape: Dictionary, mats: Array[StandardMaterial3D], kind: String) -> Dictionary:
 	## Dispatches to one of several skeletons. Each helper builds its meshes
 	## under `member`, registers their materials in `mats`, and returns the
@@ -3765,6 +4203,19 @@ func _update_hp_bar() -> void:
 func _mech_total_height() -> float:
 	if not stats:
 		return 2.0
+	# Transport class units carry their visual height in their
+	# bespoke build functions, NOT in CLASS_SHAPES (which only
+	# stores formation_spacing / turn_speed for tracked vehicles).
+	# Without a per-unit-name override the HP bar lands inside
+	# the chassis -- the Breacher casemate sits ~1.7u tall while
+	# the default transport reading was 0.5u, hiding the bar.
+	if stats.unit_class == &"transport":
+		if stats.unit_name.findn("Breacher") >= 0:
+			return 1.95
+		if stats.unit_name.findn("Grinder") >= 0:
+			return 1.55
+		# Sable Courier Tank default.
+		return 1.40
 	var shape: Dictionary = CLASS_SHAPES.get(stats.unit_class, CLASS_SHAPES[&"medium"])
 	var hip_y: float = shape["hip_y"] as float
 	var torso_size: Vector3 = shape["torso"] as Vector3
