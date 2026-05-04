@@ -1513,6 +1513,17 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 	# Per-member gait variation so a squad doesn't goose-step in lockstep.
 	# Each mech has its own phase, slightly different stride speed, swing
 	# amplitude, and torso bob amount — same skeleton, individual feel.
+	# Recoil array sized to the actual cannon count -- Bulwark's
+	# triple-cannon expansion adds extra entries to the cannons
+	# array AFTER the initial build, so a fixed-size [0.0, 0.0]
+	# would underflow when _tick_recoil iterates cannons.size().
+	var recoil_array: Array = []
+	for _rc: int in cannons.size():
+		recoil_array.append(0.0)
+	# Fall back to the legacy 2-entry default for units that have
+	# zero cannons (tank-builder paths return their own dict).
+	if recoil_array.is_empty():
+		recoil_array = [0.0, 0.0]
 	return {
 		"root": member,
 		"legs": legs,
@@ -1524,7 +1535,7 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		"torso": torso,
 		"head": head,
 		"mats": mats,
-		"recoil": [0.0, 0.0],
+		"recoil": recoil_array,
 		"stride_phase": randf_range(0.0, TAU),
 		"stride_speed": randf_range(0.85, 1.18),
 		"stride_swing": randf_range(0.36, 0.55),

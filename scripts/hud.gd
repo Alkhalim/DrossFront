@@ -5123,9 +5123,27 @@ func _role_hint_for(stat: UnitStatResource) -> String:
 	var cls: String = String(stat.unit_class)
 	if cls == "engineer":
 		return "Engineer / Builder"
+	# Tracked vehicles read as 'All-Rounder' regardless of weapon
+	# role -- Breacher Tank, Grinder Tank, Courier Tank all have
+	# explicit per-class mults that distribute damage broadly
+	# rather than punishing one armour class.
+	if cls == "transport":
+		return "All-Rounder"
 	var role: StringName = &"Universal"
 	if stat.primary_weapon:
 		role = stat.primary_weapon.role_tag
+	# Anti-medium override: medium-class chicken walkers (Hound,
+	# Jackal + branches) now carry a per-weapon mult profile that
+	# peaks vs medium armour, so the role label needs to follow
+	# the actual numbers instead of returning the legacy 'Anti-
+	# Light' default for any AP+medium pairing.
+	if cls == "medium" and stat.primary_weapon:
+		var w: WeaponResource = stat.primary_weapon
+		var ml: float = w.mult_vs_light
+		var mm: float = w.mult_vs_medium
+		var mh: float = w.mult_vs_heavy
+		if mm > 0.0 and mm >= ml and mm >= mh:
+			return "Anti-Medium"
 	match role:
 		&"AAir":
 			return "Anti-Air Specialist"
