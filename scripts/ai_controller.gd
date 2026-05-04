@@ -956,12 +956,16 @@ func _is_production_building_id(bid: StringName) -> bool:
 
 
 func _try_place_salvage_yard(key: String, offset: Vector3) -> void:
-	## Wraps _try_place for salvage yards with an ROI check: only
-	## drops the yard if there's at least 150 salvage worth of
-	## reachable wrecks within ~30u of the placement spot. Without
-	## this, the AI happily places a 100-salvage yard on an empty
-	## stretch of map and the workers idle forever, which read as
-	## the AI burning income on dead infrastructure.
+	## Wraps _try_place for salvage yards with two gates:
+	##   (a) ROI: at least 150 salvage worth of reachable wrecks
+	##       within ~30u of the placement spot, so the yard isn't
+	##       dropped on dead map terrain.
+	##   (b) Power efficiency: skip when our yards would already be
+	##       running at <= 65% productivity from the existing power
+	##       deficit. A new yard adds workers (and worker upkeep)
+	##       to a brownout grid; we'd burn 100 salvage on a
+	##       structure that returns next-to-nothing until the AI
+	##       fixes the deficit by placing more generators.
 	if _buildings_placed.has(key):
 		return
 	# Compute the candidate world position we'd actually place at
@@ -969,6 +973,14 @@ func _try_place_salvage_yard(key: String, offset: Vector3) -> void:
 	# matches what the player sees.
 	if not is_instance_valid(_hq):
 		return
+	# Power-efficiency gate.
+	if _ai_resource_manager and _ai_resource_manager.has_method("get_power_efficiency"):
+		var eff: float = _ai_resource_manager.call("get_power_efficiency") as float
+		if eff < 0.65:
+			# Tag the blocker so the debug overlay can surface
+			# 'training gate' style feedback for low power.
+			_record_blocker(key, BuildBlocker.PRODUCTION_GATE)
+			return
 	var anchor: Vector3 = _hq.global_position + offset
 	const YARD_HARVEST_SCAN_RADIUS: float = 30.0
 	const YARD_ROI_THRESHOLD: int = 150
@@ -1083,15 +1095,44 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 	# taken, the picker walks outward to the next-closest free vent
 	# that's nearer to OUR HQ than to any allied HQ — so we don't
 	# steal the ally's expansion vent or sprint into hostile territory.
+	# Per-building vent keepout. Non-generator buildings keep a
+	# unit-corridor's worth of distance (+6u) from any vent so the
+	# AI base doesn't crowd vents and lock itself out of future
+	# Reactor upgrades. Generators don't have a keepout (their
+	# centre IS the vent). Pre-computed here so the placement
+	# search below honours it.
+	var vent_keepout_radius: float = 0.0
+	if not bstats.get("requires_geothermic_vent"):
+		vent_keepout_radius = maxf(bstats.footprint_size.x, bstats.footprint_size.z) * 0.5 + 6.0
+
 	var desired: Vector3 = _hq.global_position + offset
 	if bstats.get("requires_geothermic_vent"):
-		var vent_pos: Vector3 = _pick_free_generator_vent()
+		# For vent-gated buildings: pick the CLOSEST buildable vent.
+		# _find_buildable_generator_vent walks all vents in distance
+		# order and returns the first one whose footprint is clear,
+		# so a blocked nearby vent automatically falls through to a
+		# slightly farther one that works.
+		var vent_pos: Vector3 = _find_buildable_generator_vent(bstats.footprint_size)
 		if vent_pos == Vector3.INF:
 			_record_blocker(key, BuildBlocker.NO_FREE_VENT)
-			return  # No free vent right now; retry next tick.
+			return  # No buildable vent right now; retry next tick.
 		desired = vent_pos
-	var pos: Vector3 = _find_clear_placement(desired, bstats.footprint_size)
+	# Find a clear placement near `desired`. The vent_keepout_radius
+	# is honoured by the spiral search itself, so a non-generator
+	# building whose desired anchor sits next to a vent will spiral
+	# OUT to clear ground rather than failing the post-check the
+	# old code did.
+	var pos: Vector3 = _find_clear_placement(desired, bstats.footprint_size, vent_keepout_radius)
 	if pos == Vector3.INF:
+		# Distinguish "vent area was the only blocker" from "nothing
+		# was clear" by re-running once with the keepout off; if
+		# THAT succeeds, the vent keepout is what blocked us so the
+		# overlay can surface VENT_KEEPOUT instead of NO_CLEAR_SPOT.
+		if vent_keepout_radius > 0.0:
+			var fallback_pos: Vector3 = _find_clear_placement(desired, bstats.footprint_size, 0.0)
+			if fallback_pos != Vector3.INF:
+				_record_blocker(key, BuildBlocker.VENT_KEEPOUT)
+				return
 		_record_blocker(key, BuildBlocker.NO_CLEAR_SPOT)
 		return  # retry next tick once the area clears
 	# For vent-gated buildings, snapping to anything but the vent
@@ -1101,17 +1142,6 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 	if bstats.get("requires_geothermic_vent") and pos.distance_to(desired) > 1.4:
 		_record_blocker(key, BuildBlocker.VENT_SNAP_TOO_FAR)
 		return
-	# Vent keepout for non-generator buildings -- the AI can't drop
-	# a foundry / yard / turret on or near a vent. The +6.0 margin
-	# (was +1.4) gives the future generator + its build ghost
-	# clearance plus a unit-corridor's worth of breathing room, so
-	# the AI base doesn't grow into a tight cluster around every
-	# vent that prevents it from ever being upgraded to a Reactor.
-	if not bstats.get("requires_geothermic_vent"):
-		var vent_keepout: float = maxf(bstats.footprint_size.x, bstats.footprint_size.z) * 0.5 + 6.0
-		if GeothermicVent.find_vent_at(get_tree().current_scene, pos, vent_keepout) != null:
-			_record_blocker(key, BuildBlocker.VENT_KEEPOUT)
-			return
 	# Plateau / ramp keepout. Building right at the foot of a ramp
 	# wedges the AI's Crawlers + military between the building and
 	# the slope, where pathing fails and units bounce / stall. Use
@@ -2072,19 +2102,44 @@ func _find_building_at(pos: Vector3, footprint: Vector3) -> Node:
 
 
 func _pick_free_generator_vent() -> Vector3:
-	## Returns the world position of the closest geothermic vent that
-	## (a) doesn't already host one of our generators and
-	## (b) sits closer to OUR HQ than to any allied HQ
-	##     (so we don't poach the ally's expansion vent on shared maps).
-	## Returns Vector3.INF when nothing qualifies — _try_place will
-	## just retry next tick.
-	if not is_instance_valid(_hq):
+	## Legacy single-best-vent picker -- preserved for any caller
+	## that doesn't need a buildability check (e.g. the build-plan
+	## offset calculator). New placement code should call
+	## _find_buildable_generator_vent which falls through to the
+	## next-closest vent when the closest is blocked.
+	var sorted: Array[Vector3] = _list_eligible_vents_sorted()
+	if sorted.is_empty():
 		return Vector3.INF
+	return sorted[0]
+
+
+func _find_buildable_generator_vent(footprint: Vector3) -> Vector3:
+	## Returns the closest eligible vent whose 1.4u-radius placement
+	## footprint is currently clear of obstacles. Walks vents in
+	## ascending distance from our HQ so a blocked nearby vent
+	## automatically falls through to the next-closest one rather
+	## than failing the whole placement attempt this tick. The 1.4u
+	## tolerance matches selection_manager._is_valid_build_position
+	## -- a generator must snap to its vent's centre to register.
+	var sorted: Array[Vector3] = _list_eligible_vents_sorted()
+	for vp: Vector3 in sorted:
+		if _is_placement_clear(vp, footprint, 0.0):
+			return vp
+	return Vector3.INF
+
+
+func _list_eligible_vents_sorted() -> Array[Vector3]:
+	## Vents we're allowed to claim, sorted ascending by distance to
+	## our HQ. "Eligible" = not currently occupied by any generator
+	## AND closer to our HQ than to any allied HQ (so we don't poach
+	## the ally's expansion vent on shared maps).
+	var out: Array[Vector3] = []
+	if not is_instance_valid(_hq):
+		return out
 	var my_hq: Vector3 = _hq.global_position
 	var ally_hq_positions: Array[Vector3] = _ally_hq_positions()
 	var taken: Array[Vector3] = _existing_generator_positions()
-	var best: Vector3 = Vector3.INF
-	var best_dist: float = INF
+	var with_dist: Array[Dictionary] = []
 	for node: Node in get_tree().get_nodes_in_group("geothermic_vents"):
 		if not is_instance_valid(node):
 			continue
@@ -2111,10 +2166,13 @@ func _pick_free_generator_vent() -> Vector3:
 				break
 		if poach:
 			continue
-		if d_self < best_dist:
-			best_dist = d_self
-			best = vp
-	return best
+		with_dist.append({"pos": vp, "d": d_self})
+	with_dist.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return (a["d"] as float) < (b["d"] as float)
+	)
+	for entry: Dictionary in with_dist:
+		out.append(entry["pos"] as Vector3)
+	return out
 
 
 func _ally_hq_positions() -> Array[Vector3]:
@@ -2169,8 +2227,8 @@ func _existing_generator_positions() -> Array[Vector3]:
 	return out
 
 
-func _find_clear_placement(desired: Vector3, footprint: Vector3) -> Vector3:
-	if _is_placement_clear(desired, footprint):
+func _find_clear_placement(desired: Vector3, footprint: Vector3, vent_keepout: float = 0.0) -> Vector3:
+	if _is_placement_clear(desired, footprint, vent_keepout):
 		return desired
 	# Spiral search — expanding rings around the desired anchor. Step
 	# bumped from 2.5u → 4.0u so adjacent rings actually clear the
@@ -2181,7 +2239,7 @@ func _find_clear_placement(desired: Vector3, footprint: Vector3) -> Vector3:
 			var ang: float = float(step) / 12.0 * TAU
 			var test_offset := Vector3(cos(ang), 0.0, sin(ang)) * float(ring) * 4.0
 			var pos: Vector3 = desired + test_offset
-			if _is_placement_clear(pos, footprint):
+			if _is_placement_clear(pos, footprint, vent_keepout):
 				return pos
 	return Vector3.INF
 
@@ -2207,12 +2265,27 @@ const UNIT_PLACEMENT_MARGIN: float = 0.5
 const ALLY_HQ_KEEPOUT: float = 30.0
 
 
-func _is_placement_clear(pos: Vector3, footprint: Vector3) -> bool:
+func _is_placement_clear(pos: Vector3, footprint: Vector3, vent_keepout: float = 0.0) -> bool:
 	## Same rules the player follows in SelectionManager — check against
 	## buildings (with PLACEMENT_GAP buffer), units, fuel deposits, and
-	## wrecks. Plus a keep-out around teammate HQs in 2v2.
+	## wrecks. Plus a keep-out around teammate HQs in 2v2. When
+	## vent_keepout > 0, also reject positions whose centre sits within
+	## that radius of any geothermic vent so non-generator buildings
+	## naturally spiral OUT of the vent's keepout zone instead of
+	## failing the post-check.
 	var half_x: float = footprint.x * 0.5
 	var half_z: float = footprint.z * 0.5
+
+	# Vent keepout for non-generator buildings.
+	if vent_keepout > 0.0:
+		for v_node: Node in get_tree().get_nodes_in_group("geothermic_vents"):
+			if not is_instance_valid(v_node):
+				continue
+			var v3: Node3D = v_node as Node3D
+			if not v3:
+				continue
+			if pos.distance_to(v3.global_position) < vent_keepout:
+				return false
 
 	# Allied HQ keep-out — skip our own HQ, but stay clear of any teammate's.
 	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
