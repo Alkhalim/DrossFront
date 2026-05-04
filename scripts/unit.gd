@@ -3878,7 +3878,11 @@ func _build_breacher_mortar_member(index: int, offset: Vector3, team_color: Colo
 	cannon_pivot.name = "CannonPivot_top"
 	cannon_pivot.position = Vector3(0.0, deck_y + 0.30, hull_len * 0.05)
 	# Pre-rotate so the tube's local -Z (forward) points up + fwd.
-	cannon_pivot.rotation.x = deg_to_rad(-55.0)
+	# Sign correction: positive X-rotation tips the local -Z up
+	# (and slightly forward); previous -55deg sent the tube DOWN
+	# below the chassis, which is why the mortar visually pointed
+	# straight ahead instead of diagonally up.
+	cannon_pivot.rotation.x = deg_to_rad(55.0)
 	member.add_child(cannon_pivot)
 	# Mortar baseplate -- chunky cylinder cradling the tube.
 	var base_plate := MeshInstance3D.new()
