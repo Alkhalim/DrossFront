@@ -1946,9 +1946,11 @@ func _is_valid_build_position(pos: Vector3) -> bool:
 	if not _is_build_position_explored(pos):
 		return false
 	# Geothermic-vent gate -- buildings flagged requires_geothermic_vent
-	# (Generators) only place on top of an open vent.
+	# (Generators) only place WITH THEIR CENTRE directly on a vent.
+	# 1.4u tolerance leaves room for the build-grid snap (0.5u
+	# step) without letting the player drift off the rim.
 	if _build_stats.get("requires_geothermic_vent"):
-		var vent: GeothermicVent = GeothermicVent.find_vent_at(get_tree().current_scene, pos, GeothermicVent.VENT_SIZE * 0.6)
+		var vent: GeothermicVent = GeothermicVent.find_vent_at(get_tree().current_scene, pos, 1.4)
 		if vent == null:
 			return false
 	var half_x: float = _build_stats.footprint_size.x * 0.5

@@ -663,6 +663,26 @@ func _apply_entity_visibility() -> void:
 		f3d.visible = f_explored
 		_apply_fog_dim(f3d, f_explored and not f_visible)
 
+	# Geothermic vents follow the same rule as fuel deposits and
+	# wrecks -- hidden until scouted (no leaking the vent network
+	# location through unexplored fog), dimmed when explored but
+	# not currently visible.
+	for node: Node in get_tree().get_nodes_in_group("geothermic_vents"):
+		if not is_instance_valid(node):
+			continue
+		var v3d: Node3D = node as Node3D
+		if not v3d:
+			continue
+		var v_iid: int = v3d.get_instance_id()
+		var v_key: int = _entity_state_key(v3d)
+		if _entity_visibility_cache.get(v_iid, -2) == v_key:
+			continue
+		_entity_visibility_cache[v_iid] = v_key
+		var v_explored: bool = is_explored_world(v3d.global_position)
+		var v_visible: bool = is_visible_world(v3d.global_position)
+		v3d.visible = v_explored
+		_apply_fog_dim(v3d, v_explored and not v_visible)
+
 	# Projectiles — strictly LOS-only. A missile fired from an
 	# unscouted Hammerhead would otherwise leak the unit's position
 	# by drawing its arc through the fog. Only currently-VISIBLE

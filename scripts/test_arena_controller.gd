@@ -4473,12 +4473,16 @@ func _setup_geothermic_vents() -> void:
 			centre_dir_per_player[i] = to_centre.normalized()
 		else:
 			centre_dir_per_player[i] = Vector3(0, 0, -1)
-		# 2 close vents flanking the HQ.
+		# Starter pair -- two vents side by side just in front of
+		# the HQ. Spaced 6.5u apart along the perp axis so the
+		# generators on top don't overlap, but visually read as a
+		# pair right next to each other.
 		var perp: Vector3 = Vector3(-centre_dir_per_player[i].z, 0.0, centre_dir_per_player[i].x)
-		_spawn_vent(hq_pos + perp * 12.0 + centre_dir_per_player[i] * 6.0)
-		_spawn_vent(hq_pos - perp * 12.0 + centre_dir_per_player[i] * 6.0)
+		var pair_centre: Vector3 = hq_pos + centre_dir_per_player[i] * 11.0
+		_spawn_vent(pair_centre + perp * 3.25)
+		_spawn_vent(pair_centre - perp * 3.25)
 		# 1 forward vent toward the map centre.
-		_spawn_vent(hq_pos + centre_dir_per_player[i] * 28.0)
+		_spawn_vent(hq_pos + centre_dir_per_player[i] * 32.0)
 	# Distributed vents -- ~3 per player spread across the open
 	# map area. Uses Mitchell's best-candidate sampling so the
 	# vent network reads as evenly distributed instead of pooling
