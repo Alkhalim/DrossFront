@@ -43,6 +43,17 @@ extends Resource
 ## salvo_count automatically.
 @export_range(1, 12, 1) var salvo_count: int = 1
 
+## Time between successive projectiles within a single salvo, in
+## seconds. Default 0 = all salvo projectiles spawn on the same
+## physics frame (pre-existing behaviour: simultaneous volley).
+## Positive values stagger them so a multi-barrel weapon FIRES IN
+## QUICK SUCCESSION before reloading -- e.g. Bulwark's triple-
+## cannon shoots barrel-1 at t=0, barrel-2 at t=stagger, barrel-3
+## at t=2*stagger, and only THEN starts the rof_seconds_value
+## cooldown. The cooldown still measures from the first shot, so
+## DPS is unchanged whether stagger is 0 or 0.20s.
+@export_range(0.0, 0.6, 0.01) var salvo_stagger_sec: float = 0.0
+
 @export_group("Numeric overrides (balance work)")
 ## When non-negative, these fields override the tier defaults from
 ## CombatTables. -1 (the default) means "use the tier lookup". Lets

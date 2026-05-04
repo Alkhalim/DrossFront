@@ -5,13 +5,15 @@
 
 [sub_resource type="Resource" id="weapon_ironwall_cannon"]
 script = ExtResource("2")
-weapon_name = "Heavy AP Cannon"
+weapon_name = "Triple AP Cannon Battery"
 role_tag = &"AP"
 damage_tier = &"very_high"
 range_tier = &"long"
 rof_tier = &"slow"
-damage_value = 170
+damage_value = 57
 rof_seconds_value = 2.0
+salvo_count = 3
+salvo_stagger_sec = 0.10
 projectile_style = &"shell"
 base_accuracy = 0.80
 can_damage_trees = true

@@ -1217,6 +1217,91 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 			cannons.append(cannon_pivot)
 			cannon_rest_z.append(cannon_pivot.position.z)
 			cannon_muzzle_z.append(barrel_len + 0.07)
+			# Anvil Bulwark TRIPLE-cannon expansion. The if/else
+			# above already built the centre barrel on
+			# `cannon_pivot`; here we add two flanking barrels at
+			# +/- BULWARK_FLANK_X. Each gets its own pivot so
+			# combat's salvo_stagger code recoils them independently
+			# and fires them in quick succession. Skipped for Sable
+			# (which uses the missile-launcher housing instead) and
+			# for the Bulwark Siegebreaker overlay (which keeps the
+			# single Siege Mortar barrel; the overlay layer hides
+			# the centre cannon and replaces it).
+			if not is_sable_heavy and not (stats and stats.unit_name.findn("Siegebreaker") >= 0):
+				const BULWARK_FLANK_X: float = 0.36
+				var per_radius: float = cannon_size.x * 0.62
+				for s_i: int in 2:
+					var sx: float = -BULWARK_FLANK_X if s_i == 0 else BULWARK_FLANK_X
+					var side_pivot := Node3D.new()
+					side_pivot.name = "CannonPivot_top_%d" % (s_i + 1)
+					side_pivot.position = Vector3(sx, gun_y, front_z - 0.05)
+					torso_pivot.add_child(side_pivot)
+					# Barrel
+					var s_barrel := MeshInstance3D.new()
+					var s_barrel_cyl := CylinderMesh.new()
+					s_barrel_cyl.top_radius = per_radius
+					s_barrel_cyl.bottom_radius = per_radius * 1.05
+					s_barrel_cyl.height = barrel_len
+					s_barrel_cyl.radial_segments = 32
+					s_barrel.mesh = s_barrel_cyl
+					s_barrel.rotate_object_local(Vector3.RIGHT, -PI / 2)
+					s_barrel.position.z = -barrel_len * 0.5
+					var s_barrel_mat := _make_metal_mat(trim_dark)
+					s_barrel.set_surface_override_material(0, s_barrel_mat)
+					side_pivot.add_child(s_barrel)
+					mats.append(s_barrel_mat)
+					# Sleeve
+					var s_sleeve := MeshInstance3D.new()
+					var s_sleeve_cyl := CylinderMesh.new()
+					s_sleeve_cyl.top_radius = per_radius * 1.30
+					s_sleeve_cyl.bottom_radius = per_radius * 1.30
+					s_sleeve_cyl.height = barrel_len * 0.22
+					s_sleeve_cyl.radial_segments = 32
+					s_sleeve.mesh = s_sleeve_cyl
+					s_sleeve.rotate_object_local(Vector3.RIGHT, -PI / 2)
+					s_sleeve.position.z = -barrel_len * 0.55
+					var s_sleeve_mat := _make_metal_mat(darker)
+					s_sleeve.set_surface_override_material(0, s_sleeve_mat)
+					side_pivot.add_child(s_sleeve)
+					mats.append(s_sleeve_mat)
+					# Muzzle brake
+					var s_muzzle := MeshInstance3D.new()
+					var s_muzzle_cyl := CylinderMesh.new()
+					s_muzzle_cyl.top_radius = per_radius * 1.40
+					s_muzzle_cyl.bottom_radius = per_radius * 1.20
+					s_muzzle_cyl.height = 0.13
+					s_muzzle_cyl.radial_segments = 32
+					s_muzzle.mesh = s_muzzle_cyl
+					s_muzzle.rotate_object_local(Vector3.RIGHT, -PI / 2)
+					s_muzzle.position.z = -barrel_len - 0.07
+					var s_muzzle_mat := _make_metal_mat(Color(0.1, 0.1, 0.1))
+					s_muzzle.set_surface_override_material(0, s_muzzle_mat)
+					side_pivot.add_child(s_muzzle)
+					mats.append(s_muzzle_mat)
+					# Bore
+					var s_bore := MeshInstance3D.new()
+					var s_bore_cyl := CylinderMesh.new()
+					s_bore_cyl.top_radius = per_radius * 0.62
+					s_bore_cyl.bottom_radius = per_radius * 0.62
+					s_bore_cyl.height = 0.22
+					s_bore_cyl.radial_segments = 16
+					s_bore.mesh = s_bore_cyl
+					s_bore.rotate_object_local(Vector3.RIGHT, -PI / 2)
+					s_bore.position.z = -barrel_len - 0.18
+					var s_bore_mat := StandardMaterial3D.new()
+					s_bore_mat.albedo_color = Color(0.03, 0.03, 0.04, 1.0)
+					s_bore_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+					s_bore.set_surface_override_material(0, s_bore_mat)
+					side_pivot.add_child(s_bore)
+					mats.append(s_bore_mat)
+					# Per-barrel muzzle marker.
+					var s_marker := Marker3D.new()
+					s_marker.name = "Muzzle"
+					s_marker.position = Vector3(0.0, 0.0, -barrel_len - 0.20)
+					side_pivot.add_child(s_marker)
+					cannons.append(side_pivot)
+					cannon_rest_z.append(side_pivot.position.z)
+					cannon_muzzle_z.append(barrel_len + 0.07)
 	elif cannon_kind != "none":
 		# Sentinel-style mounts cannons at the cockpit (top of head); standard
 		# bipeds mount them on the torso shoulders.
@@ -3223,87 +3308,102 @@ func _build_breacher_tank_member(index: int, offset: Vector3, team_color: Color)
 	member.add_child(case_upper)
 	mats.append(case_upper_mat)
 
-	# --- Fixed forward cannon -- the giant gun that defines the
-	# tank-destroyer identity. No turret pivot; the whole vehicle
-	# rotates to aim. CannonPivot_top still exists so combat code
-	# (recoil + muzzle lookup) keeps working.
-	var cannon_pivot := Node3D.new()
-	cannon_pivot.name = "CannonPivot_top"
-	cannon_pivot.position = Vector3(0.0, case_y + 0.55, -hull_len * 0.55)
-	member.add_child(cannon_pivot)
-
-	# Mantlet (armoured collar where the gun meets the casemate).
-	# Slightly bigger to match the higher-caliber gun.
-	var mantlet := MeshInstance3D.new()
-	var mantlet_cyl := CylinderMesh.new()
-	mantlet_cyl.top_radius = 0.42
-	mantlet_cyl.bottom_radius = 0.50
-	mantlet_cyl.height = 0.36
-	mantlet_cyl.radial_segments = 24
-	mantlet.mesh = mantlet_cyl
-	mantlet.rotate_object_local(Vector3.RIGHT, -PI / 2)
-	mantlet.position.z = 0.05
-	var mantlet_mat := _make_metal_mat(anvil_dark)
-	mantlet.set_surface_override_material(0, mantlet_mat)
-	cannon_pivot.add_child(mantlet)
-	mats.append(mantlet_mat)
-
-	# Barrel -- LONGER + THICKER per the higher-caliber tank-gun
-	# rework. Reads as a real WW2 tank-destroyer cannon (Jagdtiger
-	# / Hetzer feel) rather than a medium AT slug-thrower.
+	# --- Twin fixed forward cannons -- two barrels side-by-side
+	# in the casemate. Each gets its own CannonPivot so combat
+	# can recoil them independently and the salvo_stagger code
+	# fires them in quick succession. The whole vehicle still
+	# rotates to aim (no turret).
+	var cannons: Array[Node3D] = []
+	var muzzles: Array[float] = []
 	var barrel_len: float = 2.10
-	var barrel := MeshInstance3D.new()
-	var barrel_cyl := CylinderMesh.new()
-	barrel_cyl.top_radius = 0.20
-	barrel_cyl.bottom_radius = 0.26
-	barrel_cyl.height = barrel_len
-	barrel_cyl.radial_segments = 32
-	barrel.mesh = barrel_cyl
-	barrel.rotate_object_local(Vector3.RIGHT, -PI / 2)
-	barrel.position.z = -barrel_len * 0.5
-	var barrel_mat := _make_metal_mat(Color(0.16, 0.15, 0.14))
-	barrel.set_surface_override_material(0, barrel_mat)
-	cannon_pivot.add_child(barrel)
-	mats.append(barrel_mat)
-
-	# Muzzle brake -- distinctly wider than the barrel so the gun
-	# silhouette reads as 'serious AT cannon'.
-	var muzzle := MeshInstance3D.new()
-	var muzzle_cyl := CylinderMesh.new()
-	muzzle_cyl.top_radius = 0.34
-	muzzle_cyl.bottom_radius = 0.30
-	muzzle_cyl.height = 0.22
-	muzzle_cyl.radial_segments = 24
-	muzzle.mesh = muzzle_cyl
-	muzzle.rotate_object_local(Vector3.RIGHT, -PI / 2)
-	muzzle.position.z = -barrel_len - 0.10
-	var muzzle_mat := _make_metal_mat(Color(0.10, 0.09, 0.08))
-	muzzle.set_surface_override_material(0, muzzle_mat)
-	cannon_pivot.add_child(muzzle)
-	mats.append(muzzle_mat)
-	# Bore -- protruding dark cylinder so the barrel reads hollow.
-	var bore := MeshInstance3D.new()
-	var bore_cyl := CylinderMesh.new()
-	bore_cyl.top_radius = 0.13
-	bore_cyl.bottom_radius = 0.13
-	bore_cyl.height = 0.26
-	bore_cyl.radial_segments = 16
-	bore.mesh = bore_cyl
-	bore.rotate_object_local(Vector3.RIGHT, -PI / 2)
-	bore.position.z = -barrel_len - 0.24
-	var bore_mat := StandardMaterial3D.new()
-	bore_mat.albedo_color = Color(0.03, 0.03, 0.04, 1.0)
-	bore_mat.emission_enabled = true
-	bore_mat.emission = Color(0.03, 0.03, 0.04, 1.0)
-	bore_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	bore.set_surface_override_material(0, bore_mat)
-	cannon_pivot.add_child(bore)
-	mats.append(bore_mat)
-	# Marker so muzzle-position lookups land on the barrel tip.
-	var muzzle_marker := Marker3D.new()
-	muzzle_marker.name = "Muzzle"
-	muzzle_marker.position = Vector3(0.0, 0.0, -barrel_len - 0.20)
-	cannon_pivot.add_child(muzzle_marker)
+	for bi: int in 2:
+		var bx: float = -0.42 if bi == 0 else 0.42
+		var pivot := Node3D.new()
+		pivot.name = "CannonPivot_top" if bi == 0 else "CannonPivot_top_right"
+		pivot.position = Vector3(bx, case_y + 0.55, -hull_len * 0.55)
+		member.add_child(pivot)
+		# Mantlet -- per-barrel armoured collar.
+		var mantlet := MeshInstance3D.new()
+		var mantlet_cyl := CylinderMesh.new()
+		mantlet_cyl.top_radius = 0.30
+		mantlet_cyl.bottom_radius = 0.36
+		mantlet_cyl.height = 0.32
+		mantlet_cyl.radial_segments = 22
+		mantlet.mesh = mantlet_cyl
+		mantlet.rotate_object_local(Vector3.RIGHT, -PI / 2)
+		mantlet.position.z = 0.05
+		var mantlet_mat := _make_metal_mat(anvil_dark)
+		mantlet.set_surface_override_material(0, mantlet_mat)
+		pivot.add_child(mantlet)
+		mats.append(mantlet_mat)
+		# Barrel -- thinner than the previous single-barrel build
+		# because there are two of them now (silhouette stays
+		# beefy via the side-by-side pair).
+		var barrel := MeshInstance3D.new()
+		var barrel_cyl := CylinderMesh.new()
+		barrel_cyl.top_radius = 0.14
+		barrel_cyl.bottom_radius = 0.18
+		barrel_cyl.height = barrel_len
+		barrel_cyl.radial_segments = 28
+		barrel.mesh = barrel_cyl
+		barrel.rotate_object_local(Vector3.RIGHT, -PI / 2)
+		barrel.position.z = -barrel_len * 0.5
+		var barrel_mat := _make_metal_mat(Color(0.16, 0.15, 0.14))
+		barrel.set_surface_override_material(0, barrel_mat)
+		pivot.add_child(barrel)
+		mats.append(barrel_mat)
+		# Muzzle brake.
+		var muzzle := MeshInstance3D.new()
+		var muzzle_cyl := CylinderMesh.new()
+		muzzle_cyl.top_radius = 0.24
+		muzzle_cyl.bottom_radius = 0.20
+		muzzle_cyl.height = 0.20
+		muzzle_cyl.radial_segments = 22
+		muzzle.mesh = muzzle_cyl
+		muzzle.rotate_object_local(Vector3.RIGHT, -PI / 2)
+		muzzle.position.z = -barrel_len - 0.10
+		var muzzle_mat := _make_metal_mat(Color(0.10, 0.09, 0.08))
+		muzzle.set_surface_override_material(0, muzzle_mat)
+		pivot.add_child(muzzle)
+		mats.append(muzzle_mat)
+		# Bore so the barrel reads hollow.
+		var bore := MeshInstance3D.new()
+		var bore_cyl := CylinderMesh.new()
+		bore_cyl.top_radius = 0.09
+		bore_cyl.bottom_radius = 0.09
+		bore_cyl.height = 0.26
+		bore_cyl.radial_segments = 14
+		bore.mesh = bore_cyl
+		bore.rotate_object_local(Vector3.RIGHT, -PI / 2)
+		bore.position.z = -barrel_len - 0.24
+		var bore_mat := StandardMaterial3D.new()
+		bore_mat.albedo_color = Color(0.03, 0.03, 0.04, 1.0)
+		bore_mat.emission_enabled = true
+		bore_mat.emission = Color(0.03, 0.03, 0.04, 1.0)
+		bore_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		bore.set_surface_override_material(0, bore_mat)
+		pivot.add_child(bore)
+		mats.append(bore_mat)
+		# Per-barrel muzzle marker.
+		var marker := Marker3D.new()
+		marker.name = "Muzzle"
+		marker.position = Vector3(0.0, 0.0, -barrel_len - 0.20)
+		pivot.add_child(marker)
+		cannons.append(pivot)
+		muzzles.append(barrel_len + 0.20)
+	# Casemate "armoured shroud" between the two barrels -- a
+	# small block bridging them at the mantlet line so the pair
+	# reads as a single twin-cannon assembly, not two
+	# independent guns.
+	var shroud := MeshInstance3D.new()
+	var shroud_box := BoxMesh.new()
+	shroud_box.size = Vector3(0.65, 0.36, 0.40)
+	shroud.mesh = shroud_box
+	shroud.position = Vector3(0.0, case_y + 0.55, -hull_len * 0.55 + 0.05)
+	var shroud_mat := _make_metal_mat(anvil_dark)
+	shroud.set_surface_override_material(0, shroud_mat)
+	member.add_child(shroud)
+	mats.append(shroud_mat)
 
 	# --- Twin exhaust stacks on the rear deck. Anvil industrial-
 	# diesel signature -- visible from any angle.
@@ -3373,18 +3473,25 @@ func _build_breacher_tank_member(index: int, offset: Vector3, team_color: Color)
 	member.add_child(team_stripe)
 	mats.append(ts_mat)
 
+	# Recoil + rest_z arrays sized to the actual cannon count so
+	# salvo_stagger barrels each kick + recover independently.
+	var rest_z_arr: Array = []
+	var recoil_arr: Array = []
+	for c: Node3D in cannons:
+		rest_z_arr.append(c.position.z)
+		recoil_arr.append(0.0)
 	return {
 		"root": member,
 		"legs": [] as Array,
 		"leg_phases": [] as Array,
 		"shoulders": [] as Array,
-		"cannons": [cannon_pivot] as Array[Node3D],
-		"cannon_rest_z": [cannon_pivot.position.z] as Array,
-		"cannon_muzzle_z": [barrel_len + 0.20] as Array,
+		"cannons": cannons,
+		"cannon_rest_z": rest_z_arr,
+		"cannon_muzzle_z": muzzles,
 		"torso": null,
 		"head": null,
 		"mats": mats,
-		"recoil": [0.0],
+		"recoil": recoil_arr,
 		"stride_phase": 0.0,
 		"stride_speed": 0.0,
 		"stride_swing": 0.0,
@@ -6104,15 +6211,21 @@ func get_muzzle_positions() -> Array[Vector3]:
 			var forward: Vector3 = -global_basis.z.normalized()
 			positions.append(chest + forward * 0.4)
 			continue
-		# Use the first cannon's barrel tip — alternates can come later if
-		# we want twin-cannon mechs to fire from each barrel in turn.
-		var pivot: Node3D = cannons[0]
-		if not is_instance_valid(pivot):
-			continue
-		var muzzle_z: float = 0.5
-		if muzzle_zs.size() > 0:
-			muzzle_z = muzzle_zs[0] as float
-		positions.append(pivot.global_transform * Vector3(0, 0, -muzzle_z))
+		# Return EVERY cannon's barrel tip. Combat cycles shots
+		# through these via `i % muzzle_positions.size()` so a
+		# multi-barrel weapon (Bulwark triple cannon, Breacher twin
+		# cannon) sprays each barrel in turn instead of stacking
+		# every projectile on one muzzle.
+		for ci: int in cannons.size():
+			var pivot: Node3D = cannons[ci]
+			if not is_instance_valid(pivot):
+				continue
+			var muzzle_z: float = 0.5
+			if ci < muzzle_zs.size():
+				muzzle_z = muzzle_zs[ci] as float
+			elif muzzle_zs.size() > 0:
+				muzzle_z = muzzle_zs[0] as float
+			positions.append(pivot.global_transform * Vector3(0, 0, -muzzle_z))
 	return positions
 
 

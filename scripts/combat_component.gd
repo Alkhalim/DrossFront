@@ -902,14 +902,26 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 						pellet.set_glow_boost(3.0, Color(1.0, 0.85, 0.20, 1.0))
 					get_tree().current_scene.add_child(pellet)
 			else:
-				var proj: Node3D = proj_script.create(fire_pos, aim_pos, weapon.role_tag, weapon.rof_tier, weapon.projectile_style, _shooter_faction_id(), weapon.damage_tier)
-				# Glowing Shot (single-projectile glowing-volley path):
-				# tint the slug bright warning-yellow so the player
-				# reads "this shot is the buffed one" without it being
-				# a multi-pellet visual like Heavy Volley.
-				if is_glowing_volley and not _glowing_pellet_mode and proj.has_method("set_glow_boost"):
-					proj.call("set_glow_boost", 3.0, Color(1.0, 0.85, 0.20, 1.0))
-				get_tree().current_scene.add_child(proj)
+				# Salvo stagger -- when the weapon ships salvo_stagger_sec
+				# > 0 (Bulwark triple cannon, Breacher twin cannon) the
+				# i-th projectile in the salvo is deferred so the
+				# barrels visibly fire one-after-another instead of all
+				# spawning on the same physics frame. Damage was
+				# already applied above so DPS stays unchanged whether
+				# the visual stagger is 0 or 0.20s. Shot i==0 always
+				# fires immediately; only the trailing shots wait.
+				# `in` guard: stale cached WeaponResources from before
+				# salvo_stagger_sec was added would crash on the
+				# property access otherwise.
+				var weapon_stagger: float = weapon.salvo_stagger_sec if "salvo_stagger_sec" in weapon else 0.0
+				var stagger_sec: float = weapon_stagger * float(i) if weapon_stagger > 0.0 else 0.0
+				if stagger_sec <= 0.0:
+					var proj: Node3D = proj_script.create(fire_pos, aim_pos, weapon.role_tag, weapon.rof_tier, weapon.projectile_style, _shooter_faction_id(), weapon.damage_tier)
+					if is_glowing_volley and not _glowing_pellet_mode and proj.has_method("set_glow_boost"):
+						proj.call("set_glow_boost", 3.0, Color(1.0, 0.85, 0.20, 1.0))
+					get_tree().current_scene.add_child(proj)
+				else:
+					_spawn_staggered_projectile(stagger_sec, weapon, fire_pos, aim_pos, is_glowing_volley)
 
 	# Muzzle flash on each member — colored by the weapon's role.
 	# Recoil animation runs even off-screen so units that re-enter
@@ -1023,6 +1035,33 @@ func _spawn_drone(damage: int, role_tag: StringName, variant: StringName = &"def
 		var spawn_offset: Vector3 = Vector3(randf_range(-1.5, 1.5), 1.5, randf_range(-1.5, 1.5))
 		drone.global_position = _unit.global_position + spawn_offset
 	_active_drones.append(drone)
+
+
+func _spawn_staggered_projectile(delay_sec: float, weapon: WeaponResource, fire_pos: Vector3, aim_pos: Vector3, is_glowing_volley: bool) -> void:
+	## Schedules a single projectile spawn after `delay_sec`. Used by
+	## salvo_stagger weapons so multi-barrel cannons (Bulwark triple,
+	## Breacher twin) can fire their barrels in quick succession
+	## while the next reload still measures from the FIRST barrel's
+	## fire time. The closure captures the spawn parameters by value
+	## via `bind`, so a later weapon swap on the unit doesn't
+	## retroactively change what fires.
+	var faction: int = _shooter_faction_id()
+	var rof_tier: StringName = weapon.rof_tier
+	var style: StringName = weapon.projectile_style
+	var role: StringName = weapon.role_tag
+	var dmg_tier: StringName = weapon.damage_tier
+	var timer: SceneTreeTimer = get_tree().create_timer(delay_sec)
+	timer.timeout.connect(func() -> void:
+		if not is_inside_tree():
+			return
+		var proj_script: GDScript = load("res://scripts/projectile.gd") as GDScript
+		if not proj_script:
+			return
+		var proj: Node3D = proj_script.create(fire_pos, aim_pos, role, rof_tier, style, faction, dmg_tier)
+		if is_glowing_volley and proj.has_method("set_glow_boost"):
+			proj.call("set_glow_boost", 3.0, Color(1.0, 0.85, 0.20, 1.0))
+		get_tree().current_scene.add_child(proj)
+	)
 
 
 func _shooter_faction_id() -> int:

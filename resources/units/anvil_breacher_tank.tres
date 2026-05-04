@@ -7,13 +7,15 @@
 
 [sub_resource type="Resource" id="weapon_breacher_cannon"]
 script = ExtResource("2")
-weapon_name = "Heavy AT Cannon"
+weapon_name = "Twin AT Cannon Battery"
 role_tag = &"AP"
 damage_tier = &"high"
 range_tier = &"long"
 rof_tier = &"slow"
-damage_value = 130
+damage_value = 65
 rof_seconds_value = 6.5
+salvo_count = 2
+salvo_stagger_sec = 0.13
 projectile_style = &"shell"
 base_accuracy = 0.85
 can_damage_trees = true
