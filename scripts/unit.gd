@@ -5709,6 +5709,14 @@ func _physics_process(delta: float) -> void:
 				node.position.z -= scroll
 				if node.position.z < -seg_len * 0.5:
 					node.position.z += seg_len
+		# Chassis dive / squat. Tracked vehicles without modern
+		# stabilisation rock forward when braking and rear when
+		# accelerating; we mimic that by applying a pitch to each
+		# member root proportional to longitudinal acceleration.
+		# Track ribs exist iff this is a transport-class unit, so
+		# the loop is gated on the same array. Cost is one
+		# Vector2 length + a short member loop per physics frame.
+		_apply_tank_chassis_tilt(delta)
 
 	_physics_frame_counter += 1
 
@@ -6077,6 +6085,61 @@ func _turn_toward(face_dir: Vector3, delta: float) -> void:
 	var max_step: float = _turn_speed * delta
 	var step: float = clampf(diff, -max_step, max_step)
 	rotation.y += step
+
+
+## Per-tank chassis pitch state (radians). Updated each physics
+## frame from longitudinal acceleration; lerped back to neutral
+## when no acceleration delta is present.
+var _tank_chassis_pitch: float = 0.0
+var _tank_prev_speed_signed: float = 0.0
+
+
+func _apply_tank_chassis_tilt(delta: float) -> void:
+	## Tracked vehicle dive / squat. Compares this frame's
+	## longitudinal speed (positive = forward, negative = reverse)
+	## to last frame's to derive an acceleration sign, then pitches
+	## the visible chassis around X to mimic an unsuspended hull
+	## rocking when the engine spools / brakes bite.
+	#
+	# Magnitudes:
+	#   - Pitch peak ~5 deg either direction. Bigger reads as
+	#     comedy bobblehead; smaller as no animation.
+	#   - Lerp back toward zero at REST_RECOVERY_RAD_PER_SEC when
+	#     acceleration is small so the chassis settles cleanly.
+	const TILT_PER_ACCEL: float = 0.020  # rad gained per (u/s^2)
+	const TILT_MAX: float = 0.087        # ~5 deg cap
+	const REST_RECOVERY_RAD_PER_SEC: float = 0.45  # rad/s back to neutral
+	# Forward velocity component projected onto the unit's local
+	# -Z axis (the unit's facing). Positive = moving forward.
+	var fwd: Vector3 = -global_basis.z
+	var v_xz: Vector3 = Vector3(velocity.x, 0.0, velocity.z)
+	var speed_signed: float = v_xz.dot(fwd)
+	var accel: float = (speed_signed - _tank_prev_speed_signed) / maxf(delta, 0.0001)
+	_tank_prev_speed_signed = speed_signed
+	# Acceleration drives the target pitch. Positive accel (engine
+	# spinning up) -> nose lifts, chassis pitches BACK (positive X
+	# rotation in unit-local frame). Braking flips the sign.
+	var target_pitch: float = clampf(-accel * TILT_PER_ACCEL, -TILT_MAX, TILT_MAX)
+	# Recover toward target. Rate scales with how far we are from
+	# target so big swings settle in roughly half a second; small
+	# nudges damp quickly.
+	var step: float = REST_RECOVERY_RAD_PER_SEC * delta
+	var diff: float = target_pitch - _tank_chassis_pitch
+	if absf(diff) <= step:
+		_tank_chassis_pitch = target_pitch
+	else:
+		_tank_chassis_pitch += step * signf(diff)
+	# Apply to every member's local rotation.x. Members are the
+	# chassis roots (one per squad seat); tilting them rocks the
+	# whole tank without disturbing the squad's world position.
+	for entry: Dictionary in _member_data:
+		var root_v: Variant = entry.get("root", null)
+		if root_v == null or not is_instance_valid(root_v):
+			continue
+		var root: Node3D = root_v as Node3D
+		if not root:
+			continue
+		root.rotation.x = _tank_chassis_pitch
 
 
 func _apply_walk_bob() -> void:
