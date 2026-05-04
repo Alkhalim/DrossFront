@@ -4113,26 +4113,52 @@ class _QuickSelectGlyph:
 			"wrench":
 				_draw_wrench(sz, tint)
 	func _draw_mech(sz: Vector2, tint: Color) -> void:
-		# Squat bipedal silhouette: cockpit, shoulder pad, two legs.
+		# Side profile of a chicken-legged mech (Hound silhouette):
+		# small cockpit pod up front, top-mounted cannon, single
+		# digitigrade leg with a knee that pitches BACKWARD then a
+		# shin pitching FORWARD onto a planted foot. Reads as
+		# 'chicken walker', not 'house with a chimney'.
 		var w: float = sz.x
 		var h: float = sz.y
-		# Cockpit -- trapezoid head.
+		var dark: Color = Color(tint.r * 0.65, tint.g * 0.65, tint.b * 0.65, tint.a)
+		# Cannon up top -- long horizontal bar protruding to the
+		# right (the mech's facing direction).
+		draw_rect(Rect2(Vector2(w * 0.42, h * 0.20), Vector2(w * 0.46, h * 0.06)), tint, true)
+		# Cockpit / head pod -- angled-front trapezoid sitting under
+		# the cannon mount.
 		var head: PackedVector2Array = PackedVector2Array([
-			Vector2(w * 0.30, h * 0.18),
-			Vector2(w * 0.70, h * 0.18),
-			Vector2(w * 0.78, h * 0.36),
-			Vector2(w * 0.22, h * 0.36),
+			Vector2(w * 0.40, h * 0.26),
+			Vector2(w * 0.74, h * 0.26),
+			Vector2(w * 0.66, h * 0.46),
+			Vector2(w * 0.36, h * 0.46),
 		])
 		draw_colored_polygon(head, tint)
-		# Shoulder slab.
-		draw_rect(Rect2(Vector2(w * 0.18, h * 0.36), Vector2(w * 0.64, h * 0.18)), tint, true)
-		# Twin shoulder cannons -- short bars on top of shoulders.
-		draw_rect(Rect2(Vector2(w * 0.10, h * 0.28), Vector2(w * 0.10, h * 0.10)), tint, true)
-		draw_rect(Rect2(Vector2(w * 0.80, h * 0.28), Vector2(w * 0.10, h * 0.10)), tint, true)
-		# Legs -- two diverging stomp blocks.
-		var dark: Color = Color(tint.r * 0.7, tint.g * 0.7, tint.b * 0.7, tint.a)
-		draw_rect(Rect2(Vector2(w * 0.22, h * 0.55), Vector2(w * 0.20, h * 0.36)), dark, true)
-		draw_rect(Rect2(Vector2(w * 0.58, h * 0.55), Vector2(w * 0.20, h * 0.36)), dark, true)
+		# Shoulder hub -- the round-ish ball where the leg joins the
+		# torso, rendered as a chunky square.
+		draw_rect(Rect2(Vector2(w * 0.46, h * 0.42), Vector2(w * 0.16, h * 0.10)), dark, true)
+		# Thigh -- pitches BACKWARD from the hip (downward + left).
+		# Built as a polygon so the slope reads even at 40px.
+		var thigh: PackedVector2Array = PackedVector2Array([
+			Vector2(w * 0.46, h * 0.50),
+			Vector2(w * 0.58, h * 0.50),
+			Vector2(w * 0.34, h * 0.70),
+			Vector2(w * 0.24, h * 0.70),
+		])
+		draw_colored_polygon(thigh, tint)
+		# Knee joint at the back end of the thigh.
+		draw_rect(Rect2(Vector2(w * 0.24, h * 0.66), Vector2(w * 0.12, h * 0.10)), dark, true)
+		# Shin -- pitches FORWARD from the knee back under the
+		# cockpit, ending at the planted foot.
+		var shin: PackedVector2Array = PackedVector2Array([
+			Vector2(w * 0.26, h * 0.70),
+			Vector2(w * 0.36, h * 0.70),
+			Vector2(w * 0.56, h * 0.92),
+			Vector2(w * 0.46, h * 0.92),
+		])
+		draw_colored_polygon(shin, tint)
+		# Talon-style foot -- flat plate extending forward from the
+		# shin tip.
+		draw_rect(Rect2(Vector2(w * 0.40, h * 0.90), Vector2(w * 0.30, h * 0.08)), dark, true)
 	func _draw_wrench(sz: Vector2, tint: Color) -> void:
 		# Open-end wrench with the open jaw at top-left and the
 		# handle running diagonally to bottom-right.
