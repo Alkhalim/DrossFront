@@ -2031,6 +2031,16 @@ func _is_valid_build_position(pos: Vector3) -> bool:
 		var vent: GeothermicVent = GeothermicVent.find_vent_at(get_tree().current_scene, pos, 1.4)
 		if vent == null:
 			return false
+	else:
+		# Conversely, non-generator buildings can't sit on (or so close
+		# to) a vent that they would block a future generator from
+		# being placed there. The keepout uses the building's footprint
+		# half-extent + a small margin so a wide building (e.g. salvage
+		# yard) keeps its full envelope clear of the vent disc.
+		var keepout: float = maxf(_build_stats.footprint_size.x, _build_stats.footprint_size.z) * 0.5 + 1.4
+		var blocking_vent: GeothermicVent = GeothermicVent.find_vent_at(get_tree().current_scene, pos, keepout)
+		if blocking_vent != null:
+			return false
 	# Even-ground gate -- buildings can only be placed on flat
 	# terrain, not on hills / plateaus / steep elevation.
 	# pos.y > 0.3u indicates the cursor raycast hit raised ground

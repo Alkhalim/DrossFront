@@ -762,6 +762,14 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 	# bail and retry next tick.
 	if bstats.get("requires_geothermic_vent") and pos.distance_to(desired) > 1.4:
 		return
+	# Symmetric vent keepout for non-generator buildings -- the AI
+	# can't drop a foundry / yard / turret on or right next to a
+	# vent, since that would block the generator that should later
+	# go on that vent. Mirrors selection_manager's keepout rule.
+	if not bstats.get("requires_geothermic_vent"):
+		var vent_keepout: float = maxf(bstats.footprint_size.x, bstats.footprint_size.z) * 0.5 + 1.4
+		if GeothermicVent.find_vent_at(get_tree().current_scene, pos, vent_keepout) != null:
+			return
 
 	# Use the same path as the player: BuilderComponent.place_building spends
 	# resources, instantiates the building, calls begin_construction, and
