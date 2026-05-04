@@ -964,15 +964,23 @@ func _perform_navmesh_rebake() -> void:
 ## (z = 0). 1v1: player on north edge, AI on south edge, equidistant. 2v2:
 ## team A on the north edge (player west, ally east), team B mirrored on
 ## the south edge.
+## HQ positions bumped outward ~20% from the v1 layout (1v1
+## ±110->±132, 2v2 (±60,±100)->(±72,±120)) so players don't
+## collide right after spawning. Distance from each HQ to the map
+## edge tightens slightly (the edge bounds didn't move) while the
+## central battlefield gains real elbow room. Object spawn rules
+## (terrain, fuel deposits, vents, neutral patrols) reference these
+## constants + the map-half extent and self-balance to the new
+## layout.
 const HQ_POSITIONS_1V1: Dictionary = {
-	0: Vector3(0.0, 0.0, 110.0),
-	1: Vector3(0.0, 0.0, -110.0),
+	0: Vector3(0.0, 0.0, 132.0),
+	1: Vector3(0.0, 0.0, -132.0),
 }
 const HQ_POSITIONS_2V2: Dictionary = {
-	0: Vector3(-60.0, 0.0, 100.0),
-	1: Vector3(60.0, 0.0, 100.0),
-	3: Vector3(-60.0, 0.0, -100.0),
-	4: Vector3(60.0, 0.0, -100.0),
+	0: Vector3(-72.0, 0.0, 120.0),
+	1: Vector3(72.0, 0.0, 120.0),
+	3: Vector3(-72.0, 0.0, -120.0),
+	4: Vector3(72.0, 0.0, -120.0),
 }
 
 
