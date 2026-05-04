@@ -139,8 +139,12 @@ static func _make_textured_box(tex: Texture2D, border: Color, border_w: int, cor
 	box.modulate_color = Color.WHITE
 	# Texture is sampled tiled so the rivet / hex pattern continues
 	# beyond the source texture's bounds when the button is bigger.
-	box.axis_stretch_horizontal = StyleBoxTexture.AXIS_STRETCH_TILE
-	box.axis_stretch_vertical = StyleBoxTexture.AXIS_STRETCH_TILE
+	# Godot 4's enum is AXIS_STRETCH_MODE_TILE (not AXIS_STRETCH_TILE
+	# as in 3.x) -- the wrong constant name killed StyleBoxTexture
+	# compilation, which cascaded through every HUD helper that
+	# referenced FactionUIStyle.
+	box.axis_stretch_horizontal = StyleBoxTexture.AXIS_STRETCH_MODE_TILE
+	box.axis_stretch_vertical = StyleBoxTexture.AXIS_STRETCH_MODE_TILE
 	# Texture margin: how many pixels from each edge of the source
 	# texture are treated as the corner / edge ring (NOT the centre
 	# tile). Keeps the rivets glued to the corners as the button

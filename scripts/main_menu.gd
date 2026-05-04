@@ -91,33 +91,45 @@ func _ready() -> void:
 
 
 func _apply_theme() -> void:
-	## Mini-theme matching the in-game HUD (dark steel + green/gold accents).
+	## Command-center theme. Sharp-cornered steel slate with a thin
+	## brass border, no rounded corners. Hover lights the border up
+	## brass + brightens the fill so each button reads as a tactical
+	## terminal entry rather than a generic dialog control. The L-
+	## shaped corner brackets that complete the look are added per-
+	## button by _add_command_center_brackets().
 	var theme_res := Theme.new()
 	theme_res.set_default_font_size(16)
 
 	var btn_normal := StyleBoxFlat.new()
-	btn_normal.bg_color = Color(0.16, 0.18, 0.20, 1.0)
-	btn_normal.border_color = Color(0.4, 0.42, 0.46, 1.0)
-	btn_normal.set_border_width_all(1)
-	btn_normal.corner_radius_top_left = 4
-	btn_normal.corner_radius_top_right = 4
-	btn_normal.corner_radius_bottom_left = 4
-	btn_normal.corner_radius_bottom_right = 4
-	btn_normal.content_margin_left = 12
-	btn_normal.content_margin_right = 12
+	btn_normal.bg_color = Color(0.10, 0.11, 0.13, 1.0)
+	btn_normal.border_color = Color(0.55, 0.46, 0.30, 0.85)  # dim brass
+	btn_normal.border_width_top = 1
+	btn_normal.border_width_bottom = 1
+	btn_normal.border_width_left = 1
+	btn_normal.border_width_right = 1
+	# No rounded corners -- the chamfered industrial silhouette is
+	# carried by the corner brackets, not by softened edges.
+	btn_normal.corner_radius_top_left = 0
+	btn_normal.corner_radius_top_right = 0
+	btn_normal.corner_radius_bottom_left = 0
+	btn_normal.corner_radius_bottom_right = 0
+	# Generous left margin so the ">" label prefix sits flush left
+	# with breathing room before the entry text.
+	btn_normal.content_margin_left = 18
+	btn_normal.content_margin_right = 14
 	btn_normal.content_margin_top = 8
 	btn_normal.content_margin_bottom = 8
 
 	var btn_hover := btn_normal.duplicate() as StyleBoxFlat
-	btn_hover.bg_color = Color(0.24, 0.28, 0.32, 1.0)
-	btn_hover.border_color = Color(0.7, 0.85, 0.95, 1.0)
+	btn_hover.bg_color = Color(0.16, 0.14, 0.10, 1.0)
+	btn_hover.border_color = Color(1.00, 0.78, 0.32, 1.0)  # bright brass
+	btn_hover.set_border_width_all(2)
 
 	var btn_pressed := btn_normal.duplicate() as StyleBoxFlat
-	# Same "physical press" treatment as the in-game HUD buttons —
-	# darker fill, brighter accent border, content nudged 1px down,
-	# and a soft drop shadow so the click reads as a real push.
-	btn_pressed.bg_color = Color(0.08, 0.10, 0.12, 1.0)
-	btn_pressed.border_color = Color(1.0, 0.82, 0.35, 1.0)
+	# Pressed = darker fill, brighter accent border, content nudged
+	# down 1px so the click reads as a physical key press.
+	btn_pressed.bg_color = Color(0.05, 0.05, 0.07, 1.0)
+	btn_pressed.border_color = Color(1.0, 0.92, 0.55, 1.0)
 	btn_pressed.set_border_width_all(2)
 	btn_pressed.content_margin_top = 9
 	btn_pressed.content_margin_bottom = 7
@@ -129,7 +141,9 @@ func _apply_theme() -> void:
 	theme_res.set_stylebox("hover", "Button", btn_hover)
 	theme_res.set_stylebox("pressed", "Button", btn_pressed)
 	theme_res.set_stylebox("focus", "Button", btn_hover)
-	theme_res.set_color("font_color", "Button", Color(0.95, 0.95, 0.95, 1.0))
+	theme_res.set_color("font_color", "Button", Color(0.92, 0.88, 0.78, 1.0))
+	theme_res.set_color("font_hover_color", "Button", Color(1.00, 0.95, 0.78, 1.0))
+	theme_res.set_color("font_pressed_color", "Button", Color(1.00, 0.92, 0.55, 1.0))
 
 	theme = theme_res
 
@@ -212,18 +226,88 @@ func _build_main_buttons() -> void:
 	_main_buttons.alignment = BoxContainer.ALIGNMENT_CENTER
 	_root_vbox.add_child(_main_buttons)
 
-	for entry: Dictionary in [
+	# Command-center entry list. The "▌ NN" prefix reads as a
+	# command-line index marker and the all-caps label sells the
+	# tactical / military terminal feel without forcing a font swap.
+	# Buttons themselves are deliberately narrow (220x42) so they
+	# stack like a chassis-plate menu instead of stretching like a
+	# generic web form.
+	var entries: Array[Dictionary] = [
 		{ "label": "Skirmish",  "callback": Callable(self, "_on_play_pressed") },
 		{ "label": "Campaigns", "callback": Callable(self, "_on_campaigns_pressed") },
 		{ "label": "Tutorial",  "callback": Callable(self, "_on_tutorial_pressed") },
 		{ "label": "Settings",  "callback": Callable(self, "_on_settings_pressed") },
 		{ "label": "Quit",      "callback": Callable(self, "_on_quit_pressed") },
-	]:
+	]
+	for i: int in entries.size():
+		var entry: Dictionary = entries[i]
 		var btn := Button.new()
-		btn.text = entry["label"] as String
-		btn.custom_minimum_size = Vector2(280, 44)
+		btn.text = "▌ %02d  %s" % [i + 1, (entry["label"] as String).to_upper()]
+		btn.custom_minimum_size = Vector2(220, 42)
+		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		btn.pressed.connect(entry["callback"] as Callable)
 		_main_buttons.add_child(btn)
+		_add_command_center_brackets(btn)
+
+
+func _add_command_center_brackets(btn: Button) -> void:
+	## Drape a custom-drawn Control over the button that paints
+	## brass L-shaped corner brackets. The Control resizes with the
+	## button (PRESET_FULL_RECT) and ignores mouse input so clicks
+	## still reach the underlying button. Hover state tracks the
+	## button's pressed/hovered look via a tiny callback.
+	var deco := Control.new()
+	deco.name = "CmdCenterBrackets"
+	deco.set_anchors_preset(Control.PRESET_FULL_RECT)
+	deco.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	btn.add_child(deco)
+	# Render via a dedicated draw helper so we can re-use the same
+	# bracket shapes elsewhere if more menus need them.
+	deco.draw.connect(_draw_command_center_brackets.bind(deco, btn))
+	# Repaint on hover state changes so the brackets glow brighter
+	# when the user is over the button.
+	btn.mouse_entered.connect(deco.queue_redraw)
+	btn.mouse_exited.connect(deco.queue_redraw)
+	btn.focus_entered.connect(deco.queue_redraw)
+	btn.focus_exited.connect(deco.queue_redraw)
+
+
+func _draw_command_center_brackets(deco: Control, btn: Button) -> void:
+	## Paints four L-shaped brackets at the button corners + a small
+	## diamond accent at the right edge so the silhouette reads as a
+	## tactical terminal entry rather than a flat slab.
+	var sz: Vector2 = deco.size
+	if sz.x <= 0.0 or sz.y <= 0.0:
+		return
+	var hot: bool = btn.has_focus() or btn.get_global_rect().has_point(btn.get_global_mouse_position())
+	var col: Color = Color(1.00, 0.78, 0.32, 1.0) if hot else Color(0.55, 0.46, 0.30, 0.85)
+	var L: float = 11.0
+	var t: float = 2.0
+	var inset: float = 3.0
+	# Four corner L brackets.
+	deco.draw_rect(Rect2(inset, inset, L, t), col, true)
+	deco.draw_rect(Rect2(inset, inset, t, L), col, true)
+	deco.draw_rect(Rect2(sz.x - inset - L, inset, L, t), col, true)
+	deco.draw_rect(Rect2(sz.x - inset - t, inset, t, L), col, true)
+	deco.draw_rect(Rect2(inset, sz.y - inset - t, L, t), col, true)
+	deco.draw_rect(Rect2(inset, sz.y - inset - L, t, L), col, true)
+	deco.draw_rect(Rect2(sz.x - inset - L, sz.y - inset - t, L, t), col, true)
+	deco.draw_rect(Rect2(sz.x - inset - t, sz.y - inset - L, t, L), col, true)
+	# Right-edge diamond accent -- small rotated square 6px in from
+	# the right edge, visually anchors the "row" feel of each entry.
+	# Drawn as two triangles so we don't need a transform stack.
+	var dx: float = sz.x - 12.0
+	var dy: float = sz.y * 0.5
+	var d: float = 4.0
+	deco.draw_colored_polygon(
+		PackedVector2Array([
+			Vector2(dx, dy - d),
+			Vector2(dx + d, dy),
+			Vector2(dx, dy + d),
+			Vector2(dx - d, dy),
+		]),
+		col,
+	)
 
 
 ## --- Match Setup panel (single consolidated screen) ----------------------
