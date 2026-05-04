@@ -1,23 +1,29 @@
 extends Control
 ## Pre-match loading screen. Shows the Europe map (the same Control
 ## the Campaigns page uses) and tweens a zoom-in toward the
-## geographic location associated with the chosen map. Sells the
-## "deploying to theatre" feel and gives Godot a window to load the
-## arena scene without the player staring at a black frame.
-##
-## Flow:
-##   _ready -> build map + label, schedule the zoom-in tween,
-##             after `TOTAL_SEC` change_scene_to_file(ARENA_SCENE).
+## geographic location associated with the chosen map. Kicks off a
+## ResourceLoader.load_threaded_request for the arena scene at the
+## same time so the heavy disk + parse work happens in parallel
+## with the visible animation; once both the zoom finishes AND the
+## arena PackedScene is ready, we change_scene_to_packed (an
+## instant swap from a pre-loaded scene resource) instead of the
+## blocking change_scene_to_file.
 
 const ARENA_SCENE: String = "res://scenes/test_arena.tscn"
 
-## Total time the loading screen is visible. ~2.4 s lands long
-## enough for the zoom to read but short enough that players who've
-## seen it once aren't bothered.
-const TOTAL_SEC: float = 2.4
-const ZOOM_IN_SEC: float = 1.8
-const FADE_OUT_SEC: float = 0.5
+## Zoom phase target duration. Bumped from 1.8s to 4.0s after
+## profiling showed change_scene_to_file alone spends ~2-3s on the
+## arena's _ready (terrain spawn, navmesh bake, AI setup, scenario
+## seeding); the threaded preload now happens during this window so
+## we wait for whichever finishes last instead of stacking the load
+## time on top of the zoom.
+const ZOOM_IN_SEC: float = 4.0
+const FADE_OUT_SEC: float = 0.6
 const ZOOM_FACTOR: float = 2.4
+## Hard ceiling -- if for some reason the threaded load hangs we
+## bail to a synchronous swap after this many seconds so the
+## player isn't stuck on the loading screen.
+const HARD_TIMEOUT_SEC: float = 18.0
 
 ## Real lat/lon of where each map "is set" in Europe. Drives the
 ## focal point of the zoom-in tween. MapId enum values from
@@ -36,6 +42,38 @@ const CERN_TARGET: Dictionary = {"lon": 6.14, "lat": 46.20, "name": "CERN BLACK 
 var _map: Control = null
 var _label: Label = null
 var _vignette: ColorRect = null
+var _zoom_done: bool = false
+var _scene_change_requested: bool = false
+var _hard_timeout: float = HARD_TIMEOUT_SEC
+
+
+func _process(delta: float) -> void:
+	## Poll the threaded load every frame; once both the zoom phase
+	## reports done AND the load reports STATUS_LOADED, swap to the
+	## pre-loaded PackedScene. Hard-timeout fallback so a stuck load
+	## doesn't strand the player on the loading screen.
+	_hard_timeout -= delta
+	if _scene_change_requested:
+		return
+	if _hard_timeout <= 0.0:
+		_scene_change_requested = true
+		get_tree().change_scene_to_file(ARENA_SCENE)
+		return
+	if not _zoom_done:
+		return
+	var status: int = ResourceLoader.load_threaded_get_status(ARENA_SCENE)
+	if status == ResourceLoader.THREAD_LOAD_LOADED:
+		_scene_change_requested = true
+		var packed: PackedScene = ResourceLoader.load_threaded_get(ARENA_SCENE) as PackedScene
+		if packed:
+			get_tree().change_scene_to_packed(packed)
+		else:
+			get_tree().change_scene_to_file(ARENA_SCENE)
+	elif status == ResourceLoader.THREAD_LOAD_FAILED or status == ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
+		# Fallback to the synchronous path if the threaded load
+		# couldn't resolve the scene.
+		_scene_change_requested = true
+		get_tree().change_scene_to_file(ARENA_SCENE)
 
 
 func _ready() -> void:
@@ -83,6 +121,13 @@ func _ready() -> void:
 	# Defer the tween until after the map's _ready landed so the
 	# focal lat/lon resolves to a real pixel position.
 	call_deferred("_start_zoom")
+
+	# Kick off the threaded preload of the arena RIGHT NOW so the
+	# heavy parse work happens in parallel with the zoom animation.
+	# The _process polling loop above swaps to the pre-loaded
+	# PackedScene once both the zoom finishes AND the load reports
+	# THREAD_LOAD_LOADED.
+	ResourceLoader.load_threaded_request(ARENA_SCENE)
 
 
 func _resolve_target_name() -> String:
@@ -162,8 +207,13 @@ func _begin_fade_out() -> void:
 	if _vignette:
 		var tw: Tween = create_tween()
 		tw.tween_property(_vignette, "color:a", 0.95, FADE_OUT_SEC)
-	get_tree().create_timer(FADE_OUT_SEC + 0.05).timeout.connect(_finish_load, CONNECT_ONE_SHOT)
+	# Mark the visual phase complete; the _process polling loop
+	# now waits for THREAD_LOAD_LOADED before swapping scenes. If
+	# the threaded load already finished during the zoom the swap
+	# fires on the next frame; otherwise we hold on the faded-out
+	# vignette until the load lands or the hard timeout trips.
+	get_tree().create_timer(FADE_OUT_SEC + 0.05).timeout.connect(_mark_zoom_done, CONNECT_ONE_SHOT)
 
 
-func _finish_load() -> void:
-	get_tree().change_scene_to_file(ARENA_SCENE)
+func _mark_zoom_done() -> void:
+	_zoom_done = true
