@@ -2012,6 +2012,14 @@ func _is_valid_build_position(pos: Vector3) -> bool:
 		var vent: GeothermicVent = GeothermicVent.find_vent_at(get_tree().current_scene, pos, 1.4)
 		if vent == null:
 			return false
+	# Even-ground gate -- buildings can only be placed on flat
+	# terrain, not on hills / plateaus / steep elevation.
+	# pos.y > 0.3u indicates the cursor raycast hit raised ground
+	# (the plateau / hill geometry sits at Y >= ~1.0u). Vents are
+	# still placed at Y=0 so the Generator-on-vent check is
+	# unaffected.
+	if absf(pos.y) > 0.3:
+		return false
 	var half_x: float = _build_stats.footprint_size.x * 0.5
 	var half_z: float = _build_stats.footprint_size.z * 0.5
 

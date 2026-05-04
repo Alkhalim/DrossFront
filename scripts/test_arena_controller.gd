@@ -2793,6 +2793,29 @@ func _setup_elevation_foundry_belt() -> void:
 			p["height"] as float,
 			p["ramps"] as Array,
 		)
+	# Soft hills -- low elevation patches scattered between the
+	# plateaus + bases. Walkable but flagged as raised ground so
+	# building placement (which now rejects pos.y > 0.3u) refuses
+	# to drop foundations on slopes. Reuses the plateau spawn
+	# infrastructure with a low height so it reads as rolling
+	# terrain rather than a tactical platform.
+	var hills: Array[Dictionary] = [
+		{"center": Vector3( 35.0, 0.0,  60.0), "top": Vector2(14.0, 10.0),
+		 "height": 1.0, "ramps": ["N", "S"]},
+		{"center": Vector3(-35.0, 0.0,  60.0), "top": Vector2(14.0, 10.0),
+		 "height": 1.0, "ramps": ["N", "S"]},
+		{"center": Vector3( 40.0, 0.0, -45.0), "top": Vector2(12.0,  9.0),
+		 "height": 1.0, "ramps": ["N", "S"]},
+		{"center": Vector3(-40.0, 0.0, -45.0), "top": Vector2(12.0,  9.0),
+		 "height": 1.0, "ramps": ["N", "S"]},
+	]
+	for h: Dictionary in hills:
+		_spawn_walkable_plateau(
+			h["center"] as Vector3,
+			h["top"] as Vector2,
+			h["height"] as float,
+			h["ramps"] as Array,
+		)
 
 
 func _setup_elevation_ashplains() -> void:
