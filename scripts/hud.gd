@@ -4868,6 +4868,21 @@ func _compute_dps_vs(stat: UnitStatResource, armor_class: StringName) -> float:
 		# displayed Air DPS matches actual output.
 		var air_mult: float = weapon.air_damage_mult if is_air_query else 1.0
 		dps += raw * role_mod * (1.0 - armor_red) * air_mult
+	# Autocast ability contribution -- total damage / cooldown,
+	# gated by ability_autocast_target so a Hammerhead Bomber's
+	# Carpet Bomb (ground-only) doesn't pad DPS Air, and an
+	# Escort's AA Barrage doesn't pad DPS Gnd. Manual abilities
+	# (ability_autocast = false) don't contribute -- the player
+	# chooses when to fire those.
+	if stat.ability_autocast and stat.ability_autocast_damage > 0 and stat.ability_cooldown > 0.0:
+		var ab_target: int = stat.ability_autocast_target
+		var hits_this_class: bool = (
+			ab_target == 2
+			or (ab_target == 0 and not is_air_query)
+			or (ab_target == 1 and is_air_query)
+		)
+		if hits_this_class:
+			dps += float(stat.ability_autocast_damage) / stat.ability_cooldown
 	return dps
 
 

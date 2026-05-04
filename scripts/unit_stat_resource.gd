@@ -242,6 +242,20 @@ func can_target_air() -> bool:
 ## autocast" at a glance.
 @export var ability_autocast: bool = false
 
+## Total damage dealt by one ability use, summed across every
+## projectile / pellet / hit. Used by the HUD's DPS display to
+## include the autocast contribution in DPS Gnd / DPS Air -- a
+## Hammerhead Gunship's 17-DPS pintle is misleading because the
+## Missile Barrage autocast adds another ~26 DPS over its
+## cooldown. Set 0 (default) when the ability has no measurable
+## damage component (Stim Pack, Camo, etc.). Only consulted when
+## ability_autocast is true; manual abilities don't pad the
+## displayed DPS because the player decides when they fire.
+@export var ability_autocast_damage: int = 0
+## Which target classes the autocast ability hits, for the DPS
+## display: 0 = ground only, 1 = air only, 2 = both.
+@export var ability_autocast_target: int = 2
+
 ## Target-selection flag. When true, pressing the ability button
 ## puts the cursor into ABILITY targeting mode (blue glow); the
 ## next LEFT-click sets the target world position passed to
