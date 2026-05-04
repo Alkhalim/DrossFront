@@ -230,18 +230,22 @@ func _install_stages() -> void:
 		"trigger": Callable(self, "_stage_crawler_done"),
 	})
 	# Stage 3 — base reclaimed. Player gets HQ + economy unlock.
+	# Build order matters: the Salvage Yard now requires a Generator
+	# prereq, so the dialogue calls out Generator first.
 	_stages.append({
 		"id": &"base",
-		"dialogue": "Steelmaster Kress: \"Welcome to your forward base, commander. Get those Ratchet engineers working — we need a Basic Foundry and a Salvage Yard standing before we can talk about a real army.\"",
-		"objective": "Use your engineers to build a Basic Foundry and a Salvage Yard.",
+		"dialogue": "Steelmaster Kress: \"Welcome to your forward base, commander. Drop a Generator first to keep the lights on, then a Basic Foundry, then a Salvage Yard to feed your war machine.\"",
+		"objective": "Build a Generator, a Basic Foundry, and a Salvage Yard.",
 		"on_enter": Callable(self, "_stage_base_enter"),
 		"trigger": Callable(self, "_stage_base_done"),
 	})
-	# Stage 4 — power the base.
+	# Stage 4 — push power higher to support the army. Renamed
+	# from 'Reactors' (legacy term) to 'Generators' to match the
+	# current building name.
 	_stages.append({
 		"id": &"reactors",
-		"dialogue": "Steelmaster Kress: \"Brownouts on every line. Get your engineers to drop three Reactors next to the foundry — full power or your queue stalls.\"",
-		"objective": "Have your engineers build 3 Reactors to fully power your base.",
+		"dialogue": "Steelmaster Kress: \"You'll want headroom for what's coming, commander. Drop two more Generators next to the foundry so the queue doesn't stall under load.\"",
+		"objective": "Have at least 3 Generators powering your base.",
 		"on_enter": Callable(self, "_stage_reactors_enter"),
 		"trigger": Callable(self, "_stage_reactors_done"),
 	})
@@ -374,8 +378,11 @@ func _stage_base_enter() -> void:
 
 
 func _stage_base_done() -> bool:
-	# Player needs at least one Basic Foundry AND one Salvage Yard
-	# to advance.
+	# Player needs Generator + Basic Foundry + Salvage Yard to
+	# advance. Yard requires Generator (prereq), so the order is
+	# enforced by the build menu; the trigger just checks all
+	# three are standing.
+	var has_generator: bool = false
 	var has_foundry: bool = false
 	var has_yard: bool = false
 	for n: Node in get_tree().get_nodes_in_group("buildings"):
@@ -387,9 +394,10 @@ func _stage_base_done() -> bool:
 		if not b or not b.stats or not b.is_constructed:
 			continue
 		match b.stats.building_id:
-			&"basic_foundry": has_foundry = true
-			&"salvage_yard":  has_yard = true
-	return has_foundry and has_yard
+			&"basic_generator": has_generator = true
+			&"basic_foundry":   has_foundry = true
+			&"salvage_yard":    has_yard = true
+	return has_generator and has_foundry and has_yard
 
 
 ## Reworded from "3 additional" to "6 total" per playtest — the
