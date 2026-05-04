@@ -5471,9 +5471,15 @@ func play_shoot_anim() -> void:
 		var member: Node3D = _member_data[i]["root"]
 		if not is_instance_valid(member) or not member.visible:
 			continue
+		# Kick every cannon index this member actually has, instead
+		# of hardcoding [0]+[1]. Single-cannon units (Breacher Tank
+		# casemate, gun emplacements) carry recoil = [0.0] and
+		# crashed on recoil[1] = 1.0. Iterating to recoil.size() is
+		# also forward-compatible with three-cannon variants we
+		# might add later.
 		var recoil: Array = _member_data[i]["recoil"] as Array
-		recoil[0] = 1.0
-		recoil[1] = 1.0
+		for ri: int in recoil.size():
+			recoil[ri] = 1.0
 
 
 func _tick_recoil(delta: float) -> void:

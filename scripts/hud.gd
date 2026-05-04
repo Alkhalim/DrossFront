@@ -1125,8 +1125,13 @@ func _update_selection_display() -> void:
 			_last_building_id = -1
 			_last_unit_ids.clear()
 			_showing_build_buttons = false
+			# Don't toggle .visible on the progress bar -- the bar's
+			# layout slot is intentionally reserved at all times so
+			# the action-button rows don't shift up/down when the bar
+			# appears or disappears. Use modulate.a to swing between
+			# 'shown' and 'hidden' instead.
 			if _progress_bar:
-				_progress_bar.visible = false
+				_progress_bar.modulate.a = 0.0
 
 
 func _resolve_inspect_owner_label(owner_id: int) -> String:
@@ -1447,11 +1452,12 @@ func _build_queue_tooltip(building: Building) -> String:
 func _show_progress(pct: float, fill_color: Color) -> void:
 	if not _progress_bar:
 		return
-	# Bar stays in the layout always; modulate is what swings between
-	# 'visible' and 'hidden' so the surrounding buttons don't shift.
-	# We also have to flip `visible` back on -- the deselect path
-	# (no selection) hides the bar via .visible = false, and a later
-	# alpha bump alone wouldn't bring it back.
+	# Bar stays in the layout always; modulate is what swings
+	# between 'visible' and 'hidden' so the surrounding action
+	# buttons don't shift up/down when the bar appears. The
+	# deselection path now also uses modulate.a = 0 instead of
+	# .visible = false; we leave .visible alone here too in case
+	# some legacy caller flipped it off.
 	_progress_bar.visible = true
 	_progress_bar.modulate.a = 1.0
 	_progress_bar.value = clampf(pct, 0.0, 1.0) * 100.0

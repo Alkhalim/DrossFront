@@ -484,7 +484,17 @@ func _draw_land(poly_norm: PackedVector2Array) -> void:
 	# Triangulator needs >= 3 unique points; bail silently otherwise.
 	if pts.size() < 3:
 		return
-	draw_colored_polygon(pts, LAND)
+	# Pre-triangulate so we can detect a degenerate / self-
+	# intersecting polygon and skip the fill silently. Godot's
+	# draw_colored_polygon spams 'Invalid polygon data,
+	# triangulation failed' on every redraw for any polygon the
+	# triangulator can't resolve, which buried real errors in
+	# the log. With Geometry2D.triangulate_polygon we can detect
+	# the failure ourselves -- no fill, but the outline still
+	# draws so the country silhouette is visible.
+	var indices: PackedInt32Array = Geometry2D.triangulate_polygon(pts)
+	if indices.size() >= 3:
+		draw_colored_polygon(pts, LAND)
 	for i: int in pts.size():
 		var a: Vector2 = pts[i]
 		var b: Vector2 = pts[(i + 1) % pts.size()]
