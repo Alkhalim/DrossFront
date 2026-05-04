@@ -234,6 +234,12 @@ func _emit_telegraph() -> void:
 		var minimap: Node = hud.get_node_or_null("Minimap")
 		if minimap and minimap.has_method("start_pulse_pin"):
 			minimap.call("start_pulse_pin", _telegraph_key, _target_pos, TELEGRAPH_PING_COLOR)
+		# One-shot ping flash on top of the persistent pin so the
+		# eye is drawn to the strike location even if the player was
+		# scrolled away when the warning fired -- mirrors the
+		# satellite-spawner's pulse + ping pairing.
+		if minimap and minimap.has_method("ping"):
+			minimap.call("ping", _target_pos, TELEGRAPH_PING_COLOR)
 	# One-shot AlertManager ping for the audio cue + minimap flash.
 	# The persistent banner above carries the visible countdown; the
 	# alert is just the audible 'something is happening' chime.

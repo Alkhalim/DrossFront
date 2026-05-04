@@ -3982,18 +3982,101 @@ func _build_minimap_quick_select() -> void:
 	add_child(row)
 
 	_qs_military_btn = Button.new()
-	_qs_military_btn.text = "Mil"
-	_qs_military_btn.custom_minimum_size = Vector2(48, 30)
+	_qs_military_btn.text = ""
+	_qs_military_btn.custom_minimum_size = Vector2(40, 34)
 	_qs_military_btn.tooltip_text = "Select all your military units (skip engineers / crawlers)."
 	_qs_military_btn.pressed.connect(_on_quick_select_military)
+	_attach_quick_select_glyph(_qs_military_btn, "mech")
 	row.add_child(_qs_military_btn)
 
 	_qs_engineer_btn = Button.new()
-	_qs_engineer_btn.text = "Eng"
-	_qs_engineer_btn.custom_minimum_size = Vector2(48, 30)
+	_qs_engineer_btn.text = ""
+	_qs_engineer_btn.custom_minimum_size = Vector2(40, 34)
 	_qs_engineer_btn.tooltip_text = "Jump to and select an idle engineer (no current build target)."
 	_qs_engineer_btn.pressed.connect(_on_quick_select_idle_engineer)
+	_attach_quick_select_glyph(_qs_engineer_btn, "wrench")
 	row.add_child(_qs_engineer_btn)
+
+
+func _attach_quick_select_glyph(btn: Button, kind: String) -> void:
+	## Adds a procedural Control child to the button that paints a
+	## small role glyph (mech for military, wrench for engineer)
+	## centered inside the button. Replaces the previous text label.
+	var glyph := _QuickSelectGlyph.new()
+	glyph.kind = kind
+	glyph.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	btn.add_child(glyph)
+
+
+class _QuickSelectGlyph:
+	extends Control
+	var kind: String = "mech"
+	func _draw() -> void:
+		var sz: Vector2 = size
+		if sz.x <= 0.0 or sz.y <= 0.0:
+			return
+		var tint: Color = Color(0.95, 0.92, 0.85, 1.0)
+		match kind:
+			"mech":
+				_draw_mech(sz, tint)
+			"wrench":
+				_draw_wrench(sz, tint)
+	func _draw_mech(sz: Vector2, tint: Color) -> void:
+		# Squat bipedal silhouette: cockpit, shoulder pad, two legs.
+		var w: float = sz.x
+		var h: float = sz.y
+		# Cockpit -- trapezoid head.
+		var head: PackedVector2Array = PackedVector2Array([
+			Vector2(w * 0.30, h * 0.18),
+			Vector2(w * 0.70, h * 0.18),
+			Vector2(w * 0.78, h * 0.36),
+			Vector2(w * 0.22, h * 0.36),
+		])
+		draw_colored_polygon(head, tint)
+		# Shoulder slab.
+		draw_rect(Rect2(Vector2(w * 0.18, h * 0.36), Vector2(w * 0.64, h * 0.18)), tint, true)
+		# Twin shoulder cannons -- short bars on top of shoulders.
+		draw_rect(Rect2(Vector2(w * 0.10, h * 0.28), Vector2(w * 0.10, h * 0.10)), tint, true)
+		draw_rect(Rect2(Vector2(w * 0.80, h * 0.28), Vector2(w * 0.10, h * 0.10)), tint, true)
+		# Legs -- two diverging stomp blocks.
+		var dark: Color = Color(tint.r * 0.7, tint.g * 0.7, tint.b * 0.7, tint.a)
+		draw_rect(Rect2(Vector2(w * 0.22, h * 0.55), Vector2(w * 0.20, h * 0.36)), dark, true)
+		draw_rect(Rect2(Vector2(w * 0.58, h * 0.55), Vector2(w * 0.20, h * 0.36)), dark, true)
+	func _draw_wrench(sz: Vector2, tint: Color) -> void:
+		# Open-end wrench with the open jaw at top-left and the
+		# handle running diagonally to bottom-right.
+		var w: float = sz.x
+		var h: float = sz.y
+		# Handle as a rotated rect via a polygon.
+		var cx: float = w * 0.50
+		var cy: float = h * 0.50
+		var ang: float = -PI / 4.0
+		var hl: float = w * 0.62
+		var hw: float = h * 0.16
+		var dx: float = cos(ang) * hl * 0.5
+		var dy: float = sin(ang) * hl * 0.5
+		var nx: float = -sin(ang) * hw * 0.5
+		var ny: float = cos(ang) * hw * 0.5
+		var handle: PackedVector2Array = PackedVector2Array([
+			Vector2(cx - dx + nx, cy - dy + ny),
+			Vector2(cx + dx + nx, cy + dy + ny),
+			Vector2(cx + dx - nx, cy + dy - ny),
+			Vector2(cx - dx - nx, cy - dy - ny),
+		])
+		draw_colored_polygon(handle, tint)
+		# Open-jaw head -- C shape via a circle minus a wedge cut.
+		var head_c: Vector2 = Vector2(cx - dx * 1.05, cy - dy * 1.05)
+		draw_circle(head_c, w * 0.20, tint)
+		# Dark cutout for the jaw opening.
+		var bg: Color = Color(0.10, 0.10, 0.12, 1.0)
+		var bite: PackedVector2Array = PackedVector2Array([
+			head_c,
+			head_c + Vector2(-w * 0.22, -w * 0.04),
+			head_c + Vector2(-w * 0.04, -w * 0.22),
+		])
+		draw_colored_polygon(bite, bg)
+		draw_circle(head_c, w * 0.10, bg)
 
 
 func _on_quick_select_military() -> void:
