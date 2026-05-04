@@ -22,6 +22,7 @@ var _trail_timer: float = 0.0
 
 ## Missile arc state.
 var _is_missile: bool = false
+var _is_mortar: bool = false
 var _flight_time: float = 0.0
 var _total_flight_time: float = 1.0
 var _arc_height: float = 4.0
@@ -123,6 +124,18 @@ static func create(from: Vector3, to: Vector3, role_tag: StringName, rof_tier: S
 					beam_width = 1.2
 			proj._create_beam_mesh(color, proj.start_pos, proj.target_pos, beam_width)
 			proj.speed = 999.0
+		"mortar":
+			# High-arc mortar shell -- chunky finned cylinder that
+			# arcs much higher than a regular missile + spawns an
+			# impact shockwave for splash. Reuses _is_missile flag
+			# for the arc trajectory; arc height bumped to read as
+			# 'fired straight up' on launch.
+			proj._create_mortar_mesh(color)
+			proj._is_missile = true
+			proj._is_mortar = true
+			var mdist: float = from.distance_to(to)
+			proj._total_flight_time = maxf(mdist / 11.0, 0.6)
+			proj._arc_height = clampf(mdist * 0.55, 6.0, 14.0)
 		"shell":
 			# Heavy AP shell -- chunkier, brighter tracer than the
 			# default bullet, and slightly slower so the silhouette
@@ -298,6 +311,43 @@ func _create_bomb_mesh(color: Color) -> void:
 	stripe_mat.emission_energy_multiplier = 0.8
 	stripe.set_surface_override_material(0, stripe_mat)
 	_mesh.add_child(stripe)
+
+
+func _create_mortar_mesh(color: Color) -> void:
+	## Stubby finned mortar shell -- shorter + fatter than a regular
+	## missile, with cross-fins at the tail. Reads as 'shell falling
+	## from the sky' rather than 'guided missile'. No smoke trail
+	## (handled by _is_mortar branch in _process).
+	_mesh = MeshInstance3D.new()
+	_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# Body -- tapered cylinder.
+	var body_cyl := CylinderMesh.new()
+	body_cyl.top_radius = 0.07
+	body_cyl.bottom_radius = 0.18
+	body_cyl.height = 0.50
+	body_cyl.radial_segments = 12
+	_mesh.mesh = body_cyl
+	_mesh.rotation.x = -PI / 2  # body points along -Z (forward)
+	var body_mat := StandardMaterial3D.new()
+	body_mat.albedo_color = Color(0.18, 0.16, 0.14, 1.0)
+	body_mat.emission_enabled = true
+	body_mat.emission = color
+	body_mat.emission_energy_multiplier = 0.6
+	_mesh.set_surface_override_material(0, body_mat)
+	add_child(_mesh)
+	# Tail fins -- 4 thin rectangles forming a + cross at the rear.
+	for fin_i: int in 4:
+		var fin := MeshInstance3D.new()
+		var fin_box := BoxMesh.new()
+		fin_box.size = Vector3(0.04, 0.20, 0.16)
+		fin.mesh = fin_box
+		fin.rotation.x = -PI / 2
+		fin.rotation.z = float(fin_i) * PI * 0.5
+		fin.position.z = 0.22
+		var fin_mat := StandardMaterial3D.new()
+		fin_mat.albedo_color = Color(0.10, 0.10, 0.10, 1.0)
+		fin.set_surface_override_material(0, fin_mat)
+		add_child(fin)
 
 
 func _create_missile_mesh(color: Color) -> void:
@@ -565,7 +615,40 @@ func _spawn_impact() -> void:
 	var pem: Node = _pem_scene.get_node_or_null("ParticleEmitterManager") if _pem_scene else null
 	if pem:
 		pem.emit_flash(global_position, Color(1.0, 0.6, 0.18, 0.9))
-
+	# Mortar shockwave -- a short-lived expanding ring at ground
+	# level so the splash damage is visible as 'this hit
+	# everything in this circle'. Cheap one-shot mesh that
+	# self-removes after ~0.55s.
+	if _is_mortar and is_inside_tree():
+		_spawn_mortar_shockwave(global_position)
 	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
 	if audio and audio.has_method("play_weapon_impact"):
 		audio.play_weapon_impact(global_position)
+
+
+func _spawn_mortar_shockwave(at: Vector3) -> void:
+	var ring := MeshInstance3D.new()
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.4
+	torus.outer_radius = 0.6
+	torus.ring_segments = 6
+	torus.rings = 32
+	ring.mesh = torus
+	ring.position = Vector3(at.x, 0.18, at.z)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 0.55, 0.18, 0.85)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.55, 0.18, 1.0)
+	mat.emission_energy_multiplier = 1.6
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	ring.set_surface_override_material(0, mat)
+	get_tree().current_scene.add_child(ring)
+	# Tween the ring outward + fade. Final radius ~ splash radius
+	# (3.5u is the Mortar weapon's splash); duration short.
+	var tw: Tween = ring.create_tween().set_parallel(true)
+	tw.tween_property(ring, "scale", Vector3(7.0, 1.0, 7.0), 0.55).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(mat, "albedo_color:a", 0.0, 0.55).set_trans(Tween.TRANS_LINEAR)
+	tw.chain().tween_callback(ring.queue_free)

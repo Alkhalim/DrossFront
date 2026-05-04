@@ -675,6 +675,14 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		# diverges from the Sable Courier Tank's turreted
 		# transport silhouette; defaults route to Courier Tank.
 		if stats.unit_name.findn("Breacher") >= 0:
+			# Branch variants get distinct silhouettes -- Mortar
+			# is an open-topped artillery vehicle, Salvo carries
+			# vertical missile pods. Both lose the casemate +
+			# main cannon of the base Breacher.
+			if stats.unit_name.findn("Mortar") >= 0:
+				return _build_breacher_mortar_member(index, offset, team_color)
+			if stats.unit_name.findn("Salvo") >= 0:
+				return _build_breacher_salvo_member(index, offset, team_color)
 			return _build_breacher_tank_member(index, offset, team_color)
 		if stats.unit_name.findn("Grinder") >= 0:
 			return _build_grinder_tank_member(index, offset, team_color)
@@ -3647,6 +3655,410 @@ func _build_breacher_tank_member(index: int, offset: Vector3, team_color: Color)
 		"head": null,
 		"mats": mats,
 		"recoil": recoil_arr,
+		"stride_phase": 0.0,
+		"stride_speed": 0.0,
+		"stride_swing": 0.0,
+		"bob_amount": 0.0,
+		"idle_phase": randf_range(0.0, TAU),
+		"idle_speed": 0.0,
+	}
+
+
+## Shared chassis base for the three Breacher variants. Builds
+## tracks (with animated ribs), lower hull, twin exhaust stacks,
+## side fender plates, side amber stripes, and the team-colour
+## chevron. Returns a dict with the meshes-built materials list +
+## the helpful dimensions the variant builders need to position
+## their distinct top geometry. Variants attach their own
+## casemate / mortar / pod array on top.
+func _build_breacher_chassis_base(index: int, offset: Vector3, team_color: Color) -> Dictionary:
+	var member := Node3D.new()
+	member.name = "Member_%d" % index
+	member.position = offset
+	add_child(member)
+	var mats: Array[StandardMaterial3D] = []
+	var anvil_dark: Color = _faction_tint_chassis(Color(0.34, 0.24, 0.16))
+	var anvil_mid: Color = _faction_tint_chassis(Color(0.46, 0.32, 0.20))
+	var anvil_amber: Color = Color(1.00, 0.55, 0.18)
+	# Tracks
+	var track_len: float = 3.40
+	var track_h: float = 0.50
+	var track_w: float = 0.68
+	for side: int in 2:
+		var sx: float = -1.10 if side == 0 else 1.10
+		var track := MeshInstance3D.new()
+		var track_box := BoxMesh.new()
+		track_box.size = Vector3(track_w, track_h, track_len)
+		track.mesh = track_box
+		track.position = Vector3(sx, track_h * 0.5, 0.0)
+		var track_mat := _make_metal_mat(Color(0.08, 0.08, 0.08))
+		track.set_surface_override_material(0, track_mat)
+		member.add_child(track)
+		mats.append(track_mat)
+		for r_i: int in 6:
+			var rib := MeshInstance3D.new()
+			var rib_box := BoxMesh.new()
+			rib_box.size = Vector3(track_w + 0.06, 0.06, 0.20)
+			rib.mesh = rib_box
+			var rt: float = (float(r_i) + 0.5) / 6.0
+			rib.position = Vector3(sx, track_h, -track_len * 0.5 + rt * track_len)
+			var rib_mat := _make_metal_mat(Color(0.05, 0.05, 0.05))
+			rib.set_surface_override_material(0, rib_mat)
+			member.add_child(rib)
+			mats.append(rib_mat)
+			_courier_track_ribs.append({"node": rib, "length": track_len})
+	# Hull (the floor between the tracks)
+	var hull_w: float = 1.55
+	var hull_h: float = 0.34
+	var hull_len: float = 2.85
+	var hull_y: float = track_h * 0.85 + hull_h * 0.5
+	var hull := MeshInstance3D.new()
+	var hull_box := BoxMesh.new()
+	hull_box.size = Vector3(hull_w, hull_h, hull_len)
+	hull.mesh = hull_box
+	hull.position = Vector3(0.0, hull_y, 0.0)
+	var hull_mat := _make_metal_mat(anvil_mid)
+	hull.set_surface_override_material(0, hull_mat)
+	member.add_child(hull)
+	mats.append(hull_mat)
+	# Side fender plates
+	for fs_i: int in 2:
+		var fs_x: float = -hull_w * 0.5 - 0.10 if fs_i == 0 else hull_w * 0.5 + 0.10
+		var fender := MeshInstance3D.new()
+		var fender_box := BoxMesh.new()
+		fender_box.size = Vector3(0.20, 0.18, hull_len * 0.85)
+		fender.mesh = fender_box
+		fender.position = Vector3(fs_x, hull_y + hull_h * 0.20, 0.0)
+		var fender_mat := _make_metal_mat(anvil_dark)
+		fender.set_surface_override_material(0, fender_mat)
+		member.add_child(fender)
+		mats.append(fender_mat)
+	# Twin exhaust stacks on the rear deck.
+	for ex_i: int in 2:
+		var ex_x: float = -0.55 if ex_i == 0 else 0.55
+		var stack := MeshInstance3D.new()
+		var stack_cyl := CylinderMesh.new()
+		stack_cyl.top_radius = 0.10
+		stack_cyl.bottom_radius = 0.13
+		stack_cyl.height = 0.55
+		stack_cyl.radial_segments = 14
+		stack.mesh = stack_cyl
+		stack.position = Vector3(ex_x, hull_y + hull_h * 0.5 + 0.30, hull_len * 0.42)
+		var stack_mat := _make_metal_mat(Color(0.08, 0.08, 0.08))
+		stack.set_surface_override_material(0, stack_mat)
+		member.add_child(stack)
+		mats.append(stack_mat)
+		var heat := MeshInstance3D.new()
+		var heat_cyl := CylinderMesh.new()
+		heat_cyl.top_radius = 0.09
+		heat_cyl.bottom_radius = 0.09
+		heat_cyl.height = 0.04
+		heat.mesh = heat_cyl
+		heat.position = Vector3(ex_x, hull_y + hull_h * 0.5 + 0.58, hull_len * 0.42)
+		var heat_mat := StandardMaterial3D.new()
+		heat_mat.albedo_color = Color(0.85, 0.32, 0.10, 1.0)
+		heat_mat.emission_enabled = true
+		heat_mat.emission = Color(0.95, 0.40, 0.15, 1.0)
+		heat_mat.emission_energy_multiplier = 2.2
+		heat_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		heat.set_surface_override_material(0, heat_mat)
+		member.add_child(heat)
+		mats.append(heat_mat)
+	# Amber side stripes.
+	for as_i: int in 2:
+		var asx: float = -hull_w * 0.5 + 0.04 if as_i == 0 else hull_w * 0.5 - 0.04
+		var accent := MeshInstance3D.new()
+		var accent_box := BoxMesh.new()
+		accent_box.size = Vector3(0.05, 0.06, hull_len * 0.85)
+		accent.mesh = accent_box
+		accent.position = Vector3(asx, hull_y - hull_h * 0.5 + 0.03, 0.0)
+		var accent_mat := StandardMaterial3D.new()
+		accent_mat.albedo_color = anvil_amber
+		accent_mat.emission_enabled = true
+		accent_mat.emission = anvil_amber
+		accent_mat.emission_energy_multiplier = 1.4
+		accent_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		accent.set_surface_override_material(0, accent_mat)
+		member.add_child(accent)
+		mats.append(accent_mat)
+	# Team-colour chevron on top.
+	var ts_mat := StandardMaterial3D.new()
+	ts_mat.albedo_color = team_color
+	ts_mat.emission_enabled = true
+	ts_mat.emission = team_color
+	ts_mat.emission_energy_multiplier = 1.5
+	ts_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	for ch_i: int in 2:
+		var ch_x_sign: float = -1.0 if ch_i == 0 else 1.0
+		var chev := MeshInstance3D.new()
+		var chev_box := BoxMesh.new()
+		chev_box.size = Vector3(hull_w * 0.55, 0.05, 0.18)
+		chev.mesh = chev_box
+		chev.position = Vector3(
+			ch_x_sign * hull_w * 0.18,
+			hull_y + hull_h * 0.5 + 0.55,
+			hull_len * 0.05,
+		)
+		chev.rotation.y = deg_to_rad(28.0) * ch_x_sign
+		chev.set_surface_override_material(0, ts_mat)
+		member.add_child(chev)
+	mats.append(ts_mat)
+	return {
+		"member": member,
+		"mats": mats,
+		"hull_w": hull_w,
+		"hull_h": hull_h,
+		"hull_len": hull_len,
+		"hull_y": hull_y,
+		"anvil_dark": anvil_dark,
+		"anvil_mid": anvil_mid,
+	}
+
+
+func _build_breacher_mortar_member(index: int, offset: Vector3, team_color: Color) -> Dictionary:
+	## Mortar variant -- open-topped artillery body with a mortar
+	## tube angled steeply upward and forward. No casemate, no
+	## main cannon. Open box reads as an artillery hull (think
+	## Sturmpanzer + Hummel / SU-122 lineage) with a high-angle
+	## mortar instead of a low-angle gun.
+	var base: Dictionary = _build_breacher_chassis_base(index, offset, team_color)
+	var member: Node3D = base["member"]
+	var mats: Array[StandardMaterial3D] = base["mats"]
+	var hull_w: float = base["hull_w"]
+	var hull_h: float = base["hull_h"]
+	var hull_len: float = base["hull_len"]
+	var hull_y: float = base["hull_y"]
+	var anvil_dark: Color = base["anvil_dark"]
+	var deck_y: float = hull_y + hull_h * 0.5
+	# Open-top hull walls -- four thin boxes ringing the upper
+	# chassis, leaving the top open. Reads like an open-topped
+	# artillery casemate.
+	var wall_h: float = 0.65
+	var wall_t: float = 0.10
+	# Front + rear walls.
+	for side: int in 2:
+		var sz: float = -hull_len * 0.40 if side == 0 else hull_len * 0.40
+		var wall := MeshInstance3D.new()
+		var wb := BoxMesh.new()
+		wb.size = Vector3(hull_w * 0.92, wall_h, wall_t)
+		wall.mesh = wb
+		wall.position = Vector3(0.0, deck_y + wall_h * 0.5, sz)
+		var wmat := _make_metal_mat(anvil_dark)
+		wall.set_surface_override_material(0, wmat)
+		member.add_child(wall)
+		mats.append(wmat)
+	# Left + right walls (slightly shorter so the top reads as
+	# open-air with side armor only).
+	for side2: int in 2:
+		var sx: float = -hull_w * 0.46 if side2 == 0 else hull_w * 0.46
+		var sw := MeshInstance3D.new()
+		var sb := BoxMesh.new()
+		sb.size = Vector3(wall_t, wall_h * 0.72, hull_len * 0.78)
+		sw.mesh = sb
+		sw.position = Vector3(sx, deck_y + wall_h * 0.36, 0.0)
+		var smat := _make_metal_mat(anvil_dark)
+		sw.set_surface_override_material(0, smat)
+		member.add_child(sw)
+		mats.append(smat)
+	# Mortar pivot -- recoil + muzzle lookup target. Sits on the
+	# open deck near the rear, angled up + forward (~55deg).
+	var cannon_pivot := Node3D.new()
+	cannon_pivot.name = "CannonPivot_top"
+	cannon_pivot.position = Vector3(0.0, deck_y + 0.30, hull_len * 0.05)
+	# Pre-rotate so the tube's local -Z (forward) points up + fwd.
+	cannon_pivot.rotation.x = deg_to_rad(-55.0)
+	member.add_child(cannon_pivot)
+	# Mortar baseplate -- chunky cylinder cradling the tube.
+	var base_plate := MeshInstance3D.new()
+	var bp_cyl := CylinderMesh.new()
+	bp_cyl.top_radius = 0.36
+	bp_cyl.bottom_radius = 0.42
+	bp_cyl.height = 0.25
+	bp_cyl.radial_segments = 16
+	base_plate.mesh = bp_cyl
+	base_plate.position.z = 0.10
+	var bp_mat := _make_metal_mat(anvil_dark)
+	base_plate.set_surface_override_material(0, bp_mat)
+	cannon_pivot.add_child(base_plate)
+	mats.append(bp_mat)
+	# Mortar tube.
+	var tube_len: float = 1.55
+	var tube := MeshInstance3D.new()
+	var tube_cyl := CylinderMesh.new()
+	tube_cyl.top_radius = 0.20
+	tube_cyl.bottom_radius = 0.22
+	tube_cyl.height = tube_len
+	tube_cyl.radial_segments = 22
+	tube.mesh = tube_cyl
+	tube.rotate_object_local(Vector3.RIGHT, -PI / 2)
+	tube.position.z = -tube_len * 0.5
+	var tube_mat := _make_metal_mat(Color(0.14, 0.13, 0.12))
+	tube.set_surface_override_material(0, tube_mat)
+	cannon_pivot.add_child(tube)
+	mats.append(tube_mat)
+	# Hollow bore at the muzzle.
+	var bore := MeshInstance3D.new()
+	var bore_cyl := CylinderMesh.new()
+	bore_cyl.top_radius = 0.15
+	bore_cyl.bottom_radius = 0.15
+	bore_cyl.height = 0.20
+	bore_cyl.radial_segments = 14
+	bore.mesh = bore_cyl
+	bore.rotate_object_local(Vector3.RIGHT, -PI / 2)
+	bore.position.z = -tube_len - 0.05
+	var bore_mat := StandardMaterial3D.new()
+	bore_mat.albedo_color = Color(0.03, 0.03, 0.04, 1.0)
+	bore_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bore.set_surface_override_material(0, bore_mat)
+	cannon_pivot.add_child(bore)
+	mats.append(bore_mat)
+	# Muzzle marker for combat.
+	var muzzle_marker := Marker3D.new()
+	muzzle_marker.name = "Muzzle"
+	muzzle_marker.position = Vector3(0.0, 0.0, -tube_len - 0.10)
+	cannon_pivot.add_child(muzzle_marker)
+	# Stack of shells visible inside the open compartment -- two
+	# small cylinders so the artillery role reads even when the
+	# tube isn't firing.
+	for sh_i: int in 2:
+		var sh_x: float = -hull_w * 0.18 + float(sh_i) * 0.30
+		var shell := MeshInstance3D.new()
+		var shell_cyl := CylinderMesh.new()
+		shell_cyl.top_radius = 0.09
+		shell_cyl.bottom_radius = 0.09
+		shell_cyl.height = 0.32
+		shell.mesh = shell_cyl
+		shell.position = Vector3(sh_x, deck_y + 0.16, -hull_len * 0.18)
+		var shmat := _make_metal_mat(Color(0.55, 0.42, 0.18))
+		shell.set_surface_override_material(0, shmat)
+		member.add_child(shell)
+		mats.append(shmat)
+	return {
+		"root": member,
+		"legs": [] as Array,
+		"leg_phases": [] as Array,
+		"shoulders": [] as Array,
+		"cannons": [cannon_pivot] as Array[Node3D],
+		"cannon_rest_z": [cannon_pivot.position.z] as Array,
+		"cannon_muzzle_z": [tube_len + 0.10] as Array,
+		"torso": null,
+		"head": null,
+		"mats": mats,
+		"recoil": [0.0],
+		"stride_phase": 0.0,
+		"stride_speed": 0.0,
+		"stride_swing": 0.0,
+		"bob_amount": 0.0,
+		"idle_phase": randf_range(0.0, TAU),
+		"idle_speed": 0.0,
+	}
+
+
+func _build_breacher_salvo_member(index: int, offset: Vector3, team_color: Color) -> Dictionary:
+	## Salvo variant -- chassis carries a 2x3 grid of vertical
+	## missile pods on the deck instead of a casemate cannon.
+	## Missiles fire upward and the existing missile projectile
+	## arc handles the swoop onto the target. No main cannon.
+	var base: Dictionary = _build_breacher_chassis_base(index, offset, team_color)
+	var member: Node3D = base["member"]
+	var mats: Array[StandardMaterial3D] = base["mats"]
+	var hull_w: float = base["hull_w"]
+	var hull_h: float = base["hull_h"]
+	var hull_len: float = base["hull_len"]
+	var hull_y: float = base["hull_y"]
+	var anvil_dark: Color = base["anvil_dark"]
+	var deck_y: float = hull_y + hull_h * 0.5
+	# Mounting plate the missile pods sit on -- a flat dark deck
+	# spanning the upper chassis.
+	var deck := MeshInstance3D.new()
+	var deck_box := BoxMesh.new()
+	deck_box.size = Vector3(hull_w * 0.92, 0.10, hull_len * 0.85)
+	deck.mesh = deck_box
+	deck.position = Vector3(0.0, deck_y + 0.05, 0.0)
+	var deck_mat := _make_metal_mat(anvil_dark)
+	deck.set_surface_override_material(0, deck_mat)
+	member.add_child(deck)
+	mats.append(deck_mat)
+	# Cannon pivot for combat lookups -- positioned at the centre
+	# of the pod array. Missiles spawn from this Marker so the
+	# arc starts above the chassis.
+	var cannon_pivot := Node3D.new()
+	cannon_pivot.name = "CannonPivot_top"
+	cannon_pivot.position = Vector3(0.0, deck_y + 0.85, 0.0)
+	member.add_child(cannon_pivot)
+	# 2x3 vertical missile pod grid (6 tubes total).
+	const ROWS: int = 3
+	const COLS: int = 2
+	var pod_radius: float = 0.13
+	var pod_len: float = 0.78
+	for r_i: int in ROWS:
+		for c_i: int in COLS:
+			var px: float = (-1.0 if c_i == 0 else 1.0) * hull_w * 0.22
+			var pz: float = (float(r_i) - 1.0) * hull_len * 0.27
+			# Pod tube -- thin vertical cylinder.
+			var pod := MeshInstance3D.new()
+			var pod_cyl := CylinderMesh.new()
+			pod_cyl.top_radius = pod_radius
+			pod_cyl.bottom_radius = pod_radius * 1.05
+			pod_cyl.height = pod_len
+			pod_cyl.radial_segments = 14
+			pod.mesh = pod_cyl
+			pod.position = Vector3(px, deck_y + 0.10 + pod_len * 0.5, pz)
+			var pod_mat := _make_metal_mat(Color(0.16, 0.15, 0.14))
+			pod.set_surface_override_material(0, pod_mat)
+			member.add_child(pod)
+			mats.append(pod_mat)
+			# Hollow opening at the top -- dark cap so the player
+			# reads the tube as openable from above.
+			var lip := MeshInstance3D.new()
+			var lip_cyl := CylinderMesh.new()
+			lip_cyl.top_radius = pod_radius * 1.15
+			lip_cyl.bottom_radius = pod_radius * 1.15
+			lip_cyl.height = 0.04
+			lip.mesh = lip_cyl
+			lip.position = Vector3(px, deck_y + 0.10 + pod_len + 0.02, pz)
+			var lip_mat := _make_metal_mat(anvil_dark)
+			lip.set_surface_override_material(0, lip_mat)
+			member.add_child(lip)
+			mats.append(lip_mat)
+			# Missile nose tip protruding from the tube --
+			# emissive Anvil amber so loaded-and-armed reads at
+			# zoom.
+			var tip := MeshInstance3D.new()
+			var tip_cyl := CylinderMesh.new()
+			tip_cyl.top_radius = 0.0
+			tip_cyl.bottom_radius = pod_radius * 0.78
+			tip_cyl.height = 0.20
+			tip_cyl.radial_segments = 10
+			tip.mesh = tip_cyl
+			tip.position = Vector3(px, deck_y + 0.10 + pod_len + 0.14, pz)
+			var tip_mat := StandardMaterial3D.new()
+			tip_mat.albedo_color = Color(1.00, 0.55, 0.18, 1.0)
+			tip_mat.emission_enabled = true
+			tip_mat.emission = Color(1.00, 0.55, 0.18, 1.0)
+			tip_mat.emission_energy_multiplier = 1.6
+			tip_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			tip.set_surface_override_material(0, tip_mat)
+			member.add_child(tip)
+			mats.append(tip_mat)
+	# Muzzle marker sits at the centre top of the pod array so
+	# missile spawns + muzzle flashes land on the launch surface.
+	var muzzle_marker := Marker3D.new()
+	muzzle_marker.name = "Muzzle"
+	muzzle_marker.position = Vector3(0.0, 0.0, 0.0)
+	cannon_pivot.add_child(muzzle_marker)
+	return {
+		"root": member,
+		"legs": [] as Array,
+		"leg_phases": [] as Array,
+		"shoulders": [] as Array,
+		"cannons": [cannon_pivot] as Array[Node3D],
+		"cannon_rest_z": [cannon_pivot.position.z] as Array,
+		"cannon_muzzle_z": [0.0] as Array,
+		"torso": null,
+		"head": null,
+		"mats": mats,
+		"recoil": [0.0],
 		"stride_phase": 0.0,
 		"stride_speed": 0.0,
 		"stride_swing": 0.0,

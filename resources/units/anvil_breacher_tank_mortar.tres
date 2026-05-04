@@ -10,15 +10,17 @@ role_tag = &"AP"
 damage_tier = &"high"
 range_tier = &"very_long"
 rof_tier = &"single"
-damage_value = 130
-rof_seconds_value = 6.0
-projectile_style = &"missile"
+damage_value = 159
+rof_seconds_value = 5.45
+projectile_style = &"mortar"
 base_accuracy = 0.74
 can_damage_trees = true
 mult_vs_light = 1.10
 mult_vs_medium = 0.85
 mult_vs_heavy = 0.30
 structure_damage_mult = 0.70
+splash_radius = 3.5
+splash_damage_mult = 0.65
 
 [resource]
 script = ExtResource("1")

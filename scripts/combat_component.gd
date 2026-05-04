@@ -863,6 +863,45 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 		# at fire-time so projectiles can be cosmetic.
 		if hit and not weapon.is_drone_release:
 			_current_target.take_damage(per_member_dmg, _unit)
+			# Splash damage -- weapon.splash_radius > 0 means every
+			# shot that lands on the primary target also chips
+			# every other hostile within that radius for a
+			# fraction (splash_damage_mult) of the per-shot
+			# damage. Used by Breacher Mortar so the high-arc
+			# shells ACTUALLY clear a squad cluster, matching
+			# the unit's anti-light identity.
+			var splash_r: float = weapon.splash_radius if "splash_radius" in weapon else 0.0
+			if splash_r > 0.0:
+				var splash_dmg: int = maxi(int(round(float(per_member_dmg) * weapon.splash_damage_mult)), 1)
+				var t_pos: Vector3 = _current_target.global_position
+				var shooter_owner: int = (_unit.get("owner_id") as int) if _unit and "owner_id" in _unit else 0
+				var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+				for ent: Node in get_tree().get_nodes_in_group("units"):
+					if not is_instance_valid(ent) or ent == _current_target:
+						continue
+					if not ent.has_method("take_damage"):
+						continue
+					var ent_owner: int = (ent.get("owner_id") as int) if "owner_id" in ent else 0
+					var hostile2: bool = true
+					if registry and registry.has_method("are_enemies"):
+						hostile2 = registry.call("are_enemies", shooter_owner, ent_owner)
+					if not hostile2:
+						continue
+					if t_pos.distance_to((ent as Node3D).global_position) <= splash_r:
+						ent.take_damage(splash_dmg, _unit)
+				for ent: Node in get_tree().get_nodes_in_group("buildings"):
+					if not is_instance_valid(ent) or ent == _current_target:
+						continue
+					if not ent.has_method("take_damage"):
+						continue
+					var ent_owner_b: int = (ent.get("owner_id") as int) if "owner_id" in ent else 0
+					var hostile_b: bool = true
+					if registry and registry.has_method("are_enemies"):
+						hostile_b = registry.call("are_enemies", shooter_owner, ent_owner_b)
+					if not hostile_b:
+						continue
+					if t_pos.distance_to((ent as Node3D).global_position) <= splash_r:
+						ent.take_damage(splash_dmg, _unit)
 
 		# Pick a per-shot aim point: distribute shots across the live members
 		# of the target squad so projectiles arrive at different bodies.

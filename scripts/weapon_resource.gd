@@ -54,6 +54,15 @@ extends Resource
 ## DPS is unchanged whether stagger is 0 or 0.20s.
 @export_range(0.0, 0.6, 0.01) var salvo_stagger_sec: float = 0.0
 
+## Splash radius in world units. Default 0 = no splash (single-
+## target only). When > 0 every shot that lands deals
+## `splash_damage_mult` of the per-shot damage to every other
+## hostile entity within the radius. Used by the Breacher Mortar
+## branch to make 'high-arc anti-light artillery' actually clear
+## a squad cluster instead of nicking one mech at a time.
+@export_range(0.0, 8.0, 0.1) var splash_radius: float = 0.0
+@export_range(0.0, 1.0, 0.05) var splash_damage_mult: float = 0.5
+
 @export_group("Numeric overrides (balance work)")
 ## When non-negative, these fields override the tier defaults from
 ## CombatTables. -1 (the default) means "use the tier lookup". Lets
