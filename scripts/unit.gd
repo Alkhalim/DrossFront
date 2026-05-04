@@ -1834,6 +1834,55 @@ func _apply_forgemaster_overlay(
 	var anvil_amber: Color = Color(1.0, 0.55, 0.18)
 	var forge_red: Color = Color(1.0, 0.35, 0.10)
 
+	# --- Tapered front prow plating. Two stacked sloped wedges on
+	# the leading edge of the torso (the -Z face) so the chassis has
+	# a clear 'this is the front' read at top-down camera. Without
+	# this the wide carapace torso reads as symmetrical and the
+	# player can't tell facing at a glance. The prow narrows from
+	# the torso width down to a slim leading edge.
+	var prow_root := Node3D.new()
+	prow_root.position = Vector3(0.0, torso_size.y * 0.45, -torso_size.z * 0.45)
+	torso_pivot.add_child(prow_root)
+	# Lower wedge -- broad base.
+	var prow_lower := MeshInstance3D.new()
+	var prow_lower_box := BoxMesh.new()
+	prow_lower_box.size = Vector3(torso_size.x * 0.95, torso_size.y * 0.42, torso_size.z * 0.22)
+	prow_lower.mesh = prow_lower_box
+	prow_lower.position = Vector3(0.0, -torso_size.y * 0.18, -torso_size.z * 0.04)
+	prow_lower.rotation.x = deg_to_rad(-22.0)  # lean forward + down
+	var prow_mat := _make_metal_mat(Color(0.32, 0.30, 0.28))
+	prow_lower.set_surface_override_material(0, prow_mat)
+	prow_root.add_child(prow_lower)
+	mats.append(prow_mat)
+	# Upper wedge -- narrower nose plate further forward.
+	var prow_upper := MeshInstance3D.new()
+	var prow_upper_box := BoxMesh.new()
+	prow_upper_box.size = Vector3(torso_size.x * 0.62, torso_size.y * 0.34, torso_size.z * 0.18)
+	prow_upper.mesh = prow_upper_box
+	prow_upper.position = Vector3(0.0, torso_size.y * 0.06, -torso_size.z * 0.10)
+	prow_upper.rotation.x = deg_to_rad(-30.0)  # steeper slope
+	var prow_upper_mat := _make_metal_mat(Color(0.36, 0.34, 0.32))
+	prow_upper.set_surface_override_material(0, prow_upper_mat)
+	prow_root.add_child(prow_upper)
+	mats.append(prow_upper_mat)
+	# Amber accent strip along the prow's leading edge -- reads as
+	# warning paint on a heavy industrial vehicle.
+	var prow_stripe := MeshInstance3D.new()
+	var stripe_box := BoxMesh.new()
+	stripe_box.size = Vector3(torso_size.x * 0.55, 0.04, torso_size.z * 0.06)
+	prow_stripe.mesh = stripe_box
+	prow_stripe.position = Vector3(0.0, torso_size.y * 0.16, -torso_size.z * 0.18)
+	prow_stripe.rotation.x = deg_to_rad(-30.0)
+	var stripe_mat := StandardMaterial3D.new()
+	stripe_mat.albedo_color = anvil_amber
+	stripe_mat.emission_enabled = true
+	stripe_mat.emission = anvil_amber
+	stripe_mat.emission_energy_multiplier = 1.4
+	stripe_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	prow_stripe.set_surface_override_material(0, stripe_mat)
+	prow_root.add_child(prow_stripe)
+	mats.append(stripe_mat)
+
 	# --- Furnace stack on the rear deck. Communicates "industrial
 	# repair shop" — a tall vertical chimney with a glowing mouth
 	# at its base.
@@ -3025,16 +3074,17 @@ func _maybe_override_shape_for_unit(base: Dictionary) -> Dictionary:
 		return ovh
 	if stats.unit_name.findn("Forgemaster") >= 0:
 		var ov: Dictionary = base.duplicate()
-		# Six side-mounted legs (three pairs along the chassis sides)
-		# replace the Bulwark's ground-running quadruped, supporting
-		# the caster identity (legs come out of the SIDES, not the
-		# bottom). The stride animation falls back to alternating
-		# tripod gait already wired into _build_legs_spider.
-		ov["leg_kind"] = "spider"
-		# Slimmer leg shafts than Bulwark's stomp legs -- a
-		# carapace-mech reads with thinner pointed legs, not
-		# tank tread blocks.
-		ov["leg"] = Vector3(0.18, 1.05, 0.18)
+		# Six articulated insect-style legs (three pairs along the
+		# chassis sides). Each leg has a thigh + shin + foot
+		# segment so it actually plants on the ground from any
+		# hip height -- the previous spider straight-stub build
+		# left feet floating ~0.7u above the floor and read as
+		# 'mech standing on tiptoe'.
+		ov["leg_kind"] = "insect"
+		# Bulkier leg shafts -- the Forgemaster reads as a heavy
+		# support mech, so shafts feel like industrial linkage,
+		# not delicate spider limbs.
+		ov["leg"] = Vector3(0.22, 1.05, 0.22)
 		# Lift the hip so the chassis silhouette sits noticeably
 		# higher than Bulwark's. With six side legs the body
 		# clears the ground more, and a 1.40 hip vs Bulwark's
@@ -3063,8 +3113,146 @@ func _build_legs(member: Node3D, shape: Dictionary, mats: Array[StandardMaterial
 	match kind:
 		"chicken": return _build_legs_chicken(member, shape, mats)
 		"spider": return _build_legs_spider(member, shape, mats)
+		"insect": return _build_legs_insect(member, shape, mats)
 		"quadruped": return _build_legs_quadruped(member, shape, mats)
 		_: return _build_legs_biped(member, shape, mats)
+
+
+func _build_legs_insect(member: Node3D, shape: Dictionary, mats: Array[StandardMaterial3D]) -> Dictionary:
+	## Articulated six-leg insect/carapace skeleton. Each leg has a
+	## thigh + shin segment that bend at the knee so the foot lands
+	## flat on the ground regardless of the chassis hip_y. Built for
+	## the Forgemaster -- the previous spider build splayed straight-
+	## stub legs that floated 0.5-1u above the floor and read as
+	## 'mech standing on tiptoe'. The shin angles inward and down to
+	## reach Y=0; the thigh sits roughly horizontal so the leg
+	## silhouette is recognisably articulated, not a slanted stick.
+	var leg_size: Vector3 = shape["leg"] as Vector3
+	var hip_y: float = shape["hip_y"] as float
+	var torso_size: Vector3 = shape["torso"] as Vector3
+	var base_color: Color = shape["color"] as Color
+	var trim_color: Color = Color(base_color.r * 0.85, base_color.g * 0.85, base_color.b * 0.85)
+
+	# Segment dimensions. Bulkier than the spider build -- the
+	# Forgemaster reads as a heavy support frame, not a wasp.
+	var seg_thick: float = leg_size.x * 1.55
+	var thigh_len: float = leg_size.y * 0.55
+	# Shin length is tuned per-call so foot lands at Y=0 from any
+	# hip height. Uses the geometry: thigh extends laterally at
+	# THIGH_DROP_RATIO downward, then shin travels inward+down to
+	# the floor. Shin = hip_y - thigh_drop, since it's roughly
+	# vertical at rest.
+	const THIGH_DROP_RATIO: float = 0.25  # thigh angles slightly down
+	var thigh_drop: float = thigh_len * THIGH_DROP_RATIO
+	var shin_len: float = maxf(hip_y - thigh_drop, 0.4)
+
+	var anchor_y: float = hip_y
+	var anchor_x: float = torso_size.x * 0.5 + 0.06
+	var anchor_z_front: float = torso_size.z * 0.36
+	var anchor_z_mid: float = 0.0
+	var anchor_z_rear: float = -torso_size.z * 0.36
+	var corners: Array[Vector2] = [
+		Vector2(-anchor_x, anchor_z_front),    # 0 front-left
+		Vector2(anchor_x, anchor_z_front),     # 1 front-right
+		Vector2(-anchor_x, anchor_z_mid),      # 2 mid-left
+		Vector2(anchor_x, anchor_z_mid),       # 3 mid-right
+		Vector2(-anchor_x, anchor_z_rear),     # 4 rear-left
+		Vector2(anchor_x, anchor_z_rear),      # 5 rear-right
+	]
+
+	var legs: Array[Node3D] = []
+	for i: int in corners.size():
+		var c: Vector2 = corners[i]
+		# Hip pivot -- this is the rotating root the walk-bob code
+		# swings around X. Sits at the chassis hip height.
+		var hip := Node3D.new()
+		hip.name = "LegPivot_%d" % i
+		hip.position = Vector3(c.x, anchor_y, c.y)
+		member.add_child(hip)
+
+		# Hip cap detail (small dark ball where the leg joins).
+		var hip_cap := MeshInstance3D.new()
+		var hip_box := BoxMesh.new()
+		hip_box.size = Vector3(seg_thick * 1.4, seg_thick * 0.9, seg_thick * 1.4)
+		hip_cap.mesh = hip_box
+		var hip_mat := _make_metal_mat(trim_color)
+		hip_cap.set_surface_override_material(0, hip_mat)
+		hip.add_child(hip_cap)
+		mats.append(hip_mat)
+
+		# Thigh -- horizontal segment angling outward + slightly
+		# downward. Right legs splay +x, left legs splay -x. The
+		# thigh leaves the hip and ends at the knee.
+		var splay_dir: float = 1.0 if c.x > 0.0 else -1.0
+		var thigh := MeshInstance3D.new()
+		var thigh_box := BoxMesh.new()
+		thigh_box.size = Vector3(thigh_len, seg_thick, seg_thick * 0.95)
+		thigh.mesh = thigh_box
+		# Place the thigh box centered between hip and knee. Knee
+		# sits at lateral offset thigh_len * splay_dir, dropped by
+		# thigh_drop.
+		thigh.position = Vector3(thigh_len * 0.5 * splay_dir, -thigh_drop * 0.5, 0.0)
+		# Tilt around Z so the box reads as angling down toward the
+		# knee rather than flat horizontal.
+		thigh.rotation.z = -0.18 * splay_dir if splay_dir > 0.0 else 0.18
+		var thigh_mat := _make_metal_mat(base_color)
+		thigh.set_surface_override_material(0, thigh_mat)
+		hip.add_child(thigh)
+		mats.append(thigh_mat)
+
+		# Knee joint detail.
+		var knee := MeshInstance3D.new()
+		var knee_box := BoxMesh.new()
+		knee_box.size = Vector3(seg_thick * 1.2, seg_thick * 1.2, seg_thick * 1.2)
+		knee.mesh = knee_box
+		knee.position = Vector3(thigh_len * splay_dir, -thigh_drop, 0.0)
+		var knee_mat := _make_metal_mat(trim_color)
+		knee.set_surface_override_material(0, knee_mat)
+		hip.add_child(knee)
+		mats.append(knee_mat)
+
+		# Shin -- drops from the knee to the ground at Y = -hip_y.
+		# Slight inward tilt so the foot pads sit a little inside
+		# the knee width (a stable triangulated stance).
+		var foot_y: float = -hip_y  # absolute floor level relative to hip pivot
+		var foot_x: float = thigh_len * splay_dir * 0.85  # inward bias from knee
+		var shin_dx: float = foot_x - thigh_len * splay_dir
+		var shin_dy: float = foot_y - (-thigh_drop)
+		var shin_actual_len: float = sqrt(shin_dx * shin_dx + shin_dy * shin_dy)
+		var shin_angle: float = atan2(shin_dx, -shin_dy)  # rotation around Z
+		var shin := MeshInstance3D.new()
+		var shin_box := BoxMesh.new()
+		shin_box.size = Vector3(seg_thick * 0.9, shin_actual_len, seg_thick * 0.9)
+		shin.mesh = shin_box
+		var shin_pos: Vector3 = Vector3(
+			(thigh_len * splay_dir + foot_x) * 0.5,
+			(-thigh_drop + foot_y) * 0.5,
+			0.0,
+		)
+		shin.position = shin_pos
+		shin.rotation.z = shin_angle
+		var shin_mat := _make_metal_mat(base_color)
+		shin.set_surface_override_material(0, shin_mat)
+		hip.add_child(shin)
+		mats.append(shin_mat)
+
+		# Foot pad -- flat plate sitting on the ground.
+		var foot := MeshInstance3D.new()
+		var foot_box := BoxMesh.new()
+		foot_box.size = Vector3(seg_thick * 1.6, 0.06, seg_thick * 1.8)
+		foot.mesh = foot_box
+		foot.position = Vector3(foot_x, foot_y + 0.03, 0.0)
+		var foot_mat := _make_metal_mat(Color(0.10, 0.10, 0.11))
+		foot.set_surface_override_material(0, foot_mat)
+		hip.add_child(foot)
+		mats.append(foot_mat)
+
+		legs.append(hip)
+	# Alternating tripod gait, same as spider: phases [FL, FR, ML, MR, RL, RR]
+	# = [0, PI, PI, 0, 0, PI]. Tripod A (FL, MR, RL) lifts together,
+	# tripod B (FR, ML, RR) follows. Reads as a real insect gait at
+	# distance.
+	return { "legs": legs, "phases": [0.0, PI, PI, 0.0, 0.0, PI] }
 
 
 func _build_legs_biped(member: Node3D, shape: Dictionary, mats: Array[StandardMaterial3D]) -> Dictionary:
