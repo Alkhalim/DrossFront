@@ -434,6 +434,7 @@ func _ready() -> void:
 		if stats.unit_class == &"transport":
 			_move_speed *= 1.10
 		var shape: Dictionary = CLASS_SHAPES.get(stats.unit_class, CLASS_SHAPES[&"medium"])
+		shape = _maybe_override_shape_for_unit(shape)
 		_turn_speed = shape.get("turn_speed", 6.0) as float
 		# Avoidance radius — covers the LEADER's collision capsule with
 		# a small buffer, NOT the whole squad formation. The leader is
@@ -504,6 +505,14 @@ func _build_squad_visuals() -> void:
 		old_mesh.queue_free()
 
 	var shape_data: Dictionary = CLASS_SHAPES.get(stats.unit_class, CLASS_SHAPES[&"medium"])
+	# Per-unit shape overrides -- lets a single named unit diverge
+	# from its class baseline without needing a whole new
+	# CLASS_SHAPES entry (which would also impact every other
+	# heavy chassis). Currently used by the Forgemaster to swap
+	# its leg layout to a 6-leg side-mount + run a taller chassis
+	# that visually separates the support / caster mech from the
+	# Bulwark gunline.
+	shape_data = _maybe_override_shape_for_unit(shape_data)
 	var team_color: Color = _resolve_team_color()
 
 	var squad: int = stats.squad_size
@@ -2974,6 +2983,44 @@ func _apply_courier_sensor_overlay(member: Node3D, mats: Array[StandardMaterial3
 		tip.set_surface_override_material(0, tm)
 		member.add_child(tip)
 		mats.append(tm)
+
+
+func _maybe_override_shape_for_unit(base: Dictionary) -> Dictionary:
+	## Per-unit shape overrides applied on top of the CLASS_SHAPES
+	## baseline. Each branch returns a shallow-duplicated dictionary
+	## with the changed fields set, so other heavy-class units stay
+	## on the unmodified profile.
+	if not stats:
+		return base
+	if stats.unit_name.findn("Forgemaster") >= 0:
+		var ov: Dictionary = base.duplicate()
+		# Six side-mounted legs (three pairs along the chassis sides)
+		# replace the Bulwark's ground-running quadruped, supporting
+		# the caster identity (legs come out of the SIDES, not the
+		# bottom). The stride animation falls back to alternating
+		# tripod gait already wired into _build_legs_spider.
+		ov["leg_kind"] = "spider"
+		# Slimmer leg shafts than Bulwark's stomp legs -- a
+		# carapace-mech reads with thinner pointed legs, not
+		# tank tread blocks.
+		ov["leg"] = Vector3(0.18, 1.05, 0.18)
+		# Lift the hip so the chassis silhouette sits noticeably
+		# higher than Bulwark's. With six side legs the body
+		# clears the ground more, and a 1.40 hip vs Bulwark's
+		# 0.98 reads as 'distinctly taller support mech'.
+		ov["hip_y"] = 1.40
+		# Slightly slimmer + LONGER torso than Bulwark's wide
+		# tank-destroyer profile -- reads as a hauling carapace,
+		# not a gun chassis. Z up, X down.
+		ov["torso"] = Vector3(1.32, 0.90, 2.70)
+		# Smaller forward sensor head so it doesn't fight the
+		# chimney + missile rack on the rear deck.
+		ov["head"] = Vector3(0.55, 0.42, 0.62)
+		# Wider squad spacing so the side legs of one Forgemaster
+		# don't clip into a neighbour.
+		ov["formation_spacing"] = 2.4
+		return ov
+	return base
 
 
 func _build_legs(member: Node3D, shape: Dictionary, mats: Array[StandardMaterial3D], kind: String) -> Dictionary:
