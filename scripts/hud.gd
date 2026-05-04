@@ -1380,6 +1380,10 @@ func _show_progress(pct: float, fill_color: Color) -> void:
 		return
 	# Bar stays in the layout always; modulate is what swings between
 	# 'visible' and 'hidden' so the surrounding buttons don't shift.
+	# We also have to flip `visible` back on -- the deselect path
+	# (no selection) hides the bar via .visible = false, and a later
+	# alpha bump alone wouldn't bring it back.
+	_progress_bar.visible = true
 	_progress_bar.modulate.a = 1.0
 	_progress_bar.value = clampf(pct, 0.0, 1.0) * 100.0
 	# Override fill color per call so the bar matches the task (build vs commit vs spawn).
