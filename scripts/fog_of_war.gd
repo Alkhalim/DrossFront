@@ -683,6 +683,26 @@ func _apply_entity_visibility() -> void:
 		v3d.visible = v_explored
 		_apply_fog_dim(v3d, v_explored and not v_visible)
 
+	# Trees -- hidden until scouted, then dim when out of current
+	# vision. Without this rule a Schwarzwald forest would render
+	# every trunk through the fog, leaking the LOS-occluder
+	# silhouette of the entire map at scene start.
+	for node: Node in get_tree().get_nodes_in_group("trees"):
+		if not is_instance_valid(node):
+			continue
+		var t3d: Node3D = node as Node3D
+		if not t3d:
+			continue
+		var t_iid: int = t3d.get_instance_id()
+		var t_key: int = _entity_state_key(t3d)
+		if _entity_visibility_cache.get(t_iid, -2) == t_key:
+			continue
+		_entity_visibility_cache[t_iid] = t_key
+		var t_explored: bool = is_explored_world(t3d.global_position)
+		var t_visible: bool = is_visible_world(t3d.global_position)
+		t3d.visible = t_explored
+		_apply_fog_dim(t3d, t_explored and not t_visible)
+
 	# Projectiles — strictly LOS-only. A missile fired from an
 	# unscouted Hammerhead would otherwise leak the unit's position
 	# by drawing its arc through the fog. Only currently-VISIBLE
