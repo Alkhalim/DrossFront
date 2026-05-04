@@ -215,29 +215,19 @@ func _ready() -> void:
 	_process_phase = int(get_instance_id() & 1)
 	if stats:
 		current_hp = stats.hp
-		# Default rally point sits just OUTSIDE the building's
-		# footprint, in the direction AWAY from the world origin.
-		# A building at z=+110 (player base, north end of map)
-		# rallies further north so freshly-produced units stay
-		# safely behind the line. A building at z=-110 (AI base,
-		# south) rallies further south. Faction-agnostic — the
-		# heuristic just looks at where the building actually is
-		# relative to the map. Buildings parked near origin (for
-		# example a forward outpost on the centre line) fall back
-		# to the SpawnPoint marker so units still pop out next to
-		# the building instead of marching to map-centre.
-		var away_from_origin: Vector3 = global_position
-		away_from_origin.y = 0.0
-		var rally_dist: float = stats.footprint_size.z * 0.5 + 2.5
-		if away_from_origin.length() >= 6.0:
-			rally_point = global_position + away_from_origin.normalized() * rally_dist
-		elif _spawn_marker:
-			rally_point = _spawn_marker.global_position
-		else:
-			# No marker available + sitting on origin: fall back
-			# to the building's local +Z so the rally still sits
-			# next to the structure rather than at world centre.
-			rally_point = global_position + global_transform.basis.z * rally_dist
+		# rally_point intentionally stays at RALLY_UNSET at
+		# construction. The previous default placed an auto-rally
+		# just outside the building's footprint, which felt
+		# correct for the AI's drip-spawn flow but surprised the
+		# human player -- their fresh unit would walk a few
+		# metres "for no reason" without an order. Now the rally
+		# only sets when the player actually right-clicks the
+		# minimap / world to bind one. Units produced before the
+		# player binds a rally just spawn next to the building
+		# and stand idle, mirroring how every other RTS handles
+		# unbound production. _spawn_unit's command_move call is
+		# already gated on rally_point != RALLY_UNSET, so this
+		# change requires no other edits.
 		_ensure_visual_root()
 		_apply_placeholder_shape()
 		_add_nav_obstacle()
