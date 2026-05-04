@@ -664,9 +664,18 @@ func _build_pause_overlay() -> void:
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	overlay.add_child(center)
 
+	# Faction-textured panel chrome around the pause menu contents
+	# so the "PAUSED" screen reads as part of the player's faction
+	# UI rather than a generic dark rectangle.
+	var faction_id: int = _local_player_faction()
+	var pause_panel := PanelContainer.new()
+	pause_panel.add_theme_stylebox_override("panel", FactionUIStyle.make_panel(faction_id))
+	pause_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	center.add_child(pause_panel)
+
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 6)
-	center.add_child(vbox)
+	pause_panel.add_child(vbox)
 
 	var title := Label.new()
 	title.text = "PAUSED"
@@ -1737,40 +1746,33 @@ func _build_hotkey_palette() -> void:
 
 
 func _apply_top_bar_faction_theme() -> void:
-	## Adds a faction-coloured underline to the top resource bar so
-	## the bar itself signals which faction the player picked. Anvil
-	## gets warm brass, Sable gets violet. Drawn as a thin ColorRect
-	## anchored to the bottom edge of the TopBarBackdrop.
+	## Replaces the flat ColorRect backdrop with a faction-textured
+	## banner: Anvil = riveted steel + caution stripe along the
+	## bottom; Sable = sleek dark with violet emissive trim.
+	## Existing TopBar label children stay parented to the same
+	## backdrop, so layout is unchanged.
 	var backdrop: ColorRect = get_node_or_null("TopBarBackdrop") as ColorRect
 	if not backdrop:
 		return
-	var faction_id: int = 0
-	var settings: Node = get_node_or_null("/root/MatchSettings")
-	if settings and "player_faction" in settings:
-		faction_id = settings.get("player_faction") as int
-	var accent: Color = Color(1.0, 0.82, 0.35, 1.0) if faction_id == 0 else Color(0.78, 0.45, 1.0, 1.0)
-	# Thin underline strip — 2px tall, full width, anchored to the
-	# bottom of the backdrop.
-	var underline := ColorRect.new()
-	underline.name = "TopBarFactionUnderline"
-	underline.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	underline.offset_top = -2
-	underline.offset_bottom = 0
-	underline.color = accent
-	underline.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	backdrop.add_child(underline)
-	# Pair of small faction-coloured corner caps so the bar reads
-	# as a properly framed strip rather than just a dark rectangle.
-	for side: int in 2:
-		var cap := ColorRect.new()
-		cap.set_anchors_preset(Control.PRESET_TOP_LEFT if side == 0 else Control.PRESET_TOP_RIGHT)
-		cap.offset_left = 0 if side == 0 else -64
-		cap.offset_right = 64 if side == 0 else 0
-		cap.offset_top = 0
-		cap.offset_bottom = 4
-		cap.color = accent.darkened(0.15)
-		cap.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		backdrop.add_child(cap)
+	var faction_id: int = _local_player_faction()
+	# Make the original ColorRect transparent so only the textured
+	# plate shows through. The plate is a child TextureRect filling
+	# the backdrop's full rect, drawn before the Label siblings via
+	# add_child + move_to_front juggling so it sits BEHIND the
+	# existing labels.
+	backdrop.color = Color(0, 0, 0, 0)
+	var existing_plate: Node = backdrop.get_node_or_null("TopBarFactionPlate")
+	if existing_plate:
+		existing_plate.queue_free()
+	var plate := TextureRect.new()
+	plate.name = "TopBarFactionPlate"
+	plate.texture = FactionUITextures.get_top_bar(faction_id)
+	plate.stretch_mode = TextureRect.STRETCH_TILE
+	plate.set_anchors_preset(Control.PRESET_FULL_RECT)
+	plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	backdrop.add_child(plate)
+	# Move the plate to the back so existing labels render on top.
+	backdrop.move_child(plate, 0)
 
 
 func _build_faction_watermark() -> void:
@@ -2192,57 +2194,48 @@ func _selection_passive_groups() -> Array[Dictionary]:
 
 
 func _paint_passive_button_style(btn: Button) -> void:
-	## Subdued grey-blue stylebox so a Passive slot reads as
-	## 'always-on, not interactive' next to the violet active
-	## ability buttons. Disabled-state styling matches normal so
-	## the button looks the same whether or not Godot considers it
-	## hovered (it's disabled = true so hover never visually fires
-	## anyway).
-	var passive_accent: Color = Color(0.45, 0.62, 0.78, 1.0)
-	var bg := StyleBoxFlat.new()
-	bg.bg_color = Color(0.12, 0.16, 0.20, 1.0)
-	bg.border_color = passive_accent
-	bg.set_border_width_all(1)
-	bg.set_corner_radius_all(3)
-	bg.content_margin_left = 6
-	bg.content_margin_right = 6
-	bg.content_margin_top = 4
-	bg.content_margin_bottom = 4
-	btn.add_theme_stylebox_override("normal", bg)
-	btn.add_theme_stylebox_override("hover", bg)
-	btn.add_theme_stylebox_override("pressed", bg)
-	btn.add_theme_stylebox_override("disabled", bg)
-	btn.add_theme_color_override("font_color", passive_accent)
-	btn.add_theme_color_override("font_disabled_color", passive_accent)
+	## Faction-textured background + grey-blue corner brackets so a
+	## Passive slot reads as 'always-on, not interactive' against
+	## the violet brackets used by active abilities. Same texture
+	## as the build buttons keeps the panel visually unified.
+	var faction: int = _local_player_faction()
+	btn.add_theme_stylebox_override("normal", FactionUIStyle.make_button_normal(faction))
+	btn.add_theme_stylebox_override("hover", FactionUIStyle.make_button_normal(faction))
+	btn.add_theme_stylebox_override("pressed", FactionUIStyle.make_button_normal(faction))
+	btn.add_theme_stylebox_override("disabled", FactionUIStyle.make_button_normal(faction))
+	btn.add_theme_color_override("font_color", FactionUIStyle.text_dim(faction))
+	btn.add_theme_color_override("font_disabled_color", FactionUIStyle.text_dim(faction))
+	# Passive accent = cool grey-blue bracket. Always 'enabled' read
+	# even though the button itself is non-interactive.
+	var brackets: RoleCornerBrackets = btn.get_node_or_null("RoleBrackets") as RoleCornerBrackets
+	if not brackets:
+		brackets = RoleCornerBrackets.new()
+		brackets.name = "RoleBrackets"
+		btn.add_child(brackets)
+	brackets.set_role(Color(0.45, 0.62, 0.78, 1.0), true)
 
 
 func _paint_ability_button_style(btn: Button) -> void:
-	## Distinct stylebox + label colour for active-ability buttons so
-	## they stand out from the grey Hold / Patrol / Attack-Move slots.
-	## Violet matches the COLOR_MICROCHIPS / overall "special action"
-	## tinting in the rest of the HUD.
-	var ability_color: Color = Color(0.62, 0.32, 0.92, 1.0)
-	var bg_normal := StyleBoxFlat.new()
-	bg_normal.bg_color = Color(0.20, 0.10, 0.30, 1.0)
-	bg_normal.border_color = ability_color
-	bg_normal.set_border_width_all(2)
-	bg_normal.set_corner_radius_all(3)
-	bg_normal.content_margin_left = 6
-	bg_normal.content_margin_right = 6
-	bg_normal.content_margin_top = 4
-	bg_normal.content_margin_bottom = 4
-	var bg_hover := bg_normal.duplicate()
-	bg_hover.bg_color = Color(0.28, 0.14, 0.40, 1.0)
-	var bg_pressed := bg_normal.duplicate()
-	bg_pressed.bg_color = Color(0.36, 0.20, 0.48, 1.0)
-	var bg_disabled := bg_normal.duplicate()
-	bg_disabled.bg_color = Color(0.14, 0.10, 0.18, 1.0)
-	bg_disabled.border_color = Color(0.40, 0.30, 0.55, 1.0)
-	btn.add_theme_stylebox_override("normal", bg_normal)
-	btn.add_theme_stylebox_override("hover", bg_hover)
-	btn.add_theme_stylebox_override("pressed", bg_pressed)
-	btn.add_theme_stylebox_override("disabled", bg_disabled)
-	btn.add_theme_color_override("font_color", Color(0.92, 0.85, 1.0))
+	## Faction-textured background + violet corner brackets so the
+	## active-ability buttons stand out against the cooler-bracket
+	## passive slots while sharing the same faction chrome.
+	var faction: int = _local_player_faction()
+	btn.add_theme_stylebox_override("normal", FactionUIStyle.make_button_normal(faction))
+	btn.add_theme_stylebox_override("hover", FactionUIStyle.make_button_hover(faction))
+	btn.add_theme_stylebox_override("pressed", FactionUIStyle.make_button_pressed(faction))
+	btn.add_theme_stylebox_override("disabled", FactionUIStyle.make_button_disabled(faction))
+	btn.add_theme_color_override("font_color", FactionUIStyle.text_color(faction))
+	btn.add_theme_color_override("font_disabled_color", FactionUIStyle.text_dim(faction))
+	# Ability accent = bright violet. Wider brackets than build
+	# buttons so the active-action category reads at a glance.
+	var brackets: RoleCornerBrackets = btn.get_node_or_null("RoleBrackets") as RoleCornerBrackets
+	if not brackets:
+		brackets = RoleCornerBrackets.new()
+		brackets.name = "RoleBrackets"
+		brackets.bracket_length = 18.0
+		brackets.bracket_thickness = 3.0
+		btn.add_child(brackets)
+	brackets.set_role(Color(0.78, 0.42, 1.00, 1.0), not btn.disabled)
 
 
 func _attach_autocast_badge(btn: Button) -> void:
@@ -4108,11 +4101,15 @@ func _build_minimap_quick_select() -> void:
 	row.add_theme_constant_override("separation", 6)
 	add_child(row)
 
+	var qs_faction: int = _local_player_faction()
 	_qs_military_btn = Button.new()
 	_qs_military_btn.text = ""
 	_qs_military_btn.custom_minimum_size = Vector2(40, 34)
 	_qs_military_btn.tooltip_text = "Select all your military units (skip engineers / crawlers)."
 	_qs_military_btn.pressed.connect(_on_quick_select_military)
+	_qs_military_btn.add_theme_stylebox_override("normal", FactionUIStyle.make_button_normal(qs_faction))
+	_qs_military_btn.add_theme_stylebox_override("hover", FactionUIStyle.make_button_hover(qs_faction))
+	_qs_military_btn.add_theme_stylebox_override("pressed", FactionUIStyle.make_button_pressed(qs_faction))
 	_attach_quick_select_glyph(_qs_military_btn, "mech")
 	row.add_child(_qs_military_btn)
 
@@ -4121,6 +4118,9 @@ func _build_minimap_quick_select() -> void:
 	_qs_engineer_btn.custom_minimum_size = Vector2(40, 34)
 	_qs_engineer_btn.tooltip_text = "Jump to and select an idle engineer (no current build target)."
 	_qs_engineer_btn.pressed.connect(_on_quick_select_idle_engineer)
+	_qs_engineer_btn.add_theme_stylebox_override("normal", FactionUIStyle.make_button_normal(qs_faction))
+	_qs_engineer_btn.add_theme_stylebox_override("hover", FactionUIStyle.make_button_hover(qs_faction))
+	_qs_engineer_btn.add_theme_stylebox_override("pressed", FactionUIStyle.make_button_pressed(qs_faction))
 	_attach_quick_select_glyph(_qs_engineer_btn, "wrench")
 	row.add_child(_qs_engineer_btn)
 
@@ -5354,52 +5354,38 @@ const _ROLE_COLOR_COMMAND: Color    = Color(0.85, 0.85, 0.95, 1.0) # cool white
 
 
 func _apply_role_tint_to_build_button(btn: Button, role_color: Color, enabled: bool) -> void:
-	## Tints a build-menu button so the whole panel reads at a glance
-	## by category. Background is a desaturated dark of the role color
-	## (visible but not loud), border is the saturated role color, and
-	## the hover state brightens both for feedback. Locked buttons use
-	## a flat dark grey + dim border so the player can still see which
-	## category the locked tile belongs to without it shouting.
-	var dim: float = 0.92 if enabled else 0.65
-	var bg: Color = Color(
-		role_color.r * 0.20,
-		role_color.g * 0.20,
-		role_color.b * 0.20,
-		1.0,
-	)
-	var hover_bg: Color = Color(
-		role_color.r * 0.32,
-		role_color.g * 0.32,
-		role_color.b * 0.32,
-		1.0,
-	)
-	var border: Color = Color(role_color.r, role_color.g, role_color.b, dim)
-	var normal := StyleBoxFlat.new()
-	normal.bg_color = bg
-	normal.border_color = border
-	normal.border_width_top = 2
-	normal.border_width_bottom = 2
-	normal.border_width_left = 2
-	normal.border_width_right = 2
-	normal.corner_radius_top_left = 4
-	normal.corner_radius_top_right = 4
-	normal.corner_radius_bottom_left = 4
-	normal.corner_radius_bottom_right = 4
-	normal.content_margin_left = 6
-	normal.content_margin_right = 6
-	normal.content_margin_top = 4
-	normal.content_margin_bottom = 4
-	var hover := normal.duplicate() as StyleBoxFlat
-	hover.bg_color = hover_bg
-	var pressed := normal.duplicate() as StyleBoxFlat
-	pressed.bg_color = bg.darkened(0.15)
-	var disabled := normal.duplicate() as StyleBoxFlat
-	disabled.bg_color = Color(0.10, 0.10, 0.12, 1.0)
-	disabled.border_color = Color(role_color.r, role_color.g, role_color.b, 0.45)
-	btn.add_theme_stylebox_override("normal", normal)
-	btn.add_theme_stylebox_override("hover", hover)
-	btn.add_theme_stylebox_override("pressed", pressed)
-	btn.add_theme_stylebox_override("disabled", disabled)
+	## Faction-themed background (riveted Anvil plate or sleek Sable
+	## panel) + L-shaped corner brackets in the role color so the
+	## button's category reads as a small accent rather than burying
+	## the faction texture under a coloured fill. The bracket overlay
+	## is a child Control that redraws itself on resize.
+	##
+	## Faction lookup is resolved per call so the same button helper
+	## stays correct across faction changes (e.g. a 2v2 ally that
+	## doesn't match the player's faction never reaches this path
+	## because we only style the LOCAL player's HUD).
+	var faction: int = _local_player_faction()
+	btn.add_theme_stylebox_override("normal", FactionUIStyle.make_button_normal(faction))
+	btn.add_theme_stylebox_override("hover", FactionUIStyle.make_button_hover(faction))
+	btn.add_theme_stylebox_override("pressed", FactionUIStyle.make_button_pressed(faction))
+	btn.add_theme_stylebox_override("disabled", FactionUIStyle.make_button_disabled(faction))
+	# Text colour follows the faction palette so labels read against
+	# the new background. Disabled / locked tiles drop to the dim
+	# variant.
+	var text_c: Color = FactionUIStyle.text_color(faction) if enabled else FactionUIStyle.text_dim(faction)
+	btn.add_theme_color_override("font_color", text_c)
+	btn.add_theme_color_override("font_hover_color", text_c)
+	btn.add_theme_color_override("font_pressed_color", text_c)
+	btn.add_theme_color_override("font_disabled_color", FactionUIStyle.text_dim(faction))
+	# Corner brackets in the role color. Reuse an existing overlay if
+	# the button already has one (re-styling on selection refresh) so
+	# we don't pile up multiple bracket children per button.
+	var brackets: RoleCornerBrackets = btn.get_node_or_null("RoleBrackets") as RoleCornerBrackets
+	if not brackets:
+		brackets = RoleCornerBrackets.new()
+		brackets.name = "RoleBrackets"
+		btn.add_child(brackets)
+	brackets.set_role(role_color, enabled)
 
 
 ## Per-class training-button tints. Ground vs Air share base hues so

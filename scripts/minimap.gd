@@ -17,6 +17,10 @@ var _wreck_color := Color(0.4, 0.35, 0.25, 0.5)
 ## flash markers triggered by alert events.
 const BORDER_THICKNESS: float = 8.0
 var _border_accent: Color = Color(1.0, 0.82, 0.35, 1.0)  # Anvil brass; replaced at _ready
+## Cached faction id + corner ornament texture so _draw can blit them
+## without re-querying every frame.
+var _faction_id: int = 0
+var _frame_corner_tex: Texture2D = null
 
 ## Active pings — list of {pos, t_start, color}. Pings live for
 ## PING_LIFETIME seconds and pulse expanding rings.
@@ -37,14 +41,17 @@ const PULSE_PIN_HZ: float = 1.4
 
 func _ready() -> void:
 	# Resolve the player's faction once and cache the accent colour
-	# used for the border and corner ticks.
+	# used for the border and corner ticks. Also pull the faction-
+	# specific corner-ornament texture (rivets for Anvil, HUD bracket
+	# for Sable) so _draw can blit it without rebuilding each frame.
 	var settings: Node = get_node_or_null("/root/MatchSettings")
 	if settings and "player_faction" in settings:
-		var fid: int = settings.get("player_faction") as int
-		if fid == 1:
+		_faction_id = settings.get("player_faction") as int
+		if _faction_id == 1:
 			_border_accent = Color(0.78, 0.45, 1.0, 1.0)  # Sable violet
 		else:
 			_border_accent = Color(1.0, 0.82, 0.35, 1.0)  # Anvil brass
+	_frame_corner_tex = FactionUITextures.get_frame_corner(_faction_id)
 
 
 func ping(world_pos: Vector3, color: Color = Color.WHITE) -> void:
@@ -213,18 +220,32 @@ func _draw() -> void:
 	var inner_rect := Rect2(Vector2(2, 2), full - Vector2(4, 4))
 	draw_rect(inner_rect, Color.TRANSPARENT, false, 2.0)
 	draw_rect(inner_rect, _border_accent.darkened(0.30), false, 2.0)
-	# Corner ticks — small L-brackets in faction accent at each
-	# corner. Stops the frame from looking like a generic UI panel.
-	var tick_len: float = 14.0
-	var tick_thick: float = 2.0
-	for cx_i: int in 2:
-		for cy_i: int in 2:
-			var ox: float = 2.0 if cx_i == 0 else full.x - 2.0
-			var oy: float = 2.0 if cy_i == 0 else full.y - 2.0
-			var dir_x: int = 1 if cx_i == 0 else -1
-			var dir_y: int = 1 if cy_i == 0 else -1
-			draw_line(Vector2(ox, oy), Vector2(ox + dir_x * tick_len, oy), _border_accent, tick_thick)
-			draw_line(Vector2(ox, oy), Vector2(ox, oy + dir_y * tick_len), _border_accent, tick_thick)
+	# Corner ornaments -- procedurally-generated texture per faction
+	# (Anvil = rivet cluster, Sable = HUD bracket + slash). Drawn at
+	# each corner with appropriate flips so the ornament always
+	# points inward regardless of corner.
+	if _frame_corner_tex:
+		var corner_size: Vector2 = Vector2(28.0, 28.0)
+		# Top-left: identity transform.
+		draw_texture_rect(_frame_corner_tex, Rect2(Vector2.ZERO, corner_size), false, _border_accent)
+		# Top-right: flip horizontally.
+		draw_texture_rect(_frame_corner_tex, Rect2(Vector2(full.x - corner_size.x, 0.0), corner_size), false, _border_accent, true)
+		# Bottom-left: flip vertically (no horizontal flip flag, so we
+		# achieve it with a rotated texture region via a transform).
+		# Easier: draw_texture_rect with negative size to flip Y.
+		draw_texture_rect_region(
+			_frame_corner_tex,
+			Rect2(Vector2(0.0, full.y - corner_size.y), corner_size),
+			Rect2(Vector2(0.0, _frame_corner_tex.get_height()), Vector2(_frame_corner_tex.get_width(), -float(_frame_corner_tex.get_height()))),
+			_border_accent,
+		)
+		# Bottom-right: flip both.
+		draw_texture_rect_region(
+			_frame_corner_tex,
+			Rect2(Vector2(full.x - corner_size.x, full.y - corner_size.y), corner_size),
+			Rect2(Vector2(_frame_corner_tex.get_width(), _frame_corner_tex.get_height()), Vector2(-float(_frame_corner_tex.get_width()), -float(_frame_corner_tex.get_height()))),
+			_border_accent,
+		)
 
 	# Map background — inset rectangle.
 	draw_rect(Rect2(map_origin, map_size), Color(0.08, 0.08, 0.07, 0.85))
