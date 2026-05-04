@@ -1982,17 +1982,25 @@ func _setup_terrain_schwarzwald() -> void:
 	## allies share a corridor with their SE opponents on the right
 	## flank; NW with SW on the left). The forest fills the
 	## non-corridor area + the corners.
-	const MAP_HALF: float = 130.0
+	# Bumped 130 -> 155 to track the +20% HQ position bump (HQs now
+	# at z=±132). Trees now extend almost to the playable map edge
+	# instead of leaving an empty halo around each base.
+	const MAP_HALF: float = 155.0
 	# Wide cleared zone around each HQ so the player has real room
 	# to lay down a base. The previous 20u barely cleared the HQ
 	# itself + a foundry; 38u opens up an actual building plot.
 	const HQ_CLEAR_RADIUS: float = 38.0
-	# Corridor halfwidths control how wide the cleared lanes are.
-	# Tightened to ~2/3 of the previous 18u so the chokepoint
-	# actually feels like a chokepoint -- a Bulwark squad still
-	# fits but the player can't simply spread their army across
-	# the corridor and walk past the choke.
-	const CORRIDOR_HALF_WIDTH: float = 12.0
+	# Corridor BASE halfwidth -- the actual width pulses up + down
+	# along Z via sin-wave variation below so the path between
+	# bases reads as 'two or three narrow chokepoints between
+	# wider plazas' instead of a uniform tube.
+	const CORRIDOR_HALF_WIDTH_BASE: float = 11.0
+	const CORRIDOR_HALF_WIDTH_AMP: float = 6.0  # wider plazas reach 17u, chokes pinch to 5u
+	const CORRIDOR_PINCH_FREQ: float = 0.060   # ~3 narrows over the playable Z span
+	# Lateral wobble of the corridor centreline per Z step so the
+	# path doesn't read as a perfectly straight column.
+	const CORRIDOR_LATERAL_WOBBLE: float = 4.5
+	const CORRIDOR_WOBBLE_FREQ: float = 0.045
 	# Tree density. Step ~3.4u is just under TRUNK_RADIUS * 2 for a
 	# trunk of 1.05u + a small jitter buffer -- units (collision
 	# radius ~1.5u) cannot squeeze between adjacent trunks, so the
@@ -2034,13 +2042,18 @@ func _setup_terrain_schwarzwald() -> void:
 	for cx: float in corridor_centres_x:
 		for cz_sign: float in [1.0, -1.0]:
 			var rock_z: float = cz_sign * 35.0
+			# Track the corridor wobble + pinch when placing the
+			# choke pillars so the rocks land at the actual lane
+			# edges, not on top of the wider plazas.
+			var rk_half: float = CORRIDOR_HALF_WIDTH_BASE + sin(rock_z * CORRIDOR_PINCH_FREQ) * CORRIDOR_HALF_WIDTH_AMP
+			var rk_off: float = sin(rock_z * CORRIDOR_WOBBLE_FREQ) * CORRIDOR_LATERAL_WOBBLE
 			_spawn_terrain_piece(
-				Vector3(cx - CORRIDOR_HALF_WIDTH - 2.0, 0.0, rock_z),
+				Vector3(cx + rk_off - rk_half - 2.0, 0.0, rock_z),
 				Vector3(3.2, 3.0, 3.2),
 				"rock",
 			)
 			_spawn_terrain_piece(
-				Vector3(cx + CORRIDOR_HALF_WIDTH + 2.0, 0.0, rock_z),
+				Vector3(cx + rk_off + rk_half + 2.0, 0.0, rock_z),
 				Vector3(3.0, 3.2, 3.0),
 				"rock",
 			)
@@ -2058,11 +2071,25 @@ func _setup_terrain_schwarzwald() -> void:
 			var pz: float = z + randf_range(-TREE_JITTER, TREE_JITTER)
 			z += TREE_GRID_STEP
 			# Skip cells inside any corridor (cleared lanes).
+			# Corridor halfwidth pulses along Z (sin) so the lane
+			# alternates wider plazas + narrower chokepoints; the
+			# centreline itself wobbles laterally so the path
+			# doesn't read as a perfectly straight column.
 			var inside_corridor: bool = false
+			var corridor_half: float = CORRIDOR_HALF_WIDTH_BASE + sin(pz * CORRIDOR_PINCH_FREQ) * CORRIDOR_HALF_WIDTH_AMP
+			var corridor_offset: float = sin(pz * CORRIDOR_WOBBLE_FREQ) * CORRIDOR_LATERAL_WOBBLE
 			for cx2: float in corridor_centres_x:
-				if absf(px - cx2) <= CORRIDOR_HALF_WIDTH:
+				if absf(px - (cx2 + corridor_offset)) <= corridor_half:
 					inside_corridor = true
 					break
+			# 2v2: lateral ally lane connecting the two allied HQs
+			# along the +Z and -Z edges. Cleared as a wide horizontal
+			# strip so the player can reinforce the ally without
+			# fighting through the forest first.
+			if not inside_corridor and _is_2v2():
+				var ally_lane_half: float = 9.0
+				if absf(pz - 120.0) <= ally_lane_half or absf(pz + 120.0) <= ally_lane_half:
+					inside_corridor = true
 			if inside_corridor:
 				continue
 			# Skip cells inside any HQ clearance circle.
