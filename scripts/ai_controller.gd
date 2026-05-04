@@ -26,7 +26,14 @@ var _hq_destroyed: bool = false
 ## Building placement tracking — each placed once.
 var _buildings_placed: Dictionary = {}
 
-const AI_SALVAGE_TRICKLE: float = 15.0
+## Passive salvage trickle. Pulled 15.0 -> 5.0 to MATCH the player's
+## ResourceManager.HQ_SALVAGE_TRICKLE -- the AI used to pile up income
+## 3x the player's rate at the same _econ_mul, which felt like a
+## stealth resource cheat regardless of what the difficulty setting
+## advertised. Now HARD (_econ_mul = 1.0) really is 1.0x with no
+## hidden bonus; NORMAL / EASY scale below via the difficulty
+## multiplier.
+const AI_SALVAGE_TRICKLE: float = 5.0
 ## Safety net against the 'AI never attacks' failure mode -- if no
 ## attack has launched for this many seconds since either match
 ## start or the last attack, the AI force-pushes ATTACK with
@@ -445,20 +452,20 @@ func _process(delta: float) -> void:
 		_hq_destroyed = true
 		return
 
-	# Passive income — scaled by difficulty's economy multiplier so Easy
-	# starves the AI a bit and Hard makes it tech up faster. Income
-	# accumulator stays on the per-frame path because it integrates
-	# fractional salvage that we don't want to drop on throttled ticks.
+	# Passive income — matched to the player's HQ trickle (5/sec) and
+	# scaled by difficulty's economy multiplier. HARD is now genuinely
+	# 1.0x with no hidden bonus; NORMAL (0.80) and EASY (0.55) scale
+	# below. Fuel is NOT trickled here -- the player has to capture
+	# deposits to gain fuel, so the AI does too. Removing the AI's
+	# free fuel drip closes the last "stealth income" gap; the AI's
+	# active _try_contest_oil dispatch already grabs deposits, so an
+   	# AI that's playing well stays fuel-positive without the cheat.
 	if _ai_resource_manager and _ai_resource_manager.has_method("add_salvage"):
 		_salvage_accumulator += AI_SALVAGE_TRICKLE * _econ_mul * delta
 		if _salvage_accumulator >= 1.0:
 			var trickle: int = int(_salvage_accumulator)
 			_salvage_accumulator -= float(trickle)
 			_ai_resource_manager.add_salvage(trickle)
-			# Also give some fuel
-			if _ai_resource_manager.has_method("add_fuel"):
-				@warning_ignore("integer_division")
-				_ai_resource_manager.add_fuel(max(trickle / 3, 1))
 
 	# Throttle the rest of the AI tick (state machine + group walks
 	# + expansion timer) to ~5Hz. Below this point `delta` is the
