@@ -4693,6 +4693,47 @@ func _setup_geothermic_vents() -> void:
 		existing_positions.append(best_pos)
 
 
+func _vent_overlaps_terrain(pos: Vector3) -> bool:
+	## True when the candidate vent position sits on (or right next
+	## to) any registered plateau / ramp / hill footprint. Vents need
+	## flat ground at Y=0 to host a generator; embedding in raised
+	## terrain leaves the generator un-buildable and the steam VFX
+	## clipping through ramp geometry reads as a bug. Keepout = 4.0u
+	## so the vent + its concrete pad clears the slope foot.
+	const VENT_TERRAIN_KEEPOUT: float = 4.0
+	for node: Node in get_tree().get_nodes_in_group("elevation"):
+		if not is_instance_valid(node):
+			continue
+		var n3: Node3D = node as Node3D
+		if not n3:
+			continue
+		# Each plateau StaticBody sits at the centre of its top
+		# footprint at y=0; a simple horizontal-distance check
+		# against the body's broad bounding extent is enough to
+		# reject vents that would land on or near a slope.
+		if pos.distance_to(Vector3(n3.global_position.x, 0.0, n3.global_position.z)) < VENT_TERRAIN_KEEPOUT * 4.0:
+			# Closer inspection: any child collision shape's AABB
+			# in world space. Use a generous 2D inflation around
+			# the body centre to catch ramp wedges that extend
+			# past the plateau body.
+			return true
+	# Also reject vents that overlap fuel deposits / wrecks / other
+	# terrain features so a vent isn't stuck inside a refinery rig.
+	for group_name: String in ["fuel_deposits", "terrain"]:
+		for node: Node in get_tree().get_nodes_in_group(group_name):
+			if not is_instance_valid(node):
+				continue
+			var n3b: Node3D = node as Node3D
+			if not n3b:
+				continue
+			# Skip elevation nodes (already handled above).
+			if n3b.is_in_group("elevation"):
+				continue
+			if pos.distance_to(Vector3(n3b.global_position.x, 0.0, n3b.global_position.z)) < VENT_TERRAIN_KEEPOUT:
+				return true
+	return false
+
+
 func _spawn_vent(pos: Vector3) -> void:
 	var vent: GeothermicVent = GeothermicVent.new()
 	add_child(vent)
