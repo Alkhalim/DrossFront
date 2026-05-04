@@ -9,11 +9,11 @@
 script = ExtResource("2")
 weapon_name = "Twin AT Cannon Battery"
 role_tag = &"AP"
-damage_tier = &"high"
+damage_tier = &"very_high"
 range_tier = &"long"
 rof_tier = &"slow"
-damage_value = 65
-rof_seconds_value = 6.5
+damage_value = 195
+rof_seconds_value = 5.9
 salvo_count = 2
 salvo_stagger_sec = 0.13
 projectile_style = &"shell"
@@ -21,7 +21,7 @@ base_accuracy = 0.85
 can_damage_trees = true
 mult_vs_light = 0.55
 mult_vs_medium = 0.85
-mult_vs_heavy = 1.10
+mult_vs_heavy = 1.00
 structure_damage_mult = 0.70
 
 [resource]
