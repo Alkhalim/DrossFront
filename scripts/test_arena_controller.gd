@@ -4074,8 +4074,12 @@ func _spawn_skyline_feature(pos: Vector3, kind: String, height: float) -> void:
 
 
 func _build_skyline_stack(root: Node3D, color: Color, height: float) -> void:
-	# A wide brick base + tall thinner column + cap ring — reads as an
-	# old foundry chimney / refinery stack.
+	## Old foundry / refinery chimney. Built from a wide brick base
+	## plus a hollow tube made of ringed wall panels so the player
+	## can see down into the stack from the RTS camera angle. A few
+	## panels are skipped or shortened to read as derelict / partly
+	## collapsed; rubble piles dressed at the base sell the broken
+	## look.
 	var base := MeshInstance3D.new()
 	var base_box := BoxMesh.new()
 	base_box.size = Vector3(2.4, height * 0.18, 2.4)
@@ -4089,36 +4093,101 @@ func _build_skyline_stack(root: Node3D, color: Color, height: float) -> void:
 	base_mat.roughness = 0.95
 	base.material_override = base_mat
 	root.add_child(base)
-	var column := MeshInstance3D.new()
-	var column_cyl := CylinderMesh.new()
-	column_cyl.top_radius = 0.7
-	column_cyl.bottom_radius = 0.95
-	column_cyl.height = height * 0.78
-	column.mesh = column_cyl
-	column.position.y = height * 0.18 + column_cyl.height * 0.5
-	var col_mat := StandardMaterial3D.new()
-	col_mat.albedo_color = color
-	col_mat.albedo_texture = SharedTextures.get_metal_wear_texture()
-	col_mat.uv1_offset = Vector3(randf(), randf(), 0.0)
-	col_mat.uv1_scale = Vector3(1.5, 3.0, 1.0)
-	col_mat.roughness = 0.92
-	column.material_override = col_mat
-	root.add_child(column)
-	# Cap ring at the top — slight emissive so distant skyline catches the eye.
-	var cap := MeshInstance3D.new()
-	var cap_cyl := CylinderMesh.new()
-	cap_cyl.top_radius = 1.0
-	cap_cyl.bottom_radius = 1.0
-	cap_cyl.height = 0.25
-	cap.mesh = cap_cyl
-	cap.position.y = height * 0.96
-	var cap_mat := StandardMaterial3D.new()
-	cap_mat.albedo_color = color.darkened(0.3)
-	cap_mat.emission_enabled = true
-	cap_mat.emission = Color(1.0, 0.45, 0.18)
-	cap_mat.emission_energy_multiplier = 0.6
-	cap.material_override = cap_mat
-	root.add_child(cap)
+
+	# Hollow tube. Each segment is a narrow box arranged tangent to
+	# a circle of radius `tube_radius`. Skipping random segments and
+	# shortening their height creates the "broken rim" silhouette
+	# without a per-stack ArrayMesh. The shared inner-wall material
+	# is darker than the outer so the inside reads as scorched.
+	var tube_height: float = height * 0.78
+	var tube_y: float = height * 0.18 + tube_height * 0.5
+	var tube_radius: float = 0.85
+	var tube_radius_top: float = 0.75
+	const SEGMENTS: int = 14
+	# Outer wall material -- weathered metal panel, same character as
+	# the column had before.
+	var wall_mat := StandardMaterial3D.new()
+	wall_mat.albedo_color = color
+	wall_mat.albedo_texture = SharedTextures.get_metal_wear_texture()
+	wall_mat.uv1_offset = Vector3(randf(), randf(), 0.0)
+	wall_mat.uv1_scale = Vector3(1.5, 3.0, 1.0)
+	wall_mat.roughness = 0.92
+	# Damage markers: pre-roll which segments are missing / short so
+	# the broken rim is consistent across this stack's lifetime.
+	# Use match-seeded rand so each placement gets a different
+	# break pattern but a single stack stays stable.
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	var missing_count: int = rng.randi_range(1, 2)
+	var missing_idx: Dictionary = {}
+	for _i: int in missing_count:
+		missing_idx[rng.randi_range(0, SEGMENTS - 1)] = true
+	for s_i: int in SEGMENTS:
+		if missing_idx.has(s_i):
+			continue
+		var ang: float = float(s_i) / float(SEGMENTS) * TAU
+		# Tangent panel width ≈ chord between two segment centres.
+		var seg_w: float = TAU * tube_radius / float(SEGMENTS) * 1.05
+		# Random per-segment height taper so the rim looks chewed
+		# rather than perfectly flat. 80%-100% of tube_height.
+		var seg_h: float = tube_height * rng.randf_range(0.80, 1.0)
+		var panel := MeshInstance3D.new()
+		var panel_box := BoxMesh.new()
+		panel_box.size = Vector3(seg_w, seg_h, 0.18)
+		panel.mesh = panel_box
+		var r: float = lerp(tube_radius, tube_radius_top, 0.5)
+		panel.position = Vector3(
+			cos(ang) * r,
+			tube_y + (seg_h - tube_height) * 0.5,
+			sin(ang) * r,
+		)
+		# Face the panel toward the tube centre.
+		panel.rotation.y = -ang + PI * 0.5
+		panel.material_override = wall_mat
+		root.add_child(panel)
+
+	# Inner darker cylinder occupying the lower 70% of the tube --
+	# this is the visible "back wall" the player sees when looking
+	# down into the stack from above. Without it the inside looks
+	# like an empty void where ground geometry behind the stack
+	# leaks through.
+	var well := MeshInstance3D.new()
+	var well_cyl := CylinderMesh.new()
+	well_cyl.top_radius = tube_radius * 0.78
+	well_cyl.bottom_radius = tube_radius * 0.78
+	well_cyl.height = tube_height * 0.70
+	well.mesh = well_cyl
+	well.position.y = tube_y - tube_height * 0.15
+	var well_mat := StandardMaterial3D.new()
+	well_mat.albedo_color = Color(0.05, 0.04, 0.03, 1.0)  # near-black soot
+	well_mat.roughness = 1.0
+	well.material_override = well_mat
+	root.add_child(well)
+
+	# Rubble piles dressed at the base -- a few angular boxes
+	# clustered against one side to suggest a partial collapse.
+	# Tied to the missing segment direction when possible so the
+	# rubble lines up with the broken rim.
+	var rubble_dir: float = rng.randf() * TAU
+	if not missing_idx.is_empty():
+		var first_missing: int = missing_idx.keys()[0] as int
+		rubble_dir = float(first_missing) / float(SEGMENTS) * TAU
+	for r_i: int in 4:
+		var rb := MeshInstance3D.new()
+		var rb_box := BoxMesh.new()
+		var rs: float = rng.randf_range(0.35, 0.70)
+		rb_box.size = Vector3(rs, rs * rng.randf_range(0.45, 0.85), rs)
+		rb.mesh = rb_box
+		var off_ang: float = rubble_dir + rng.randf_range(-0.7, 0.7)
+		var off_r: float = rng.randf_range(1.05, 1.55)
+		rb.position = Vector3(
+			cos(off_ang) * off_r,
+			rs * 0.5 * 0.55 + 0.05,
+			sin(off_ang) * off_r,
+		)
+		rb.rotation.y = rng.randf_range(0.0, TAU)
+		rb.material_override = base_mat
+		root.add_child(rb)
 
 
 func _build_skyline_tower(root: Node3D, color: Color, height: float) -> void:
