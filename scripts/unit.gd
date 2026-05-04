@@ -172,6 +172,11 @@ var _zero_move_repath_at_msec: int = 0
 ## re-issue command_move every frame while the deflection ladder
 ## is also tweaking the agent.
 var _ramp_rescue_at_msec: int = 0
+## Throttle (msec) for the detour-around-building attempts. Once a
+## unit triggers the 1.4s building-detour, suppress further detour
+## attempts on this unit for ~3s so the inserted side-step has time
+## to play out before another one stacks behind it.
+var _detour_attempted_at_msec: int = 0
 
 ## Movement-aware collision shrink. While the unit is actively
 ## moving, the leader collision box is rescaled to
@@ -5185,6 +5190,81 @@ func stop() -> void:
 	has_move_order = false
 
 
+func _try_unit_detour_around_building() -> bool:
+	## Stuck-rescue stage 2 for Unit (~1.4s of zero progress with a
+	## live move order). Mirrors the crawler's
+	## _find_detour_waypoint logic: find the nearest building roughly
+	## ahead of the unit, compute a perpendicular side-step that
+	## walks AWAY from that building's centre line, and queue it
+	## ahead of the original target so the unit physically routes
+	## around the obstacle before resuming.
+	##
+	## Returns true when a detour was actually queued (caller uses
+	## the bool to throttle re-attempts) and false when no blocking
+	## building was found in front of the unit (in which case the
+	## existing deflection ladder handles the situation).
+	if move_target == Vector3.INF or not has_move_order:
+		return false
+	var fwd: Vector3 = move_target - global_position
+	fwd.y = 0.0
+	if fwd.length_squared() < 0.01:
+		return false
+	fwd = fwd.normalized()
+	const DETOUR_SCAN_RADIUS: float = 10.0
+	const DETOUR_FORWARD_CONE_DOT: float = 0.2  # ~78° cone forward
+	const DETOUR_OFFSET_MIN: float = 5.0
+	var origin: Vector3 = global_position
+	var best_blocker: Node3D = null
+	var best_blocker_d: float = DETOUR_SCAN_RADIUS
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var b: Node3D = node as Node3D
+		if not b:
+			continue
+		var to_b: Vector3 = b.global_position - origin
+		to_b.y = 0.0
+		var d: float = to_b.length()
+		if d > DETOUR_SCAN_RADIUS:
+			continue
+		if d > 0.001 and to_b.normalized().dot(fwd) < DETOUR_FORWARD_CONE_DOT:
+			continue
+		if d < best_blocker_d:
+			best_blocker_d = d
+			best_blocker = b
+	if not best_blocker:
+		return false
+	# Perpendicular axis (90° rotation of fwd around Y).
+	var perp: Vector3 = Vector3(-fwd.z, 0.0, fwd.x)
+	# Pick the side AWAY from the blocker's centre line so the
+	# detour walks past the building rather than into another
+	# corner of it.
+	var to_blocker: Vector3 = best_blocker.global_position - origin
+	to_blocker.y = 0.0
+	var blocker_lateral: float = to_blocker.dot(perp)
+	var side_dir: Vector3 = -perp if blocker_lateral > 0.0 else perp
+	# How far out -- pull from the building's footprint half-extent
+	# so the side-step clears the bounding box plus a margin.
+	var b_half: float = 3.0
+	var b_stats_v: Variant = best_blocker.get("stats")
+	if typeof(b_stats_v) == TYPE_OBJECT and is_instance_valid(b_stats_v):
+		var fp_v: Variant = b_stats_v.get("footprint_size")
+		if typeof(fp_v) == TYPE_VECTOR3:
+			var fp: Vector3 = fp_v as Vector3
+			b_half = maxf(fp.x, fp.z) * 0.5
+	var lateral_off: float = maxf(b_half + 3.0, DETOUR_OFFSET_MIN)
+	var detour: Vector3 = origin + side_dir * lateral_off + fwd * 3.0
+	detour.y = origin.y
+	# Queue the detour: push the original target back into the
+	# move_queue so the unit resumes the original goal once the
+	# detour is reached, then retarget the agent to the side-step.
+	move_queue.push_front(move_target)
+	move_target = detour
+	if _nav_agent:
+		_nav_agent.target_position = detour
+	return true
+
+
 func _try_ramp_stuck_rescue() -> bool:
 	## When wedged on a ramp, command_move toward the far short-end
 	## midpoint of the ramp's clearance rect (i.e. the side opposite
@@ -6158,6 +6238,17 @@ func _physics_process(delta: float) -> void:
 			_deflect_until_msec = now_msec + 900
 			if _nav_agent:
 				_nav_agent.target_position = move_target
+		# 1.4s — building detour. The deflection sidesteps wiggle but
+		# don't change the path the navmesh hands back; if the unit's
+		# stuck on a building corner, the agent keeps producing the
+		# same blocked route. Insert a side-step waypoint AROUND the
+		# nearest blocking building so the unit physically routes
+		# past it before retrying the original target. Once-every-3s
+		# throttle so a stuck-against-a-wall unit doesn't stack
+		# detour waypoints on top of each other.
+		if _stuck_timer >= 1.4 and now_msec >= _detour_attempted_at_msec:
+			if _try_unit_detour_around_building():
+				_detour_attempted_at_msec = now_msec + 3000
 		# 1.8s — escalate to 75°. Pure-perpendicular slide along the
 		# obstacle edge.
 		if _stuck_timer >= 1.8 and _stuck_timer < 1.8 + delta * 1.5:
