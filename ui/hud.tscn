@@ -15,7 +15,7 @@ script = ExtResource("1")
 layout_mode = 1
 anchors_preset = 10
 anchor_right = 1.0
-offset_bottom = 36.0
+offset_bottom = 30.0
 mouse_filter = 2
 color = Color(0.06, 0.07, 0.08, 0.78)
 

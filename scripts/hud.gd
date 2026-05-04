@@ -150,6 +150,7 @@ func _ready() -> void:
 	_build_fps_counter()
 	_build_faction_watermark()
 	_apply_top_bar_faction_theme()
+	_apply_bottom_panel_faction_theme()
 	_build_selection_roster()
 	_build_hotkey_palette()
 	# Faster tooltip popups — Godot's default ~500ms is too slow for
@@ -1773,6 +1774,18 @@ func _apply_top_bar_faction_theme() -> void:
 	backdrop.add_child(plate)
 	# Move the plate to the back so existing labels render on top.
 	backdrop.move_child(plate, 0)
+
+
+func _apply_bottom_panel_faction_theme() -> void:
+	## Wraps the bottom action / info panel in a faction-styled
+	## stylebox so the build-menu chrome reads as part of the
+	## player's faction kit. Uses make_panel for the textured
+	## background; the buttons inside already pick up their own
+	## faction styling via _apply_role_tint_to_build_button.
+	if not _bottom_panel or not is_instance_valid(_bottom_panel):
+		return
+	var faction_id: int = _local_player_faction()
+	_bottom_panel.add_theme_stylebox_override("panel", FactionUIStyle.make_panel(faction_id))
 
 
 func _build_faction_watermark() -> void:

@@ -56,21 +56,40 @@ func _draw() -> void:
 		# Dim disabled brackets so locked tiles don't shout their
 		# category. Halve alpha and desaturate slightly toward grey.
 		c.a *= 0.45
-	# Each corner gets two strokes -- one horizontal, one vertical --
-	# starting `inset` pixels in from the corner and extending
-	# `bracket_length` along each axis. Thickness stays constant.
+	# Mounting socket -- darker recessed bed under each bracket so
+	# the role colour reads as inset into the plate rather than as
+	# a translucent overlay floating above it. Drawn first; the
+	# bracket strokes layer on top with a tiny bright top-left
+	# highlight pixel for the "stamped metal" emboss.
 	var L: float = bracket_length
 	var t: float = bracket_thickness
 	var i: float = inset
+	var socket: Color = Color(0.0, 0.0, 0.0, 0.55) if enabled else Color(0.0, 0.0, 0.0, 0.30)
+	var hi: Color = Color(1.0, 1.0, 1.0, 0.30) if enabled else Color(1.0, 1.0, 1.0, 0.12)
+	var pad: float = 1.0  # how much the socket extends past the bracket on each side
+	# Each corner: socket bed (slightly larger), bracket strokes,
+	# bright pixel highlight at the inner corner of the L.
 	# Top-left
+	draw_rect(Rect2(i - pad, i - pad, L + pad * 2.0, t + pad * 2.0), socket, true)
+	draw_rect(Rect2(i - pad, i - pad, t + pad * 2.0, L + pad * 2.0), socket, true)
 	draw_rect(Rect2(i, i, L, t), c, true)
 	draw_rect(Rect2(i, i, t, L), c, true)
+	draw_rect(Rect2(i, i, 1.0, 1.0), hi, true)
 	# Top-right
+	draw_rect(Rect2(size.x - i - L - pad, i - pad, L + pad * 2.0, t + pad * 2.0), socket, true)
+	draw_rect(Rect2(size.x - i - t - pad, i - pad, t + pad * 2.0, L + pad * 2.0), socket, true)
 	draw_rect(Rect2(size.x - i - L, i, L, t), c, true)
 	draw_rect(Rect2(size.x - i - t, i, t, L), c, true)
+	draw_rect(Rect2(size.x - i - 1.0, i, 1.0, 1.0), hi, true)
 	# Bottom-left
+	draw_rect(Rect2(i - pad, size.y - i - t - pad, L + pad * 2.0, t + pad * 2.0), socket, true)
+	draw_rect(Rect2(i - pad, size.y - i - L - pad, t + pad * 2.0, L + pad * 2.0), socket, true)
 	draw_rect(Rect2(i, size.y - i - t, L, t), c, true)
 	draw_rect(Rect2(i, size.y - i - L, t, L), c, true)
+	draw_rect(Rect2(i, size.y - i - 1.0, 1.0, 1.0), hi, true)
 	# Bottom-right
+	draw_rect(Rect2(size.x - i - L - pad, size.y - i - t - pad, L + pad * 2.0, t + pad * 2.0), socket, true)
+	draw_rect(Rect2(size.x - i - t - pad, size.y - i - L - pad, t + pad * 2.0, L + pad * 2.0), socket, true)
 	draw_rect(Rect2(size.x - i - L, size.y - i - t, L, t), c, true)
 	draw_rect(Rect2(size.x - i - t, size.y - i - L, t, L), c, true)
+	draw_rect(Rect2(size.x - i - 1.0, size.y - i - 1.0, 1.0, 1.0), hi, true)

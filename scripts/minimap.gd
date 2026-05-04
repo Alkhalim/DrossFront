@@ -212,14 +212,33 @@ func _draw() -> void:
 	var map_size: Vector2 = full - Vector2(BORDER_THICKNESS, BORDER_THICKNESS) * 2.0
 	var half_world: float = MAP_WORLD_SIZE / 2.0
 
-	# Decorative border — outer dark frame + faction-coloured inner
-	# accent bands + corner ticks. Reads as a stamped insignia plate
-	# rather than a flat dark rectangle.
-	draw_rect(Rect2(Vector2.ZERO, full), Color(0.04, 0.04, 0.05, 0.95))
+	# Faction-textured frame plate. The button-face procedural
+	# texture (riveted Anvil steel / scanlined Sable cyber) is
+	# tiled across the outer margin so the minimap chrome
+	# matches the rest of the player's HUD instead of reading
+	# as a flat black slab.
+	var frame_tex: Texture2D = FactionUITextures.get_button_face(_faction_id)
+	if frame_tex:
+		var tex_w: float = float(frame_tex.get_width())
+		var tex_h: float = float(frame_tex.get_height())
+		# Tile the texture by drawing one rect per integer tile;
+		# draw_texture_rect_region with a scaled source rect gives
+		# us tiling for free.
+		draw_texture_rect_region(
+			frame_tex,
+			Rect2(Vector2.ZERO, full),
+			Rect2(Vector2.ZERO, Vector2(full.x / tex_w * tex_w, full.y / tex_h * tex_h)),
+		)
+	else:
+		draw_rect(Rect2(Vector2.ZERO, full), Color(0.04, 0.04, 0.05, 0.95))
 	# Faction accent strip just inside the outer frame.
 	var inner_rect := Rect2(Vector2(2, 2), full - Vector2(4, 4))
-	draw_rect(inner_rect, Color.TRANSPARENT, false, 2.0)
-	draw_rect(inner_rect, _border_accent.darkened(0.30), false, 2.0)
+	draw_rect(inner_rect, _border_accent, false, 2.0)
+	# Inner trim — thin dark line one pixel inside the accent so
+	# the bezel reads as a recessed plate rather than a painted
+	# stripe on top of the texture.
+	var trim_rect := Rect2(Vector2(BORDER_THICKNESS - 1, BORDER_THICKNESS - 1), map_size + Vector2(2, 2))
+	draw_rect(trim_rect, Color(0.05, 0.05, 0.06, 1.0), false, 1.0)
 	# Corner ornaments -- procedurally-generated texture per faction
 	# (Anvil = rivet cluster, Sable = HUD bracket + slash). Drawn at
 	# each corner with appropriate flips so the ornament always
