@@ -42,62 +42,140 @@ func _draw() -> void:
 
 
 func _draw_anvil_icon(cx: float, cy: float, r: float) -> void:
-	# Iron-grey rivet plate background — circle with darker outline.
-	draw_circle(Vector2(cx, cy), r, Color(0.32, 0.34, 0.36, 1.0))
-	draw_arc(Vector2(cx, cy), r, 0.0, TAU, 32, Color(0.05, 0.05, 0.06, 1.0), 2.0, true)
-	# 4 corner rivets at NE/NW/SE/SW of the plate.
-	var rivet_r: float = r * 0.70
-	for ang: float in [PI * 0.25, PI * 0.75, PI * 1.25, PI * 1.75]:
-		draw_circle(Vector2(cx + cos(ang) * rivet_r, cy + sin(ang) * rivet_r), 2.5, Color(0.18, 0.20, 0.22, 1.0))
-	# Anvil silhouette — a chunky upside-down trapezoid with horns.
-	# Drawn as a polygon so the body is solid and reads at small size.
-	var body_w: float = r * 1.05
+	# Octagonal iron plate -- stronger industrial silhouette than
+	# the previous circle. Eight-vertex polygon with a darker
+	# bevel ring on its inside edge.
+	var plate: PackedVector2Array = []
+	for i: int in 8:
+		var a: float = float(i) / 8.0 * TAU + PI / 8.0  # rotated so a flat edge sits on top
+		plate.append(Vector2(cx + cos(a) * r, cy + sin(a) * r))
+	draw_colored_polygon(plate, Color(0.30, 0.27, 0.22, 1.0))
+	# Inner bevel polygon -- slightly smaller octagon in a darker
+	# tone so the plate reads as a thick rim around the central
+	# emblem.
+	var bevel: PackedVector2Array = []
+	for i: int in 8:
+		var a: float = float(i) / 8.0 * TAU + PI / 8.0
+		bevel.append(Vector2(cx + cos(a) * (r * 0.84), cy + sin(a) * (r * 0.84)))
+	draw_colored_polygon(bevel, Color(0.20, 0.18, 0.15, 1.0))
+	# Bright outline on the outer plate edge.
+	for i: int in 8:
+		var p_a: Vector2 = plate[i]
+		var p_b: Vector2 = plate[(i + 1) % 8]
+		draw_line(p_a, p_b, Color(0.55, 0.46, 0.30, 1.0), 1.5)
+	# 4 brass rivets along the cardinal axes -- larger and brighter
+	# than before so they read at small thumbnail sizes.
+	var rivet_r: float = r * 0.78
+	for ang: float in [-PI * 0.5, 0.0, PI * 0.5, PI]:
+		var rp: Vector2 = Vector2(cx + cos(ang) * rivet_r, cy + sin(ang) * rivet_r)
+		draw_circle(rp, 3.0, Color(0.65, 0.52, 0.30, 1.0))
+		# Highlight pixel on the top-left of each rivet for the
+		# stamped-bolt look.
+		draw_rect(Rect2(rp + Vector2(-1.5, -1.5), Vector2(1.0, 1.0)), Color(1.0, 0.85, 0.45, 0.65), true)
+	# Anvil silhouette -- chunkier, cleaner trapezoid with sharper
+	# horns and a defined waist. Drawn over a brass-tinted
+	# crossed-hammer accent so the emblem reads as "hammer + anvil"
+	# rather than "blob + line".
+	# Crossed hammer (drawn first so anvil overlaps it).
+	var hammer_a: Color = Color(0.78, 0.62, 0.18, 1.0)
+	var hammer_w: float = r * 0.10
+	# Diagonal handle from upper-right toward lower-left.
+	_draw_thick_line(
+		Vector2(cx + r * 0.55, cy - r * 0.50),
+		Vector2(cx - r * 0.20, cy + r * 0.30),
+		hammer_w * 0.7,
+		Color(0.42, 0.30, 0.18, 1.0),
+	)
+	# Hammer head box at the upper end.
+	draw_rect(
+		Rect2(Vector2(cx + r * 0.40, cy - r * 0.65), Vector2(r * 0.36, r * 0.22)),
+		hammer_a,
+		true,
+	)
+	# Anvil body.
+	var body_w: float = r * 1.10
 	var body_h: float = r * 0.55
 	var body: PackedVector2Array = [
-		Vector2(cx - body_w * 0.55, cy - body_h * 0.20),  # top-left horn
-		Vector2(cx - body_w * 0.32, cy - body_h * 0.15),
-		Vector2(cx - body_w * 0.18, cy + body_h * 0.05),
-		Vector2(cx - body_w * 0.32, cy + body_h * 0.45),  # base widens
-		Vector2(cx + body_w * 0.32, cy + body_h * 0.45),
-		Vector2(cx + body_w * 0.18, cy + body_h * 0.05),
-		Vector2(cx + body_w * 0.32, cy - body_h * 0.15),
-		Vector2(cx + body_w * 0.55, cy - body_h * 0.20),  # top-right horn
+		Vector2(cx - body_w * 0.55, cy - body_h * 0.10),  # top-left horn tip
+		Vector2(cx - body_w * 0.18, cy - body_h * 0.05),  # neck
+		Vector2(cx - body_w * 0.18, cy + body_h * 0.18),  # waist top
+		Vector2(cx - body_w * 0.42, cy + body_h * 0.55),  # base outer
+		Vector2(cx + body_w * 0.42, cy + body_h * 0.55),
+		Vector2(cx + body_w * 0.18, cy + body_h * 0.18),
+		Vector2(cx + body_w * 0.18, cy - body_h * 0.05),
+		Vector2(cx + body_w * 0.55, cy - body_h * 0.10),  # top-right horn tip
 	]
-	draw_colored_polygon(body, Color(0.18, 0.20, 0.22, 1.0))
-	# Brass identity stripe across the anvil body — Anvil's faction color.
-	var stripe_y: float = cy + body_h * 0.20
-	draw_line(Vector2(cx - body_w * 0.32, stripe_y), Vector2(cx + body_w * 0.32, stripe_y), Color(0.78, 0.62, 0.18, 1.0), 2.0)
+	draw_colored_polygon(body, Color(0.16, 0.16, 0.17, 1.0))
+	# Top working face -- a thin brass strip along the upper edge of
+	# the anvil for the "hot iron" highlight that sells the forge
+	# read.
+	draw_rect(
+		Rect2(Vector2(cx - body_w * 0.55, cy - body_h * 0.16), Vector2(body_w * 1.10, body_h * 0.10)),
+		Color(0.78, 0.55, 0.18, 1.0),
+		true,
+	)
+
+
+func _draw_thick_line(a: Vector2, b: Vector2, half_thickness: float, color: Color) -> void:
+	## draw_line's `width` only renders ALIASED lines on most
+	## drivers; for a clean thick stroke we build a quad.
+	var dir: Vector2 = (b - a).normalized()
+	var perp: Vector2 = Vector2(-dir.y, dir.x) * half_thickness
+	draw_colored_polygon(PackedVector2Array([
+		a + perp,
+		a - perp,
+		b - perp,
+		b + perp,
+	]), color)
 
 
 func _draw_sable_icon(cx: float, cy: float, r: float) -> void:
-	# Matte black faceted diamond background — angular instead of round.
-	var diamond: PackedVector2Array = [
-		Vector2(cx, cy - r * 1.05),
-		Vector2(cx + r * 0.92, cy),
-		Vector2(cx, cy + r * 1.05),
-		Vector2(cx - r * 0.92, cy),
-	]
-	draw_colored_polygon(diamond, Color(0.05, 0.06, 0.08, 1.0))
-	# Subtle inner facet — slightly lighter polygon offset toward upper-left
-	# so the diamond reads as 3D rather than flat.
-	var facet: PackedVector2Array = [
-		Vector2(cx, cy - r * 0.95),
-		Vector2(cx + r * 0.18, cy - r * 0.25),
-		Vector2(cx, cy + r * 0.20),
-		Vector2(cx - r * 0.55, cy - r * 0.10),
-	]
-	draw_colored_polygon(facet, Color(0.10, 0.12, 0.16, 1.0))
-	# Diamond outline.
-	for i: int in 4:
-		var a: Vector2 = diamond[i]
-		var b: Vector2 = diamond[(i + 1) % 4]
-		draw_line(a, b, Color(0.20, 0.22, 0.26, 1.0), 1.5)
-	# Pale-cyan accent line — Sable's signature glow strip running
-	# diagonally across the diamond face.
-	var c1: Vector2 = Vector2(cx - r * 0.45, cy + r * 0.10)
-	var c2: Vector2 = Vector2(cx + r * 0.55, cy - r * 0.40)
-	draw_line(c1, c2, Color(0.78, 0.35, 1.0, 1.0), 2.0)
-	# Small vertical kicker stroke on the right side, same neon.
-	var k1: Vector2 = Vector2(cx + r * 0.22, cy + r * 0.05)
-	var k2: Vector2 = Vector2(cx + r * 0.22, cy + r * 0.45)
-	draw_line(k1, k2, Color(0.78, 0.35, 1.0, 1.0), 2.0)
+	# Hexagonal corp-glyph -- replaces the previous diamond. Hex
+	# shape reads as "circuit / chip die" which leans into the
+	# corpo-cyber aesthetic better than the simpler diamond.
+	var hex: PackedVector2Array = []
+	for i: int in 6:
+		var a: float = float(i) / 6.0 * TAU + PI / 6.0  # flat edge top
+		hex.append(Vector2(cx + cos(a) * r, cy + sin(a) * r))
+	draw_colored_polygon(hex, Color(0.05, 0.05, 0.08, 1.0))
+	# Inner darker hex for the recessed-die look.
+	var inner_hex: PackedVector2Array = []
+	for i: int in 6:
+		var a: float = float(i) / 6.0 * TAU + PI / 6.0
+		inner_hex.append(Vector2(cx + cos(a) * (r * 0.78), cy + sin(a) * (r * 0.78)))
+	draw_colored_polygon(inner_hex, Color(0.10, 0.10, 0.14, 1.0))
+	# Outer hex outline -- bright violet emissive for the corp-tech
+	# silhouette.
+	for i: int in 6:
+		var p_a: Vector2 = hex[i]
+		var p_b: Vector2 = hex[(i + 1) % 6]
+		draw_line(p_a, p_b, Color(0.78, 0.35, 1.00, 1.0), 1.6)
+	# Centred sigil -- an angular S-curve made of three thick line
+	# segments. Reads as a stylised corp logo / monogram. Drawn as
+	# rotated rectangles so the "S" silhouette stays sharp.
+	var s_thick: float = r * 0.13
+	# Top stroke (upper-left to upper-right).
+	_draw_thick_line(
+		Vector2(cx - r * 0.30, cy - r * 0.32),
+		Vector2(cx + r * 0.32, cy - r * 0.32),
+		s_thick * 0.5,
+		Color(0.92, 0.65, 1.00, 1.0),
+	)
+	# Middle diagonal (upper-right to lower-left).
+	_draw_thick_line(
+		Vector2(cx + r * 0.32, cy - r * 0.32),
+		Vector2(cx - r * 0.32, cy + r * 0.32),
+		s_thick * 0.5,
+		Color(0.92, 0.65, 1.00, 1.0),
+	)
+	# Bottom stroke (lower-left to lower-right).
+	_draw_thick_line(
+		Vector2(cx - r * 0.32, cy + r * 0.32),
+		Vector2(cx + r * 0.30, cy + r * 0.32),
+		s_thick * 0.5,
+		Color(0.92, 0.65, 1.00, 1.0),
+	)
+	# Two corner pip dots at the top-left + bottom-right of the hex
+	# for that "circuit etching" pattern read.
+	for ang: float in [PI * 0.83, PI * 1.83]:
+		draw_circle(Vector2(cx + cos(ang) * (r * 0.55), cy + sin(ang) * (r * 0.55)), 2.0, Color(0.78, 0.35, 1.0, 1.0))
