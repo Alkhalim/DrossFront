@@ -1336,13 +1336,21 @@ func _update_building_panel(building: Building) -> void:
 
 	# Only rebuild buttons when selection changes — except for the armory
 	# while a research project is in flight, where we rebuild every frame
-	# so the percentage label stays live.
+	# so the percentage label stays live. Branch commits run through
+	# BranchCommitManager (post anchor-mode-moved-to-HQ), so the armory
+	# refresh check has to honour both managers; otherwise the cancel
+	# button's percentage label freezes at whatever value was set when
+	# the panel first rendered.
 	var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
+	var bcm_for_refresh: Node = get_tree().current_scene.get_node_or_null("BranchCommitManager")
 	var is_armory: bool = (
 		building.stats.building_id == &"basic_armory"
 		or building.stats.building_id == &"advanced_armory"
 	)
-	var armory_in_progress: bool = is_armory and rm and rm.is_in_progress()
+	var armory_in_progress: bool = is_armory and (
+		(rm and rm.is_in_progress())
+		or (bcm_for_refresh and bcm_for_refresh.has_method("is_committing") and bcm_for_refresh.is_committing())
+	)
 	# Buildings that produce units take priority over the turret-
 	# profile panel even when they carry a TurretComponent (the HQ
 	# now mounts a built-in defensive turret but its primary action
@@ -2373,24 +2381,40 @@ func _rebuild_production_buttons(building: Building) -> void:
 	# what they're going to be able to train, but the buttons reject
 	# clicks until the building completes.
 	var construction_locked: bool = not building.is_constructed
+	# After a branch commit, swap each base unit's display stats for
+	# the committed variant so the train button reads "Tracker" /
+	# "Ripper" instead of the base "Hound" name + tooltip. Spawn-
+	# time substitution still happens in Building._spawn_unit, so
+	# the queue keeps using the base stats and the cost chip stays
+	# accurate to what the queue actually charges.
+	var bcm: Node = get_tree().current_scene.get_node_or_null("BranchCommitManager")
 	var unlocked_idx: int = 0
 	for unit_stat: UnitStatResource in producible_all:
 		var unlocked: bool = building.is_unit_unlocked(unit_stat) if building.has_method("is_unit_unlocked") else true
+		var display_stat: UnitStatResource = unit_stat
+		if bcm and bcm.has_method("has_committed") and bcm.has_committed(unit_stat.unit_name):
+			var committed: UnitStatResource = bcm.get_committed_stats(unit_stat.unit_name)
+			if committed:
+				display_stat = committed
 
 		var btn := Button.new()
 		btn.custom_minimum_size = Vector2(124, 80)
 		btn.size_flags_horizontal = Control.SIZE_FILL
 		btn.size_flags_vertical = Control.SIZE_FILL
 
-		var u_display: String = unit_stat.get_display_name()
+		var u_display: String = display_stat.get_display_name()
 		if unlocked:
 			var hotkey: String = hotkeys[unlocked_idx] if unlocked_idx < hotkeys.size() else str(unlocked_idx + 1)
 			_set_label_button(btn, "[%s]" % hotkey, u_display)
-			btn.tooltip_text = _unit_tooltip(unit_stat)
+			btn.tooltip_text = _unit_tooltip(display_stat)
 			var capture_idx: int = unlocked_idx
 			btn.pressed.connect(_on_production_button.bind(capture_idx))
+			# Cost chip uses the BASE stats: that's what queue_unit
+			# actually charges, regardless of what the variant
+			# advertises. Avoids misleading the player when the
+			# variant happens to list a different cost.
 			var chip_refs: Dictionary = _attach_cost_widget(btn, unit_stat.cost_salvage, unit_stat.cost_fuel, unit_stat.population)
-			_action_buttons.append({ "button": btn, "kind": "produce", "stat": unit_stat, "chips": chip_refs })
+			_action_buttons.append({ "button": btn, "kind": "produce", "stat": display_stat, "chips": chip_refs })
 			if construction_locked:
 				btn.disabled = true
 				btn.tooltip_text = "%s — building is still under construction." % u_display
@@ -3214,8 +3238,16 @@ func _rebuild_armory_buttons(building: Building) -> void:
 		paths = ANVIL_ADVANCED_BRANCHED_UNITS if is_advanced_armory else ANVIL_BASIC_BRANCHED_UNITS
 
 	var armory_label: String = "Advanced Armory — branch upgrades" if is_advanced_armory else "Armory — branch upgrades"
+	# With parallel commits possible (one per base unit), surface
+	# the count rather than just the first branch name. The per-row
+	# UI handles the per-commit detail below.
 	if bcm.is_committing():
-		_action_label.text = "Commit in progress: %s" % bcm.get_commit_branch_name()
+		var keys: Array[String] = bcm.get_active_commit_keys() if bcm.has_method("get_active_commit_keys") else [] as Array[String]
+		var n_active: int = keys.size()
+		if n_active <= 1:
+			_action_label.text = "Commit in progress: %s" % bcm.get_commit_branch_name()
+		else:
+			_action_label.text = "%d commits in progress" % n_active
 	else:
 		_action_label.text = armory_label
 
@@ -3276,36 +3308,40 @@ func _make_armory_row(base_stats: UnitStatResource, bcm: Node, cost_suffix: Stri
 
 	# When THIS row's commit is in progress, swap the two branch
 	# buttons for a single cancel button showing live progress + the
-	# branch being committed. Other rows still render their normal
-	# (disabled) branch buttons so the player can see what's locked.
-	var owning_base: UnitStatResource = bcm.get_commit_base_stats() if bcm.has_method("get_commit_base_stats") else null
-	if bcm.is_committing() and owning_base and owning_base == base_stats:
-		row.add_child(_make_commit_cancel_button(bcm))
+	# branch being committed. With parallel commits possible, we now
+	# only check whether THIS specific base unit is being committed;
+	# other rows whose own bases are idle stay clickable.
+	if bcm.has_method("is_committing_unit") and bcm.is_committing_unit(base_stats.unit_name):
+		row.add_child(_make_commit_cancel_button(bcm, base_stats.unit_name))
 		return row
 
-	var committing_now: bool = bcm.is_committing()
-	row.add_child(_make_branch_button(base_stats, base_stats.branch_a_stats, base_stats.branch_a_name, cost_suffix, committing_now))
-	row.add_child(_make_branch_button(base_stats, base_stats.branch_b_stats, base_stats.branch_b_name, cost_suffix, committing_now))
+	# Only this row's branch buttons are gated by THIS row's lock --
+	# any commit on other base units is irrelevant for this row.
+	row.add_child(_make_branch_button(base_stats, base_stats.branch_a_stats, base_stats.branch_a_name, cost_suffix, false))
+	row.add_child(_make_branch_button(base_stats, base_stats.branch_b_stats, base_stats.branch_b_name, cost_suffix, false))
 	return row
 
 
-func _make_commit_cancel_button(bcm: Node) -> Button:
+func _make_commit_cancel_button(bcm: Node, base_unit_name: String) -> Button:
 	var btn := Button.new()
 	btn.custom_minimum_size = Vector2(248, 50)
-	var pct: int = int(bcm.get_commit_progress() * 100.0) if bcm.has_method("get_commit_progress") else 0
-	var bname: String = bcm.get_commit_branch_name() if bcm.has_method("get_commit_branch_name") else "Commit"
+	var pct: int = int(bcm.get_commit_progress(base_unit_name) * 100.0) if bcm.has_method("get_commit_progress") else 0
+	var bname: String = bcm.get_commit_branch_name(base_unit_name) if bcm.has_method("get_commit_branch_name") else "Commit"
 	btn.text = "Cancel %s  (%d%%) — refund" % [bname, pct]
 	btn.add_theme_color_override("font_color", Color(1.0, 0.78, 0.32, 1.0))
 	btn.tooltip_text = "Cancel the in-progress branch commit. Microchips, fuel, and salvage spent are refunded."
-	btn.pressed.connect(_on_cancel_branch_commit)
+	# Cancel handler needs to know which commit to abort -- bind the
+	# base name so two parallel commits don't fight over which gets
+	# cancelled when a button is pressed.
+	btn.pressed.connect(_on_cancel_branch_commit.bind(base_unit_name))
 	return btn
 
 
-func _on_cancel_branch_commit() -> void:
+func _on_cancel_branch_commit(base_unit_name: String = "") -> void:
 	var bcm: Node = get_tree().current_scene.get_node_or_null("BranchCommitManager")
 	if not bcm or not bcm.has_method("cancel_commit"):
 		return
-	if not bcm.cancel_commit():
+	if not bcm.cancel_commit(base_unit_name):
 		return
 	# Refund — same trio of resources start_commit charged.
 	if _resource_manager:
@@ -3683,10 +3719,11 @@ func _on_branch_commit(base_stats: UnitStatResource, branch_stats: UnitStatResou
 		return
 	if not _resource_manager:
 		return
-	# Pay first, commit second — start_commit refuses if a commit is
-	# already in progress, so spending up-front would leak resources.
-	# Validate, then spend, then start.
-	if bcm.is_committing() or bcm.has_committed(base_stats.unit_name):
+	# Pay first, commit second — start_commit refuses if THIS unit's
+	# branch is already in flight or committed, so spending up-front
+	# would leak resources. Other units' parallel commits are fine
+	# and shouldn't gate this one.
+	if bcm.is_committing_unit(base_stats.unit_name) or bcm.has_committed(base_stats.unit_name):
 		return
 	if not _resource_manager.spend_full(
 		BranchCommitManager.COMMIT_COST_SALVAGE,
