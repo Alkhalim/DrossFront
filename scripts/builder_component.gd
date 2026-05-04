@@ -120,11 +120,18 @@ func _physics_process(delta: float) -> void:
 	# precision occasionally lands the engineer just inside the
 	# foundation XZ box. The engineer then blocks its own
 	# foundation-clear check, advance_construction silently no-ops,
-	# and the build stalls until the player nudges them out. Detect
-	# the self-block and move the engineer back to the approach
-	# point so construction resumes on its own.
+	# and the build stalls until the player nudges them out.
+	#
+	# Single fixed approach point wasn't enough: if that approach
+	# direction was blocked (by another building, ramp, or unit)
+	# the engineer kept re-issuing the same blocked path tick
+	# after tick. Now we try eight cardinal-and-diagonal escape
+	# directions and commit to the first one with a clear edge,
+	# rotating the start each time we re-enter the rescue branch
+	# so the engineer doesn't always pick the same blocked one.
 	if _is_inside_foundation_footprint():
-		_unit.command_move(_approach_point())
+		var escape: Vector3 = _pick_clear_escape_point()
+		_unit.command_move(escape)
 		_set_build_anim(false)
 		return
 
@@ -296,6 +303,62 @@ func _is_inside_foundation_footprint() -> bool:
 	var dx: float = absf(_unit.global_position.x - _target_building.global_position.x)
 	var dz: float = absf(_unit.global_position.z - _target_building.global_position.z)
 	return dx < half_x and dz < half_z
+
+
+## Per-builder rotating offset so consecutive _pick_clear_escape_point
+## calls don't always start at the same compass direction. Bumped
+## one slot each tick we re-enter the rescue branch.
+var _escape_rotation: int = 0
+
+
+func _pick_clear_escape_point() -> Vector3:
+	## Returns a world-space target outside the building's
+	## foundation footprint. Tries 8 compass directions starting at
+	## a per-builder rotating offset and picks the first one whose
+	## endpoint clears every other building / large terrain piece.
+	## If no direction is fully clear, returns the first candidate
+	## anyway -- the engineer at least leaves the foundation, and
+	## the next rescue tick will re-roll.
+	if not _target_building or not _target_building.stats:
+		return _unit.global_position
+	var center: Vector3 = _target_building.global_position
+	var fs: Vector3 = _target_building.stats.footprint_size
+	var extent: float = maxf(fs.x, fs.z) * 0.5
+	var radius: float = extent + BUILD_BUFFER * 1.4
+	var first_candidate: Vector3 = Vector3.INF
+	for i: int in 8:
+		var dir_idx: int = (i + _escape_rotation) % 8
+		var ang: float = float(dir_idx) / 8.0 * TAU
+		var cand: Vector3 = center + Vector3(cos(ang), 0.0, sin(ang)) * radius
+		if first_candidate == Vector3.INF:
+			first_candidate = cand
+		# Reject candidates whose endpoint sits inside another
+		# building's foundation -- those would just re-trap the
+		# engineer in a different self-block.
+		var blocked: bool = false
+		for node: Node in get_tree().get_nodes_in_group("buildings"):
+			if not is_instance_valid(node) or node == _target_building:
+				continue
+			var b: Building = node as Building
+			if not b or not b.stats:
+				continue
+			var bfs: Vector3 = b.stats.footprint_size
+			var bx: float = bfs.x * 0.5 + 0.4
+			var bz: float = bfs.z * 0.5 + 0.4
+			var dxb: float = absf(b.global_position.x - cand.x)
+			var dzb: float = absf(b.global_position.z - cand.z)
+			if dxb < bx and dzb < bz:
+				blocked = true
+				break
+		if not blocked:
+			_escape_rotation = (dir_idx + 1) % 8
+			return cand
+	# Every direction had something in it (heavy base packing) --
+	# return the first one anyway so at least we shuffle out of
+	# the foundation; next rescue cycle will try again from a
+	# rotated start.
+	_escape_rotation = (_escape_rotation + 1) % 8
+	return first_candidate
 
 
 func _approach_point() -> Vector3:
