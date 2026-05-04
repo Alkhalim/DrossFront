@@ -56,120 +56,193 @@ var MARKERS: Dictionary = {
 
 # --- Coastlines ----------------------------------------------------
 
-## Mainland Europe + Anatolia + Caucasus + Russian heartland walked
-## clockwise from the Strait of Gibraltar. Vertices are real coastal
-## landmarks; intermediate points keep the silhouette readable
-## without flooding the polygon with noise.
-var MAIN_LAND: PackedVector2Array = PackedVector2Array([
-	# Iberian south + east coasts
-	_ll(-5.6, 36.0),    # Strait of Gibraltar
+## Each landmass is a separate SIMPLE polygon (no self-intersections,
+## consistent clockwise winding) so draw_colored_polygon fills them
+## reliably. Peninsulas (Italian boot, Greek finger) and complex
+## inlets (Bothnian Gulf, Skagerrak) are split into their own
+## polygons rather than tracebacks on a single outline -- that was
+## why the previous version filled only the British Isles cleanly.
+
+## Iberian peninsula -- closed shape from Gibraltar around the
+## coast and back via the Pyrenees ridge.
+var IBERIA: PackedVector2Array = PackedVector2Array([
+	_ll(-5.6, 36.0),    # Gibraltar
 	_ll(-2.9, 36.7),    # Almeria
 	_ll(-0.5, 38.3),    # Alicante
 	_ll( 1.0, 41.0),    # Tarragona
-	_ll( 3.2, 42.4),    # Roses / French border
-	# French Mediterranean coast
+	_ll( 3.2, 42.4),    # Pyrenees east end
+	_ll(-1.5, 43.5),    # Pyrenees west end (Biarritz)
+	_ll(-2.93, 43.26),  # Bilbao
+	_ll(-7.0, 43.7),    # Galicia
+	_ll(-9.27, 42.88),  # Cape Finisterre
+	_ll(-9.14, 38.72),  # Lisbon
+	_ll(-8.99, 37.02),  # Cape Saint Vincent
+])
+
+## France -- bordered by Pyrenees, Med, Alps, Rhine, Channel,
+## Atlantic.
+var FRANCE: PackedVector2Array = PackedVector2Array([
+	_ll(-1.5, 43.5),    # Biarritz
+	_ll( 3.2, 42.4),    # Pyrenees east
 	_ll( 5.4, 43.3),    # Marseille
 	_ll( 7.3, 43.7),    # Nice
-	# Italian Riviera + Genoa
-	_ll( 8.9, 44.4),    # Genoa
-	# Tuscany / Lazio coast down to Rome
-	_ll(11.2, 43.5),    # Pisa
-	_ll(12.4, 41.9),    # Rome
-	# Naples + heel of the boot
-	_ll(14.3, 40.8),    # Naples
-	_ll(17.9, 40.6),    # Brindisi (heel)
-	_ll(15.6, 38.1),    # Reggio (toe)
-	_ll(18.0, 39.8),    # Lecce
-	# Adriatic east coast (Slovenia / Croatia)
-	_ll(13.9, 44.9),    # Pula
-	_ll(15.2, 44.1),    # Zadar
-	_ll(16.4, 43.5),    # Split
-	_ll(18.1, 42.6),    # Dubrovnik
-	# Albanian + Greek west coast
-	_ll(19.3, 41.3),    # Durres
-	_ll(20.8, 38.3),    # Patras
-	_ll(23.7, 37.0),    # Cape Maleas
-	# Aegean fingers
-	_ll(23.7, 37.98),   # Athens (Piraeus)
-	_ll(24.5, 38.4),    # Aegean fjord
-	_ll(26.1, 38.4),    # Izmir bay
-	# Anatolia (Turkey) south + east
-	_ll(28.0, 36.7),    # Marmaris
-	_ll(31.0, 36.8),    # Antalya
-	_ll(34.7, 36.6),    # Adana
-	_ll(36.2, 36.6),    # Iskenderun
-	# Caucasus shoulder
-	_ll(41.5, 41.5),    # Batumi
-	_ll(45.0, 41.7),    # Caspian shoulder (clipped to E edge)
-	# Russian east edge -- straight up
-	_ll(45.0, 50.0),
-	_ll(45.0, 60.0),
-	# Arctic / Barents Sea coast
-	_ll(43.0, 67.0),    # Severodvinsk hint
-	_ll(38.0, 68.5),    # Murmansk approach
-	_ll(33.1, 68.97),   # Murmansk
-	_ll(28.5, 69.5),    # Norwegian-Russian border
-	# North Cape + Norwegian fjord coast
-	_ll(25.8, 71.17),   # North Cape
-	_ll(20.0, 70.0),    # Hammerfest area
-	_ll(18.96, 69.65),  # Tromso
-	_ll(14.0, 67.5),    # Bodo region
-	_ll(10.5, 63.43),   # Trondheim
-	_ll( 5.32, 60.39),  # Bergen
-	_ll( 5.73, 58.97),  # Stavanger
-	# Skagerrak / Denmark stub
-	_ll( 8.0,  58.0),   # Norway south
-	_ll(10.7, 57.7),    # Skagen (Denmark tip)
-	_ll( 8.5, 55.0),    # Esbjerg (Denmark west)
-	# North Sea coast (Germany / Netherlands / Belgium)
-	_ll( 8.8, 53.55),   # Hamburg approach
-	_ll( 7.0, 53.5),    # Bremerhaven
-	_ll( 4.9, 52.37),   # Amsterdam
+	_ll( 8.0, 46.5),    # Mont Blanc shoulder
+	_ll( 8.2, 49.0),    # Rhine valley north
+	_ll( 6.6, 51.2),    # Belgian border
 	_ll( 3.7, 51.4),    # Belgian coast
-	# French Atlantic coast
 	_ll( 1.6, 50.95),   # Calais
 	_ll(-1.6, 49.65),   # Cherbourg
 	_ll(-4.49, 48.39),  # Brest
 	_ll(-2.16, 47.28),  # Saint-Nazaire
 	_ll(-1.55, 46.16),  # La Rochelle
-	# Bay of Biscay -> Iberia north
-	_ll(-1.5, 43.5),    # Biarritz
-	_ll(-2.93, 43.26),  # Bilbao
-	_ll(-7.0, 43.7),    # Galicia north corner
-	_ll(-9.27, 42.88),  # Cape Finisterre
-	# Iberia west (Portugal)
-	_ll(-9.14, 38.72),  # Lisbon
-	_ll(-8.99, 37.02),  # Cape Saint Vincent
-	# Back to Strait of Gibraltar
-	_ll(-7.0, 36.4),
 ])
 
-## Sweden / Finland separated by the Bothnian Gulf -- treated as a
-## distinct landmass at this scale.
-var SWEDEN_FINLAND: PackedVector2Array = PackedVector2Array([
+## Benelux + northern Germany + Denmark base.
+var GERMANY_BENELUX: PackedVector2Array = PackedVector2Array([
+	_ll( 3.7, 51.4),    # Belgian coast
+	_ll( 6.6, 51.2),    # France-Germany border
+	_ll( 8.2, 49.0),    # Rhine valley
+	_ll( 8.2, 47.7),    # Lake Constance
+	_ll(13.5, 49.0),    # Czech border NE
+	_ll(14.5, 53.5),    # Oder mouth
+	_ll(11.0, 54.5),    # Baltic coast (north Germany)
+	_ll( 9.5, 54.8),    # Schleswig
+	_ll( 8.5, 55.0),    # Esbjerg
+	_ll( 8.8, 53.55),   # Hamburg approach
+	_ll( 7.0, 53.5),    # Bremerhaven
+	_ll( 4.9, 52.37),   # Amsterdam
+])
+
+## Central / Eastern Europe -- Poland, Czech, Austria, Slovakia,
+## Hungary, Romania, Balkans north.
+var CENTRAL_EUROPE: PackedVector2Array = PackedVector2Array([
+	_ll( 8.0, 46.5),    # Alps W
+	_ll(13.5, 46.7),    # Brenner
+	_ll(13.5, 49.0),    # Czech border NW
+	_ll(14.5, 53.5),    # Oder mouth
+	_ll(19.0, 54.5),    # Polish-Russian border
+	_ll(23.0, 54.0),    # Suwalki gap
+	_ll(23.6, 49.0),    # Lviv
+	_ll(28.6, 44.2),    # Constanta (Black Sea)
+	_ll(22.5, 45.0),    # Iron Gate of the Danube
+	_ll(19.0, 44.0),    # Belgrade
+	_ll(15.5, 46.0),    # Slovenian border
+	_ll(13.5, 46.7),    # back to Brenner area
+])
+
+## Russian western heartland -- big block from the Polish border
+## east to the bounding edge.
+var RUSSIA: PackedVector2Array = PackedVector2Array([
+	_ll(23.0, 54.0),    # Suwalki
+	_ll(28.0, 60.0),    # St Petersburg approach
+	_ll(28.5, 69.5),    # Norwegian-Russian border
+	_ll(33.1, 68.97),   # Murmansk
+	_ll(38.0, 68.5),    # Murmansk approach
+	_ll(43.0, 67.0),    # Severodvinsk hint
+	_ll(45.0, 60.0),    # bounding edge
+	_ll(45.0, 50.0),    # bounding edge south
+	_ll(45.0, 47.5),    # Caspian shoulder
+	_ll(38.5, 47.5),    # Don river
+	_ll(34.5, 46.5),    # Crimea
+	_ll(30.5, 46.0),    # Odessa
+	_ll(28.6, 44.2),    # Constanta
+	_ll(23.6, 49.0),    # Lviv
+])
+
+## Caucasus + Anatolia south coast.
+var ANATOLIA: PackedVector2Array = PackedVector2Array([
+	_ll(45.0, 41.7),    # Caspian shoulder
+	_ll(45.0, 47.5),    # bounding south
+	_ll(38.5, 47.5),    # Don
+	_ll(38.0, 45.0),    # Sea of Azov east
+	_ll(41.5, 41.5),    # Batumi
+	_ll(36.2, 36.6),    # Iskenderun
+	_ll(34.7, 36.6),    # Adana
+	_ll(31.0, 36.8),    # Antalya
+	_ll(28.0, 36.7),    # Marmaris
+	_ll(26.5, 38.4),    # Izmir
+	_ll(26.0, 40.4),    # Dardanelles
+	_ll(28.98, 41.01),  # Istanbul
+	_ll(35.0, 42.0),    # Sinop
+	_ll(41.7, 41.5),    # Trabzon
+])
+
+## Italian boot -- separate peninsula polygon.
+var ITALY: PackedVector2Array = PackedVector2Array([
+	_ll( 7.3, 43.7),    # Riviera
+	_ll( 8.9, 44.4),    # Genoa
+	_ll(10.5, 45.0),    # Po valley north
+	_ll(13.9, 45.7),    # Trieste
+	_ll(13.9, 44.9),    # Pula
+	_ll(15.0, 41.5),    # Adriatic mid
+	_ll(17.9, 40.6),    # Brindisi (heel)
+	_ll(18.5, 40.0),    # Lecce
+	_ll(17.0, 39.0),    # Gulf of Taranto
+	_ll(15.6, 38.1),    # Reggio (toe)
+	_ll(13.5, 39.5),    # Salerno
+	_ll(14.3, 40.8),    # Naples
+	_ll(12.4, 41.9),    # Rome
+	_ll(11.2, 43.5),    # Pisa
+])
+
+## Balkans + Greek peninsula.
+var BALKANS: PackedVector2Array = PackedVector2Array([
+	_ll(15.5, 46.0),    # Slovenian border
+	_ll(19.0, 44.0),    # Belgrade
+	_ll(22.5, 45.0),    # Iron Gate
+	_ll(28.6, 44.2),    # Constanta
+	_ll(28.0, 41.5),    # Bulgarian Black Sea
+	_ll(26.0, 40.4),    # Dardanelles
+	_ll(24.0, 40.5),    # Macedonia coast
+	_ll(23.7, 37.98),   # Athens
+	_ll(22.5, 37.0),    # Peloponnese
+	_ll(21.0, 38.5),    # Patras
+	_ll(19.3, 41.3),    # Durres
+	_ll(18.1, 42.6),    # Dubrovnik
+	_ll(16.4, 43.5),    # Split
+	_ll(15.2, 44.1),    # Zadar
+	_ll(13.9, 45.7),    # Trieste
+])
+
+## Scandinavia (Norway + Sweden + Finland as a single landmass).
+var SCANDINAVIA: PackedVector2Array = PackedVector2Array([
+	# Norway south coast east through Skagerrak
+	_ll( 5.73, 58.97),  # Stavanger
+	_ll( 8.0,  58.4),   # Norway south coast
 	_ll(11.3, 58.4),    # Gothenburg
-	_ll(11.6, 56.4),    # Skane south
 	_ll(12.6, 56.0),    # Malmo
 	_ll(14.5, 56.2),    # Karlskrona
 	_ll(17.0, 57.0),    # Kalmar
 	_ll(18.07, 59.33),  # Stockholm
-	_ll(20.0, 63.0),    # Bothnian Gulf west
-	# Finland sweep
-	_ll(21.5, 65.7),    # Lulea
-	_ll(24.0, 65.9),    # Tornio (Finland-Sweden border)
-	_ll(25.5, 65.0),    # Oulu
-	_ll(28.0, 64.0),
-	_ll(30.0, 62.5),
-	_ll(28.0, 60.6),    # Helsinki bay
-	_ll(24.95, 60.17),  # Helsinki
+	# Bothnian Gulf -- Finland east coast
 	_ll(22.0, 60.0),    # Turku
-	# Bothnian Gulf east coast
-	_ll(21.5, 62.0),
-	_ll(20.0, 60.5),
-	# Back to Stockholm via the Baltic
-	_ll(18.0, 58.5),
-	_ll(15.0, 58.5),
-	_ll(13.0, 58.0),
+	_ll(24.95, 60.17),  # Helsinki
+	_ll(28.0, 60.6),    # Vyborg
+	_ll(30.0, 62.5),    # Karelia
+	_ll(28.0, 64.0),    # Karelian north
+	_ll(25.5, 65.0),    # Oulu
+	_ll(24.0, 65.9),    # Tornio
+	# Up Finland to Lapland
+	_ll(27.5, 68.5),    # Inari
+	_ll(28.5, 69.5),    # Norwegian border
+	# Norway arctic + fjord coast back south
+	_ll(25.8, 71.17),   # North Cape
+	_ll(20.0, 70.0),    # Hammerfest
+	_ll(18.96, 69.65),  # Tromso
+	_ll(14.0, 67.5),    # Bodo
+	_ll(10.5, 63.43),   # Trondheim
+	_ll( 5.32, 60.39),  # Bergen
+])
+
+## Denmark + Jutland peninsula -- separate from Germany so the
+## Skagerrak / Kattegat reads as water.
+var DENMARK: PackedVector2Array = PackedVector2Array([
+	_ll( 8.5, 55.0),    # Esbjerg
+	_ll( 8.0, 56.5),    # Jutland west
+	_ll(10.7, 57.7),    # Skagen
+	_ll(12.5, 56.0),    # Zealand east
+	_ll(11.5, 55.0),    # Lolland
+	_ll( 9.5, 54.8),    # Schleswig
 ])
 
 ## Great Britain (Scotland + England + Wales).
@@ -332,9 +405,18 @@ func _draw() -> void:
 	for r: int in rows + 1:
 		var y: float = float(r) / float(rows) * MAP_SIZE.y
 		draw_line(Vector2(0.0, y), Vector2(MAP_SIZE.x, y), GRID, 1.0)
-	# Land masses.
-	_draw_land(MAIN_LAND)
-	_draw_land(SWEDEN_FINLAND)
+	# Land masses -- all clean simple polygons so each fills with
+	# the LAND tone via draw_colored_polygon.
+	_draw_land(IBERIA)
+	_draw_land(FRANCE)
+	_draw_land(GERMANY_BENELUX)
+	_draw_land(CENTRAL_EUROPE)
+	_draw_land(RUSSIA)
+	_draw_land(ANATOLIA)
+	_draw_land(ITALY)
+	_draw_land(BALKANS)
+	_draw_land(SCANDINAVIA)
+	_draw_land(DENMARK)
 	_draw_land(BRITISH_ISLES)
 	_draw_land(IRELAND)
 	_draw_land(ICELAND)
