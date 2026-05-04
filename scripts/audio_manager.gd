@@ -412,14 +412,16 @@ func play_error() -> void:
 	# Recorded error stinger when the bank is loaded; falls back to
 	# the layered procedural buzz otherwise. Pitch jitter even on a
 	# single-variant bank so repeated rejected commands don't sound
-	# identical.
+	# identical. Output level pulled ~3 dB (≈ -30% linear) below
+	# the original -7..-5 / -6 dB tuning -- the rejection cue was
+	# dominating the SFX bus on rapid mis-clicks.
 	var stream: AudioStream = _pick(_sfx_error)
 	if stream:
 		var pitch: float = randf_range(0.92, 1.08)
-		_emit(stream, randf_range(-7.0, -5.0), pitch)
+		_emit(stream, randf_range(-10.0, -8.0), pitch)
 		return
-	_play_tone(randf_range(70.0, 82.0), randf_range(0.22, 0.28), -6.0, randf_range(-2.0, 2.0))
-	_play_filtered_noise(0.18, 800.0, -16.0)
+	_play_tone(randf_range(70.0, 82.0), randf_range(0.22, 0.28), -9.0, randf_range(-2.0, 2.0))
+	_play_filtered_noise(0.18, 800.0, -19.0)
 
 
 func play_huge_explosion(at: Vector3 = Vector3.INF) -> void:
