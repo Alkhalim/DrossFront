@@ -29,6 +29,7 @@ cost_salvage = 265
 cost_fuel = 42
 build_time = 30.0
 built_at = &"aerodrome"
+unlock_prerequisite = &"advanced_armory"
 primary_weapon = SubResource("weapon_pulse_cannons")
 special_description = "Fast Sable interceptor. Tuned for anti-air work."
 branch_a_name = "Dogfighter"

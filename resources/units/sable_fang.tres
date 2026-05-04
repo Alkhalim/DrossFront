@@ -32,7 +32,6 @@ cost_salvage = 195
 cost_fuel = 25
 build_time = 24.0
 built_at = &"aerodrome"
-unlock_prerequisite = &"advanced_armory"
 primary_weapon = SubResource("weapon_micro_missile")
 special_description = "Sable's light drone swarm — high speed, weak shielding, leans on numbers."
 passive_description = "Drone Swarm — 10-drone pack at very-fast speed, light air armor. Wins by numbers, not by toughness."
