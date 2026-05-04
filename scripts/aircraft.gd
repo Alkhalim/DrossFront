@@ -2430,7 +2430,13 @@ func ability_cooldown_remaining() -> float:
 	return _ability_cd_remaining
 
 
-func trigger_ability() -> bool:
+func trigger_ability(target_pos: Vector3 = Vector3.INF) -> bool:
+	## Signature mirrors Unit.trigger_ability so SelectionManager's
+	## unified ability-fire path can call .call("trigger_ability",
+	## target) on either a Unit or an Aircraft without an arity
+	## mismatch. target_pos is consumed by area-target abilities
+	## (Barrier Bloom); auto-target abilities (Missile Barrage,
+	## Carpet Bombard) ignore it.
 	if not has_ability() or alive_count == 0:
 		return false
 	if _ability_cd_remaining > 0.0:
@@ -2441,12 +2447,50 @@ func trigger_ability() -> bool:
 			fired = _ability_missile_barrage()
 		"Carpet Bombard":
 			fired = _ability_carpet_bombard()
+		"Barrier Bloom":
+			fired = _ability_barrier_bloom(target_pos)
 		_:
 			push_warning("Aircraft '%s' has unknown ability '%s'" % [stats.unit_name, stats.ability_name])
 			return false
 	if fired:
 		_ability_cd_remaining = stats.ability_cooldown
 	return fired
+
+
+func _ability_barrier_bloom(target_pos: Vector3) -> bool:
+	## Phalanx Shield's area-target ability. Mirrors Unit's
+	## _ability_barrier_bloom: every friendly unit (ground or air)
+	## inside stats.ability_radius of the targeted ground point gets
+	## a 45% damage reduction for stats.ability_duration. The Shield
+	## is currently flagged is_aircraft so it instantiates from
+	## aircraft.tscn -- this port lets the same selection-manager
+	## ability dispatch fire it without an "unknown ability"
+	## warning when the player triggers it.
+	if target_pos == Vector3.INF:
+		return false
+	var radius: float = stats.ability_radius if stats.ability_radius > 0.0 else 6.0
+	var duration: float = stats.ability_duration if stats.ability_duration > 0.0 else 5.0
+	var radius_sq: float = radius * radius
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node):
+			continue
+		var ally_owner: int = (node.get("owner_id") as int) if "owner_id" in node else -1
+		if ally_owner != owner_id:
+			continue
+		var alive_v: int = (node.get("alive_count") as int) if "alive_count" in node else 1
+		if alive_v <= 0:
+			continue
+		var ally_pos: Vector3 = (node as Node3D).global_position
+		if ally_pos.distance_squared_to(target_pos) > radius_sq:
+			continue
+		var combat: Node = node.get_node_or_null("CombatComponent")
+		if combat and combat.has_method("apply_damage_reduction"):
+			combat.call("apply_damage_reduction", 0.45, duration)
+	# Visual marker -- shared dome / pulse renderer if aircraft has
+	# one; otherwise a no-op so the gameplay effect still lands.
+	if has_method("_spawn_pulse_visual_at"):
+		call("_spawn_pulse_visual_at", target_pos, radius, Color(0.45, 0.75, 1.0))
+	return true
 
 
 func _ability_missile_barrage() -> bool:

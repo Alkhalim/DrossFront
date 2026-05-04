@@ -5082,10 +5082,14 @@ func _rebalance_formation() -> void:
 		if not is_instance_valid(member):
 			continue
 		# Tween, but cancel any prior rebalance tween on this member
-		# so back-to-back deaths don't queue stale lerps.
-		var prev_tween: Tween = member.get_meta("rebalance_tween", null) as Tween
-		if prev_tween and prev_tween.is_valid():
-			prev_tween.kill()
+		# so back-to-back deaths don't queue stale lerps. Guard with
+		# has_meta to avoid Godot 4's "object does not have any meta
+		# values with the key" runtime warning that fires the first
+		# time the rebalance runs on a freshly-built squad.
+		if member.has_meta("rebalance_tween"):
+			var prev_tween: Tween = member.get_meta("rebalance_tween") as Tween
+			if prev_tween and prev_tween.is_valid():
+				prev_tween.kill()
 		var t := member.create_tween()
 		t.tween_property(member, "position", new_offset, 0.4).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 		member.set_meta("rebalance_tween", t)

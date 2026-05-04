@@ -1590,6 +1590,12 @@ const CRAWLER_RETREAT_WINDOW: float = 4.0
 ## Damage HP each Crawler had last poll, keyed by instance id. Used to
 ## detect "Crawler is being shot at this tick".
 var _crawler_last_hp: Dictionary = {}
+## Per-crawler aggregated escort HP tracker. Maps crawler iid ->
+## summed HP across its escort units last AI tick. Compared each
+## tick to detect "an escort took damage" so the retreat / defender
+## dispatch logic treats hits on escorts the same as hits on the
+## chassis.
+var _crawler_escort_last_hp: Dictionary = {}
 ## Last time each Crawler took damage, keyed by instance id.
 var _crawler_last_damage_at: Dictionary = {}
 ## "Idle" radius — narrower than the Crawler's actual harvest reach so a
@@ -1629,6 +1635,33 @@ func _command_idle_crawler_to_wreck() -> void:
 		if cur_hp < prev_hp:
 			_crawler_last_damage_at[iid] = now
 		_crawler_last_hp[iid] = cur_hp
+
+		# Escort attacks count as attacks on the Crawler itself.
+		# Walks the recorded escort ids for THIS crawler, sums their
+		# total HP, compares to last tick. Any drop -> stamp the
+		# damage-at timestamp so the retreat / defender-dispatch
+		# logic treats it the same way as a direct hit on the
+		# chassis. Cheap (escorts capped at 1-3 units per crawler).
+		var escort_total_hp: int = 0
+		var current_escort_ids: Array = _crawler_escorts.get(iid, []) as Array
+		for esc_id_v: Variant in current_escort_ids:
+			var esc_id: int = esc_id_v as int
+			var esc_node: Node = instance_from_id(esc_id) as Node
+			if not esc_node or not is_instance_valid(esc_node):
+				continue
+			# Use the unit's per-member HP sum if available, falling
+			# back to current_hp for single-cell units. Both fields
+			# decrement on damage.
+			if "member_hp" in esc_node:
+				for h_v: Variant in (esc_node.get("member_hp") as Array):
+					escort_total_hp += h_v as int
+			elif "current_hp" in esc_node:
+				escort_total_hp += esc_node.get("current_hp") as int
+		var prev_escort_hp_v: Variant = _crawler_escort_last_hp.get(iid, -1)
+		var prev_escort_hp: int = (prev_escort_hp_v as int) if typeof(prev_escort_hp_v) == TYPE_INT else escort_total_hp
+		if prev_escort_hp >= 0 and escort_total_hp < prev_escort_hp:
+			_crawler_last_damage_at[iid] = now
+		_crawler_escort_last_hp[iid] = escort_total_hp
 
 		var anchored: bool = node.has_method("is_anchored") and node.is_anchored()
 		var under_fire: bool = (now - (_crawler_last_damage_at.get(iid, -999.0) as float)) < CRAWLER_RETREAT_WINDOW
