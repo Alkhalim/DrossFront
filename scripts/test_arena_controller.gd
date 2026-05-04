@@ -2139,6 +2139,58 @@ func _setup_terrain_schwarzwald() -> void:
 			add_child(tree)
 		x += TREE_GRID_STEP
 
+	# Salvage groves -- small clearings in the canopy with 3-5
+	# wrecks each. Reward exploration off the main corridor.
+	# Positions are deterministic per match seed so the player
+	# can learn rough locations across replays.
+	# `var` not `const` -- GDScript's compile-time const evaluator
+	# rejects Vector3() constructor calls inside Packed array
+	# literals. Same trap as the Wreck class faced.
+	var GROVE_POSITIONS: Array[Vector3] = [
+		Vector3(-95.0, 0.0,  60.0),
+		Vector3( 95.0, 0.0,  60.0),
+		Vector3(-95.0, 0.0, -60.0),
+		Vector3( 95.0, 0.0, -60.0),
+		Vector3(-30.0, 0.0,  85.0),
+		Vector3( 30.0, 0.0, -85.0),
+	]
+	for grove_centre: Vector3 in GROVE_POSITIONS:
+		var n_wrecks: int = randi_range(3, 5)
+		for w_i: int in n_wrecks:
+			var ang: float = randf_range(0.0, TAU)
+			var rad: float = randf_range(1.5, 4.5)
+			var w_pos := grove_centre + Vector3(cos(ang) * rad, 0.0, sin(ang) * rad)
+			var wreck := Wreck.new()
+			wreck.salvage_value = randi_range(45, 80)
+			wreck.salvage_remaining = wreck.salvage_value
+			wreck.wreck_size = Vector3(randf_range(0.9, 1.4), randf_range(0.4, 0.6), randf_range(0.9, 1.4))
+			wreck.position = w_pos
+			add_child.call_deferred(wreck)
+
+	# Rock outcrops scattered through the open spaces -- breaks
+	# the otherwise pure-tree silhouette + adds cover for
+	# manoeuvring squads.
+	# `var` not `const` for the Vector3-in-literal reason above.
+	var ROCK_CLUSTER_POSITIONS: Array[Vector3] = [
+		Vector3(-110.0, 0.0,  10.0),
+		Vector3( 110.0, 0.0, -10.0),
+		Vector3(-40.0, 0.0,  -5.0),
+		Vector3( 45.0, 0.0,   0.0),
+		Vector3(-80.0, 0.0,  90.0),
+		Vector3( 80.0, 0.0, -90.0),
+	]
+	for rock_centre: Vector3 in ROCK_CLUSTER_POSITIONS:
+		# 3-4 rocks per cluster, jittered around the centre.
+		var rocks: int = randi_range(3, 4)
+		for r_i: int in rocks:
+			var rang: float = randf_range(0.0, TAU)
+			var rrad: float = randf_range(1.0, 3.5)
+			_spawn_terrain_piece(
+				rock_centre + Vector3(cos(rang) * rrad, 0.0, sin(rang) * rrad),
+				Vector3(randf_range(2.4, 3.8), randf_range(2.2, 3.4), randf_range(2.4, 3.8)),
+				"rock",
+			)
+
 
 func _decorate_ruin_block(root: Node3D, piece_size: Vector3, center_offset: Vector3 = Vector3.ZERO, add_roof_details: bool = true) -> void:
 	## Adds building-character details (windows, antennae, half-collapsed
