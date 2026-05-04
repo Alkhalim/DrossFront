@@ -11,6 +11,9 @@ damage_tier = &"moderate"
 range_tier = &"medium"
 rof_tier = &"moderate"
 can_hit_air = true
+mult_vs_light = 0.40
+mult_vs_medium = 1.00
+mult_vs_heavy = 0.60
 
 [resource]
 script = ExtResource("1")

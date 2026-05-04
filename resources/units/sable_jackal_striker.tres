@@ -13,6 +13,9 @@ rof_tier = &"moderate"
 projectile_style = &"beam"
 damage_value = 75
 base_accuracy = 0.85
+mult_vs_light = 0.40
+mult_vs_medium = 1.00
+mult_vs_heavy = 0.60
 
 [resource]
 script = ExtResource("1")

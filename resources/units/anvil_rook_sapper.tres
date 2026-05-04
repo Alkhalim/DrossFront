@@ -12,7 +12,9 @@ range_tier = &"medium"
 rof_tier = &"rapid"
 base_accuracy = 0.82
 can_hit_air = true
-air_damage_mult = 0.2
+air_damage_mult = 0.7
+mult_vs_light_air = 1.00
+mult_vs_heavy_air = 0.30
 
 [sub_resource type="Resource" id="weapon_sapper_demo"]
 script = ExtResource("2")
