@@ -5035,6 +5035,55 @@ func _remove_member_visual(index: int) -> void:
 			# refund for whoever clears it. Squad death spawns its own
 			# bigger wreck via _die(); this is just the per-member chunk.
 			_spawn_member_wreck(member.global_position)
+	# Reform the surviving members into the formation slots for the
+	# new alive_count so the squad keeps a balanced shape around its
+	# centre instead of leaving holes where the dead used to stand.
+	_rebalance_formation()
+
+
+func _rebalance_formation() -> void:
+	## Reassigns local member positions to the formation slots for the
+	## current alive_count. Ratchet of 5 -> 3 will swap the surviving
+	## members into the 3-slot triangle layout; squad keeps its centre
+	## instead of trailing a corner gap. Tween (~0.4s) so the
+	## reposition reads as a deliberate close-up rather than a
+	## teleport. No-op when alive_count == squad_size or stats is
+	## missing (rare during scene teardown).
+	if not stats or alive_count <= 0:
+		return
+	if alive_count >= stats.squad_size:
+		return
+	var unit_offsets_v: Variant = FORMATION_OFFSETS.get(alive_count, null)
+	if unit_offsets_v == null:
+		return
+	var unit_offsets: Array = unit_offsets_v as Array
+	var shape_data: Dictionary = CLASS_SHAPES.get(stats.unit_class, CLASS_SHAPES[&"medium"])
+	shape_data = _maybe_override_shape_for_unit(shape_data)
+	var spacing: float = shape_data.get("formation_spacing", 1.5) as float
+	# Walk surviving members in their original index order so the new
+	# slot list maps them deterministically (slot 0 -> first survivor,
+	# slot 1 -> second survivor, etc). Without the deterministic order
+	# the leader / trailing reads can flip frame-to-frame.
+	var slot_idx: int = 0
+	for i: int in _member_data.size():
+		if i >= member_hp.size() or member_hp[i] <= 0:
+			continue
+		if slot_idx >= unit_offsets.size():
+			break
+		var u: Vector2 = unit_offsets[slot_idx] as Vector2
+		var new_offset := Vector3(u.x * spacing, 0.0, u.y * spacing)
+		slot_idx += 1
+		var member: Node3D = _member_meshes[i] if i < _member_meshes.size() else null
+		if not is_instance_valid(member):
+			continue
+		# Tween, but cancel any prior rebalance tween on this member
+		# so back-to-back deaths don't queue stale lerps.
+		var prev_tween: Tween = member.get_meta("rebalance_tween", null) as Tween
+		if prev_tween and prev_tween.is_valid():
+			prev_tween.kill()
+		var t := member.create_tween()
+		t.tween_property(member, "position", new_offset, 0.4).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+		member.set_meta("rebalance_tween", t)
 
 
 func _spawn_member_wreck(world_pos: Vector3) -> void:
@@ -5590,6 +5639,17 @@ func _ability_garrison() -> bool:
 			# they're back on the field.
 			if ally.has_method("stop"):
 				ally.stop()
+			# Disable the passenger's collision while garrisoned.
+			# Without this, the passenger's CharacterBody3D collider
+			# stays at the carrier's position and fights the carrier's
+			# move_and_slide depenetration each frame -- the visible
+			# symptom was the transport jittering whenever it tried
+			# to move. Originals are stashed so disembark can put
+			# them back.
+			ally.set_meta("garrison_prev_collision_layer", ally.collision_layer)
+			ally.set_meta("garrison_prev_collision_mask", ally.collision_mask)
+			ally.collision_layer = 0
+			ally.collision_mask = 0
 			taken += 1
 		_set_garrison_buff(true)
 		return true
@@ -5608,6 +5668,16 @@ func _ability_garrison() -> bool:
 		ally.global_position = drop_pos
 		ally._garrisoned_in = null
 		ally.visible = true
+		# Restore the passenger's collision layer / mask. Falls back
+		# to the standard Unit values if the metadata is missing
+		# (e.g. mid-save reload), so a disembarked unit always ends
+		# up collidable.
+		var prev_layer: int = ally.get_meta("garrison_prev_collision_layer", 2) as int
+		var prev_mask: int = ally.get_meta("garrison_prev_collision_mask", 5) as int
+		ally.collision_layer = prev_layer
+		ally.collision_mask = prev_mask
+		ally.remove_meta("garrison_prev_collision_layer")
+		ally.remove_meta("garrison_prev_collision_mask")
 	_set_garrison_buff(false)
 	return true
 
@@ -6827,6 +6897,14 @@ func _die() -> void:
 			ally.global_position = global_position + Vector3(cos(angle) * 3.0, 0.0, sin(angle) * 3.0)
 			ally._garrisoned_in = null
 			ally.visible = true
+			# Carrier-died disembark also restores collision so the
+			# survivors don't end up phasing through everything.
+			var prev_layer: int = ally.get_meta("garrison_prev_collision_layer", 2) as int
+			var prev_mask: int = ally.get_meta("garrison_prev_collision_mask", 5) as int
+			ally.collision_layer = prev_layer
+			ally.collision_mask = prev_mask
+			ally.remove_meta("garrison_prev_collision_layer")
+			ally.remove_meta("garrison_prev_collision_mask")
 		_garrison_passengers.clear()
 
 	_spawn_squad_death_explosion()

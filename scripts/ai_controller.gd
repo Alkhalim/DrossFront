@@ -1133,9 +1133,14 @@ func notify_pre_seeded_building(key: String, building: Node) -> void:
 
 
 func _maintain_engineers() -> void:
-	## Keep at least one Ratchet engineer alive. Built at the HQ, just like
-	## the player builds them. Without this the AI permanently loses build
-	## capability if the player wipes out the starting engineers.
+	## Keep at least two Ratchet engineers alive. Two so the AI can
+	## parallelise placement -- with one engineer, every _try_place
+	## tick either dispatches the engineer or hits the NO_ENGINEER
+	## blocker, which throttled the early base build to one structure
+	## per ~30s. Two engineers roughly halves base-build time at the
+	## cost of one extra unit slot. AI debug overlay also exposed
+	## the bottleneck directly: the Next-Build line was almost
+	## always 'no free engineer' until the first foundry finished.
 	if not is_instance_valid(_hq) or not _hq.get("is_constructed"):
 		return
 	var engineer_count: int = 0
@@ -1144,7 +1149,7 @@ func _maintain_engineers() -> void:
 			continue
 		if node.has_method("get_builder") and node.get_builder():
 			engineer_count += 1
-	if engineer_count >= 1:
+	if engineer_count >= 2:
 		return
 	# Don't pile up engineers in the queue; only request one at a time.
 	if _hq.has_method("get_queue_size") and _hq.get_queue_size() > 0:
@@ -1513,7 +1518,12 @@ func _try_contest_oil() -> void:
 			break
 		if not is_instance_valid(unit):
 			continue
-		if unit.has_method("get_builder") and unit.get("get_builder"):
+		# Skip engineers. The previous check called .get("get_builder")
+		# (property lookup) instead of .get_builder() (method call),
+		# which always returned null -- engineers were silently being
+		# pulled into the oil-contest detachment, gutting the build
+		# pool. Method call now actually filters them out.
+		if unit.has_method("get_builder") and unit.get_builder():
 			continue
 		# Skip units that already have a forced attack target -- they're
 		# busy. Pull from "available" pool instead.
