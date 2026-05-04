@@ -3619,11 +3619,26 @@ func _spawn_soft_patch(pos: Vector3, base_size: float, tint: Color, roughness: f
 		var tex: Texture2D = _resolve_biome_texture(texture_key)
 		if tex:
 			mat.albedo_texture = tex
-			# UV scale tuned so a ~50u biome patch shows ~3-4 tiles of
-			# the texture -- detail reads at typical RTS zoom without
-			# becoming a repeating grid.
-			mat.uv1_scale = Vector3(4.0, 4.0, 1.0)
+			# UV scale dropped 4 -> 1.6 so a ~50u biome patch shows
+			# only ~1.5 tile reps, big enough that the texture
+			# detail (sand grain, cracked mud, snow speckle) is
+			# readable from RTS zoom. The previous 4x tiling
+			# packed the noise so densely it averaged out to a
+			# flat grey from the camera distance, which is why
+			# the player saw 'no extra terrain types'.
+			mat.uv1_scale = Vector3(1.6, 1.6, 1.0)
 			mat.uv1_offset = Vector3(randf(), randf(), 0.0)
+			# Brighten the tint so the multiplied albedo doesn't
+			# fully crush the texture under the (intentionally
+			# dark) biome colour. Final RGB ~= tint.rgb * 1.6 *
+			# texture_sample, capped to white.
+			var bright_tint: Color = Color(
+				minf(tint.r * 1.6, 1.0),
+				minf(tint.g * 1.6, 1.0),
+				minf(tint.b * 1.6, 1.0),
+				tint.a,
+			)
+			mat.albedo_color = bright_tint
 	patch.material_override = mat
 	add_child(patch)
 
