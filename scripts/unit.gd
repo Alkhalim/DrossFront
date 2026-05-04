@@ -525,6 +525,13 @@ func _build_squad_visuals() -> void:
 		var member_info: Dictionary = _build_mech_member(i, offset, shape_data, team_color)
 		_member_meshes.append(member_info["root"])
 		_member_data.append(member_info)
+		# X-ray silhouette: a team-coloured capsule that draws ONLY
+		# when something opaque is in front of the unit (a building
+		# / terrain piece occludes it). The capsule is parented to
+		# the same member root so it follows the mech's position
+		# automatically; the shader's depth-texture compare gates
+		# visibility per-pixel. See shaders/x_ray_silhouette.gdshader.
+		_attach_xray_silhouette(member_info["root"], shape_data, team_color)
 
 	# Collision shape covers the squad footprint, sized to the actual mech bulk.
 	var torso_size: Vector3 = shape_data["torso"] as Vector3
@@ -596,6 +603,62 @@ func _build_squad_visuals() -> void:
 		bay.name = "DroneBay"
 		bay.position = Vector3(0.0, total_h + 0.3, -torso_size.z * 0.5)
 		add_child(bay)
+
+
+## Cached x-ray shader instance -- one ShaderMaterial parent that
+## every silhouette mesh inherits via `next_pass`. Each member
+## clones the material so it can carry its own team-colour
+## uniform without back-propagating to the parent.
+static var _xray_shader: Shader = null
+
+
+func _attach_xray_silhouette(member: Node3D, shape: Dictionary, team_color: Color) -> void:
+	## Spawns a single capsule mesh per squad member that renders
+	## only when occluded by something in front of it (the shader
+	## samples DEPTH_TEXTURE and discards fragments that AREN'T
+	## behind an opaque occluder). Cheap proxy for a full chassis
+	## silhouette -- a single capsule sized to the unit's bounding
+	## box reads as 'unit position behind the building' without
+	## the cost of duplicating every barrel + leg.
+	if _xray_shader == null:
+		_xray_shader = load("res://shaders/x_ray_silhouette.gdshader") as Shader
+	if _xray_shader == null:
+		return
+	# Bounding capsule sized off the chassis dimensions in the
+	# class shape. For mechs hip_y + torso.y is the body height;
+	# for transport / tank shapes torso.y is small but we add a
+	# minimum so tracked vehicles still get a readable silhouette.
+	var hip_y: float = shape.get("hip_y", 0.0) as float
+	var torso: Vector3 = shape.get("torso", Vector3(1.0, 1.0, 1.0)) as Vector3
+	var head: Vector3 = shape.get("head", Vector3.ZERO) as Vector3
+	var height: float = maxf(hip_y + torso.y + head.y, 1.6)
+	var radius: float = maxf(maxf(torso.x, torso.z) * 0.55, 0.55)
+	var sil := MeshInstance3D.new()
+	var cap := CapsuleMesh.new()
+	cap.radius = radius
+	cap.height = height
+	sil.mesh = cap
+	# Capsule's pivot is its centre; lift it so the bottom sits
+	# at member Y=0 (ground level relative to the squad member).
+	sil.position.y = height * 0.5
+	# Don't cast shadows from the silhouette -- it's a UI element
+	# not a physical mesh.
+	sil.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# Render priority above the standard 3D pass so the silhouette
+	# samples the depth texture AFTER buildings have written their
+	# depth. Without this the silhouette can sample its own / a
+	# co-pass mesh's depth and behave inconsistently.
+	sil.set("sorting_offset", 0.5)
+	var mat := ShaderMaterial.new()
+	mat.shader = _xray_shader
+	# Per-team colour with comfortable alpha so the silhouette
+	# reads as identity without overwhelming the underlying
+	# building behind it.
+	var tinted: Color = Color(team_color.r, team_color.g, team_color.b, 0.85)
+	mat.set_shader_parameter("outline_color", tinted)
+	mat.set_shader_parameter("depth_bias", 0.05)
+	sil.material_override = mat
+	member.add_child(sil)
 
 
 func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_color: Color) -> Dictionary:
