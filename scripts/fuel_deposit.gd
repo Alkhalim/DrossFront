@@ -181,6 +181,15 @@ func _complete_capture(new_owner: int) -> void:
 	_capturing_owner = -1
 	_capture_progress = 0.0
 	captured.emit(new_owner)
+	# First income chunk arrives the moment the deposit flips to a
+	# real owner, NOT 10s later. Pre-fill the accumulator with one
+	# full interval's worth of fuel so the next _generate_fuel
+	# tick pays out immediately and then the regular cooldown
+	# starts from there. Skipped when the deposit goes neutral
+	# (new_owner < 0) so a captured-then-lost deposit doesn't
+	# pre-pay anyone.
+	if new_owner >= 0:
+		_fuel_accumulator = fuel_per_second * FUEL_PAYOUT_INTERVAL_SEC
 
 	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
 	if audio and audio.has_method("play_construction_complete"):
