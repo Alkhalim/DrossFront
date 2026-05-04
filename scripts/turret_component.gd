@@ -37,7 +37,7 @@ const PROFILES: Dictionary = {
 	# brief intra-burst gaps for the visual stagger) so the salvo
 	# reads as a real MG nest, not single-tap shots. Targets both
 	# ground AND air -- HQ MGs work as light flak.
-	&"hq_defense": { "damage": 18, "fire": 1.0, "range": 22.0, "role": &"Universal", "name": "HQ Defense", "burst_count": 3, "burst_gap": 0.08, "targets_air": true },
+	&"hq_defense": { "damage": 23, "fire": 1.0, "range": 22.0, "role": &"Universal", "name": "HQ Defense", "burst_count": 3, "burst_gap": 0.08, "targets_air": true },
 }
 
 ## Anvil's industrial-doctrine turret hits harder than the baseline

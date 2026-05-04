@@ -8,7 +8,7 @@
 script = ExtResource("1")
 building_name = "Headquarters"
 building_id = &"headquarters"
-hp = 5750
+hp = 6000
 cost_salvage = 0
 build_time = 0.0
 power_consumption = 0

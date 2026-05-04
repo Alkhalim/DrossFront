@@ -28,11 +28,14 @@ const MUSIC_TRACKS_ANVIL: Array[String] = [
 	"res://assets/audio/Music/Anvil/Iron Foundry March.mp3",
 	"res://assets/audio/Music/Anvil/Iron Foundry March (1).mp3",
 	"res://assets/audio/Music/Anvil/Iron Republic.mp3",
+	"res://assets/audio/Music/Anvil/Kholodny Grom (0.71x).mp3",
 ]
 const MUSIC_TRACKS_SABLE: Array[String] = [
-	"res://assets/audio/Music/Sable/Silent Ops.mp3",
-	"res://assets/audio/Music/Sable/Silent Spec Ops.mp3",
-	"res://assets/audio/Music/Sable/Silent Spec Ops (1).mp3",
+	"res://assets/audio/Music/Sable/Black File Regiment.mp3",
+	"res://assets/audio/Music/Sable/Black File Regiment (1).mp3",
+	"res://assets/audio/Music/Sable/Ledger of Ash.mp3",
+	"res://assets/audio/Music/Sable/Silver Briefing.mp3",
+	"res://assets/audio/Music/Sable/Silver Briefing (1).mp3",
 ]
 
 ## Playback volume on the music bus. -16 dB drops another ~20%
