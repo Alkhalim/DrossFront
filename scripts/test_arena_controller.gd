@@ -4471,22 +4471,69 @@ func _setup_geothermic_vents() -> void:
 		_spawn_vent(hq_pos - perp * 12.0 + centre_dir_per_player[i] * 6.0)
 		# 1 forward vent toward the map centre.
 		_spawn_vent(hq_pos + centre_dir_per_player[i] * 28.0)
-	# Distributed vents -- 3 per player scattered across the map.
-	# Use a deterministic-but-varied placement: place along a ring
-	# around the map centre with per-player offsets so vent
-	# positions differ across modes / matches without sloshing on
-	# replay.
+	# Distributed vents -- ~3 per player spread across the open
+	# map area. Uses Mitchell's best-candidate sampling so the
+	# vent network reads as evenly distributed instead of pooling
+	# on whatever ring quadrant rolled. For each new vent, K
+	# candidate positions are rolled at random; the one with the
+	# largest minimum distance to all already-placed vents wins.
+	# Cheap (K * already_placed comparisons per pick) and produces
+	# noticeably better spread than a single random sample.
 	var dist_count: int = roster.size() * 3
-	var dist_radius: float = 75.0
+	var existing_positions: Array[Vector3] = []
+	# Seed with the close + forward vents already spawned so the
+	# distribution actively avoids them.
+	for node: Node in get_tree().get_nodes_in_group("geothermic_vents"):
+		if not is_instance_valid(node):
+			continue
+		var n3: Node3D = node as Node3D
+		if n3:
+			existing_positions.append(n3.global_position)
+	# Sample bounds -- inside the playable area, but pulled in
+	# from the deepest map corners so distributed vents don't
+	# spawn directly under the player HQs.
+	const SAMPLE_HALF: float = 110.0
+	const SAMPLE_INNER_MIN: float = 25.0   # avoid the dead-centre stack
+	const SAMPLE_HQ_KEEPOUT: float = 35.0  # don't spawn on top of an HQ
+	const CANDIDATE_COUNT: int = 18
 	for j: int in dist_count:
-		var ang: float = TAU * float(j) / float(dist_count)
-		var wobble: float = sin(ang * 3.0) * 12.0
-		var pos := Vector3(
-			cos(ang) * (dist_radius + wobble),
-			0.0,
-			sin(ang) * (dist_radius + wobble),
-		)
-		_spawn_vent(pos)
+		var best_pos: Vector3 = Vector3.ZERO
+		var best_min_dist: float = -1.0
+		for c: int in CANDIDATE_COUNT:
+			var cand := Vector3(
+				randf_range(-SAMPLE_HALF, SAMPLE_HALF),
+				0.0,
+				randf_range(-SAMPLE_HALF, SAMPLE_HALF),
+			)
+			# Reject if the candidate is too close to a player HQ.
+			var hq_too_close: bool = false
+			for entry: Dictionary in roster:
+				var hq_pos2: Vector3 = _hq_position_for(entry["id"] as int)
+				if cand.distance_to(hq_pos2) < SAMPLE_HQ_KEEPOUT:
+					hq_too_close = true
+					break
+			if hq_too_close:
+				continue
+			# Reject candidates inside the inner deadzone -- avoids
+			# all distributed vents stacking at the map centre on
+			# Foundry Belt's central plateau.
+			if cand.length() < SAMPLE_INNER_MIN:
+				continue
+			# Score = min distance to any already-placed vent.
+			var min_d: float = INF
+			for ep: Vector3 in existing_positions:
+				var d: float = cand.distance_to(ep)
+				if d < min_d:
+					min_d = d
+			if min_d > best_min_dist:
+				best_min_dist = min_d
+				best_pos = cand
+		# Place the winner. If every candidate failed the HQ /
+		# inner-deadzone gates (very unlikely with 18 rolls), skip.
+		if best_min_dist < 0.0:
+			continue
+		_spawn_vent(best_pos)
+		existing_positions.append(best_pos)
 
 
 func _spawn_vent(pos: Vector3) -> void:
