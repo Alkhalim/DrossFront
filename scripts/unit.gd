@@ -3326,7 +3326,10 @@ func _build_breacher_tank_member(index: int, offset: Vector3, team_color: Color)
 	# rotates to aim (no turret).
 	var cannons: Array[Node3D] = []
 	var muzzles: Array[float] = []
-	var barrel_len: float = 2.10
+	# Barrel length trimmed 2.10 -> 1.78 (~15% shorter) per
+	# playtest feedback; the twin barrels read crisper at the
+	# casemate scale without dominating the silhouette.
+	var barrel_len: float = 1.78
 	for bi: int in 2:
 		var bx: float = -0.42 if bi == 0 else 0.42
 		var pivot := Node3D.new()
