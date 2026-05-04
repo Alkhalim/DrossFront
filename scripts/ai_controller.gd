@@ -807,23 +807,43 @@ func _process_attack() -> void:
 	if fresh_hq != Vector3.ZERO or _player_hq_pos == Vector3.ZERO:
 		_player_hq_pos = fresh_hq
 
-	# Keep some units near base as defenders
+	# Build the attacker list. Two filters layer on the standard
+	# 'engineers stay home' rule:
+	#
+	# (a) Any unit currently inside HQ_RALLY_RADIUS of our HQ
+	#     stays put. This keeps freshly-produced reinforcements
+	#     massed at the foundry rally point instead of getting
+	#     trickled forward one at a time the moment they spawn
+	#     during an ATTACK -- they'll join the next wave when
+	#     the ARMY->ATTACK transition picks them up. The
+	#     previous DEFENDERS=2 cap let only the first two close
+	#     units stay; #3+ got pushed forward immediately.
+	# (b) Units already attacking (forced or attack-move target
+	#     set) are still funnelled toward the enemy HQ so they
+	#     keep pressing the front, regardless of where they are.
+	const HQ_RALLY_RADIUS: float = 35.0
 	var attack_units: Array[Node] = []
-	var defender_count: int = 0
-
 	for node: Node in _units:
 		if not is_instance_valid(node):
 			continue
-		# Engineers stay home — they need to keep building, not march on the
-		# enemy. Same rule the player follows by intuition.
 		if node.has_method("get_builder") and node.get_builder():
 			continue
-		if defender_count < DEFENDERS:
-			# Keep defenders near HQ
-			var dist_to_hq: float = node.global_position.distance_to(_hq.global_position)
-			if dist_to_hq < 25.0:
-				defender_count += 1
-				continue
+		var n3: Node3D = node as Node3D
+		if not n3:
+			continue
+		var dist_to_hq: float = n3.global_position.distance_to(_hq.global_position)
+		var combat: Node = node.get_node_or_null("CombatComponent")
+		var already_attacking: bool = false
+		if combat:
+			var amt: Variant = combat.get("attack_move_target")
+			already_attacking = typeof(amt) == TYPE_VECTOR3 and (amt as Vector3) != Vector3.INF
+			if not already_attacking:
+				var ft: Variant = combat.get("forced_target")
+				already_attacking = typeof(ft) == TYPE_OBJECT and is_instance_valid(ft)
+		if dist_to_hq < HQ_RALLY_RADIUS and not already_attacking:
+			# Reinforcement still rallying near the base; leave it
+			# alone for the next wave.
+			continue
 		attack_units.append(node)
 
 	# Send attackers toward the chosen enemy HQ. Spread the actual attack-move

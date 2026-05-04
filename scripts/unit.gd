@@ -5262,15 +5262,8 @@ func _try_unit_detour_around_building() -> bool:
 		return false
 	# Perpendicular axis (90° rotation of fwd around Y).
 	var perp: Vector3 = Vector3(-fwd.z, 0.0, fwd.x)
-	# Pick the side AWAY from the blocker's centre line so the
-	# detour walks past the building rather than into another
-	# corner of it.
-	var to_blocker: Vector3 = best_blocker.global_position - origin
-	to_blocker.y = 0.0
-	var blocker_lateral: float = to_blocker.dot(perp)
-	var side_dir: Vector3 = -perp if blocker_lateral > 0.0 else perp
-	# How far out -- pull from the building's footprint half-extent
-	# so the side-step clears the bounding box plus a margin.
+	# Lateral offset scales with the blocker's footprint half-
+	# extent so the side-step clears the bounding box plus margin.
 	var b_half: float = 3.0
 	var b_stats_v: Variant = best_blocker.get("stats")
 	if typeof(b_stats_v) == TYPE_OBJECT and is_instance_valid(b_stats_v):
@@ -5279,8 +5272,30 @@ func _try_unit_detour_around_building() -> bool:
 			var fp: Vector3 = fp_v as Vector3
 			b_half = maxf(fp.x, fp.z) * 0.5
 	var lateral_off: float = maxf(b_half + 3.0, DETOUR_OFFSET_MIN)
-	var detour: Vector3 = origin + side_dir * lateral_off + fwd * 3.0
-	detour.y = origin.y
+	# Try BOTH sides and pick whichever side-step destination is
+	# itself clear of every building footprint. Previously we only
+	# tried the side AWAY from the blocker's centre, which still
+	# wedged the unit when the "away" side happened to host
+	# another building (common in dense AI bases). Picking the
+	# clearer side prevents the detour from queueing a fresh
+	# stuck.
+	var to_blocker: Vector3 = best_blocker.global_position - origin
+	to_blocker.y = 0.0
+	var blocker_lateral: float = to_blocker.dot(perp)
+	var preferred_side: Vector3 = -perp if blocker_lateral > 0.0 else perp
+	var fallback_side: Vector3 = -preferred_side
+	var detour_a: Vector3 = origin + preferred_side * lateral_off + fwd * 3.0
+	var detour_b: Vector3 = origin + fallback_side * lateral_off + fwd * 3.0
+	detour_a.y = origin.y
+	detour_b.y = origin.y
+	var detour: Vector3 = detour_a
+	if not _detour_destination_clear(detour_a):
+		if _detour_destination_clear(detour_b):
+			detour = detour_b
+		else:
+			# Neither side has clearance; let the deflection ladder
+			# stages take over.
+			return false
 	# Queue the detour: push the original target back into the
 	# move_queue so the unit resumes the original goal once the
 	# detour is reached, then retarget the agent to the side-step.
@@ -5288,6 +5303,33 @@ func _try_unit_detour_around_building() -> bool:
 	move_target = detour
 	if _nav_agent:
 		_nav_agent.target_position = detour
+	return true
+
+
+func _detour_destination_clear(pos: Vector3) -> bool:
+	## True when no building's XZ AABB (footprint + small margin)
+	## contains `pos`. Used by the unit detour to verify the
+	## side-step destination isn't itself wedged inside another
+	## building -- the detour only helps if the unit can actually
+	## stand at the new waypoint.
+	const DETOUR_DEST_MARGIN: float = 1.5
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var b: Node3D = node as Node3D
+		if not b:
+			continue
+		var stats_v: Variant = b.get("stats")
+		if typeof(stats_v) != TYPE_OBJECT or not is_instance_valid(stats_v):
+			continue
+		var fp_v: Variant = stats_v.get("footprint_size")
+		if typeof(fp_v) != TYPE_VECTOR3:
+			continue
+		var fp: Vector3 = fp_v as Vector3
+		var half_x: float = fp.x * 0.5 + DETOUR_DEST_MARGIN
+		var half_z: float = fp.z * 0.5 + DETOUR_DEST_MARGIN
+		if absf(pos.x - b.global_position.x) < half_x and absf(pos.z - b.global_position.z) < half_z:
+			return false
 	return true
 
 
