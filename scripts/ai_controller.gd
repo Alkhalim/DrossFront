@@ -524,6 +524,14 @@ func _process(delta: float) -> void:
 		AIState.REBUILD:
 			_process_rebuild()
 
+	# Hard-difficulty target composition runs in every state so
+	# the late-game expansion keeps adding production / power
+	# even while the AI is mid-attack or rebuilding. Calls early-
+	# out on already-placed keys so the cost is just a counter
+	# scan when the targets are met.
+	if _difficulty_is_hard() and _state != AIState.SETUP:
+		_try_hard_target_composition()
+
 
 func _personality_wave_size_base() -> int:
 	## Per-personality base wave size before _agg_mul + _wave_count
@@ -953,6 +961,149 @@ func _best_counter_in_roster(roster: Array, target_armor: StringName) -> UnitSta
 
 func _is_production_building_id(bid: StringName) -> bool:
 	return bid == &"basic_foundry" or bid == &"advanced_foundry" or bid == &"aerodrome"
+
+
+func _difficulty_is_hard() -> bool:
+	## Returns true when this AI's difficulty is HARD. The target-
+	## composition phase only runs on Hard so easy / normal AIs stay
+	## intentionally less productive.
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if settings and settings.has_method("get_ai_difficulty"):
+		return (settings.get_ai_difficulty(owner_id) as int) == 2
+	return false
+
+
+func _count_constructed_owned(building_ids: Array[StringName]) -> int:
+	## Counts buildings owned by us whose stats.building_id is in
+	## `building_ids`. Includes in-progress + constructed. Used by
+	## the hard-target composition phase to decide which slots are
+	## still missing.
+	var n: int = 0
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var b: Building = node as Building
+		if not b or not b.stats:
+			continue
+		if b.owner_id != owner_id:
+			continue
+		if building_ids.has(b.stats.building_id):
+			n += 1
+	return n
+
+
+## --- Hard-difficulty target composition --------------------------------
+## Hard's target composition (per the design spec):
+##   Minimum (mid-game): >=3 production facilities, basic armory,
+##                       >=2 generators, >=1 reactor.
+##   Late game:          5-7 production facilities, 5 energy
+##                       buildings (any mix of generators + reactors).
+## Late-game kicks in when the match has been running >= 6 minutes
+## AND the AI has launched at least one attack wave -- before that
+## the archetype's curated plan is doing its job. Padding builds use
+## unique keys (pad_*) so they don't collide with the archetype's
+## entries; the existing _buildings_placed dedup keeps each pad
+## attempted only once per match.
+
+const HARD_PROD_MIN: int = 3
+const HARD_PROD_LATE_MIN: int = 5
+const HARD_PROD_LATE_MAX: int = 7
+const HARD_GEN_MIN: int = 2
+const HARD_REACTOR_MIN: int = 1
+const HARD_ENERGY_LATE_MIN: int = 5
+const HARD_LATE_GAME_CLOCK_SEC: float = 360.0  # 6 minutes
+
+
+func _try_hard_target_composition() -> void:
+	## Tops up production / energy / armory slots beyond what the
+	## archetype plan placed. Runs every AI tick; each individual
+	## _try_place call early-outs on already-placed keys so the
+	## cost is a few group walks when targets are met.
+	if not is_instance_valid(_hq):
+		return
+	var prod_count: int = _count_constructed_owned([&"basic_foundry", &"advanced_foundry", &"aerodrome"])
+	var basic_gen_count: int = _count_constructed_owned([&"basic_generator"])
+	var reactor_count: int = _count_constructed_owned([&"advanced_generator"])
+	var energy_count: int = basic_gen_count + reactor_count
+	var has_basic_armory: bool = _count_constructed_owned([&"basic_armory"]) > 0
+	var late_game: bool = _match_clock_sec >= HARD_LATE_GAME_CLOCK_SEC and _wave_count >= 1
+
+	# --- Mid-game minimums (always applied on Hard) ---
+	# Basic Armory -- ensure even archetypes that defer the
+	# armory eventually get one. The standard build plan's key
+	# is "basic_armory"; we use a separate "pad_armory" so this
+	# call doesn't conflict if the archetype already queued the
+	# canonical key.
+	if not has_basic_armory:
+		_try_place("pad_armory", "res://resources/buildings/basic_armory.tres",
+			_offset_for("basic_armory", Vector3(18, 0, -4)))
+
+	# Production minimum: pad up to HARD_PROD_MIN if the archetype
+	# left us short. Round-robin between basic_foundry / adv_foundry
+	# / aerodrome based on what's already lowest in the mix.
+	var prod_targets: int = HARD_PROD_LATE_MAX if late_game else HARD_PROD_MIN
+	if prod_count < prod_targets:
+		_try_place_pad_production(prod_count, prod_targets)
+
+	# Energy minimum: at least HARD_GEN_MIN basic generators + 1
+	# reactor, then in late game pad to HARD_ENERGY_LATE_MIN total.
+	# _place_next_power_building auto-picks reactor when 2+ basic
+	# generators are already up, so threading more pad calls just
+	# means more total energy.
+	var energy_target: int = HARD_ENERGY_LATE_MIN if late_game else (HARD_GEN_MIN + HARD_REACTOR_MIN)
+	if energy_count < energy_target:
+		_try_place_pad_energy(energy_count, energy_target)
+
+
+func _try_place_pad_production(current: int, target: int) -> void:
+	## Drops one extra production facility per missing slot. The
+	## offsets cycle around the base ring so successive pads don't
+	## stack on top of each other; _find_clear_placement spirals out
+	## from each anchor.
+	const PAD_RING_RADIUS: float = 24.0
+	var pad_offsets: Array[Vector3] = [
+		Vector3(0, 0, -22),
+		Vector3(22, 0, 0),
+		Vector3(0, 0, 22),
+		Vector3(-22, 0, 0),
+	]
+	var paths: Array[String] = [
+		"res://resources/buildings/basic_foundry.tres",
+		"res://resources/buildings/advanced_foundry.tres",
+		"res://resources/buildings/aerodrome.tres",
+	]
+	for i: int in range(current, target):
+		var key: String = "pad_prod_%d" % i
+		if _buildings_placed.has(key):
+			continue
+		var off: Vector3 = pad_offsets[i % pad_offsets.size()]
+		# Push out a touch with the ring radius so successive pads
+		# don't overlap each other's anchor points.
+		off += Vector3(cos(float(i) * 1.7) * 4.0, 0.0, sin(float(i) * 1.7) * 4.0).normalized() * PAD_RING_RADIUS * 0.0
+		var path: String = paths[i % paths.size()]
+		_try_place(key, path, _offset_for(key, off))
+
+
+func _try_place_pad_energy(current: int, target: int) -> void:
+	## Drops one extra power building per missing slot.
+	## _place_next_power_building flips to Reactor automatically
+	## once 2+ basic generators are up, so the pads naturally
+	## become reactors in late-game once the basic-gen quota is
+	## met. A blocked vent falls through to the next-closest one
+	## via the buildable-vent picker.
+	var pad_offsets: Array[Vector3] = [
+		Vector3(28, 0, 8),
+		Vector3(-28, 0, 8),
+		Vector3(28, 0, -8),
+		Vector3(-28, 0, -8),
+		Vector3(0, 0, 28),
+	]
+	for i: int in range(current, target):
+		var key: String = "pad_energy_%d" % i
+		if _buildings_placed.has(key):
+			continue
+		var off: Vector3 = pad_offsets[i % pad_offsets.size()]
+		_place_next_power_building(key, _offset_for(key, off))
 
 
 func _try_place_salvage_yard(key: String, offset: Vector3) -> void:
