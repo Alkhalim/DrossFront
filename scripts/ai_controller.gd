@@ -82,8 +82,11 @@ var _expansion_timer: float = 0.0
 ## per-tick chance scales with aggression so Hard contests almost
 ## every interval while Easy only sometimes bothers.
 const OIL_CONTEST_INTERVAL: float = 18.0
-const OIL_CONTEST_PREFERRED_RADIUS: float = 110.0
-const OIL_CONTEST_DETACHMENT_SIZE: int = 3
+## Detachment size when the AI actively claims an oil field.
+## Bumped 3 -> 4 so a contested deposit (player camping with a
+## small force) is more likely to actually flip rather than the
+## AI bouncing off and respawning the same dispatch in 18s.
+const OIL_CONTEST_DETACHMENT_SIZE: int = 4
 var _oil_contest_timer: float = 0.0
 
 var _salvage_accumulator: float = 0.0
@@ -1150,29 +1153,25 @@ func _dispatch_crawler_defenders(crawler_pos: Vector3) -> void:
 ## (no engineer free, no resources, no safe spot) — the next interval
 ## will retry.
 func _try_contest_oil() -> void:
-	## Looks for the nearest fuel deposit that's neutral or held by an
-	## enemy, biased toward deposits NEAR the AI's base, and detaches
-	## a small attack-move group to capture / contest it. Per-tick
-	## probability scales with the AI's aggression multiplier so Hard
-	## (~1.8) almost always rolls in, Easy (~0.75) often skips, and
-	## Normal (~1.15) usually does it but not always.
+	## Strictly picks the nearest fuel deposit the AI doesn't own
+	## (neutral OR enemy-held) and detaches a small attack-move
+	## group to capture / contest it. Runs every OIL_CONTEST_INTERVAL
+	## seconds with NO probabilistic skip and NO distance cap --
+	## the AI should actively claim oil instead of waiting for it
+	## to drop into its lap. The dispatch interval already throttles
+	## how often we redirect units; per-tick variance there is enough.
 	if not _hq or not is_instance_valid(_hq):
-		return
-	# Aggression-driven dispatch chance. clampf so a future tuning
-	# bump above 2.0 doesn't always succeed (we still want a tick of
-	# variance).
-	var roll: float = randf()
-	if roll > clampf(_agg_mul * 0.6, 0.25, 0.95):
 		return
 	var hq_pos: Vector3 = _hq.global_position
 	var deposits: Array[Node] = get_tree().get_nodes_in_group("fuel_deposits")
 	if deposits.is_empty():
 		return
-	# Score deposits by (1 / (distance + 1)) with a hard cap at the
-	# preferred radius so the AI stays nearby. Neutral deposits get a
-	# slight score bonus over enemy-held (cheaper to flip).
+	# Pure nearest-non-owned pick. No bonus for neutral over enemy-
+	# held -- the player asked for 'nearest one we don't own',
+	# capture-time difference is minor compared to lost income from
+	# never claiming a contested field.
 	var best: Node3D = null
-	var best_score: float = 0.0
+	var best_dist: float = INF
 	for d_node: Node in deposits:
 		if not is_instance_valid(d_node):
 			continue
@@ -1183,13 +1182,8 @@ func _try_contest_oil() -> void:
 		if dep_owner == owner_id:
 			continue  # already ours
 		var dist: float = hq_pos.distance_to(dep.global_position)
-		if dist > OIL_CONTEST_PREFERRED_RADIUS:
-			continue
-		var score: float = 1.0 / (dist + 1.0)
-		if dep_owner < 0:
-			score *= 1.4  # neutral: easier flip
-		if score > best_score:
-			best_score = score
+		if dist < best_dist:
+			best_dist = dist
 			best = dep
 	if not best:
 		return
