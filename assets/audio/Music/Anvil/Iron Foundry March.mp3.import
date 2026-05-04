@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://b6nnt6l6en37j"
+path="res://.godot/imported/Iron Foundry March.mp3-b7d0b204810fc8e5f2309a3a0d3329c1.mp3str"
+
+[deps]
+
+source_file="res://assets/audio/Music/Anvil/Iron Foundry March.mp3"
+dest_files=["res://.godot/imported/Iron Foundry March.mp3-b7d0b204810fc8e5f2309a3a0d3329c1.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

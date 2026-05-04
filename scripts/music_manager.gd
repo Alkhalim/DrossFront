@@ -25,9 +25,9 @@ const MUSIC_TRACKS_UNIVERSAL: Array[String] = [
 	"res://assets/audio/Music/Universal/Steel Order.mp3",
 ]
 const MUSIC_TRACKS_ANVIL: Array[String] = [
-	"res://assets/audio/Music/Anvil/Red Alert March.mp3",
-	"res://assets/audio/Music/Anvil/Red Parade Sector.mp3",
-	"res://assets/audio/Music/Anvil/Red Tundra March.mp3",
+	"res://assets/audio/Music/Anvil/Iron Foundry March.mp3",
+	"res://assets/audio/Music/Anvil/Iron Foundry March (1).mp3",
+	"res://assets/audio/Music/Anvil/Iron Republic.mp3",
 ]
 const MUSIC_TRACKS_SABLE: Array[String] = [
 	"res://assets/audio/Music/Sable/Silent Ops.mp3",

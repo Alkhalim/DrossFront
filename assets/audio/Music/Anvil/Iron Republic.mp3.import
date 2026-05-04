@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://cknlylvsiifig"
+path="res://.godot/imported/Iron Republic.mp3-2b34c29a48471ca5a75fb368737d72f8.mp3str"
+
+[deps]
+
+source_file="res://assets/audio/Music/Anvil/Iron Republic.mp3"
+dest_files=["res://.godot/imported/Iron Republic.mp3-2b34c29a48471ca5a75fb368737d72f8.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4
