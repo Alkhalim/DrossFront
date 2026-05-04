@@ -412,8 +412,16 @@ func _find_nearest_enemy(max_range: float) -> Node3D:
 	# radius (rebuild lag).
 	var idx: SpatialIndex = SpatialIndex.get_instance(get_tree().current_scene)
 	var candidates: Array = idx.nearby(my_pos, max_range) if idx else []
-	for node: Node in candidates:
-		if not is_instance_valid(node):
+	# Untyped iteration -- the spatial-index bucket may carry stale
+	# Object references for entities freed since the last rebuild
+	# tick. A typed `for node: Node in candidates:` assigns each
+	# slot to a typed local, which errors on a freed handle BEFORE
+	# the is_instance_valid check below ever runs.
+	for raw in candidates:
+		if raw == null or not is_instance_valid(raw):
+			continue
+		var node: Node = raw as Node
+		if not node:
 			continue
 		# `node` may be a unit OR a building -- both expose
 		# take_damage + owner_id. Skip non-targetable entries.
@@ -872,8 +880,13 @@ func _find_stray_target(aim_pos: Vector3, primary: Node3D, my_owner: int) -> Nod
 	# the same O(N)->O(K) win the main targeting path got.
 	var idx: SpatialIndex = SpatialIndex.get_instance(get_tree().current_scene)
 	var candidates: Array = idx.nearby(aim_pos, STRAY_HIT_RADIUS) if idx else []
-	for node: Node in candidates:
-		if not is_instance_valid(node) or node == primary:
+	# Untyped iteration -- see _find_nearest_enemy for the typed-cast
+	# of freed-instance trap.
+	for raw in candidates:
+		if raw == null or not is_instance_valid(raw):
+			continue
+		var node: Node = raw as Node
+		if not node or node == primary:
 			continue
 		if not node.has_method("take_damage"):
 			continue
