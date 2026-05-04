@@ -1,88 +1,21 @@
 class_name GeothermicVent
 extends StaticBody3D
 ## A capped fissure of geothermal steam. Generator buildings must
-## be placed on top of one of these to function. Open vents emit a
-## continuous smoke plume; once a Generator covers the vent the
+## be placed on top of one to produce power. Open vents emit a
+## continuous steam plume via a dedicated GPUParticles3D so the
+## smoke is unmissable; once a Generator covers the vent the
 ## plume stops. Roughly the footprint of a Generator (4u square),
 ## so the visual hides cleanly under the building.
 ##
 ## Scene placement happens via TestArenaController's vent setup
-## pass. Each player gets 2 close-base vents + 1 forward visible
-## vent at start, plus 3 more distributed across the map.
+## pass. Each player gets a starter pair of close vents + 1
+## forward visible vent at start, plus distributed vents elsewhere.
 
 const VENT_SIZE: float = 4.0
-const SMOKE_INTERVAL_SEC: float = 0.85
 
 var is_covered: bool = false
-var _smoke_timer: float = 0.0
-## Cached PEM ref so the per-tick smoke emit doesn't re-walk the
-## scene tree.
-var _pem: Node = null
-
-
-func _ready() -> void:
-	add_to_group("geothermic_vents")
-	# Collision layer 0 (no physics interaction); the vent is a
-	# static decoration that the build system queries by group.
-	collision_layer = 0
-	collision_mask = 0
-	_build_visuals()
-	# Stagger the smoke timer so a row of vents doesn't all puff
-	# in sync.
-	_smoke_timer = randf_range(0.0, SMOKE_INTERVAL_SEC)
-	if get_tree() and get_tree().current_scene:
-		_pem = get_tree().current_scene.get_node_or_null("ParticleEmitterManager")
-
-
-func _build_visuals() -> void:
-	# Concrete-collared rim around the fissure.
-	var rim_mat: StandardMaterial3D = StandardMaterial3D.new()
-	rim_mat.albedo_color = Color(0.30, 0.28, 0.24, 1.0)
-	rim_mat.roughness = 0.95
-	var rim: MeshInstance3D = MeshInstance3D.new()
-	var rim_mesh: CylinderMesh = CylinderMesh.new()
-	rim_mesh.top_radius = VENT_SIZE * 0.45
-	rim_mesh.bottom_radius = VENT_SIZE * 0.50
-	rim_mesh.height = 0.18
-	rim_mesh.radial_segments = 12
-	rim.mesh = rim_mesh
-	rim.position = Vector3(0.0, 0.09, 0.0)
-	rim.set_surface_override_material(0, rim_mat)
-	add_child(rim)
-	# Glowing inner cap -- warm orange pit, gives the vent its
-	# 'hot' read at a glance.
-	var pit_mat: StandardMaterial3D = StandardMaterial3D.new()
-	pit_mat.albedo_color = Color(0.45, 0.20, 0.10, 1.0)
-	pit_mat.emission_enabled = true
-	pit_mat.emission = Color(1.0, 0.45, 0.15, 1.0)
-	pit_mat.emission_energy_multiplier = 1.4
-	pit_mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
-	var pit: MeshInstance3D = MeshInstance3D.new()
-	var pit_mesh: CylinderMesh = CylinderMesh.new()
-	pit_mesh.top_radius = VENT_SIZE * 0.30
-	pit_mesh.bottom_radius = VENT_SIZE * 0.32
-	pit_mesh.height = 0.06
-	pit_mesh.radial_segments = 14
-	pit.mesh = pit_mesh
-	pit.position = Vector3(0.0, 0.20, 0.0)
-	pit.set_surface_override_material(0, pit_mat)
-	add_child(pit)
-	# Hazard stripe markers around the rim -- four short yellow
-	# wedges, same visual language as the fuel-deposit pad.
-	var stripe_mat: StandardMaterial3D = StandardMaterial3D.new()
-	stripe_mat.albedo_color = Color(0.78, 0.62, 0.10, 1.0)
-	stripe_mat.roughness = 0.7
-	for w: int in 4:
-		var wedge: MeshInstance3D = MeshInstance3D.new()
-		var w_box: BoxMesh = BoxMesh.new()
-		w_box.size = Vector3(0.4, 0.025, 0.16)
-		wedge.mesh = w_box
-		var ang: float = float(w) * (PI * 0.5) + PI * 0.25
-		wedge.position = Vector3(cos(ang) * VENT_SIZE * 0.55, 0.205, sin(ang) * VENT_SIZE * 0.55)
-		wedge.rotation.y = -ang
-		wedge.set_surface_override_material(0, stripe_mat)
-		add_child(wedge)
-
+var _steam: GPUParticles3D = null
+var _glow_light: OmniLight3D = null
 
 ## Throttle for the cover-state recheck. Repolling the buildings
 ## group every frame for every vent at high counts is wasteful;
@@ -91,31 +24,193 @@ const COVER_RECHECK_INTERVAL: float = 1.1
 var _cover_check_timer: float = 0.0
 
 
+func _ready() -> void:
+	add_to_group("geothermic_vents")
+	# Static decoration -- no physics interaction. The build system
+	# queries vents by group, not by collider.
+	collision_layer = 0
+	collision_mask = 0
+	_build_visuals()
+	_cover_check_timer = randf_range(0.0, COVER_RECHECK_INTERVAL)
+
+
+func _build_visuals() -> void:
+	# --- Concrete pad + collar -------------------------------------
+	# Wide low pad gives the rim something to sit on and matches the
+	# Generator footprint (so the building looks like it locked into
+	# place).
+	var pad_mat: StandardMaterial3D = StandardMaterial3D.new()
+	pad_mat.albedo_color = Color(0.34, 0.32, 0.28, 1.0)
+	pad_mat.roughness = 0.95
+	var pad: MeshInstance3D = MeshInstance3D.new()
+	var pad_mesh: CylinderMesh = CylinderMesh.new()
+	pad_mesh.top_radius = VENT_SIZE * 0.55
+	pad_mesh.bottom_radius = VENT_SIZE * 0.60
+	pad_mesh.height = 0.16
+	pad_mesh.radial_segments = 14
+	pad.mesh = pad_mesh
+	pad.position = Vector3(0.0, 0.08, 0.0)
+	pad.set_surface_override_material(0, pad_mat)
+	add_child(pad)
+
+	# Riveted iron collar around the rim -- pipes / fixtures bolted
+	# in. Read as the cap on the geothermal well.
+	var collar_mat: StandardMaterial3D = StandardMaterial3D.new()
+	collar_mat.albedo_color = Color(0.18, 0.16, 0.14, 1.0)
+	collar_mat.metallic = 0.45
+	collar_mat.roughness = 0.55
+	var collar: MeshInstance3D = MeshInstance3D.new()
+	var collar_mesh: CylinderMesh = CylinderMesh.new()
+	collar_mesh.top_radius = VENT_SIZE * 0.40
+	collar_mesh.bottom_radius = VENT_SIZE * 0.46
+	collar_mesh.height = 0.32
+	collar_mesh.radial_segments = 18
+	collar.mesh = collar_mesh
+	collar.position = Vector3(0.0, 0.32, 0.0)
+	collar.set_surface_override_material(0, collar_mat)
+	add_child(collar)
+
+	# Eight rivets around the collar.
+	var rivet_mat: StandardMaterial3D = StandardMaterial3D.new()
+	rivet_mat.albedo_color = Color(0.55, 0.45, 0.18, 1.0)
+	rivet_mat.metallic = 0.7
+	rivet_mat.roughness = 0.4
+	for r: int in 8:
+		var rivet: MeshInstance3D = MeshInstance3D.new()
+		var rs: SphereMesh = SphereMesh.new()
+		rs.radius = 0.08
+		rs.height = 0.16
+		rivet.mesh = rs
+		var ang: float = TAU * float(r) / 8.0
+		rivet.position = Vector3(
+			cos(ang) * VENT_SIZE * 0.43,
+			0.40,
+			sin(ang) * VENT_SIZE * 0.43,
+		)
+		rivet.set_surface_override_material(0, rivet_mat)
+		add_child(rivet)
+
+	# Glowing inner pit -- warm orange, gives the vent its 'hot'
+	# read and the steam its colour anchor.
+	var pit_mat: StandardMaterial3D = StandardMaterial3D.new()
+	pit_mat.albedo_color = Color(0.45, 0.20, 0.10, 1.0)
+	pit_mat.emission_enabled = true
+	pit_mat.emission = Color(1.0, 0.50, 0.18, 1.0)
+	pit_mat.emission_energy_multiplier = 2.2
+	pit_mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
+	var pit: MeshInstance3D = MeshInstance3D.new()
+	var pit_mesh: CylinderMesh = CylinderMesh.new()
+	pit_mesh.top_radius = VENT_SIZE * 0.28
+	pit_mesh.bottom_radius = VENT_SIZE * 0.30
+	pit_mesh.height = 0.06
+	pit_mesh.radial_segments = 18
+	pit.mesh = pit_mesh
+	pit.position = Vector3(0.0, 0.50, 0.0)
+	pit.set_surface_override_material(0, pit_mat)
+	add_child(pit)
+
+	# Soft warm point light so the vent reads at distance + tints
+	# nearby ground orange.
+	_glow_light = OmniLight3D.new()
+	_glow_light.light_color = Color(1.0, 0.55, 0.20, 1.0)
+	_glow_light.light_energy = 0.6
+	_glow_light.omni_range = 5.5
+	_glow_light.position = Vector3(0.0, 0.7, 0.0)
+	add_child(_glow_light)
+
+	# Hazard stripe wedges around the pad -- four short
+	# yellow/black segments on the cardinals so the pad reads as
+	# an industrial work-site.
+	var stripe_mat: StandardMaterial3D = StandardMaterial3D.new()
+	stripe_mat.albedo_color = Color(0.78, 0.62, 0.10, 1.0)
+	stripe_mat.roughness = 0.7
+	for w: int in 4:
+		var wedge: MeshInstance3D = MeshInstance3D.new()
+		var w_box: BoxMesh = BoxMesh.new()
+		w_box.size = Vector3(0.55, 0.025, 0.20)
+		wedge.mesh = w_box
+		var ang2: float = float(w) * (PI * 0.5) + PI * 0.25
+		wedge.position = Vector3(
+			cos(ang2) * VENT_SIZE * 0.55,
+			0.165,
+			sin(ang2) * VENT_SIZE * 0.55,
+		)
+		wedge.rotation.y = -ang2
+		wedge.set_surface_override_material(0, stripe_mat)
+		add_child(wedge)
+
+	# Dedicated GPU steam emitter. Cone-shape with strong upward
+	# velocity and a long lifetime so the plume is unmistakable.
+	# The shared ParticleEmitterManager.emit_smoke route was too
+	# subtle / capped for a continuous source.
+	_steam = GPUParticles3D.new()
+	_steam.amount = 32
+	_steam.lifetime = 2.4
+	_steam.preprocess = 1.5  # warm the column on spawn so it doesn't pop in empty
+	_steam.position = Vector3(0.0, 0.55, 0.0)
+	_steam.draw_pass_1 = _build_steam_mesh()
+	_steam.process_material = _build_steam_material()
+	add_child(_steam)
+
+
+func _build_steam_mesh() -> Mesh:
+	var qm: QuadMesh = QuadMesh.new()
+	qm.size = Vector2(1.0, 1.0)
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.albedo_color = Color(0.85, 0.88, 0.92, 0.85)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	mat.billboard_keep_scale = true
+	qm.material = mat
+	return qm
+
+
+func _build_steam_material() -> ParticleProcessMaterial:
+	var pm: ParticleProcessMaterial = ParticleProcessMaterial.new()
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	pm.emission_sphere_radius = 0.35
+	pm.direction = Vector3(0.0, 1.0, 0.0)
+	pm.spread = 18.0
+	pm.initial_velocity_min = 1.6
+	pm.initial_velocity_max = 2.6
+	pm.gravity = Vector3(0.0, 0.6, 0.0)  # mild positive gravity (rises)
+	pm.scale_min = 0.55
+	pm.scale_max = 1.35
+	pm.angle_min = -180.0
+	pm.angle_max = 180.0
+	# Fade out across lifetime via colour ramp.
+	var ramp: Gradient = Gradient.new()
+	ramp.set_color(0, Color(0.92, 0.94, 0.96, 0.85))
+	ramp.set_color(1, Color(0.85, 0.86, 0.88, 0.0))
+	var grad_tex: GradientTexture1D = GradientTexture1D.new()
+	grad_tex.gradient = ramp
+	pm.color_ramp = grad_tex
+	# Scale curve -- grow as the puff rises.
+	var sc_curve: Curve = Curve.new()
+	sc_curve.add_point(Vector2(0.0, 0.6))
+	sc_curve.add_point(Vector2(1.0, 1.6))
+	var sc_tex: CurveTexture = CurveTexture.new()
+	sc_tex.curve = sc_curve
+	pm.scale_curve = sc_tex
+	return pm
+
+
 func _process(delta: float) -> void:
 	# Periodically rescan for a Generator footprint covering the
-	# vent. When found, mark covered (kills the smoke); when the
+	# vent. When found, mark covered (kills the steam); when the
 	# generator is destroyed the recheck flips it back to open.
 	_cover_check_timer -= delta
 	if _cover_check_timer <= 0.0:
 		_cover_check_timer = COVER_RECHECK_INTERVAL + randf_range(-0.1, 0.2)
 		_recheck_cover_state()
-	if is_covered:
-		return
-	_smoke_timer -= delta
-	if _smoke_timer > 0.0:
-		return
-	_smoke_timer += SMOKE_INTERVAL_SEC
-	# Steady steam plume rising straight up. Pale grey-white tint
-	# so it reads as hot vapour, not a smoke smear.
-	if _pem and _pem.has_method("emit_smoke"):
-		var origin: Vector3 = global_position + Vector3(0.0, 0.4, 0.0)
-		_pem.call("emit_smoke", origin, Vector3(0.0, 4.0, 0.0), Color(0.78, 0.80, 0.82, 0.55))
 
 
 func _recheck_cover_state() -> void:
 	## Scans the buildings group for a Generator (basic_generator or
 	## advanced_generator) whose footprint overlaps this vent. Sets
-	## is_covered accordingly so the smoke plume tracks reality.
+	## is_covered accordingly so the steam plume tracks reality.
 	var found: bool = false
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(node):
@@ -132,13 +227,19 @@ func _recheck_cover_state() -> void:
 		if b.global_position.distance_to(global_position) < VENT_SIZE * 0.6:
 			found = true
 			break
-	is_covered = found
+	if found != is_covered:
+		mark_covered(found)
 
 
 func mark_covered(covered: bool) -> void:
-	## Called by Building when a Generator finishes / is destroyed
-	## on this vent. Stops or resumes the steam plume.
+	## Toggle the cover state. Stops or resumes the steam plume +
+	## the warm OmniLight (no point shedding light from underneath
+	## a finished generator -- the building has its own emission).
 	is_covered = covered
+	if _steam:
+		_steam.emitting = not covered
+	if _glow_light:
+		_glow_light.visible = not covered
 
 
 static func find_vent_at(scene: Node, world_pos: Vector3, radius: float = 2.5) -> GeothermicVent:
