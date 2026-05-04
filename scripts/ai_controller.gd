@@ -1101,12 +1101,14 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 	if bstats.get("requires_geothermic_vent") and pos.distance_to(desired) > 1.4:
 		_record_blocker(key, BuildBlocker.VENT_SNAP_TOO_FAR)
 		return
-	# Symmetric vent keepout for non-generator buildings -- the AI
-	# can't drop a foundry / yard / turret on or right next to a
-	# vent, since that would block the generator that should later
-	# go on that vent. Mirrors selection_manager's keepout rule.
+	# Vent keepout for non-generator buildings -- the AI can't drop
+	# a foundry / yard / turret on or near a vent. The +6.0 margin
+	# (was +1.4) gives the future generator + its build ghost
+	# clearance plus a unit-corridor's worth of breathing room, so
+	# the AI base doesn't grow into a tight cluster around every
+	# vent that prevents it from ever being upgraded to a Reactor.
 	if not bstats.get("requires_geothermic_vent"):
-		var vent_keepout: float = maxf(bstats.footprint_size.x, bstats.footprint_size.z) * 0.5 + 1.4
+		var vent_keepout: float = maxf(bstats.footprint_size.x, bstats.footprint_size.z) * 0.5 + 6.0
 		if GeothermicVent.find_vent_at(get_tree().current_scene, pos, vent_keepout) != null:
 			_record_blocker(key, BuildBlocker.VENT_KEEPOUT)
 			return
@@ -1415,6 +1417,16 @@ var _crawler_escorts: Dictionary = {}
 ## mid-fight.
 const ESCORT_COMBAT_GRACE_SEC: float = 7.0
 var _escort_combat_lock_until: Dictionary = {}
+## Crawler stuck-detection for escort displacement. Tracks each
+## crawler's last-recorded position + the match-clock sec it was
+## first seen there. When the crawler stays inside a 1.5u radius for
+## CRAWLER_STUCK_NUDGE_SEC, the escort logic pushes its escorts
+## OUT of the comfort band (50% beyond ESC_MAX) so the crawler has
+## space to manoeuvre. Cleared once the crawler moves again.
+const CRAWLER_STUCK_RADIUS: float = 1.5
+const CRAWLER_STUCK_NUDGE_SEC: float = 5.0
+var _crawler_stuck_anchor: Dictionary = {}        # crawler iid -> Vector3
+var _crawler_stuck_since_sec: Dictionary = {}     # crawler iid -> match_clock
 
 
 func _crawler_escort_count() -> int:
@@ -1509,10 +1521,37 @@ func _assign_crawler_escort(crawler: Node3D) -> void:
 	# chasing escort back into formation as soon as it crossed
 	# ESC_MAX, which made the convoys 'glance and disengage'
 	# instead of finishing fights.
-	const ESC_MIN_DIST: float = 4.0
-	const ESC_MAX_DIST: float = 11.0
-	const ESC_REASSIGN_DIST: float = (ESC_MIN_DIST + ESC_MAX_DIST) * 0.5  # ~7.5u
+	# Comfort-band radii. Each bumped 50% from the original
+	# 4..11 spread so escorts stand farther off the chassis by
+	# default, leaving the crawler more room to navigate. The
+	# stuck-displacement override below pushes escorts out
+	# even further when the crawler can't make progress.
+	const ESC_MIN_DIST: float = 6.0
+	const ESC_MAX_DIST: float = 16.5
+	const ESC_REASSIGN_DIST: float = (ESC_MIN_DIST + ESC_MAX_DIST) * 0.5  # ~11.25u
+	const ESC_STUCK_PUSH: float = ESC_MAX_DIST * 1.5  # ~24.75u
 	var crawler_pos2: Vector3 = crawler.global_position
+	# Crawler stuck-detection: if the chassis hasn't moved more
+	# than CRAWLER_STUCK_RADIUS in CRAWLER_STUCK_NUDGE_SEC, we
+	# clear the comfort band entirely and push escorts out to
+	# ESC_STUCK_PUSH so the crawler has space. Cleared once the
+	# chassis moves again.
+	var crawler_stuck: bool = false
+	var anchor_v: Variant = _crawler_stuck_anchor.get(iid, null)
+	if typeof(anchor_v) == TYPE_VECTOR3:
+		var anchor: Vector3 = anchor_v as Vector3
+		var moved: float = Vector2(crawler_pos2.x - anchor.x, crawler_pos2.z - anchor.z).length()
+		if moved > CRAWLER_STUCK_RADIUS:
+			# Reset anchor + timer; chassis is mobile.
+			_crawler_stuck_anchor[iid] = crawler_pos2
+			_crawler_stuck_since_sec[iid] = _match_clock_sec
+		else:
+			var since: float = _crawler_stuck_since_sec.get(iid, _match_clock_sec) as float
+			if _match_clock_sec - since >= CRAWLER_STUCK_NUDGE_SEC:
+				crawler_stuck = true
+	else:
+		_crawler_stuck_anchor[iid] = crawler_pos2
+		_crawler_stuck_since_sec[iid] = _match_clock_sec
 	for esc_i: int in alive_escorts.size():
 		var esc_unit: Node = alive_escorts[esc_i]
 		if not is_instance_valid(esc_unit):
@@ -1544,6 +1583,16 @@ func _assign_crawler_escort(crawler: Node3D) -> void:
 			# we rope it back into formation.
 			continue
 		var d_to_crawler: float = (esc_unit as Node3D).global_position.distance_to(crawler_pos2)
+		if crawler_stuck:
+			# Chassis has been wedged for CRAWLER_STUCK_NUDGE_SEC.
+			# Kick this escort outward to ESC_STUCK_PUSH so the
+			# crawler has manoeuvring room. Skip if the escort is
+			# already past the push radius.
+			if d_to_crawler < ESC_STUCK_PUSH:
+				var ang_s: float = float(esc_i) / float(maxi(target_count, 1)) * TAU
+				var ring_s: Vector3 = Vector3(cos(ang_s), 0.0, sin(ang_s)) * ESC_STUCK_PUSH
+				combat.command_attack_move(crawler_pos2 + ring_s)
+			continue
 		if d_to_crawler >= ESC_MIN_DIST and d_to_crawler <= ESC_MAX_DIST:
 			# Inside the comfort band. Don't churn its current
 			# move/combat order -- if it's busy fighting an

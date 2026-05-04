@@ -146,21 +146,26 @@ func _ready() -> void:
 	# hostile AIs instead of two. Done here so subsequent setup paths
 	# read the corrected team_ids.
 	_apply_scenario_team_overrides()
-	# Geothermic vents drive Generator placement. Spawn them BEFORE
-	# the player + AI start placing buildings so any seeded base
-	# can find vents to attach Generators to.
-	_setup_geothermic_vents()
 	_setup_player()
 	_setup_ai()
+	# Build elevation BEFORE the rest of the world so vent placement
+	# + terrain spawn both know where the plateau / ramp footprints
+	# are and can avoid them. Vents used to spawn first (so seeded
+	# bases could reach them) but the distributed-vent picker had no
+	# way to avoid plateaus / ramps that hadn't been built yet, and
+	# random placements landed on terrain the navmesh later carved
+	# off as unwalkable.
+	_setup_elevation()
+	# Geothermic vents drive Generator placement. Spawn them AFTER
+	# elevation (so the picker rejects plateau / ramp footprints)
+	# but BEFORE seeded bases + terrain (so seeded buildings can
+	# reach vents and terrain placement can avoid them).
+	_setup_geothermic_vents()
 	# After bases/AI controllers are in place, seed any scenario-
 	# specific extras (pre-built forward base, full economy preload,
 	# starting army roll-out for the stress test, etc).
 	_apply_scenario_seeding()
 	_setup_fuel_deposits()
-	# Build elevation BEFORE terrain so terrain spawn knows where the
-	# plateau / ramp footprints are and can avoid placing rocks /
-	# ruins that obstruct ramp approach lanes.
-	_setup_elevation()
 	_setup_terrain()
 	_setup_off_map_backdrop()
 	_setup_map_signature_features()
@@ -2636,6 +2641,26 @@ func _spawn_terrain_piece(pos: Vector3, piece_size: Vector3, kind: String) -> vo
 	if _overlaps_plateau_footprint(pos, piece_size, 0.0):
 		return
 
+	# Vent safety zone -- terrain pieces can't spawn within
+	# VENT_TERRAIN_SAFETY of any geothermic vent. Without this, a
+	# rock outcrop or ruin block dropped by terrain (which runs
+	# AFTER vent placement) could land on top of a vent and lock
+	# the player out of building a generator there for the rest of
+	# the match. Same group + radius works for the player's
+	# starter pair, the forward vent, and the distributed Mitchell
+	# samples.
+	const VENT_TERRAIN_SAFETY: float = 6.0
+	for vent_node: Node in get_tree().get_nodes_in_group("geothermic_vents"):
+		if not is_instance_valid(vent_node):
+			continue
+		var v3: Node3D = vent_node as Node3D
+		if not v3:
+			continue
+		var dx: float = absf(pos.x - v3.global_position.x)
+		var dz: float = absf(pos.z - v3.global_position.z)
+		if dx < diag_half + VENT_TERRAIN_SAFETY and dz < diag_half + VENT_TERRAIN_SAFETY:
+			return  # overlap → silently drop the piece
+
 	# Queue the piece's 2D footprint as a blocked region so the ground
 	# strip-decomposition navmesh carves a hole at this position. Without
 	# this, units' nav agents path THROUGH terrain (the navmesh covers
@@ -4878,16 +4903,15 @@ func _setup_geothermic_vents() -> void:
 		else:
 			centre_dir_per_player[i] = Vector3(0, 0, -1)
 		# Starter pair -- two vents side by side, sitting ~17u in
-		# front of the HQ (was 11; bumped +50% per playtest so the
-		# pair doesn't crowd the base footprint). Pair spacing
-		# 6.5u along the perp axis so generators on top don't
-		# overlap. Each placement runs through _spawn_vent_safely
-		# which retries with small lateral nudges if the original
-		# position lands inside a ramp / plateau / terrain piece.
+		# front of the HQ. Pair spacing bumped to 5.0u perp from
+		# centre (10u total apart, was 6.5u) so two side-by-side
+		# generators on the pair leave room for a unit + crawler
+		# to thread between them and the side approach lanes
+		# don't read as a single congested chokepoint.
 		var perp: Vector3 = Vector3(-centre_dir_per_player[i].z, 0.0, centre_dir_per_player[i].x)
 		var pair_centre: Vector3 = hq_pos + centre_dir_per_player[i] * 17.0
-		_spawn_vent_safely(pair_centre + perp * 3.25, perp)
-		_spawn_vent_safely(pair_centre - perp * 3.25, perp)
+		_spawn_vent_safely(pair_centre + perp * 5.0, perp)
+		_spawn_vent_safely(pair_centre - perp * 5.0, perp)
 		# 1 forward vent further toward map centre (was 32u, now
 		# 48u -- same +50% bump). On Schwarzwald the corridor is a
 		# narrow choke at this Z; nudge the vent ~12u laterally so
