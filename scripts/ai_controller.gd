@@ -2726,8 +2726,8 @@ func _is_placement_clear(pos: Vector3, footprint: Vector3, vent_keepout: float =
 	# unit's resolved primary-weapon range so a long-range Bulwark
 	# pushes the keepout further out than a short-range Rook.
 	# Buildings under construction count as friendly (they're not
-	# threatening anyone yet), so we skip them.
-	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	# threatening anyone yet), so we skip them. `registry` was
+	# already resolved up top for the allied-HQ keepout; reuse it.
 	for u_node: Node in get_tree().get_nodes_in_group("units"):
 		if not is_instance_valid(u_node):
 			continue
