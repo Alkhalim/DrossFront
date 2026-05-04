@@ -469,7 +469,21 @@ func _draw() -> void:
 func _draw_land(poly_norm: PackedVector2Array) -> void:
 	var pts: PackedVector2Array = PackedVector2Array()
 	for p: Vector2 in poly_norm:
-		pts.append(p * MAP_SIZE)
+		# Drop a vertex when it's a near-duplicate of the previous
+		# one. Triangulation chokes on degenerate edges, and several
+		# of the hand-crafted country polygons have repeated points
+		# that flooded the editor log with 'Invalid polygon data'
+		# on every redraw.
+		var pp: Vector2 = p * MAP_SIZE
+		if pts.size() > 0 and pp.distance_to(pts[pts.size() - 1]) < 0.5:
+			continue
+		pts.append(pp)
+	# Same dedupe at the wrap-around edge.
+	if pts.size() >= 2 and pts[0].distance_to(pts[pts.size() - 1]) < 0.5:
+		pts.remove_at(pts.size() - 1)
+	# Triangulator needs >= 3 unique points; bail silently otherwise.
+	if pts.size() < 3:
+		return
 	draw_colored_polygon(pts, LAND)
 	for i: int in pts.size():
 		var a: Vector2 = pts[i]
