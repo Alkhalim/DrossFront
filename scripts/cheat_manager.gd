@@ -15,6 +15,18 @@ extends Node
 var tech_craze: bool = false
 
 
+func cheat_catalogue() -> Array:
+	## Returns every recognised cheat as { code, desc } pairs. Used by
+	## the HUD's chat help overlay so the listing lives next to the
+	## apply_code dispatch -- adding a new cheat means updating one
+	## file, not two.
+	return [
+		{"code": "techcraze", "desc": "Unlock every unit + building tech gate for the rest of the match."},
+		{"code": "cashmoneten", "desc": "Fill salvage / fuel / microchips to their cap."},
+		{"code": "nofog", "desc": "Disable fog of war for the local player."},
+	]
+
+
 func apply_code(raw: String) -> String:
 	## Normalises the typed cheat code, applies its effect, and
 	## returns a short status line for the chat HUD to echo back.

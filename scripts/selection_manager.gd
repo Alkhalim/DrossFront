@@ -380,6 +380,12 @@ func _input(event: InputEvent) -> void:
 
 	# Key handlers
 	if event is InputEventKey and not _build_mode:
+		# Suppress all command + build hotkeys while a text input has
+		# focus (chat / cheat input). Without this, typing in chat
+		# also fires A=attack-move, S=hold, the build hotkeys, etc.,
+		# so writing the word "stand" triggers four separate orders.
+		if _is_text_input_focused():
+			return
 		var key: InputEventKey = event as InputEventKey
 		if key.pressed and not key.echo:
 			# A key = attack-move mode
@@ -615,6 +621,19 @@ func _handle_build_hotkey(key: InputEventKey) -> void:
 	if stat:
 		start_build_placement(stat)
 		get_viewport().set_input_as_handled()
+
+
+func _is_text_input_focused() -> bool:
+	## True when a LineEdit / TextEdit currently owns keyboard focus.
+	## Used by the key-handler entry point to silence command + build
+	## hotkeys while the player is typing in chat / cheat input.
+	var vp: Viewport = get_viewport()
+	if not vp:
+		return false
+	var owner: Control = vp.gui_get_focus_owner()
+	if not owner:
+		return false
+	return owner is LineEdit or owner is TextEdit
 
 
 func _find_hud_for_visible_build_stats() -> Node:

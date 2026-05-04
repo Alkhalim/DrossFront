@@ -566,6 +566,12 @@ func _build_power_widget() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		var key: InputEventKey = event as InputEventKey
+		# Suppress global hotkeys (M overlay, Tab palette, etc.) while
+		# the chat / cheat input is focused -- typing 'mesh' shouldn't
+		# also flick the Mesh overlay on. Escape stays live so it can
+		# still cancel the chat (handled by _input above).
+		if _is_chat_focused() and key.keycode != KEY_ESCAPE:
+			return
 		if key.pressed and not key.echo and key.keycode == KEY_ESCAPE:
 			_toggle_pause()
 			get_viewport().set_input_as_handled()
@@ -4056,6 +4062,14 @@ func _on_chat_submitted(text: String) -> void:
 	if text.strip_edges() == "":
 		return
 	var cheats: Node = get_tree().current_scene.get_node_or_null("CheatManager") if get_tree() else null
+	# 'cheats' (or 'help') prints the cheat catalogue. Done here in
+	# the HUD layer rather than CheatManager so the listing can be
+	# surfaced through the multi-line cheat-help overlay rather than
+	# the single-line alert banner.
+	var lower: String = text.strip_edges().to_lower()
+	if lower == "cheats" or lower == "help":
+		_show_cheat_help_overlay(cheats)
+		return
 	var msg: String = "Chat: %s" % text
 	if cheats and cheats.has_method("apply_code"):
 		var resp: String = cheats.call("apply_code", text)
@@ -4064,6 +4078,91 @@ func _on_chat_submitted(text: String) -> void:
 	# Surface through the alert banner so the player gets visible
 	# feedback without a dedicated chat log scroll.
 	_on_alert(msg, 0, Vector3.ZERO)
+
+
+func _is_chat_focused() -> bool:
+	## True when the chat LineEdit currently owns keyboard focus.
+	## Used by the global key handlers to suppress hotkeys while the
+	## player is typing.
+	var vp: Viewport = get_viewport()
+	if not vp:
+		return false
+	var owner: Control = vp.gui_get_focus_owner()
+	if not owner:
+		return false
+	return owner == _chat_input or owner is LineEdit or owner is TextEdit
+
+
+func _show_cheat_help_overlay(cheats: Node) -> void:
+	## Mid-screen panel listing every cheat code + a one-line
+	## description. Click anywhere to dismiss. Pulled from
+	## CheatManager.cheat_catalogue() if it exists; falls back to the
+	## hardcoded list below so the help still works even if the
+	## catalogue accessor wasn't wired up yet.
+	var entries: Array = []
+	if cheats and cheats.has_method("cheat_catalogue"):
+		entries = cheats.call("cheat_catalogue") as Array
+	if entries.is_empty():
+		entries = [
+			{"code": "techcraze", "desc": "Unlock every unit + building tech gate."},
+			{"code": "cashmoneten", "desc": "Fill salvage / fuel / microchips to cap."},
+			{"code": "nofog", "desc": "Disable fog of war for the local player."},
+		]
+	var panel := PanelContainer.new()
+	panel.name = "CheatHelpOverlay"
+	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	panel.custom_minimum_size = Vector2(420, 220)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.08, 0.08, 0.10, 0.96)
+	style.border_color = Color(1.0, 0.78, 0.32, 0.95)
+	style.border_width_top = 1
+	style.border_width_bottom = 1
+	style.border_width_left = 1
+	style.border_width_right = 1
+	style.corner_radius_top_left = 6
+	style.corner_radius_top_right = 6
+	style.corner_radius_bottom_left = 6
+	style.corner_radius_bottom_right = 6
+	style.content_margin_left = 14
+	style.content_margin_right = 14
+	style.content_margin_top = 12
+	style.content_margin_bottom = 12
+	panel.add_theme_stylebox_override("panel", style)
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 6)
+	panel.add_child(vbox)
+	var title := Label.new()
+	title.text = "Cheat codes — type into chat (Enter)"
+	title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.45, 1.0))
+	title.add_theme_font_size_override("font_size", 14)
+	vbox.add_child(title)
+	for entry: Dictionary in entries:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 12)
+		var code_lbl := Label.new()
+		code_lbl.text = entry.get("code", "") as String
+		code_lbl.add_theme_color_override("font_color", Color(0.55, 0.85, 1.0, 1.0))
+		code_lbl.custom_minimum_size = Vector2(120, 0)
+		row.add_child(code_lbl)
+		var desc_lbl := Label.new()
+		desc_lbl.text = entry.get("desc", "") as String
+		desc_lbl.add_theme_color_override("font_color", Color(0.92, 0.92, 0.92, 1.0))
+		desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		desc_lbl.custom_minimum_size = Vector2(260, 0)
+		row.add_child(desc_lbl)
+		vbox.add_child(row)
+	var dismiss := Label.new()
+	dismiss.text = "Press Esc or click to dismiss."
+	dismiss.add_theme_color_override("font_color", Color(0.65, 0.65, 0.65, 1.0))
+	dismiss.add_theme_font_size_override("font_size", 11)
+	vbox.add_child(dismiss)
+	panel.gui_input.connect(func(ev: InputEvent) -> void:
+		if ev is InputEventMouseButton and (ev as InputEventMouseButton).pressed:
+			panel.queue_free()
+		elif ev is InputEventKey and (ev as InputEventKey).pressed:
+			panel.queue_free()
+	)
+	add_child(panel)
 
 
 func _input(event: InputEvent) -> void:
