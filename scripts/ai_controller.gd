@@ -1133,26 +1133,52 @@ func notify_pre_seeded_building(key: String, building: Node) -> void:
 
 
 func _maintain_engineers() -> void:
-	## Keep three Ratchet engineers alive. Two was already a big jump
-	## from one (which throttled base-build to one structure at a time),
-	## but the debug overlay still showed long stretches of 'no free
-	## engineer' when one was repairing, one was placing, and a queued
-	## third placement had to wait. Three is the smallest pool that
-	## comfortably handles repair + placement + auto-assist in
-	## parallel without continually showing the NO_ENGINEER blocker.
+	## Keep three USABLE Ratchet engineers alive. The cap counts only
+	## engineers actually available for placement -- garrisoned ones
+	## (riding inside a transport) are excluded so a fully-loaded
+	## Courier Tank doesn't trick the cap into thinking the AI is
+	## fully staffed when no engineer can actually break ground.
+	##
+	## Queueing priority is tiered by urgency so the HQ doesn't sit
+	## on a Crawler build while the AI has zero engineers:
+	##   count == 0  -> ALWAYS queue regardless of HQ queue state
+	##                  (engineer goes in even if a Crawler is
+	##                  already mid-build behind it).
+	##   count <  2  -> queue alongside other items in the HQ queue.
+	##   count <  3  -> only queue when the HQ queue is empty so we
+	##                  don't crowd out tactical Crawler / starter-
+	##                  unit production for a third utility unit.
 	if not is_instance_valid(_hq) or not _hq.get("is_constructed"):
 		return
-	var engineer_count: int = 0
+	var usable_engineer_count: int = 0
 	for node: Node in _units:
 		if not is_instance_valid(node):
 			continue
-		if node.has_method("get_builder") and node.get_builder():
-			engineer_count += 1
-	if engineer_count >= 3:
+		if not (node.has_method("get_builder") and node.get_builder()):
+			continue
+		# Garrisoned engineers can't reach build sites -- exclude
+		# them from the staffing count so an engineer riding inside
+		# a Courier Tank doesn't lock the AI out of replenishing.
+		var garrisoned_var: Variant = node.get("_garrisoned_in") if "_garrisoned_in" in node else null
+		if typeof(garrisoned_var) == TYPE_OBJECT and is_instance_valid(garrisoned_var):
+			continue
+		usable_engineer_count += 1
+	if usable_engineer_count >= 3:
 		return
-	# Don't pile up engineers in the queue; only request one at a time.
-	if _hq.has_method("get_queue_size") and _hq.get_queue_size() > 0:
-		return
+	# Tiered queueing -- urgency drops the empty-queue gate when
+	# the AI is critically understaffed.
+	var queue_size: int = _hq.get_queue_size() if _hq.has_method("get_queue_size") else 0
+	if usable_engineer_count == 0:
+		pass  # Always queue when we have none -- urgent.
+	elif usable_engineer_count < 2:
+		# Allow queueing alongside one other item, not a deep stack.
+		if queue_size >= 2:
+			return
+	else:
+		# Topping up to 3: wait for the queue to clear so we don't
+		# crowd out tactical production.
+		if queue_size > 0:
+			return
 	var engineer_stats: UnitStatResource = load(_engineer_path()) as UnitStatResource
 	if not engineer_stats:
 		return
