@@ -1133,14 +1133,13 @@ func notify_pre_seeded_building(key: String, building: Node) -> void:
 
 
 func _maintain_engineers() -> void:
-	## Keep at least two Ratchet engineers alive. Two so the AI can
-	## parallelise placement -- with one engineer, every _try_place
-	## tick either dispatches the engineer or hits the NO_ENGINEER
-	## blocker, which throttled the early base build to one structure
-	## per ~30s. Two engineers roughly halves base-build time at the
-	## cost of one extra unit slot. AI debug overlay also exposed
-	## the bottleneck directly: the Next-Build line was almost
-	## always 'no free engineer' until the first foundry finished.
+	## Keep three Ratchet engineers alive. Two was already a big jump
+	## from one (which throttled base-build to one structure at a time),
+	## but the debug overlay still showed long stretches of 'no free
+	## engineer' when one was repairing, one was placing, and a queued
+	## third placement had to wait. Three is the smallest pool that
+	## comfortably handles repair + placement + auto-assist in
+	## parallel without continually showing the NO_ENGINEER blocker.
 	if not is_instance_valid(_hq) or not _hq.get("is_constructed"):
 		return
 	var engineer_count: int = 0
@@ -1149,7 +1148,7 @@ func _maintain_engineers() -> void:
 			continue
 		if node.has_method("get_builder") and node.get_builder():
 			engineer_count += 1
-	if engineer_count >= 2:
+	if engineer_count >= 3:
 		return
 	# Don't pile up engineers in the queue; only request one at a time.
 	if _hq.has_method("get_queue_size") and _hq.get_queue_size() > 0:
@@ -1312,6 +1311,14 @@ func _command_idle_crawler_to_wreck() -> void:
 ## Crawler currently 'owns'. Cleared / refilled per shepherd
 ## tick so dead escorts get replaced from the available pool.
 var _crawler_escorts: Dictionary = {}
+## Per-escort "still engaged" timestamps. Maps escort instance_id ->
+## match_clock_sec at which the escort's combat-lock expires. Refreshed
+## each tick the escort has a live combat target; once its target dies
+## or breaks line of sight we keep the lock for ESCORT_COMBAT_GRACE_SEC
+## so a brief target swap doesn't yank the escort back into formation
+## mid-fight.
+const ESCORT_COMBAT_GRACE_SEC: float = 7.0
+var _escort_combat_lock_until: Dictionary = {}
 
 
 func _crawler_escort_count() -> int:
@@ -1398,6 +1405,14 @@ func _assign_crawler_escort(crawler: Node3D) -> void:
 	# moving target point and clip into the crawler. Outside
 	# the band, attack-move to a ring-position at the band's
 	# midpoint so the escort eases back into formation.
+	#
+	# Combat-lock override: an escort with an active combat
+	# target (or one whose last-known target died within
+	# ESCORT_COMBAT_GRACE_SEC ago) is left alone regardless
+	# of distance. The previous logic would yank an attacker-
+	# chasing escort back into formation as soon as it crossed
+	# ESC_MAX, which made the convoys 'glance and disengage'
+	# instead of finishing fights.
 	const ESC_MIN_DIST: float = 4.0
 	const ESC_MAX_DIST: float = 11.0
 	const ESC_REASSIGN_DIST: float = (ESC_MIN_DIST + ESC_MAX_DIST) * 0.5  # ~7.5u
@@ -1408,6 +1423,29 @@ func _assign_crawler_escort(crawler: Node3D) -> void:
 			continue
 		var combat: Node = esc_unit.get_node_or_null("CombatComponent") as Node
 		if not combat or not combat.has_method("command_attack_move"):
+			continue
+		var esc_iid: int = esc_unit.get_instance_id()
+		# Refresh the combat-lock as long as the escort has a
+		# live target. The lock decays to ESCORT_COMBAT_GRACE_SEC
+		# the moment the last target goes invalid -- after that
+		# window the escort accepts rejoin orders again.
+		var live_target: bool = false
+		var t_var: Variant = combat.get("_current_target")
+		if typeof(t_var) == TYPE_OBJECT and is_instance_valid(t_var):
+			var tnode: Node = t_var as Node
+			var t_alive: bool = true
+			if "alive_count" in tnode:
+				t_alive = (tnode.get("alive_count") as int) > 0
+			if t_alive:
+				live_target = true
+		if live_target:
+			_escort_combat_lock_until[esc_iid] = _match_clock_sec + ESCORT_COMBAT_GRACE_SEC
+		var lock_until: float = _escort_combat_lock_until.get(esc_iid, 0.0) as float
+		if _match_clock_sec < lock_until:
+			# Escort is mid-engagement (or within the 7s grace
+			# after its last target died / went out of sight).
+			# Leave it alone so it can finish the fight before
+			# we rope it back into formation.
 			continue
 		var d_to_crawler: float = (esc_unit as Node3D).global_position.distance_to(crawler_pos2)
 		if d_to_crawler >= ESC_MIN_DIST and d_to_crawler <= ESC_MAX_DIST:
@@ -1732,9 +1770,32 @@ func _find_relocation_target(from: Vector3, max_dist: float) -> Node3D:
 	return best
 
 
+## Per-tick engineer pool diagnostic. Reset at the top of _process so
+## the overlay can read why no engineer was free this tick. Counts each
+## engineer's state: total alive, busy on a real build site, busy
+## repairing, garrisoned (riding inside a transport), or idle.
+var _engineer_total: int = 0
+var _engineer_idle: int = 0
+var _engineer_busy_build: int = 0
+var _engineer_busy_repair: int = 0
+var _engineer_garrisoned: int = 0
+
+
 func _find_free_engineer() -> Node:
 	## Returns an idle AI engineer (Ratchet) — one with a builder component
 	## that isn't currently constructing or moving to a build site.
+	## Repair-locked engineers count as free here: AI placement should
+	## preempt auto-repair so the base keeps growing rather than the
+	## engineer indefinitely topping off a single damaged structure.
+	## Side effect: tallies per-state counters so the debug overlay can
+	## tell the user WHY 'no free engineer' is firing when an engineer
+	## visibly looks idle.
+	_engineer_total = 0
+	_engineer_idle = 0
+	_engineer_busy_build = 0
+	_engineer_busy_repair = 0
+	_engineer_garrisoned = 0
+	var picked: Node = null
 	for node: Node in _units:
 		if not is_instance_valid(node):
 			continue
@@ -1745,20 +1806,33 @@ func _find_free_engineer() -> Node:
 		var builder: Node = node.get_builder() if node.has_method("get_builder") else null
 		if not builder:
 			continue
+		_engineer_total += 1
+		# Garrisoned engineers can't reach a build site -- counted
+		# separately so the overlay can flag 'engineer rode into a
+		# transport and needs to disembark first'.
+		var garrisoned_var: Variant = node.get("_garrisoned_in") if "_garrisoned_in" in node else null
+		if typeof(garrisoned_var) == TYPE_OBJECT and is_instance_valid(garrisoned_var):
+			_engineer_garrisoned += 1
+			continue
 		# Read the target through Variant + typeof so a freed Building
-		# reference (queue_free'd but still cached on the builder) can't
-		# crash the cast. `target_var is Object` raised
-		# 'Left operand of "is" is a previously freed instance' on stale
-		# Variant slots; typeof() operates on the Variant container
-		# without dereferencing, then is_instance_valid is documented
-		# safe on freed references. Treat freed targets as free-to-build.
+		# reference (queue_free'd but still cached on the builder)
+		# can't crash the cast. Treat freed targets as free-to-build.
 		var target_var: Variant = builder.get("_target_building")
 		if typeof(target_var) == TYPE_OBJECT and is_instance_valid(target_var):
 			var target_node: Node = target_var as Node
 			if target_node and not target_node.get("is_constructed"):
-				continue  # Builder is genuinely busy on a live, unfinished site.
-		return node
-	return null
+				_engineer_busy_build += 1
+				continue
+		# Repair lock is informational only -- AI placement preempts
+		# repair so the base keeps growing.
+		var repair_var: Variant = builder.get("_repair_target") if "_repair_target" in builder else null
+		if typeof(repair_var) == TYPE_OBJECT and is_instance_valid(repair_var):
+			_engineer_busy_repair += 1
+		else:
+			_engineer_idle += 1
+		if picked == null:
+			picked = node
+	return picked
 
 
 func _find_building_at(pos: Vector3, footprint: Vector3) -> Node:
@@ -2274,4 +2348,9 @@ func get_debug_snapshot() -> Dictionary:
 		"next_build_blocker": _blocker_label(_next_build_blocker),
 		"sec_until_attack": _time_until_next_attack(),
 		"match_clock": _match_clock_sec,
+		"eng_total": _engineer_total,
+		"eng_idle": _engineer_idle,
+		"eng_build": _engineer_busy_build,
+		"eng_repair": _engineer_busy_repair,
+		"eng_garrison": _engineer_garrisoned,
 	}

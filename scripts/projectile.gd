@@ -641,7 +641,12 @@ func _spawn_impact() -> void:
 		if "alive_count" in pending_target:
 			alive = (pending_target.get("alive_count") as int) > 0
 		if alive and pending_target.has_method("take_damage"):
-			pending_target.take_damage(pending_damage, pending_shooter)
+			# Shooter may have died mid-flight; take_damage's typed
+			# Node3D param rejects a freed Object reference at the
+			# bind, so pass null when the shooter is gone. Splash /
+			# kill credit just lose attribution for that round.
+			var attacker: Node3D = pending_shooter if (pending_shooter and is_instance_valid(pending_shooter)) else null
+			pending_target.take_damage(pending_damage, attacker)
 	# Splash on impact -- scans hostile units + buildings within
 	# pending_splash_radius and chips them. Same shape as the
 	# previous CombatComponent splash code, just relocated to the
