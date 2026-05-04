@@ -1362,7 +1362,7 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 		# order and returns the first one whose footprint is clear,
 		# so a blocked nearby vent automatically falls through to a
 		# slightly farther one that works.
-		var vent_pos: Vector3 = _find_buildable_generator_vent(bstats.footprint_size)
+		var vent_pos: Vector3 = _find_buildable_generator_vent(bstats.footprint_size, bstats.building_id)
 		if vent_pos == Vector3.INF:
 			_record_blocker(key, BuildBlocker.NO_FREE_VENT)
 			return  # No buildable vent right now; retry next tick.
@@ -1371,15 +1371,17 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 	# is honoured by the spiral search itself, so a non-generator
 	# building whose desired anchor sits next to a vent will spiral
 	# OUT to clear ground rather than failing the post-check the
-	# old code did.
-	var pos: Vector3 = _find_clear_placement(desired, bstats.footprint_size, vent_keepout_radius)
+	# old code did. candidate_id flows through so energy-vs-energy
+	# pairs can sit closer than the standard PLACEMENT_GAP allows
+	# (the starter vent pair is intentionally 10u apart).
+	var pos: Vector3 = _find_clear_placement(desired, bstats.footprint_size, vent_keepout_radius, bstats.building_id)
 	if pos == Vector3.INF:
 		# Distinguish "vent area was the only blocker" from "nothing
 		# was clear" by re-running once with the keepout off; if
 		# THAT succeeds, the vent keepout is what blocked us so the
 		# overlay can surface VENT_KEEPOUT instead of NO_CLEAR_SPOT.
 		if vent_keepout_radius > 0.0:
-			var fallback_pos: Vector3 = _find_clear_placement(desired, bstats.footprint_size, 0.0)
+			var fallback_pos: Vector3 = _find_clear_placement(desired, bstats.footprint_size, 0.0, bstats.building_id)
 			if fallback_pos != Vector3.INF:
 				_record_blocker(key, BuildBlocker.VENT_KEEPOUT)
 				return
@@ -2509,7 +2511,7 @@ func _pick_free_generator_vent() -> Vector3:
 	return sorted[0]
 
 
-func _find_buildable_generator_vent(footprint: Vector3) -> Vector3:
+func _find_buildable_generator_vent(footprint: Vector3, candidate_id: StringName = &"basic_generator") -> Vector3:
 	## Returns the closest eligible vent whose 1.4u-radius placement
 	## footprint is currently clear of obstacles. Walks vents in
 	## ascending distance from our HQ so a blocked nearby vent
@@ -2517,9 +2519,13 @@ func _find_buildable_generator_vent(footprint: Vector3) -> Vector3:
 	## than failing the whole placement attempt this tick. The 1.4u
 	## tolerance matches selection_manager._is_valid_build_position
 	## -- a generator must snap to its vent's centre to register.
+	## candidate_id is forwarded to _is_placement_clear so the
+	## relaxed energy-vs-energy spacing applies (the second starter
+	## vent sits 10u from the first, inside the standard
+	## PLACEMENT_GAP rejection threshold).
 	var sorted: Array[Vector3] = _list_eligible_vents_sorted()
 	for vp: Vector3 in sorted:
-		if _is_placement_clear(vp, footprint, 0.0):
+		if _is_placement_clear(vp, footprint, 0.0, candidate_id):
 			return vp
 	return Vector3.INF
 
@@ -2623,8 +2629,8 @@ func _existing_generator_positions() -> Array[Vector3]:
 	return out
 
 
-func _find_clear_placement(desired: Vector3, footprint: Vector3, vent_keepout: float = 0.0) -> Vector3:
-	if _is_placement_clear(desired, footprint, vent_keepout):
+func _find_clear_placement(desired: Vector3, footprint: Vector3, vent_keepout: float = 0.0, candidate_id: StringName = &"") -> Vector3:
+	if _is_placement_clear(desired, footprint, vent_keepout, candidate_id):
 		return desired
 	# Spiral search — expanding rings around the desired anchor. Step
 	# bumped from 2.5u → 4.0u so adjacent rings actually clear the
@@ -2635,7 +2641,7 @@ func _find_clear_placement(desired: Vector3, footprint: Vector3, vent_keepout: f
 			var ang: float = float(step) / 12.0 * TAU
 			var test_offset := Vector3(cos(ang), 0.0, sin(ang)) * float(ring) * 4.0
 			var pos: Vector3 = desired + test_offset
-			if _is_placement_clear(pos, footprint, vent_keepout):
+			if _is_placement_clear(pos, footprint, vent_keepout, candidate_id):
 				return pos
 	return Vector3.INF
 
@@ -2661,7 +2667,7 @@ const UNIT_PLACEMENT_MARGIN: float = 0.5
 const ALLY_HQ_KEEPOUT: float = 30.0
 
 
-func _is_placement_clear(pos: Vector3, footprint: Vector3, vent_keepout: float = 0.0) -> bool:
+func _is_placement_clear(pos: Vector3, footprint: Vector3, vent_keepout: float = 0.0, candidate_id: StringName = &"") -> bool:
 	## Same rules the player follows in SelectionManager — check against
 	## buildings (with PLACEMENT_GAP buffer), units, fuel deposits, and
 	## wrecks. Plus a keep-out around teammate HQs in 2v2. When
@@ -2702,6 +2708,57 @@ func _is_placement_clear(pos: Vector3, footprint: Vector3, vent_keepout: float =
 			if pos.distance_to(b.global_position) < ALLY_HQ_KEEPOUT:
 				return false
 
+	# Energy-producing buildings get a relaxed gap when both the
+	# candidate and the existing building are energy types -- the
+	# starter vent pair sits 10u apart, but the standard
+	# PLACEMENT_GAP (9u) plus two basic-generator half-extents
+	# (2.5u total) gives an 11.5u rejection threshold, which made
+	# the AI never place a second generator on the second vent of
+	# its starting pair. Vent placement already enforces the
+	# minimum spacing the layout designer chose, so for
+	# energy-vs-energy pairs we can drop the manual gap entirely.
+	var candidate_is_energy: bool = candidate_id == &"basic_generator" or candidate_id == &"advanced_generator"
+
+	# Hostile-fire keepout. Reject placements whose centre sits
+	# inside an enemy weapon's range. Without this the AI happily
+	# drops foundries / yards inside a player turret's kill zone
+	# and watches them die during construction. Uses each hostile
+	# unit's resolved primary-weapon range so a long-range Bulwark
+	# pushes the keepout further out than a short-range Rook.
+	# Buildings under construction count as friendly (they're not
+	# threatening anyone yet), so we skip them.
+	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	for u_node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(u_node):
+			continue
+		var u_owner: int = (u_node.get("owner_id") as int) if "owner_id" in u_node else -1
+		if u_owner == owner_id:
+			continue
+		var hostile: bool = (
+			registry.are_enemies(owner_id, u_owner)
+			if registry and registry.has_method("are_enemies")
+			else u_owner != owner_id
+		)
+		if not hostile:
+			continue
+		if "alive_count" in u_node and (u_node.get("alive_count") as int) <= 0:
+			continue
+		var u_pos: Vector3 = (u_node as Node3D).global_position
+		# Per-unit weapon range from stats. Falls back to 18u when
+		# the unit has no primary_weapon (workers, engineers) so
+		# the keepout still rejects placements inside a typical
+		# unit's threat radius.
+		var threat_range: float = 18.0
+		var u_stats_v: Variant = u_node.get("stats")
+		if typeof(u_stats_v) == TYPE_OBJECT and is_instance_valid(u_stats_v):
+			var weapon_v: Variant = u_stats_v.get("primary_weapon")
+			if typeof(weapon_v) == TYPE_OBJECT and is_instance_valid(weapon_v) and weapon_v.has_method("resolved_range"):
+				threat_range = weapon_v.call("resolved_range") as float
+		# Plus a small footprint margin so the building isn't right
+		# at the edge of the kill zone.
+		var keepout: float = threat_range + maxf(half_x, half_z) + 2.0
+		if u_pos.distance_to(pos) < keepout:
+			return false
 	# Buildings (AABB-vs-AABB with spacing gap).
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(node):
@@ -2713,7 +2770,14 @@ func _is_placement_clear(pos: Vector3, footprint: Vector3, vent_keepout: float =
 		var their_hz: float = b.stats.footprint_size.z * 0.5
 		var dx: float = absf(b.global_position.x - pos.x)
 		var dz: float = absf(b.global_position.z - pos.z)
-		if dx < (half_x + their_hx + PLACEMENT_GAP) and dz < (half_z + their_hz + PLACEMENT_GAP):
+		# Per-pair gap. Energy-vs-energy uses 0u extra so the AI can
+		# fill both vents of the starter pair (and any other
+		# closely-spaced vent cluster). Everything else keeps the
+		# wider PLACEMENT_GAP for unit traffic between buildings.
+		var pair_gap: float = PLACEMENT_GAP
+		if candidate_is_energy and (b.stats.building_id == &"basic_generator" or b.stats.building_id == &"advanced_generator"):
+			pair_gap = 0.0
+		if dx < (half_x + their_hx + pair_gap) and dz < (half_z + their_hz + pair_gap):
 			return false
 
 	# Units — friendly OR enemy. The AI shouldn't be allowed to drop a
