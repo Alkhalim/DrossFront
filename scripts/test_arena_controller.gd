@@ -2022,15 +2022,29 @@ func _setup_terrain_schwarzwald() -> void:
 	# path doesn't read as a perfectly straight column.
 	const CORRIDOR_LATERAL_WOBBLE: float = 4.5
 	const CORRIDOR_WOBBLE_FREQ: float = 0.045
-	# Tree density. Step ~3.4u is just under TRUNK_RADIUS * 2 for a
-	# trunk of 1.05u + a small jitter buffer -- units (collision
-	# radius ~1.5u) cannot squeeze between adjacent trunks, so the
-	# forest reads as a real wall rather than a grid the squad can
-	# pour through. Density doubles the previous tree count;
-	# rendering cost stays bounded by the shared mesh + material
-	# palette.
+	# Tree density. Step + jitter chosen so the gap between
+	# neighbouring trunks (gap = step - 2*trunk_radius +/- 2*jitter)
+	# stays under the navmesh agent_radius worst-case. Trunks are
+	# 1.05u radius, agent radius is 1.5u, so any gap > 1.5u risks
+	# being navmesh-carved as a usable pocket -- units pour into
+	# it on path-find, then can't get back out because the
+	# surrounding cells aren't connected to the main corridor.
+	# JITTER cut 1.1 -> 0.4 so the worst-case widening is
+	# (step - 2.1 + 0.8) = step - 1.3, which at step 3.4 gives
+	# 2.1u max gap; that's still narrow enough that the bake
+	# treats it as a wall rather than carve a dead-end pocket
+	# units can stumble into. Visual variation is preserved by
+	# the existing per-tree mesh / scale variants in forest_tree.
 	const TREE_GRID_STEP: float = 3.4
-	const TREE_JITTER: float = 1.1
+	const TREE_JITTER: float = 0.4
+	# Extra padding around the corridor when deciding 'is this
+	# tree position outside the corridor'. Keeps trees from
+	# spawning RIGHT at the corridor edge -- those border trees
+	# leaked the corridor's open-floor bake into ragged half-cells
+	# that the path planner sometimes routed units into and then
+	# couldn't reach again. With 1.6u of padding the navmesh edge
+	# meets a clean wall of trunks.
+	const CORRIDOR_EDGE_PAD: float = 1.6
 
 	var corridor_centres_x: Array[float] = []
 	if _is_2v2():
@@ -2100,7 +2114,11 @@ func _setup_terrain_schwarzwald() -> void:
 			var corridor_half: float = CORRIDOR_HALF_WIDTH_BASE + sin(pz * CORRIDOR_PINCH_FREQ) * CORRIDOR_HALF_WIDTH_AMP
 			var corridor_offset: float = sin(pz * CORRIDOR_WOBBLE_FREQ) * CORRIDOR_LATERAL_WOBBLE
 			for cx2: float in corridor_centres_x:
-				if absf(px - (cx2 + corridor_offset)) <= corridor_half:
+				# CORRIDOR_EDGE_PAD widens the no-tree zone slightly
+				# so border trees don't sit ON the corridor edge --
+				# prevents the ragged half-cell pockets units would
+				# otherwise get stuck inside.
+				if absf(px - (cx2 + corridor_offset)) <= corridor_half + CORRIDOR_EDGE_PAD:
 					inside_corridor = true
 					break
 			# 2v2: lateral ally lane connecting the two allied HQs
