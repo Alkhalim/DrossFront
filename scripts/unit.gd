@@ -525,13 +525,14 @@ func _build_squad_visuals() -> void:
 		var member_info: Dictionary = _build_mech_member(i, offset, shape_data, team_color)
 		_member_meshes.append(member_info["root"])
 		_member_data.append(member_info)
-		# X-ray silhouette: a team-coloured capsule that draws ONLY
-		# when something opaque is in front of the unit (a building
-		# / terrain piece occludes it). The capsule is parented to
-		# the same member root so it follows the mech's position
-		# automatically; the shader's depth-texture compare gates
-		# visibility per-pixel. See shaders/x_ray_silhouette.gdshader.
-		_attach_xray_silhouette(member_info["root"], shape_data, team_color)
+		# X-ray silhouette disabled -- the depth-texture sample in
+		# the previous shader was returning the near-plane value
+		# in Forward+, causing the silhouette to draw EVERYWHERE
+		# instead of only when occluded. Plain white capsules
+		# overlaid every unit. Reverted while a more reliable
+		# behind-buildings outline approach is designed (next_pass
+		# duplicate via the Building's transparent layer is the
+		# probable replacement).
 
 	# Collision shape covers the squad footprint, sized to the actual mech bulk.
 	var torso_size: Vector3 = shape_data["torso"] as Vector3
