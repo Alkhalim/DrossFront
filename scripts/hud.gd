@@ -2924,41 +2924,56 @@ func _attach_cost_widget(btn: Button, salvage: int, fuel: int, pop: int) -> Dict
 	hbox.add_theme_constant_override("separation", 6)
 	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	# Pinned to the bottom edge so the button text up top has more
-	# breathing room. With the new 80px button height the strip
-	# claims the bottom 14px and the label sits in the upper 66px,
-	# avoiding the icons-collide-with-text issue at the previous
-	# 70px height.
-	hbox.offset_top = -14
-	hbox.offset_bottom = -2
+	# Pin the strip ENTIRELY inside the button bounds. Previous
+	# offset_top = -14 meant the strip's top edge sat 14px above
+	# the button bottom -- but with separators + icon padding the
+	# bottom row of pixels could clip below the button edge.
+	# Now: 18px tall strip starting 20px above the bottom, with a
+	# 4px floor margin so the icons can never touch / cross the
+	# button outline.
+	hbox.offset_top = -22
+	hbox.offset_bottom = -4
+	hbox.offset_left = 4
+	hbox.offset_right = -4
 	btn.add_child(hbox)
 	var refs: Dictionary = {}
 	if salvage > 0:
-		refs["salvage"] = _add_cost_chip(hbox, salvage, RES_COLOR_SALVAGE)
+		refs["salvage"] = _add_cost_chip(hbox, salvage, RES_COLOR_SALVAGE, ResourceIcon.Kind.SALVAGE, "Salvage")
 	if fuel > 0:
-		refs["fuel"] = _add_cost_chip(hbox, fuel, RES_COLOR_FUEL)
+		refs["fuel"] = _add_cost_chip(hbox, fuel, RES_COLOR_FUEL, ResourceIcon.Kind.FUEL, "Fuel")
 	if pop > 0:
-		refs["pop"] = _add_cost_chip(hbox, pop, RES_COLOR_POP)
+		refs["pop"] = _add_cost_chip(hbox, pop, RES_COLOR_POP, ResourceIcon.Kind.POPULATION, "Population")
 	return refs
 
 
-func _add_cost_chip(parent: Container, amount: int, color: Color) -> Dictionary:
+func _add_cost_chip(parent: Container, amount: int, color: Color, icon_kind: int = -1, tooltip: String = "") -> Dictionary:
 	var chip := HBoxContainer.new()
 	chip.add_theme_constant_override("separation", 3)
 	chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(chip)
-	var swatch := ColorRect.new()
-	swatch.custom_minimum_size = Vector2(8, 8)
-	swatch.color = color
-	swatch.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	chip.add_child(swatch)
+	# Icon swatch -- distinct shape per resource kind. Kept as
+	# `swatch` in the returned dict so legacy callers still work,
+	# but it's now a ResourceIcon Control instead of a plain
+	# ColorRect (or a ColorRect fallback for un-migrated callers).
+	var swatch_node: Node = null
+	if icon_kind >= 0:
+		var icon: ResourceIcon = ResourceIcon.make(icon_kind as ResourceIcon.Kind, color, tooltip, Vector2(12.0, 12.0))
+		chip.add_child(icon)
+		swatch_node = icon
+	else:
+		var fallback := ColorRect.new()
+		fallback.custom_minimum_size = Vector2(8, 8)
+		fallback.color = color
+		fallback.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		chip.add_child(fallback)
+		swatch_node = fallback
 	var lbl := Label.new()
 	lbl.text = str(amount)
 	lbl.add_theme_color_override("font_color", color)
 	lbl.add_theme_font_size_override("font_size", 12)
 	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	chip.add_child(lbl)
-	return { "swatch": swatch, "label": lbl, "color": color }
+	return { "swatch": swatch_node, "label": lbl, "color": color }
 
 
 func _rebuild_turret_profile_buttons(building: Building) -> void:
@@ -4546,16 +4561,23 @@ func _paint_cost_chip(chip: Dictionary, lacking: bool) -> void:
 	## Tints a single cost chip's swatch + label red when the player
 	## is short on that resource. When the resource is fine, restores
 	## the chip's stored neutral color. Safe to call with an empty
-	## dict (does nothing).
+	## dict (does nothing). Handles BOTH the legacy ColorRect swatch
+	## and the new ResourceIcon (which exposes its tint via the
+	## `tint` property + queues a redraw).
 	if chip.is_empty():
 		return
-	var swatch: ColorRect = chip.get("swatch", null) as ColorRect
+	var swatch_node: Node = chip.get("swatch", null) as Node
 	var lbl: Label = chip.get("label", null) as Label
 	var base_color: Color = chip.get("color", Color.WHITE) as Color
-	if not is_instance_valid(swatch) or not is_instance_valid(lbl):
+	if not is_instance_valid(lbl):
 		return
 	var paint: Color = COLOR_AFFORD_BAD if lacking else base_color
-	swatch.color = paint
+	if is_instance_valid(swatch_node):
+		if swatch_node is ResourceIcon:
+			(swatch_node as ResourceIcon).tint = paint
+			(swatch_node as ResourceIcon).queue_redraw()
+		elif swatch_node is ColorRect:
+			(swatch_node as ColorRect).color = paint
 	lbl.add_theme_color_override("font_color", paint)
 
 
