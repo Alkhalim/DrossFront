@@ -3257,7 +3257,9 @@ func _build_breacher_tank_member(index: int, offset: Vector3, team_color: Color)
 		mats.append(track_mat)
 		# Six visible rib stripes per side -- consistent with the
 		# Courier Tank read so tracked vehicles share a visual
-		# language even with different chassis above.
+		# language even with different chassis above. Each rib
+		# registered with _courier_track_ribs so _process scrolls
+		# them along the track Z axis proportional to ground speed.
 		for r_i: int in 6:
 			var rib := MeshInstance3D.new()
 			var rib_box := BoxMesh.new()
@@ -3269,6 +3271,7 @@ func _build_breacher_tank_member(index: int, offset: Vector3, team_color: Color)
 			rib.set_surface_override_material(0, rib_mat)
 			member.add_child(rib)
 			mats.append(rib_mat)
+			_courier_track_ribs.append({"node": rib, "length": track_len})
 
 	# --- Lower hull -- thin floor between the tracks. Narrower
 	# than the previous build per rework feedback, and sitting
@@ -3419,6 +3422,56 @@ func _build_breacher_tank_member(index: int, offset: Vector3, team_color: Color)
 	member.add_child(shroud)
 	mats.append(shroud_mat)
 
+	# --- Mantlet collar -- a wide sloped armour plate that bridges
+	# the casemate's front face to the gun mantlets so the cannons
+	# don't read as floating in front of the chassis. Sits flush
+	# against the casemate upper plate's leading edge and tilts
+	# down to meet the mantlet shroud.
+	var collar := MeshInstance3D.new()
+	var collar_box := BoxMesh.new()
+	collar_box.size = Vector3(hull_w * 0.95, 0.30, 0.55)
+	collar.mesh = collar_box
+	collar.position = Vector3(0.0, case_y + 0.55, -hull_len * 0.45)
+	collar.rotation.x = deg_to_rad(-22.0)
+	var collar_mat := _make_metal_mat(anvil_dark)
+	collar.set_surface_override_material(0, collar_mat)
+	member.add_child(collar)
+	mats.append(collar_mat)
+
+	# --- Side fender plates above the tracks -- extra mass that
+	# fills the gap between hull and tracks visually. Reads as
+	# real engineering instead of a hovering box.
+	for fs_i: int in 2:
+		var fs_x: float = -hull_w * 0.5 - 0.10 if fs_i == 0 else hull_w * 0.5 + 0.10
+		var fender := MeshInstance3D.new()
+		var fender_box := BoxMesh.new()
+		fender_box.size = Vector3(0.20, 0.18, hull_len * 0.85)
+		fender.mesh = fender_box
+		fender.position = Vector3(fs_x, hull_y + hull_h * 0.20, 0.0)
+		var fender_mat := _make_metal_mat(anvil_dark)
+		fender.set_surface_override_material(0, fender_mat)
+		member.add_child(fender)
+		mats.append(fender_mat)
+
+	# --- Rivet strip along the casemate top edge. A row of small
+	# dark blocks the player reads as bolt heads, breaking up the
+	# otherwise-flat plate.
+	for ri: int in 5:
+		var rivet := MeshInstance3D.new()
+		var rivet_box := BoxMesh.new()
+		rivet_box.size = Vector3(0.08, 0.05, 0.08)
+		rivet.mesh = rivet_box
+		var rt: float = (float(ri) + 0.5) / 5.0
+		rivet.position = Vector3(
+			-hull_w * 0.40 + rt * hull_w * 0.80,
+			case_y + 0.97,
+			hull_len * 0.18,
+		)
+		var rivet_mat := _make_metal_mat(Color(0.05, 0.05, 0.05))
+		rivet.set_surface_override_material(0, rivet_mat)
+		member.add_child(rivet)
+		mats.append(rivet_mat)
+
 	# --- Twin exhaust stacks on the rear deck. Anvil industrial-
 	# diesel signature -- visible from any angle.
 	for ex_i: int in 2:
@@ -3472,19 +3525,33 @@ func _build_breacher_tank_member(index: int, offset: Vector3, team_color: Color)
 		member.add_child(accent)
 		mats.append(accent_mat)
 
-	# Team-colour spine stripe so allegiance reads from above.
-	var team_stripe := MeshInstance3D.new()
-	var ts_box := BoxMesh.new()
-	ts_box.size = Vector3(0.40, 0.05, hull_len * 0.55)
-	team_stripe.mesh = ts_box
-	team_stripe.position = Vector3(0.0, case_y + 1.05, hull_len * 0.10)
+	# Team-colour chevron pointing forward. Two angled strips that
+	# meet at the bow form a simple > silhouette on top of the
+	# casemate -- glance-readable from the RTS camera, doubles as
+	# a 'this is the front' direction tell. Replaces the previous
+	# rectangular spine stripe which read as a random box on the
+	# roof rather than identity.
 	var ts_mat := StandardMaterial3D.new()
 	ts_mat.albedo_color = team_color
 	ts_mat.emission_enabled = true
 	ts_mat.emission = team_color
 	ts_mat.emission_energy_multiplier = 1.5
-	team_stripe.set_surface_override_material(0, ts_mat)
-	member.add_child(team_stripe)
+	ts_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	for ch_i: int in 2:
+		var ch_x_sign: float = -1.0 if ch_i == 0 else 1.0
+		var chev := MeshInstance3D.new()
+		var chev_box := BoxMesh.new()
+		chev_box.size = Vector3(hull_w * 0.55, 0.05, 0.18)
+		chev.mesh = chev_box
+		chev.position = Vector3(
+			ch_x_sign * hull_w * 0.18,
+			case_y + 1.05,
+			hull_len * 0.05,
+		)
+		# Tilt each strip so they form a forward-pointing >.
+		chev.rotation.y = deg_to_rad(28.0) * ch_x_sign
+		chev.set_surface_override_material(0, ts_mat)
+		member.add_child(chev)
 	mats.append(ts_mat)
 
 	# Recoil + rest_z arrays sized to the actual cannon count so
@@ -3545,6 +3612,21 @@ func _build_grinder_tank_member(index: int, offset: Vector3, team_color: Color) 
 		track.set_surface_override_material(0, track_mat)
 		member.add_child(track)
 		mats.append(track_mat)
+		# Animated track ribs -- registered with the unit's
+		# _courier_track_ribs list so _process scrolls them along
+		# the track's Z axis as the tank moves.
+		for r_i: int in 5:
+			var rib := MeshInstance3D.new()
+			var rib_box := BoxMesh.new()
+			rib_box.size = Vector3(track_w + 0.04, 0.05, 0.16)
+			rib.mesh = rib_box
+			var rt: float = (float(r_i) + 0.5) / 5.0
+			rib.position = Vector3(sx, track_h, -track_len * 0.5 + rt * track_len)
+			var rib_mat := _make_metal_mat(Color(0.05, 0.05, 0.05))
+			rib.set_surface_override_material(0, rib_mat)
+			member.add_child(rib)
+			mats.append(rib_mat)
+			_courier_track_ribs.append({"node": rib, "length": track_len})
 	# --- Hull (thicker than Courier; medium rather than the Breacher's
 	# wide casemate stance).
 	var hull_w: float = 1.65
