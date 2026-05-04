@@ -5194,6 +5194,28 @@ func stop() -> void:
 	has_move_order = false
 
 
+func _in_active_combat() -> bool:
+	## True when the CombatComponent has a live target it's engaging.
+	## Used to suppress the stuck-rescue ladder so a unit standing
+	## still while firing on an enemy isn't misread as wedged on
+	## terrain. Both forced_target (player or AI command_attack
+	## directive) and _current_target (auto-acquired) count.
+	var combat: Node = get_combat()
+	if not combat:
+		return false
+	var t_var: Variant = combat.get("_current_target")
+	if typeof(t_var) == TYPE_OBJECT and is_instance_valid(t_var):
+		var t_alive: bool = true
+		if "alive_count" in t_var:
+			t_alive = (t_var.get("alive_count") as int) > 0
+		if t_alive:
+			return true
+	var f_var: Variant = combat.get("forced_target")
+	if typeof(f_var) == TYPE_OBJECT and is_instance_valid(f_var):
+		return true
+	return false
+
+
 func _try_unit_detour_around_building() -> bool:
 	## Stuck-rescue stage 2 for Unit (~1.4s of zero progress with a
 	## live move order). Mirrors the crawler's
@@ -6216,11 +6238,19 @@ func _physics_process(delta: float) -> void:
 	# building that just rose, a wreck that just spawned) and is
 	# returning a stale next_path_position. Throttled to avoid
 	# spamming the navigation server every frame while wedged.
-	if actual_move < 0.001 and has_move_order and _nav_agent:
+	# A unit standing still while shooting a live target isn't
+	# stuck -- it's intentionally holding ground to fire. Skip the
+	# zero-move repath + the deflection / detour ladder while a
+	# combat target is engaged so the rescue logic doesn't yank
+	# the unit out of position to rotate around an enemy it's
+	# already killing. The `_in_active_combat` helper checks the
+	# CombatComponent's _current_target for a live, valid target.
+	var in_combat: bool = _in_active_combat()
+	if actual_move < 0.001 and has_move_order and _nav_agent and not in_combat:
 		if now_msec >= _zero_move_repath_at_msec:
 			_nav_agent.target_position = move_target
 			_zero_move_repath_at_msec = now_msec + 500
-	if actual_move < expected_move:
+	if actual_move < expected_move and not in_combat:
 		_stuck_timer += delta
 		# 0.6s — ramp self-rescue. Side-to-side wiggle from the
 		# deflection ladder doesn't actually clear a ramp; the unit
@@ -6284,6 +6314,12 @@ func _physics_process(delta: float) -> void:
 			arrived.emit()
 			return
 	else:
+		_stuck_timer = 0.0
+		_deflect_angle_deg = 50.0
+	# Combat overrides the rescue ladder entirely. Reset the stuck
+	# timer when engaged so a long firefight doesn't wake up a
+	# 14s give-up the moment the target dies.
+	if in_combat:
 		_stuck_timer = 0.0
 		_deflect_angle_deg = 50.0
 

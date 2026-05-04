@@ -539,6 +539,12 @@ func _process(delta: float) -> void:
 	# without producing anything.
 	if _state != AIState.SETUP:
 		_reap_idle_salvage_yards()
+	# Threat response. Rallies nearby idle units when enemies are
+	# inside our HQ defence radius or pressing one of our
+	# buildings -- runs in every state except SETUP so the AI
+	# defends itself even mid-attack.
+	if _state != AIState.SETUP:
+		_check_threat_response()
 
 
 func _personality_wave_size_base() -> int:
@@ -1957,6 +1963,119 @@ func _dispatch_crawler_defenders(crawler_pos: Vector3) -> void:
 		var combat: Node = node.get_node_or_null("CombatComponent")
 		if combat and combat.has_method("command_attack_move"):
 			combat.command_attack_move(attacker_pos)
+
+
+## Threat-response: rallies nearby idle AI units when own buildings or
+## the HQ are under threat. Runs every AI tick. Two scan stages:
+##   (1) Enemies within HQ_DEFENSE_RADIUS of our HQ -- standing
+##       harassers in the home base.
+##   (2) Enemies within BUILDING_DEFENSE_RADIUS of any owned building --
+##       a turret push, a yard raid, an aerodrome poke etc.
+## Each detected threat dispatches non-engineer non-escort idle units
+## within DEFENSE_DRAW_RADIUS to attack-move on the threat. Engineers
+## keep building; crawler escorts keep escorting; everything else
+## counter-attacks.
+const HQ_DEFENSE_RADIUS: float = 35.0
+const BUILDING_DEFENSE_RADIUS: float = 18.0
+const DEFENSE_DRAW_RADIUS: float = 60.0
+const DEFENSE_DISPATCH_PER_THREAT: int = 4
+## Throttle (msec) per threat position so the dispatcher doesn't
+## re-issue the same attack-move every tick. Keyed by quantized
+## XZ position so a moving threat re-fires a dispatch when it
+## drifts to a new cell.
+var _threat_dispatch_at_msec: Dictionary = {}
+
+
+func _check_threat_response() -> void:
+	if not is_instance_valid(_hq):
+		return
+	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	var hq_pos: Vector3 = _hq.global_position
+	var hq_radius_sq: float = HQ_DEFENSE_RADIUS * HQ_DEFENSE_RADIUS
+	var bldg_radius_sq: float = BUILDING_DEFENSE_RADIUS * BUILDING_DEFENSE_RADIUS
+	# Pre-collect own buildings so we don't walk the buildings group
+	# once per enemy in the inner loop.
+	var own_buildings: Array[Vector3] = []
+	for b_node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(b_node):
+			continue
+		if b_node.get("owner_id") != owner_id:
+			continue
+		# Skip damaged-out / unfinished buildings? Both still count
+		# -- a half-built foundation under attack should still rally
+		# defenders.
+		own_buildings.append((b_node as Node3D).global_position)
+	# Scan hostile units once. For each one, check whether they're
+	# inside the HQ radius OR within building radius of any of our
+	# buildings; if so, fire a dispatch at their position.
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node):
+			continue
+		var n_owner: int = (node.get("owner_id") as int) if "owner_id" in node else -1
+		if n_owner == owner_id:
+			continue
+		var hostile: bool = (
+			registry.are_enemies(owner_id, n_owner)
+			if registry and registry.has_method("are_enemies")
+			else n_owner != owner_id
+		)
+		if not hostile:
+			continue
+		if "alive_count" in node and (node.get("alive_count") as int) <= 0:
+			continue
+		var enemy_pos: Vector3 = (node as Node3D).global_position
+		var threat: bool = enemy_pos.distance_squared_to(hq_pos) < hq_radius_sq
+		if not threat:
+			for b_pos: Vector3 in own_buildings:
+				if enemy_pos.distance_squared_to(b_pos) < bldg_radius_sq:
+					threat = true
+					break
+		if not threat:
+			continue
+		_dispatch_threat_response(enemy_pos)
+
+
+func _dispatch_threat_response(threat_pos: Vector3) -> void:
+	## Fires up to DEFENSE_DISPATCH_PER_THREAT non-engineer non-escort
+	## idle units at the threat position. Throttled per-position so
+	## we don't keep re-issuing the same attack-move every tick.
+	var key: String = "%d_%d" % [int(threat_pos.x / 6.0), int(threat_pos.z / 6.0)]
+	var now_msec: int = Time.get_ticks_msec()
+	var next_at_msec: int = (_threat_dispatch_at_msec.get(key, 0) as int)
+	if now_msec < next_at_msec:
+		return
+	# Build the set of units currently locked into a Crawler escort
+	# so the threat dispatcher doesn't poach them.
+	var taken: Dictionary = {}
+	for esc_ids_v: Variant in _crawler_escorts.values():
+		var esc_ids: Array = esc_ids_v as Array
+		for tid_v: Variant in esc_ids:
+			taken[tid_v as int] = true
+	var dispatched: int = 0
+	for node: Node in _units:
+		if dispatched >= DEFENSE_DISPATCH_PER_THREAT:
+			break
+		if not is_instance_valid(node):
+			continue
+		# Skip engineers (let them keep building) and escorts
+		# (their crawler still needs them).
+		if node.has_method("get_builder") and node.get_builder():
+			continue
+		var iid: int = node.get_instance_id()
+		if taken.has(iid):
+			continue
+		var d: float = (node as Node3D).global_position.distance_to(threat_pos)
+		if d > DEFENSE_DRAW_RADIUS:
+			continue
+		var combat: Node = node.get_node_or_null("CombatComponent")
+		if combat and combat.has_method("command_attack_move"):
+			combat.command_attack_move(threat_pos)
+			dispatched += 1
+	# Throttle this threat-cell for ~3s so the dispatch stays
+	# stable. A fresh enemy in a different cell still fires its own
+	# dispatch immediately.
+	if dispatched > 0:
+		_threat_dispatch_at_msec[key] = now_msec + 3000
 
 
 ## Yard-expansion helper. Looks for a wreck cluster center far from any
