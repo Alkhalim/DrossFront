@@ -36,6 +36,14 @@ var pending_target: Node3D = null
 var pending_shooter: Node3D = null
 var pending_splash_radius: float = 0.0
 var pending_splash_damage: int = 0
+## Snapshot of the shooter's owner_id captured at fire time.
+## Splash damage uses this for friend/foe sorting so a projectile
+## still applies its full payload even when the shooter died
+## mid-flight (the live pending_shooter reference is then null /
+## freed and the registry lookup can't dereference it).
+## -1 = unknown owner; treat everyone in the splash radius as
+## hostile so the round still does damage.
+var pending_shooter_owner_id: int = -1
 
 
 func set_damage_payload(damage: int, target: Node3D, shooter: Node3D, splash_radius: float, splash_damage: int) -> void:
@@ -44,6 +52,10 @@ func set_damage_payload(damage: int, target: Node3D, shooter: Node3D, splash_rad
 	pending_shooter = shooter
 	pending_splash_radius = splash_radius
 	pending_splash_damage = splash_damage
+	if shooter and is_instance_valid(shooter) and "owner_id" in shooter:
+		pending_shooter_owner_id = shooter.get("owner_id") as int
+	else:
+		pending_shooter_owner_id = -1
 var _flight_time: float = 0.0
 var _total_flight_time: float = 1.0
 var _arc_height: float = 4.0
@@ -652,9 +664,23 @@ func _spawn_impact() -> void:
 	# previous CombatComponent splash code, just relocated to the
 	# arrival site so the area-of-effect VISIBLY centres on the
 	# impact rather than firing instantly from the unit's barrel.
-	if pending_splash_radius > 0.0 and pending_splash_damage > 0 and pending_shooter and is_instance_valid(pending_shooter):
-		var shooter_owner: int = (pending_shooter.get("owner_id") as int) if "owner_id" in pending_shooter else 0
+	#
+	# Splash now drives off the cached pending_shooter_owner_id
+	# rather than dereferencing the live shooter, so a projectile
+	# fired by a unit that dies mid-flight still delivers its
+	# splash payload. The take_damage attacker arg is passed null
+	# when the shooter is gone (kill attribution lost) but the
+	# damage itself still lands.
+	if pending_splash_radius > 0.0 and pending_splash_damage > 0:
+		var shooter_alive: bool = pending_shooter and is_instance_valid(pending_shooter)
+		var splash_attacker: Node3D = pending_shooter if shooter_alive else null
+		var shooter_owner: int = pending_shooter_owner_id
 		var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+		# When the cached owner_id is unknown (shooter freed before
+		# fire-time payload attach) we fall back to "everyone is
+		# hostile" so the round still chips bystanders rather than
+		# silently no-opping.
+		var owner_unknown: bool = shooter_owner < 0
 		for ent: Node in get_tree().get_nodes_in_group("units"):
 			if not is_instance_valid(ent) or ent == pending_target:
 				continue
@@ -662,12 +688,14 @@ func _spawn_impact() -> void:
 				continue
 			var ent_owner: int = (ent.get("owner_id") as int) if "owner_id" in ent else 0
 			var hostile: bool = true
-			if registry and registry.has_method("are_enemies"):
+			if not owner_unknown and registry and registry.has_method("are_enemies"):
 				hostile = registry.call("are_enemies", shooter_owner, ent_owner)
+			elif not owner_unknown:
+				hostile = ent_owner != shooter_owner
 			if not hostile:
 				continue
 			if global_position.distance_to((ent as Node3D).global_position) <= pending_splash_radius:
-				ent.take_damage(pending_splash_damage, pending_shooter)
+				ent.take_damage(pending_splash_damage, splash_attacker)
 		for ent2: Node in get_tree().get_nodes_in_group("buildings"):
 			if not is_instance_valid(ent2) or ent2 == pending_target:
 				continue
@@ -675,12 +703,14 @@ func _spawn_impact() -> void:
 				continue
 			var ent2_owner: int = (ent2.get("owner_id") as int) if "owner_id" in ent2 else 0
 			var hostile2: bool = true
-			if registry and registry.has_method("are_enemies"):
+			if not owner_unknown and registry and registry.has_method("are_enemies"):
 				hostile2 = registry.call("are_enemies", shooter_owner, ent2_owner)
+			elif not owner_unknown:
+				hostile2 = ent2_owner != shooter_owner
 			if not hostile2:
 				continue
 			if global_position.distance_to((ent2 as Node3D).global_position) <= pending_splash_radius:
-				ent2.take_damage(pending_splash_damage, pending_shooter)
+				ent2.take_damage(pending_splash_damage, splash_attacker)
 	# Impact flash routed through the GPU-particle emitter — same
 	# bright-orange burst, no per-impact MeshInstance3D allocation.
 	var _pem_scene: Node = get_tree().current_scene
