@@ -1336,10 +1336,16 @@ func _assign_crawler_escort(crawler: Node3D) -> void:
 			var u: Node = cand["unit"] as Node
 			alive_escorts.append(u)
 			alive_ids.append(u.get_instance_id())
-	# Issue the follow order: each escort attack-moves to a small
-	# offset around the Crawler so they form a loose ring rather
-	# than stacking on the chassis. Attack-move so they engage
-	# en route -- mirrors the player's expectation for an escort.
+	# Issue follow orders only when escorts drift OUT of a
+	# comfortable distance band [ESC_MIN, ESC_MAX] from the
+	# crawler. Inside the band the escort is left to its own
+	# combat / idle behaviour so it doesn't constantly chase a
+	# moving target point and clip into the crawler. Outside
+	# the band, attack-move to a ring-position at the band's
+	# midpoint so the escort eases back into formation.
+	const ESC_MIN_DIST: float = 4.0
+	const ESC_MAX_DIST: float = 11.0
+	const ESC_REASSIGN_DIST: float = (ESC_MIN_DIST + ESC_MAX_DIST) * 0.5  # ~7.5u
 	var crawler_pos2: Vector3 = crawler.global_position
 	for esc_i: int in alive_escorts.size():
 		var esc_unit: Node = alive_escorts[esc_i]
@@ -1348,14 +1354,18 @@ func _assign_crawler_escort(crawler: Node3D) -> void:
 		var combat: Node = esc_unit.get_node_or_null("CombatComponent") as Node
 		if not combat or not combat.has_method("command_attack_move"):
 			continue
+		var d_to_crawler: float = (esc_unit as Node3D).global_position.distance_to(crawler_pos2)
+		if d_to_crawler >= ESC_MIN_DIST and d_to_crawler <= ESC_MAX_DIST:
+			# Inside the comfort band. Don't churn its current
+			# move/combat order -- if it's busy fighting an
+			# attacker it should stay there.
+			continue
+		# Outside the band -- pick a ring-position at the band's
+		# midpoint and send the escort to soft-rejoin.
 		var ang: float = float(esc_i) / float(maxi(target_count, 1)) * TAU
-		var ring: Vector3 = Vector3(cos(ang), 0.0, sin(ang)) * 4.0
-		# Only re-issue when meaningfully far from the post --
-		# avoid spamming attack-move every AI tick which would
-		# starve the unit's normal pathing.
+		var ring: Vector3 = Vector3(cos(ang), 0.0, sin(ang)) * ESC_REASSIGN_DIST
 		var post: Vector3 = crawler_pos2 + ring
-		if (esc_unit as Node3D).global_position.distance_to(post) > 6.0:
-			combat.command_attack_move(post)
+		combat.command_attack_move(post)
 	_crawler_escorts[iid] = alive_ids
 
 

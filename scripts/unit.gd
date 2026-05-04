@@ -285,7 +285,11 @@ const CLASS_SHAPES: Dictionary = {
 		"antenna": 0.0,
 		"color": Color(0.5, 0.46, 0.28),
 		"formation_spacing": 0.7,
-		"turn_speed": 6.0,
+		# turn_speed is now rad/sec under the constant-velocity
+		# turn rule (was a smoothstep factor). Engineers feel
+		# nimble; bumped to 9 so they pivot ~1.5x as fast as
+		# the medium baseline.
+		"turn_speed": 9.0,
 		"leg_kind": "spider",
 		"torso_lean": 0.0,
 	},
@@ -298,7 +302,9 @@ const CLASS_SHAPES: Dictionary = {
 		"antenna": 0.425,
 		"color": Color(0.32, 0.34, 0.4),
 		"formation_spacing": 0.85,
-		"turn_speed": 6.5,
+		# Light scout pivot: ~9 rad/s = ~520 deg/s. Snaps facing
+		# in under half a second across any angle.
+		"turn_speed": 9.0,
 		"leg_kind": "biped",
 		"torso_lean": 0.0,
 	},
@@ -313,7 +319,8 @@ const CLASS_SHAPES: Dictionary = {
 		"antenna": 0.5,
 		"color": Color(0.38, 0.32, 0.32),
 		"formation_spacing": 1.4,
-		"turn_speed": 4.0,
+		# Medium chicken-walker baseline: ~7 rad/s = ~400 deg/s.
+		"turn_speed": 7.0,
 		"leg_kind": "chicken",
 		"torso_lean": 0.0,
 	},
@@ -329,7 +336,9 @@ const CLASS_SHAPES: Dictionary = {
 		"antenna": 0.42,
 		"color": Color(0.42, 0.4, 0.35),
 		"formation_spacing": 2.0,
-		"turn_speed": 2.0,
+		# Heavy mech: ~4 rad/s = ~230 deg/s. Visibly slower than
+		# lights but still finishes a 180 in <1s.
+		"turn_speed": 4.0,
 		"leg_kind": "quadruped",
 		"torso_lean": 0.0,
 	},
@@ -341,7 +350,8 @@ const CLASS_SHAPES: Dictionary = {
 		"antenna": 0.85,
 		"color": Color(0.48, 0.42, 0.35),
 		"formation_spacing": 2.4,
-		"turn_speed": 1.7,
+		# Apex titan: slowest pivot, ~3.5 rad/s = ~200 deg/s.
+		"turn_speed": 3.5,
 		"leg_kind": "biped",
 		"torso_lean": 0.0,
 	},
@@ -360,7 +370,9 @@ const CLASS_SHAPES: Dictionary = {
 		"antenna": 0.0,
 		"color": Color(0.18, 0.18, 0.22),
 		"formation_spacing": 3.5,
-		"turn_speed": 2.5,
+		# Tracked tank: ~5 rad/s = ~290 deg/s. Tracks pivot in
+		# place faster than legs need to reposition.
+		"turn_speed": 5.0,
 		"leg_kind": "tracked",
 		"torso_lean": 0.0,
 	},
@@ -6043,13 +6055,28 @@ func _apply_idle_spread() -> void:
 
 
 func _turn_toward(face_dir: Vector3, delta: float) -> void:
-	## Smoothly rotate the unit around Y to face `face_dir`. Heavies turn
-	## noticeably slower than lights, giving each class a different feel.
+	## Constant angular-velocity turn around Y. Replaces the previous
+	## smoothstep lerp_angle which felt floaty -- the lerp factor
+	## (turn_speed * delta) was tiny per frame, so big direction
+	## changes (180deg kite-back) interpolated slowly while small
+	## ones felt instant. Now the unit rotates at exactly
+	## `_turn_speed` rad/sec regardless of how far it has to turn,
+	## matching how Dota 2 / SC2 handle facing: a hard cap on
+	## degrees per second so heavies pivot visibly slower than
+	## lights but neither feels rubber-banded.
 	if face_dir.length_squared() < 0.0001:
 		return
 	# atan2(x, z) gives the Y rotation that orients -Z toward face_dir; -PI matches look_at.
 	var target_y: float = atan2(face_dir.x, face_dir.z) + PI
-	rotation.y = lerp_angle(rotation.y, target_y, clampf(_turn_speed * delta, 0.0, 1.0))
+	# Signed shortest-path delta in [-PI, PI]. wrapf gives us the
+	# wrap; we then clamp the per-frame step to turn_speed * delta
+	# and apply it directly so the rotation closes at constant
+	# angular velocity until it's within one frame's step of the
+	# target.
+	var diff: float = wrapf(target_y - rotation.y, -PI, PI)
+	var max_step: float = _turn_speed * delta
+	var step: float = clampf(diff, -max_step, max_step)
+	rotation.y += step
 
 
 func _apply_walk_bob() -> void:

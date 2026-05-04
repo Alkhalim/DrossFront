@@ -1479,6 +1479,17 @@ func _account_starter_unit_population() -> void:
 	for node: Node in get_tree().get_nodes_in_group("units"):
 		if not is_instance_valid(node):
 			continue
+		# Skip queue_freed nodes -- _swap_starter_units_to_player_faction
+		# queue_free's the Anvil starter units before respawning the
+		# Sable equivalents, but queue_free is deferred to end-of-frame
+		# so the freed Anvil units are still in the 'units' group when
+		# we walk it here. Without this skip we double-count the Anvil
+		# pop on top of the Sable pop, leaving a 36-38 phantom block on
+		# Sable players that never resolves (the Anvil units were
+		# never properly killed via die() so remove_population never
+		# fires for them).
+		if node.is_queued_for_deletion():
+			continue
 		var oid: int = (node.get("owner_id") as int) if "owner_id" in node else -1
 		if oid != 0:
 			continue
