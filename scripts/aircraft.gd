@@ -260,14 +260,18 @@ func _process(delta: float) -> void:
 	if alive_count <= 0:
 		return
 	_ac_phys_frame += 1
-	if (_ac_phys_frame & 1) != (get_instance_id() & 1):
-		# Off-frames still need the position integration so the
-		# craft moves smoothly; everything else (bob, shadows,
-		# rotors, drones) waits for its phase tick.
+	# Third-frame stagger (was half-frame) -- matches the
+	# CombatComponent + SalvageWorker pattern. Aircraft._process
+	# was the dominant cost in the latest 250-pop stress test
+	# (~27s of session time / 31k calls); cutting the heavy-tick
+	# rate from ~30 Hz to ~20 Hz drops a third of that without
+	# visible flight-feel changes (off-frames still integrate
+	# position so motion stays smooth).
+	if (_ac_phys_frame % 3) != int(get_instance_id() % 3):
 		if move_target != Vector3.INF and stats:
 			global_position += velocity * delta
 		return
-	delta *= 2.0
+	delta *= 3.0
 	# Active-ability cooldown tick (mirrors Unit). The autocast
 	# trigger lives in CombatComponent so it fires at the right
 	# moment in the combat tick instead of here.
