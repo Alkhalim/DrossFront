@@ -123,6 +123,16 @@ var forced_target: Node3D = null
 ## Attack-move destination. Vector3.INF = not attack-moving.
 var attack_move_target: Vector3 = Vector3.INF
 
+## Retaliation bookkeeping -- when notify_attacked sets a forced
+## target on a unit that was moving (en-route engagement), we
+## remember the original move target so the unit can resume its
+## journey after the attacker is dead OR has stayed out of sight
+## for RETALIATION_LOST_SIGHT_SEC seconds. INF = not retaliating
+## from a move. Cleared when the retaliation resolves.
+const RETALIATION_LOST_SIGHT_SEC: float = 7.0
+var _retaliation_resume_target: Vector3 = Vector3.INF
+var _retaliation_lost_sight_timer: float = 0.0
+
 
 func _ready() -> void:
 	_unit = get_parent()
@@ -239,6 +249,27 @@ func _physics_process(delta: float) -> void:
 	# Forced target wins. If it's gone or dead, drop it.
 	if forced_target and not _is_valid_target(forced_target):
 		forced_target = null
+		_retaliation_lost_sight_timer = 0.0
+	# Retaliation lost-sight watchdog -- when an AI-owned unit was
+	# pulled into combat by notify_attacked but its attacker has
+	# stayed out of sight for RETALIATION_LOST_SIGHT_SEC seconds,
+	# clear forced_target so the unit resumes its original move
+	# order. 'Out of sight' = farther than the unit's sight radius.
+	# Player-owned units (owner 0) never enter retaliation during
+	# plain moves, so the watchdog is a no-op for them.
+	if forced_target and unit_has_move_order and attack_move_target == Vector3.INF:
+		var owner_v: int = (_unit.get("owner_id") as int) if "owner_id" in _unit else 0
+		if owner_v != 0:
+			var stats_v: UnitStatResource = _unit.get("stats") as UnitStatResource
+			var sight: float = stats_v.resolved_sight_radius() if stats_v else 20.0
+			var d_target: float = _unit.global_position.distance_to(forced_target.global_position)
+			if d_target > sight:
+				_retaliation_lost_sight_timer += delta
+				if _retaliation_lost_sight_timer >= RETALIATION_LOST_SIGHT_SEC:
+					forced_target = null
+					_retaliation_lost_sight_timer = 0.0
+			else:
+				_retaliation_lost_sight_timer = 0.0
 	if forced_target:
 		_current_target = forced_target
 	elif _current_target and not _is_valid_target(_current_target):
@@ -520,10 +551,17 @@ func notify_attacked(attacker: Node3D) -> void:
 		return
 
 	var has_move_order: bool = _unit.get("has_move_order") as bool
+	var owner_id_v: int = (_unit.get("owner_id") as int) if "owner_id" in _unit else 0
 	if has_move_order and attack_move_target == Vector3.INF:
-		# Player-issued (or builder-issued) plain move is in progress.
-		# Finish that command before fighting back.
-		return
+		# Player-issued plain move (owner 0): finish that command
+		# before fighting back -- the player explicitly chose to
+		# disengage. AI-owned units (owner != 0) DO retaliate
+		# during a plain move, then resume the move once the
+		# attacker is dead OR has stayed out of sight for
+		# RETALIATION_LOST_SIGHT_SEC seconds.
+		if owner_id_v == 0:
+			return
+		_retaliation_lost_sight_timer = 0.0
 	forced_target = attacker
 	_current_target = attacker
 
