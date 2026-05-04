@@ -12,6 +12,7 @@ range_tier = &"long"
 rof_tier = &"slow"
 damage_value = 170
 rof_seconds_value = 2.0
+projectile_style = &"shell"
 base_accuracy = 0.80
 can_damage_trees = true
 mult_vs_light = 0.3

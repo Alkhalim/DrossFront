@@ -123,6 +123,22 @@ static func create(from: Vector3, to: Vector3, role_tag: StringName, rof_tier: S
 					beam_width = 1.2
 			proj._create_beam_mesh(color, proj.start_pos, proj.target_pos, beam_width)
 			proj.speed = 999.0
+		"shell":
+			# Heavy AP shell -- chunkier, brighter tracer than the
+			# default bullet, and slightly slower so the silhouette
+			# reads on the way to the target. Does NOT arc (kinetic
+			# round, not a missile). Used by big-bore guns like the
+			# Bulwark cannon where the default rof_tier-derived
+			# missile style was visually wrong (the gun's a giant AP
+			# cannon, not a launcher).
+			proj._create_shell_mesh(color)
+			proj.speed = 70.0
+			var aim_shell: Vector3 = proj.target_pos - proj.start_pos
+			if aim_shell.length_squared() > 0.0001:
+				var ts := Transform3D()
+				ts.origin = proj.start_pos
+				proj.transform = ts.looking_at(proj.target_pos, Vector3.UP)
+			proj._bullet_oriented = true
 		_:
 			proj._create_bullet_mesh(color)
 			# Faster bullets so the volley reads as actually shooting rather than
@@ -163,6 +179,49 @@ func _create_bullet_mesh(color: Color) -> void:
 	mat.emission_energy_multiplier = 3.0
 	_mesh.set_surface_override_material(0, mat)
 	add_child(_mesh)
+
+
+func _create_shell_mesh(color: Color) -> void:
+	# Heavy AP shell -- bigger than a tracer slug + a tapered nose.
+	# Stays a kinetic round (no arc, no missile smoke trail).
+	_mesh = MeshInstance3D.new()
+	_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# Tapered cylinder gives the AP nose silhouette.
+	var shell_cyl := CylinderMesh.new()
+	shell_cyl.top_radius = 0.06
+	shell_cyl.bottom_radius = 0.16
+	shell_cyl.height = 0.62
+	shell_cyl.radial_segments = 12
+	_mesh.mesh = shell_cyl
+	_mesh.rotation.x = -PI / 2
+	var shell_mat := StandardMaterial3D.new()
+	shell_mat.albedo_color = color
+	shell_mat.emission_enabled = true
+	shell_mat.emission = color
+	shell_mat.emission_energy_multiplier = 2.4
+	_mesh.set_surface_override_material(0, shell_mat)
+	add_child(_mesh)
+	# Bright glowing aft cap reads as the burning tracer charge so a
+	# shot fired toward camera still has a strong tail-light read.
+	var aft := MeshInstance3D.new()
+	aft.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var aft_cyl := CylinderMesh.new()
+	aft_cyl.top_radius = 0.18
+	aft_cyl.bottom_radius = 0.18
+	aft_cyl.height = 0.10
+	aft_cyl.radial_segments = 12
+	aft.mesh = aft_cyl
+	aft.rotation.x = -PI / 2
+	aft.position.z = 0.26
+	var aft_mat := StandardMaterial3D.new()
+	var hot: Color = color.lerp(Color(1.0, 1.0, 0.85, 1.0), 0.55)
+	aft_mat.albedo_color = hot
+	aft_mat.emission_enabled = true
+	aft_mat.emission = hot
+	aft_mat.emission_energy_multiplier = 6.0
+	aft_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	aft.set_surface_override_material(0, aft_mat)
+	add_child(aft)
 
 
 func set_glow_boost(mult: float, tint: Color = Color(1.0, 0.78, 0.20, 1.0)) -> void:

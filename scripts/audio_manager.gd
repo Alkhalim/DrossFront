@@ -585,9 +585,14 @@ func _pick_weapon_fire_stream(weapon: WeaponResource) -> AudioStream:
 	# Missile-tier weapons (single/slow/volley) launch visible missile
 	# projectiles — give them the missile-launch bank so the audio
 	# matches the visual. Checked first so it overrides the
-	# weight/role-based routing below.
+	# weight/role-based routing below. Skip the missile-launch route
+	# when the weapon explicitly forces a kinetic projectile via
+	# projectile_style ("bullet" / "shell"), since those visually
+	# read as cannon shots, not launches.
 	var rof: StringName = weapon.rof_tier
-	if (rof == &"single" or rof == &"slow" or rof == &"volley") and not _sfx_missile_launch.is_empty():
+	var pstyle: StringName = weapon.get("projectile_style") if "projectile_style" in weapon else &""
+	var is_kinetic_override: bool = pstyle == &"bullet" or pstyle == &"shell"
+	if (rof == &"single" or rof == &"slow" or rof == &"volley") and not _sfx_missile_launch.is_empty() and not is_kinetic_override:
 		return _pick(_sfx_missile_launch)
 	# Beam-style projectiles (Jackal pulse lasers etc.) always use
 	# the laser sound bank regardless of role/rof so the audio
