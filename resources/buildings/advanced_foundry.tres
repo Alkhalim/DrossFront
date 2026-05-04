@@ -1,8 +1,9 @@
-[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=4 format=3]
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
 [ext_resource type="Resource" path="res://resources/units/anvil_bulwark.tres" id="2"]
 [ext_resource type="Resource" path="res://resources/units/anvil_forgemaster.tres" id="3"]
+[ext_resource type="Resource" path="res://resources/units/anvil_breacher_tank.tres" id="4"]
 
 [resource]
 script = ExtResource("1")
@@ -13,7 +14,7 @@ cost_salvage = 265
 build_time = 42.0
 power_consumption = 25
 power_production = 0
-producible_units = [ExtResource("2"), ExtResource("3")]
+producible_units = [ExtResource("2"), ExtResource("3"), ExtResource("4")]
 footprint_size = Vector3(6.5, 4.5, 5)
 placeholder_color = Color(0.32, 0.30, 0.34, 1)
 is_advanced = true

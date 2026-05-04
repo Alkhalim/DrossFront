@@ -1979,7 +1979,12 @@ func _build_courier_tank_member(index: int, offset: Vector3, team_color: Color) 
 	var mats: Array[StandardMaterial3D] = []
 	var sable_dark: Color = _faction_tint_chassis(Color(0.18, 0.18, 0.22))
 	var sable_mid: Color = _faction_tint_chassis(Color(0.28, 0.28, 0.32))
-	var sable_violet: Color = Color(0.78, 0.42, 1.0)
+	# Accent colour swings to Anvil amber for the Breacher Tank
+	# variants so a player using both factions doesn't see two
+	# tracked tanks share the same Sable-violet seam read. Sable
+	# Courier Tank keeps its violet identity.
+	var is_breacher: bool = stats != null and stats.unit_name.findn("Breacher") >= 0
+	var sable_violet: Color = Color(1.00, 0.55, 0.18) if is_breacher else Color(0.78, 0.42, 1.0)
 
 	# --- Tracks (two side rails). Long flat boxes flanking the hull.
 	var track_len: float = 2.85
