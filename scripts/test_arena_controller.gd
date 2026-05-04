@@ -2803,16 +2803,19 @@ func _setup_elevation_foundry_belt() -> void:
 	# building placement (which now rejects pos.y > 0.3u) refuses
 	# to drop foundations on slopes. Reuses the plateau spawn
 	# infrastructure with a low height so it reads as rolling
-	# terrain rather than a tactical platform.
+	# terrain rather than a tactical platform. Bumped 1.0 -> 1.8
+	# so the silhouette is unambiguously taller than the mech (~2u
+	# total) at the player camera angle -- 1.0u was indistinguishable
+	# from ground at distance.
 	var hills: Array[Dictionary] = [
 		{"center": Vector3( 35.0, 0.0,  60.0), "top": Vector2(14.0, 10.0),
-		 "height": 1.0, "ramps": ["N", "S"]},
+		 "height": 1.8, "ramps": ["N", "S"]},
 		{"center": Vector3(-35.0, 0.0,  60.0), "top": Vector2(14.0, 10.0),
-		 "height": 1.0, "ramps": ["N", "S"]},
+		 "height": 1.8, "ramps": ["N", "S"]},
 		{"center": Vector3( 40.0, 0.0, -45.0), "top": Vector2(12.0,  9.0),
-		 "height": 1.0, "ramps": ["N", "S"]},
+		 "height": 1.8, "ramps": ["N", "S"]},
 		{"center": Vector3(-40.0, 0.0, -45.0), "top": Vector2(12.0,  9.0),
-		 "height": 1.0, "ramps": ["N", "S"]},
+		 "height": 1.8, "ramps": ["N", "S"]},
 	]
 	for h: Dictionary in hills:
 		_spawn_walkable_plateau(
@@ -4666,6 +4669,12 @@ func _setup_geothermic_vents() -> void:
 			# all distributed vents stacking at the map centre on
 			# Foundry Belt's central plateau.
 			if cand.length() < SAMPLE_INNER_MIN:
+				continue
+			# Reject candidates that overlap a plateau / ramp / hill
+			# footprint. A vent embedded in a ramp can't host a
+			# generator (the build gate rejects sloped ground) and
+			# the steam VFX clipping through stairs reads as a bug.
+			if _vent_overlaps_terrain(cand):
 				continue
 			# Score = min distance to any already-placed vent.
 			var min_d: float = INF
