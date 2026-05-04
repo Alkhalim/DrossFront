@@ -27,6 +27,25 @@ var _hq_destroyed: bool = false
 var _buildings_placed: Dictionary = {}
 
 const AI_SALVAGE_TRICKLE: float = 15.0
+## Safety net against the 'AI never attacks' failure mode -- if no
+## attack has launched for this many seconds since either match
+## start or the last attack, the AI force-pushes ATTACK with
+## whatever it has. Prevents the loop where wave_size never gets
+## reached because attrition keeps the unit count below the
+## threshold. Per-personality overrides below shorten / lengthen
+## this for RUSH / TURRET_HEAVY etc. Hard difficulty also scales
+## it down (more aggressive timeout).
+const MAX_DORMANT_SEC_BASE: float = 150.0
+## Match-wall-clock seconds since this AI spawned. Independent of
+## _state_timer so it survives state transitions, REBUILD pauses
+## etc. Drives the dormant-attack safety net.
+var _match_clock_sec: float = 0.0
+## Wall-clock seconds since this AI last LAUNCHED an attack
+## (entered ATTACK state). Initialised to 0 so the first attack
+## still has to satisfy the normal wave-size / dormant-timer
+## thresholds.
+var _last_attack_clock_sec: float = 0.0
+
 const ECONOMY_DURATION: float = 40.0
 ## Bumped 35 → 90 so the AI actually masses up before attacking. The old
 ## 35s fallback let the timer trip before INITIAL_WAVE_SIZE was hit, and
@@ -323,6 +342,11 @@ func _process(delta: float) -> void:
 			if "alive_count" in node and node.get("alive_count") > 0:
 				_units.append(node)
 
+	# Match wall-clock advances regardless of state. Drives the
+	# dormant-attack safety net so a stuck ECONOMY/ARMY/REBUILD
+	# loop can't keep the AI passive forever.
+	_match_clock_sec += delta
+
 	_state_timer += delta
 
 	# Forward-yard expansion ticks across all states except REBUILD (when
@@ -350,6 +374,62 @@ func _process(delta: float) -> void:
 			_process_attack()
 		AIState.REBUILD:
 			_process_rebuild()
+
+
+func _personality_wave_size_base() -> int:
+	## Per-personality base wave size before _agg_mul + _wave_count
+	## scaling. RUSH attacks earlier with smaller waves to chip the
+	## opponent constantly; ECONOMY_HEAVY masses up bigger pushes.
+	match _strategy:
+		Strategy.RUSH:           return 5
+		Strategy.TURRET_HEAVY:   return 9
+		Strategy.ECONOMY_HEAVY:  return 11
+		_:                       return 7  # BALANCED
+
+
+func _personality_dormant_timeout_sec() -> float:
+	## Per-personality 'I MUST attack now even if I'm under-massed'
+	## ceiling. Hard difficulty pulls these down further via the
+	## aggression multiplier so a Hard AI is never silent for long.
+	var base: float = MAX_DORMANT_SEC_BASE
+	match _strategy:
+		Strategy.RUSH:           base = 90.0
+		Strategy.TURRET_HEAVY:   base = 200.0
+		Strategy.ECONOMY_HEAVY:  base = 180.0
+		_:                       base = 150.0  # BALANCED
+	# Aggression multiplier inversely scales the timeout: Hard
+	# (1.8) shrinks 150s -> ~83s; Easy (0.75) lengthens to 200s.
+	# Floor at 60s so a hyper-aggro AI still gives the player a
+	# beat to react.
+	return maxf(base / maxf(_agg_mul, 0.5), 60.0)
+
+
+func _force_attack_if_dormant() -> bool:
+	## Returns true (and transitions to ATTACK) if more than the
+	## personality's dormant-timeout seconds have passed since the
+	## last attack and we have AT LEAST one combat unit. Acts as
+	## the safety net against the wave-size-never-reached failure
+	## mode -- the AI will always attack eventually, even if the
+	## ARMY phase keeps eating losses to defensive harassment.
+	var since_last: float = _match_clock_sec - _last_attack_clock_sec
+	if since_last < _personality_dormant_timeout_sec():
+		return false
+	# Need at least one combat unit (skip engineers / crawlers).
+	var combat_count: int = 0
+	for node: Node in _units:
+		if not is_instance_valid(node):
+			continue
+		if node.has_method("get_builder") and node.get_builder():
+			continue
+		combat_count += 1
+		if combat_count >= 1:
+			break
+	if combat_count == 0:
+		return false
+	_state = AIState.ATTACK
+	_state_timer = 0.0
+	_last_attack_clock_sec = _match_clock_sec
+	return true
 
 
 func _process_economy() -> void:
@@ -433,6 +513,10 @@ func _process_economy() -> void:
 			_try_place("aerodrome", "res://resources/buildings/aerodrome.tres", _offset_for("aerodrome", Vector3(28, 0, -8)))
 			_try_place("sam_site", "res://resources/buildings/sam_site.tres", _offset_for("sam_site", Vector3(0, 0, -22)))
 
+	# Dormant-attack safety net -- if we've had ANY combat units
+	# for too long without launching an attack, push out now.
+	if _force_attack_if_dormant():
+		return
 	if _state_timer >= ECONOMY_DURATION:
 		_state = AIState.ARMY
 		_state_timer = 0.0
@@ -451,13 +535,21 @@ func _process_army() -> void:
 	if _wave_count >= 2 and is_instance_valid(_adv_foundry):
 		_try_queue_at(_adv_foundry)
 
-	# Wave size scales with the aggression multiplier — Hard sends bigger
-	# pushes, Easy sends fewer units before attacking.
-	var base_wave: float = float(INITIAL_WAVE_SIZE + _wave_count * 2) * _agg_mul
+	# Wave size pulls from the personality base, scaled by wave
+	# count + aggression. Personality drives the OPENING wave size:
+	# RUSH attacks with smaller waves earlier; ECONOMY_HEAVY masses
+	# bigger pushes.
+	var base_wave: float = float(_personality_wave_size_base() + _wave_count * 2) * _agg_mul
 	var wave_size: int = maxi(int(round(base_wave)), 2)
 	if _units.size() >= wave_size or _state_timer >= ARMY_DURATION / _agg_mul:
 		_state = AIState.ATTACK
 		_state_timer = 0.0
+		_last_attack_clock_sec = _match_clock_sec
+		return
+	# Dormant-attack safety net -- if the army phase has dragged
+	# on too long because attrition keeps the count below
+	# wave_size, push with what we have.
+	_force_attack_if_dormant()
 
 
 func _process_attack() -> void:
@@ -524,6 +616,11 @@ func _process_attack() -> void:
 
 
 func _process_rebuild() -> void:
+	# Even during REBUILD the dormant safety net stays armed -- a
+	# match where the AI keeps losing every wave shouldn't end up
+	# with the AI passively rebuilding forever between attacks.
+	if _force_attack_if_dormant():
+		return
 	if _state_timer >= REBUILD_DURATION:
 		_state = AIState.ECONOMY
 		_state_timer = 0.0
