@@ -132,12 +132,17 @@ func _ready() -> void:
 
 	# Collision: layer 2 (units, so click-select raycasts find it) AND
 	# layer 4 (obstacles, so other units' mask=5 actually collides with
-	# the chassis). Without the layer 4 bit, mechs walked straight
-	# through the Crawler. Mask = 7 (ground + units + obstacles) so the
-	# Crawler now also bumps into other units / workers / crawlers
-	# instead of being able to drive straight through them.
+	# the chassis). Mask = 5 (ground + obstacles) so the Crawler stops
+	# at terrain + buildings + other crawlers (all on the obstacle
+	# layer) but NOT at salvage workers / individual mechs (unit
+	# layer 2). The chassis is way too big to be physically nudged
+	# around by a single worker drone, and the previous mask=7 setup
+	# meant the Crawler ground to a halt every time it tried to drive
+	# past its own gatherers. Mechs still stop at the Crawler from
+	# THEIR side because their mask includes the obstacle layer the
+	# Crawler is on.
 	collision_layer = 6
-	collision_mask = 7
+	collision_mask = 5
 
 	_build_visuals()
 	_build_collision()
