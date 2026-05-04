@@ -299,12 +299,36 @@ func _physics_process(delta: float) -> void:
 	var primary: WeaponResource = stats.primary_weapon
 	var primary_range: float = primary.resolved_range() if primary else 10.0
 
-	# Per-unit LOS gate -- a unit can only engage what it personally
-	# sees, not what an ally is spotting through shared FOW. If the
-	# target sits outside the firing unit's own sight_radius, push
-	# forward to close the gap before reopening fire.
+	# Shared-FOW LOS gate -- a unit can engage anything within its
+	# weapon range as long as ANY friendly observer (own units,
+	# allied units, friendly buildings) currently reveals the target
+	# in fog of war. The previous gate was per-unit sight_radius
+	# only, so a Bulwark with 25u long-range cannon couldn't fire at
+	# a structure 22u away that an allied scout was painting -- the
+	# shot was forced to walk into the unit's own sight bubble first.
+	# The shared-vision rule mirrors how the player sees the world
+	# (FOW is per-team), so a unit firing on what the player can see
+	# matches expectations.
 	var sight_r: float = stats.resolved_sight_radius() if stats else primary_range
-	if dist > sight_r:
+	# Only player-side units (owner 0) and player allies benefit
+	# from the shared-FOW reveal; the FOW grid is the local
+	# player's vision, so applying it to enemy AI would let the
+	# enemy 'cheat' by piggybacking on the player's vision. AI
+	# stays on per-unit sight_radius until a per-team FOW is wired
+	# up. PlayerRegistry.are_allied returns true for any owner on
+	# the same team as the local player.
+	var owner_id: int = _unit.get("owner_id") as int
+	var uses_shared_los: bool = owner_id == 0
+	if not uses_shared_los:
+		var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+		if registry and registry.has_method("are_allied"):
+			uses_shared_los = registry.call("are_allied", owner_id, 0)
+	var team_can_see: bool = false
+	if uses_shared_los:
+		var fow: Node = get_tree().current_scene.get_node_or_null("FogOfWar") if get_tree() else null
+		if fow and fow.has_method("is_visible_world"):
+			team_can_see = fow.call("is_visible_world", _current_target.global_position)
+	if dist > sight_r and not team_can_see:
 		_unit.command_move(_current_target.global_position, false)
 		return
 
