@@ -4271,20 +4271,26 @@ func _setup_buildable_buildings() -> void:
 		return
 
 	if buildable_buildings.is_empty():
+		# Order matters -- the HUD's Basic / Advanced tabs render
+		# buttons in this sequence (filtered by is_advanced), and
+		# the build hotkeys (Q W E R / A S D F) map by position.
+		# Advanced tab order is the spec'd one: Adv Foundry (Q),
+		# Aerodrome (W), Reactor (E), Adv Armory (R) -- the most
+		# common tech-up sequence is left-to-right.
 		var stat_paths: Array[String] = [
+			# Basic tab.
 			"res://resources/buildings/basic_foundry.tres",
-			"res://resources/buildings/advanced_foundry.tres",
-			"res://resources/buildings/salvage_yard.tres",
 			"res://resources/buildings/basic_generator.tres",
-			"res://resources/buildings/advanced_generator.tres",
+			"res://resources/buildings/salvage_yard.tres",
 			"res://resources/buildings/basic_armory.tres",
-			"res://resources/buildings/advanced_armory.tres",
 			"res://resources/buildings/gun_emplacement.tres",
 			"res://resources/buildings/gun_emplacement_basic.tres",
-			# V3 §"Pillar 3" — Aerodrome (produces aircraft) + SAM Site
-			# (anti-air defense). Both available to either faction.
-			"res://resources/buildings/aerodrome.tres",
 			"res://resources/buildings/sam_site.tres",
+			# Advanced tab -- Q W E R order per balance brief.
+			"res://resources/buildings/advanced_foundry.tres",
+			"res://resources/buildings/aerodrome.tres",
+			"res://resources/buildings/advanced_generator.tres",
+			"res://resources/buildings/advanced_armory.tres",
 			# V3 §"Pillar 2" — Sable's Mesh anchor structure. Filtered
 			# below by faction_lock so Anvil players don't see it.
 			"res://resources/buildings/black_pylon.tres",
