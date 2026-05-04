@@ -263,17 +263,63 @@ func _build_healthy() -> void:
 		plate.set_surface_override_material(0, bark_dark)
 		add_child(plate)
 	# Canopy -- 4 stacked cones tapering to a point at the top.
+	# Per-tree jitter to break the plastic-cone uniform look:
+	# - Each canopy layer gets a small random Y rotation so the
+	#   triangle facets don't align top-to-bottom across trees.
+	# - Per-instance scale jitter (XZ width + slight tilt) so no
+	#   two trees match exactly.
+	# - Per-tree colour multiplier (0.85-1.10) layered on the
+	#   shared palette material so adjacent trees pick up
+	#   slightly different greens / olives.
+	var jitter_mat: StandardMaterial3D = canopy_mat.duplicate() as StandardMaterial3D
+	var col_mul: float = randf_range(0.85, 1.10)
+	jitter_mat.albedo_color = Color(
+		clampf(canopy_mat.albedo_color.r * col_mul, 0.0, 1.0),
+		clampf(canopy_mat.albedo_color.g * col_mul * randf_range(0.95, 1.05), 0.0, 1.0),
+		clampf(canopy_mat.albedo_color.b * col_mul * randf_range(0.90, 1.05), 0.0, 1.0),
+		1.0,
+	)
 	var canopy_y: float = TRUNK_HEIGHT - 0.20  # start lower so canopy hugs trunk
 	for layer: int in 4:
 		var disc: MeshInstance3D = MeshInstance3D.new()
 		var dc: CylinderMesh = _mesh_canopy_layers[layer]
 		disc.mesh = dc
 		disc.position = Vector3(0, canopy_y + dc.height * 0.5, 0)
-		disc.set_surface_override_material(0, canopy_mat)
+		# Per-layer rotation breaks the perfectly-aligned facets
+		# stacking (top-down silhouette stops looking like a
+		# faceted plastic cone).
+		disc.rotation.y = randf_range(0.0, TAU)
+		# Slight XZ scale variance + tiny tilt (±3deg per axis)
+		# so no canopy is a perfect symmetric stack.
+		var sx: float = randf_range(0.92, 1.08)
+		var sz: float = randf_range(0.92, 1.08)
+		disc.scale = Vector3(sx, randf_range(0.95, 1.06), sz)
+		disc.rotation.x = randf_range(-0.05, 0.05)
+		disc.rotation.z = randf_range(-0.05, 0.05)
+		disc.set_surface_override_material(0, jitter_mat)
 		add_child(disc)
 		# Each layer overlaps the one below by ~25% so the silhouette
 		# reads as a continuous cone, not a stack of separated discs.
 		canopy_y += dc.height * 0.75
+	# 2-4 small "needle clumps" -- tiny low-poly spheres clinging
+	# to the lower canopy edges so the silhouette breaks up the
+	# perfect cone outline. Reads as branches poking out of an
+	# overgrown canopy rather than a smooth molded shape.
+	var clump_count: int = randi_range(2, 4)
+	for k: int in clump_count:
+		var clump: MeshInstance3D = MeshInstance3D.new()
+		var sph: SphereMesh = SphereMesh.new()
+		sph.radius = randf_range(0.18, 0.32)
+		sph.height = sph.radius * 1.6
+		sph.radial_segments = 8
+		sph.rings = 4
+		clump.mesh = sph
+		var c_ang: float = randf_range(0.0, TAU)
+		var c_h: float = TRUNK_HEIGHT + randf_range(0.6, 2.4)
+		var c_r: float = CANOPY_RADIUS * randf_range(0.55, 0.95)
+		clump.position = Vector3(cos(c_ang) * c_r, c_h, sin(c_ang) * c_r)
+		clump.set_surface_override_material(0, jitter_mat)
+		add_child(clump)
 	# Lower secondary branches -- 2-3 short downward-tilted twigs
 	# poking out from the trunk just below the canopy. Adds the
 	# fidelity the user wanted (matches building / unit detail
