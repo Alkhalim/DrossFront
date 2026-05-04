@@ -257,6 +257,21 @@ func _trigger_crash(pos: Vector3) -> void:
 			var falloff: float = clampf(1.0 - (d / IMPACT_RADIUS) * 0.7, 0.3, 1.0)
 			node.take_damage(int(IMPACT_DAMAGE * falloff), null)
 
+	# Tree clearing -- a satellite slamming into the canopy on
+	# Schwarzwald (or any forested map) should leave a small ring
+	# of fallen trees + the visible crater. Trees are not in the
+	# splash group above; queue_free them directly here so the
+	# crash actually reads as 'something hit the ground hard'.
+	const TREE_CLEAR_RADIUS: float = 6.0
+	for tree_node: Node in get_tree().get_nodes_in_group("trees"):
+		if not is_instance_valid(tree_node):
+			continue
+		var t3: Node3D = tree_node as Node3D
+		if not t3:
+			continue
+		if pos.distance_to(t3.global_position) <= TREE_CLEAR_RADIUS:
+			t3.queue_free()
+
 	# Audio -- huge explosion stinger so the crash reads as a real
 	# event, not a quiet pop.
 	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")

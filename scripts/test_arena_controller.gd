@@ -200,6 +200,11 @@ func _setup_map_signature_features() -> void:
 	# glowing volcanic fissures that block pathing across the open plain.
 	if _is_ashplains():
 		_setup_volcanic_fissures()
+	elif _is_schwarzwald():
+		# Schwarzwald is a forest map -- ammo dumps would clutter
+		# the corridor + lane geometry and read off-tone for the
+		# wooded biome.
+		pass
 	else:
 		_setup_ammo_dumps()
 
