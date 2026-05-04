@@ -127,10 +127,9 @@ var attack_move_target: Vector3 = Vector3.INF
 ## target on a unit that was moving (en-route engagement), we
 ## remember the original move target so the unit can resume its
 ## journey after the attacker is dead OR has stayed out of sight
-## for RETALIATION_LOST_SIGHT_SEC seconds. INF = not retaliating
-## from a move. Cleared when the retaliation resolves.
+## for RETALIATION_LOST_SIGHT_SEC seconds. Cleared when the
+## retaliation resolves.
 const RETALIATION_LOST_SIGHT_SEC: float = 7.0
-var _retaliation_resume_target: Vector3 = Vector3.INF
 var _retaliation_lost_sight_timer: float = 0.0
 
 

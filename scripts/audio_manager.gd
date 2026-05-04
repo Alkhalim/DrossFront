@@ -1118,6 +1118,7 @@ func _generate_pitched_tone(start_freq: float, end_freq: float, duration: float)
 
 func _generate_two_tone(freq1: float, freq2: float, duration: float) -> AudioStreamWAV:
 	var samples: int = int(SAMPLE_RATE * duration)
+	@warning_ignore("integer_division")
 	var half: int = samples / 2
 	var data := PackedByteArray()
 	data.resize(samples * 2)

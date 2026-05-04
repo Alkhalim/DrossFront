@@ -630,10 +630,10 @@ func _is_text_input_focused() -> bool:
 	var vp: Viewport = get_viewport()
 	if not vp:
 		return false
-	var owner: Control = vp.gui_get_focus_owner()
-	if not owner:
+	var focus_owner: Control = vp.gui_get_focus_owner()
+	if not focus_owner:
 		return false
-	return owner is LineEdit or owner is TextEdit
+	return focus_owner is LineEdit or focus_owner is TextEdit
 
 
 func _find_hud_for_visible_build_stats() -> Node:

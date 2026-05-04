@@ -282,6 +282,7 @@ func _show_end_screen(victory: bool) -> void:
 	vbox.add_child(title)
 
 	# Match time + tally — formatted as a stat block.
+	@warning_ignore("integer_division")
 	var mins: int = int(_match_timer) / 60
 	var secs: int = int(_match_timer) % 60
 	var stats := Label.new()

@@ -1088,6 +1088,7 @@ func _update_resource_display() -> void:
 
 	# Match timer
 	if _timer_label:
+		@warning_ignore("integer_division")
 		var mins: int = int(_match_time) / 60
 		var secs: int = int(_match_time) % 60
 		_timer_label.text = "%d:%02d" % [mins, secs]
@@ -4336,10 +4337,10 @@ func _is_chat_focused() -> bool:
 	var vp: Viewport = get_viewport()
 	if not vp:
 		return false
-	var owner: Control = vp.gui_get_focus_owner()
-	if not owner:
+	var focus_owner: Control = vp.gui_get_focus_owner()
+	if not focus_owner:
 		return false
-	return owner == _chat_input or owner is LineEdit or owner is TextEdit
+	return focus_owner == _chat_input or focus_owner is LineEdit or focus_owner is TextEdit
 
 
 func _show_cheat_help_overlay(cheats: Node) -> void:
@@ -5123,6 +5124,7 @@ func _render_stars(value: float, low: float, high: float, inverted: bool = false
 	else:
 		color_hex = STAR_TIER_GOLD_HEX
 		tier_half = total_half - 20
+	@warning_ignore("integer_division")
 	var full: int = tier_half / 2
 	var has_half: bool = (tier_half % 2) == 1
 	var stars: String = "★".repeat(full)

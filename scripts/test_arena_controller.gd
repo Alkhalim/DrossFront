@@ -1279,7 +1279,7 @@ func _spawn_tutorial_enemy_unit(stats_path: String, pos: Vector3, owner_id: int)
 	node.global_position = pos
 
 
-func _spawn_ai_player(player_id: int, display_name: String) -> void:
+func _spawn_ai_player(player_id: int, _display_name: String) -> void:
 	# Resource manager — uses a name unique per player so multi-AI 2v2
 	# scenes don't clash. Legacy code that asks for "AIResourceManager"
 	# still finds the player_id=1 manager since it gets that exact name.
@@ -4940,9 +4940,10 @@ func _spawn_vent_safely(pos: Vector3, nudge_axis: Vector3) -> void:
 		var nudged_ok: bool = false
 		for step: int in 6:
 			# Alternate sides each step: +1, -1, +2, -2, +3, -3 etc.
-			var sign: float = 1.0 if (step % 2) == 0 else -1.0
+			var step_sign: float = 1.0 if (step % 2) == 0 else -1.0
+			@warning_ignore("integer_division")
 			var dist: float = float(step / 2 + 1) * 4.0
-			var candidate: Vector3 = pos + nudge_axis * sign * dist
+			var candidate: Vector3 = pos + nudge_axis * step_sign * dist
 			if not _vent_overlaps_terrain(candidate):
 				safe_pos = candidate
 				nudged_ok = true

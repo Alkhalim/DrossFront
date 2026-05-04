@@ -157,12 +157,15 @@ func _draw_population(sz: Vector2) -> void:
 	draw_circle(Vector2(w * 0.82, sh_top + sh_h * 0.5), w * 0.12, tint)
 
 
-static func make(kind: Kind, tint: Color, tooltip: String = "", icon_size: Vector2 = Vector2(14.0, 14.0)) -> ResourceIcon:
+static func make(p_kind: Kind, p_tint: Color, p_tooltip: String = "", icon_size: Vector2 = Vector2(14.0, 14.0)) -> ResourceIcon:
 	## Convenience factory -- one call returns a sized + tinted +
-	## tooltipped icon ready to add as a chip child.
+	## tooltipped icon ready to add as a chip child. Params are
+	## prefixed `p_` because plain `kind` / `tint` / `tooltip` shadow
+	## the class-level vars they assign to (the parser warns even
+	## though static funcs can't actually access instance state).
 	var icon: ResourceIcon = ResourceIcon.new()
-	icon.kind = kind
-	icon.tint = tint
-	icon.tooltip = tooltip
+	icon.kind = p_kind
+	icon.tint = p_tint
+	icon.tooltip = p_tooltip
 	icon.custom_minimum_size = icon_size
 	return icon

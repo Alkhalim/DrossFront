@@ -452,6 +452,7 @@ func _process(delta: float) -> void:
 			_ai_resource_manager.add_salvage(trickle)
 			# Also give some fuel
 			if _ai_resource_manager.has_method("add_fuel"):
+				@warning_ignore("integer_division")
 				_ai_resource_manager.add_fuel(max(trickle / 3, 1))
 
 	# Throttle the rest of the AI tick (state machine + group walks
@@ -919,6 +920,7 @@ func _dominant_enemy_armor() -> StringName:
 	## falls back to the normal weighted choice.
 	if _enemy_total_seen < COUNTER_MIN_SEEN:
 		return &""
+	@warning_ignore("integer_division")
 	var threshold: int = int(_enemy_total_seen / 2) + 1  # > 50%
 	for k_v: Variant in _enemy_armor_counts.keys():
 		var k: StringName = k_v as StringName

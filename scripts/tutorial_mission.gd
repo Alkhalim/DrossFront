@@ -29,7 +29,6 @@ var _completed: bool = false
 ## "did the squad enter the cache point yet?" without each one
 ## re-implementing the proximity poll.
 const VISIT_RADIUS_SQ: float = 20.0 * 20.0  # 20u radius
-var _visited_zones: Dictionary = {}  # StringName -> bool
 
 ## How often _process polls the trigger callable — 4 Hz is plenty
 ## for proximity / unit-count checks without hammering the scene.

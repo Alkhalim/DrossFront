@@ -69,7 +69,9 @@ static func get_wall_panel_texture() -> Texture2D:
 	noise.fractal_octaves = 2
 	# 4 horizontal panels, 2 vertical slabs across the texture face. World-
 	# space repetition is controlled by the caller's uv1_scale.
+	@warning_ignore("integer_division")
 	var horiz_period: int = _TEX_SIZE / 4
+	@warning_ignore("integer_division")
 	var vert_period: int = _TEX_SIZE / 2
 	var joint_thickness: int = 2
 	# Sub-joint mortar groove — a faint half-brightness inset alongside

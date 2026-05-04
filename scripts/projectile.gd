@@ -287,7 +287,7 @@ func set_glow_boost(mult: float, tint: Color = Color(1.0, 0.78, 0.20, 1.0)) -> v
 	mat.emission_energy_multiplier = mat.emission_energy_multiplier * maxf(mult, 1.0)
 
 
-func _create_bomb_mesh(color: Color) -> void:
+func _create_bomb_mesh(_color: Color) -> void:
 	## Heavy aerial bomb -- chunky cylindrical body with a tail-fin
 	## cluster on the back. Distinct from missiles (which are slimmer
 	## and emissive) so a player can tell at a glance which projectile

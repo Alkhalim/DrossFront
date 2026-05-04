@@ -461,6 +461,7 @@ func _v_formation_offsets(n: int, spacing: float) -> Array[Vector3]:
 		return arr
 	if n % 2 == 1:
 		arr.append(Vector3.ZERO)
+		@warning_ignore("integer_division")
 		var pairs: int = (n - 1) / 2
 		for r: int in pairs:
 			var rank: int = r + 1
@@ -469,6 +470,7 @@ func _v_formation_offsets(n: int, spacing: float) -> Array[Vector3]:
 			arr.append(Vector3(-x, 0.0, z))
 			arr.append(Vector3(+x, 0.0, z))
 	else:
+		@warning_ignore("integer_division")
 		var pairs: int = n / 2
 		for r: int in pairs:
 			# Front pair sits at ±spacing/2 (no central leader); each
