@@ -2069,6 +2069,19 @@ func _setup_terrain_schwarzwald() -> void:
 	else:
 		deposit_positions = _deposit_positions_1v1()
 	const DEPOSIT_CLEAR_RADIUS: float = 9.0
+	# Geothermic vents already spawned by _setup_geothermic_vents
+	# (called before _setup_terrain). Collect them so the tree
+	# field carves a small clearing around each + an access lane
+	# back to the corridor; on Schwarzwald the forward vent sits
+	# laterally off the corridor and would otherwise be buried.
+	var vent_positions: Array[Vector3] = []
+	for vnode: Node in get_tree().get_nodes_in_group("geothermic_vents"):
+		if not is_instance_valid(vnode):
+			continue
+		var vn3: Node3D = vnode as Node3D
+		if vn3:
+			vent_positions.append(vn3.global_position)
+	const VENT_CLEAR_RADIUS: float = 7.5
 
 	# A handful of tall rock pillars at the corridor mouths so the
 	# choke read is reinforced by hard cover rather than tree-only
@@ -2168,6 +2181,35 @@ func _setup_terrain_schwarzwald() -> void:
 					too_close_to_deposit = true
 					break
 			if too_close_to_deposit:
+				continue
+			# Skip cells too close to a geothermic vent (clearing
+			# around the vent itself) AND skip cells along the
+			# access lane from each vent back to the nearest
+			# corridor centreline. Without the lane, an off-corridor
+			# vent (Schwarzwald forward vent now sits ~12u laterally
+			# off the choke per _setup_geothermic_vents) would be
+			# unreachable on foot.
+			var too_close_to_vent: bool = false
+			for vp: Vector3 in vent_positions:
+				if pos.distance_to(vp) <= VENT_CLEAR_RADIUS:
+					too_close_to_vent = true
+					break
+				# Access lane: ~4u half-width strip from vent.x
+				# back to the nearest corridor.x at the vent's z.
+				if absf(pz - vp.z) <= 4.0:
+					var lane_corr_x: float = corridor_centres_x[0]
+					var best_corr_dist: float = INF
+					for ccx: float in corridor_centres_x:
+						var ccd: float = absf(vp.x - ccx)
+						if ccd < best_corr_dist:
+							best_corr_dist = ccd
+							lane_corr_x = ccx
+					var lo: float = minf(vp.x, lane_corr_x) - 1.5
+					var hi: float = maxf(vp.x, lane_corr_x) + 1.5
+					if px >= lo and px <= hi:
+						too_close_to_vent = true
+						break
+			if too_close_to_vent:
 				continue
 			# Skip ramp clearance + plateau footprints (none placed
 			# on Schwarzwald yet, but cheap insurance for later).
@@ -4669,8 +4711,21 @@ func _setup_geothermic_vents() -> void:
 		_spawn_vent(pair_centre + perp * 3.25)
 		_spawn_vent(pair_centre - perp * 3.25)
 		# 1 forward vent further toward map centre (was 32u, now
-		# 48u -- same +50% bump).
-		_spawn_vent(hq_pos + centre_dir_per_player[i] * 48.0)
+		# 48u -- same +50% bump). On Schwarzwald the corridor is a
+		# narrow choke at this Z; nudge the vent ~12u laterally so
+		# it sits in a small forest clearing OFF the corridor
+		# instead of mid-chokepoint. The Schwarzwald tree spawn
+		# clears a 9u radius around every vent + carves a short
+		# access lane back to the corridor, so the offset vent is
+		# still reachable on foot.
+		var forward_vent: Vector3 = hq_pos + centre_dir_per_player[i] * 48.0
+		if _is_schwarzwald():
+			# Pick a side per player so adjacent forward vents don't
+			# stack on the same flank. Even-index players go RIGHT
+			# of their corridor, odd-index go LEFT.
+			var side_sign: float = 1.0 if (i % 2) == 0 else -1.0
+			forward_vent += perp * 12.0 * side_sign
+		_spawn_vent(forward_vent)
 	# Distributed vents -- ~3 per player spread across the open
 	# map area. Uses Mitchell's best-candidate sampling so the
 	# vent network reads as evenly distributed instead of pooling
