@@ -531,6 +531,13 @@ func _process(delta: float) -> void:
 	# scan when the targets are met.
 	if _difficulty_is_hard() and _state != AIState.SETUP:
 		_try_hard_target_composition()
+		# Salvage-cap dump: Hard AIs that pile up resources beyond
+		# HARD_SALVAGE_CAP must spend the surplus on a combat unit
+		# at the first idle foundry / advanced foundry / aerodrome
+		# they own. Prevents the late-game "AI is sitting on 5000
+		# salvage" pattern that reads as the AI not knowing what
+		# to do with itself.
+		_dump_excess_salvage_into_units()
 
 	# Idle-yard reaper. Demolishes any of our salvage yards that
 	# haven't taken a worker delivery in IDLE_YARD_TIMEOUT_SEC --
@@ -2835,6 +2842,51 @@ func _all_friendly_foundries() -> Array[Node]:
 		if bstats.building_id in production_ids:
 			out.append(node)
 	return out
+
+
+## --- Hard-difficulty salvage cap --------------------------------------
+## Hard AIs aren't allowed to pile up more than HARD_SALVAGE_CAP. When
+## they do, _dump_excess_salvage_into_units finds an idle production
+## building (empty queue) and queues a unit through the standard
+## strategy-weighted picker. Production buildings are scanned in
+## priority order matching the AI's normal composition: advanced
+## foundry first (heavies), then basic foundry (mediums + lights),
+## then aerodrome (air). The picker inside _try_queue_at handles the
+## actual unit choice + faction-aware roster, so this just picks WHERE
+## to spend.
+const HARD_SALVAGE_CAP: int = 1500
+
+
+func _dump_excess_salvage_into_units() -> void:
+	if not _ai_resource_manager:
+		return
+	var salvage: int = (_ai_resource_manager.get("salvage") as int) if "salvage" in _ai_resource_manager else 0
+	if salvage <= HARD_SALVAGE_CAP:
+		return
+	# Pick an idle production building, prioritised so the dump
+	# leans into the AI's late-game composition (heavies first).
+	var prio_order: Array[StringName] = [&"advanced_foundry", &"basic_foundry", &"aerodrome"]
+	var foundries: Array[Node] = _all_friendly_foundries()
+	for prio_id: StringName in prio_order:
+		for f: Node in foundries:
+			if not is_instance_valid(f):
+				continue
+			var fs: BuildingStatResource = f.get("stats") as BuildingStatResource
+			if not fs or fs.building_id != prio_id:
+				continue
+			if not f.has_method("get_queue_size"):
+				continue
+			if f.get_queue_size() > 0:
+				continue  # not idle
+			# Hand off to the standard queue path; it picks a
+			# faction-correct strategy-weighted unit + spends.
+			# Returning after the first success caps the dump at
+			# one queue per tick (we'll fire again next tick if
+			# we're still over the cap), so a sudden injection
+			# doesn't queue six units across every foundry in
+			# one frame.
+			_try_queue_at(f)
+			return
 
 
 func _try_queue_at(foundry_node: Node) -> void:
