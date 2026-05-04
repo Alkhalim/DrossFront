@@ -144,15 +144,17 @@ func _format_snapshot(s: Dictionary) -> String:
 	else:
 		lines.append("Next build: [b]%s[/b] [color=#cccc66](%s)[/color]" % [nb, blocker])
 	# Engineer state breakdown -- helps diagnose 'no free engineer'
-	# blockers: shows whether engineers are tied up on builds, repair,
-	# or sitting in a transport.
+	# blockers. Snapshot is refreshed once per AI tick directly off
+	# each engineer's current state, so the displayed mix reflects
+	# the moment in time, not the last placement attempt.
 	var eng_t: int = s.get("eng_total", 0) as int
 	var eng_i: int = s.get("eng_idle", 0) as int
 	var eng_b: int = s.get("eng_build", 0) as int
 	var eng_r: int = s.get("eng_repair", 0) as int
 	var eng_g: int = s.get("eng_garrison", 0) as int
-	lines.append("Engineers: [b]%d[/b] (idle %d / build %d / repair %d / garr %d)" % [
-		eng_t, eng_i, eng_b, eng_r, eng_g,
+	var eng_m: int = s.get("eng_moving", 0) as int
+	lines.append("Engineers: [b]%d[/b] (idle %d / mov %d / build %d / rep %d / garr %d)" % [
+		eng_t, eng_i, eng_m, eng_b, eng_r, eng_g,
 	])
 	var sec: float = s.get("sec_until_attack", 0.0) as float
 	if sec < 0.0:

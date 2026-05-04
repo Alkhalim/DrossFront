@@ -65,6 +65,16 @@ var _yard_component: Node = null
 ## velocity and could end up clipped into the floor at the foot of
 ## a slope where move_and_slide briefly lost floor contact.
 const GRAVITY: float = 18.0
+## Cliff safety -- last position the Crawler was definitively on
+## floor and making forward progress. When the body's Y drops more
+## than CLIFF_FALLBACK_Y_DROP below this point we assume the chassis
+## clipped through a cliff face / corner and teleport back. Also
+## used as the destination for the stuck-rescue back-out nudge so
+## the Crawler retreats AWAY from whatever it was trying to climb
+## instead of getting nudged in a random direction that often pushes
+## it deeper into the obstacle.
+var _last_safe_pos: Vector3 = Vector3.INF
+const CLIFF_FALLBACK_Y_DROP: float = 4.0
 ## Stuck-rescue: same logic as Unit. Tracks how long the Crawler has been
 ## ordered somewhere but unable to make progress; re-paths once at 1.5s and
 ## gives up at 5s so a wedged Crawler doesn't grind forever.
@@ -1011,6 +1021,18 @@ func _physics_process(delta: float) -> void:
 	var prev_pos: Vector3 = global_position
 	move_and_slide()
 
+	# Cliff fall-through safety. When the chassis Y drops more than
+	# CLIFF_FALLBACK_Y_DROP below the last known good position, the
+	# body has clipped through cliff geometry. Snap back to that
+	# safe spot, drop the move target, and let the AI re-pick a
+	# different goal next tick.
+	if _last_safe_pos != Vector3.INF and global_position.y < _last_safe_pos.y - CLIFF_FALLBACK_Y_DROP:
+		global_position = _last_safe_pos + Vector3.UP * 0.3
+		velocity = Vector3.ZERO
+		_stuck_timer = 0.0
+		stop()
+		return
+
 	# Stuck rescue — same thresholds as Unit so the Crawler doesn't sit
 	# wedged against a wreck or a chokepoint forever.
 	var actual_move: float = (global_position - prev_pos).length()
@@ -1021,14 +1043,24 @@ func _physics_process(delta: float) -> void:
 			if _nav_agent:
 				_nav_agent.target_position = move_target
 		elif _stuck_timer > 5.0 and _stuck_timer < 5.0 + delta * 1.5:
-			# First-pass nudge -- shove the Crawler 2.5u in a random
-			# direction and re-target. This unwedges the common case
-			# where the body is jammed against a wreck / pile that
-			# the navmesh treats as reachable from the goal side
-			# but not the current side.
-			var nudge_ang: float = randf_range(0.0, TAU)
-			var nudge_off: Vector3 = Vector3(cos(nudge_ang), 0.0, sin(nudge_ang)) * 2.5
-			global_position += nudge_off
+			# Cliff-aware back-out. Most stuck-against-cliff cases
+			# happen when the navmesh ends short of the chassis's
+			# collision footprint and the Crawler keeps grinding
+			# into a slope it can't climb. Retreat back along the
+			# inverse of the desired direction (away from the goal)
+			# so the body comes off whatever it was climbing rather
+			# than getting nudged sideways into the same wall.
+			var back_off: Vector3 = -direction * 3.0
+			# If we have a last-known safe position, prefer biasing
+			# the nudge toward there so the Crawler reliably ends
+			# up back on navigable ground.
+			if _last_safe_pos != Vector3.INF:
+				var to_safe: Vector3 = _last_safe_pos - global_position
+				to_safe.y = 0.0
+				if to_safe.length_squared() > 0.01:
+					back_off = to_safe.normalized() * 3.0
+			global_position += back_off
+			velocity = Vector3.ZERO
 			if _nav_agent:
 				_nav_agent.target_position = move_target
 		elif _stuck_timer > 8.0:
@@ -1037,6 +1069,13 @@ func _physics_process(delta: float) -> void:
 			# tick can re-pick a fresh wreck cluster.
 			stop()
 			return
+	else:
+		# Made meaningful progress this frame on the floor: this is
+		# a good "safe to retreat to" anchor for any future cliff
+		# clipping or stuck-rescue. Only update when actually on
+		# floor so we don't bake in a mid-air or mid-fall position.
+		if is_on_floor():
+			_last_safe_pos = global_position
 	else:
 		_stuck_timer = 0.0
 

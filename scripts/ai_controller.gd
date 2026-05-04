@@ -55,6 +55,15 @@ const ECONOMY_DURATION: float = 40.0
 ## anyway" safety net.
 const ARMY_DURATION: float = 90.0
 const REBUILD_DURATION: float = 20.0
+## Hard cap on how long the AI is allowed to stay in ATTACK before
+## forcibly transitioning to REBUILD. Without this the state could
+## stick indefinitely when 2-3 surviving attackers got wedged on
+## terrain or stalled on the navmesh -- the size <= 1 exit
+## condition only fires after attrition takes them all out, which
+## never happens for a stuck idler. 75s is generous enough for a
+## successful push to land its hits but tight enough that a stalled
+## one resets the loop within a wave-and-a-half.
+const ATTACK_MAX_DURATION: float = 75.0
 ## Bumped from 4 to 7 — the v2 1v1 map has neutral patrols sitting on
 ## every deposit lane, and a 4-unit wave reliably gets ground down by
 ## one Hound + one Bulwark before reaching the player. 7 gives the AI
@@ -245,15 +254,17 @@ func _adv_foundry_heavy_path() -> String:
 
 
 func _econ_mul_for_difficulty(d: int) -> float:
-	# Hard cap pulled 2.0 -> 1.4 so the AI doesn't outpace its
-	# build-plan with stockpiled income. Income trickle now sits
-	# closer to a player's typical economy and the AI has to
-	# actually convert it into structures + units rather than
-	# burying salvage under a single wave.
+	## Resource cheating cap: HARD now plays on equal economy with
+	## the player (1.0x trickle, no bonus salvage / fuel). The AI's
+	## challenge has to come from how well it USES its income, not
+	## from outright income bonuses. Lower difficulties scale below
+	## 1.0 so the AI starves a bit more visibly. Intentionally
+	## slower than the player on EASY so an inexperienced player
+	## isn't crushed by raw resource volume.
 	match d:
-		0: return 0.65  # EASY
-		2: return 1.4   # HARD
-		_: return 1.1   # NORMAL
+		0: return 0.55  # EASY
+		2: return 1.0   # HARD -- no resource cheat
+		_: return 0.80  # NORMAL
 
 
 func _agg_mul_for_difficulty(d: int) -> float:
@@ -464,6 +475,12 @@ func _process(delta: float) -> void:
 	_refresh_enemy_armor_counts()
 	# Wire kill / loss tracking onto any newly seen units (debug harness).
 	_track_unit_lifecycle()
+	# Snapshot engineer pool states for the overlay. Done up here so
+	# the overlay reads a clean tick-time view, decoupled from the
+	# downstream _try_place / _find_free_engineer calls which can
+	# change individual engineer states (start_building sets
+	# _target_building) within a single tick.
+	_refresh_engineer_diagnostics()
 	# Reset the per-tick "first blocked build" capture so each tick starts
 	# fresh. Cleared up here, populated by _try_place's early-returns below.
 	_blocker_captured_this_tick = false
@@ -792,8 +809,29 @@ func _process_attack() -> void:
 				var spread: Vector3 = Vector3(cos(ring_angle), 0.0, sin(ring_angle)) * ring_radius
 				combat.command_attack_move(_player_hq_pos + spread)
 
-	# If most attackers are dead, rebuild
-	if attack_units.size() <= 1:
+	# Exit ATTACK when one of three things is true:
+	#   1. Only one (or zero) attacker is left -- the wave is spent.
+	#   2. ATTACK has been running too long -- the survivors are
+	#      stuck on terrain or otherwise non-productive; cycle back
+	#      to REBUILD so the AI can mass up again instead of sitting
+	#      on a dead push.
+	#   3. No attacker is anywhere near the enemy HQ AND the state
+	#      has been going long enough for them to have arrived --
+	#      catches the "wave got bullied off course and is wandering"
+	#      pattern that wouldn't trip the size threshold but also
+	#      isn't actually attacking.
+	var stuck_too_long: bool = _state_timer >= ATTACK_MAX_DURATION
+	var no_progress: bool = false
+	if not stuck_too_long and _state_timer >= 25.0 and _player_hq_pos != Vector3.ZERO:
+		var any_close: bool = false
+		for u: Node in attack_units:
+			if not is_instance_valid(u):
+				continue
+			if (u as Node3D).global_position.distance_to(_player_hq_pos) < 50.0:
+				any_close = true
+				break
+		no_progress = not any_close
+	if attack_units.size() <= 1 or stuck_too_long or no_progress:
 		_wave_count += 1
 		_state = AIState.REBUILD
 		_state_timer = 0.0
@@ -1796,32 +1834,43 @@ func _find_relocation_target(from: Vector3, max_dist: float) -> Node3D:
 	return best
 
 
-## Per-tick engineer pool diagnostic. Reset at the top of _process so
-## the overlay can read why no engineer was free this tick. Counts each
-## engineer's state: total alive, busy on a real build site, busy
-## repairing, garrisoned (riding inside a transport), or idle.
+## Per-tick engineer pool diagnostic. Refreshed once per AI tick via
+## _refresh_engineer_diagnostics() so the overlay reflects the current
+## moment, NOT the last _try_place call's view. Counts each engineer's
+## state: total alive, busy on a real build site, busy repairing,
+## garrisoned (riding inside a transport), moving (walking with no
+## active build target -- usually transient), or idle.
 var _engineer_total: int = 0
 var _engineer_idle: int = 0
 var _engineer_busy_build: int = 0
 var _engineer_busy_repair: int = 0
 var _engineer_garrisoned: int = 0
+var _engineer_moving: int = 0
 
 
-func _find_free_engineer() -> Node:
-	## Returns an idle AI engineer (Ratchet) — one with a builder component
-	## that isn't currently constructing or moving to a build site.
-	## Repair-locked engineers count as free here: AI placement should
-	## preempt auto-repair so the base keeps growing rather than the
-	## engineer indefinitely topping off a single damaged structure.
-	## Side effect: tallies per-state counters so the debug overlay can
-	## tell the user WHY 'no free engineer' is firing when an engineer
-	## visibly looks idle.
+func _refresh_engineer_diagnostics() -> void:
+	## Snapshot the engineer pool's per-state counts ONCE at the top
+	## of each AI tick. Previously the counters were updated as a
+	## side-effect of _find_free_engineer, which ran multiple times
+	## per tick (once per _try_place call) and left the overlay
+	## reading the LAST call's state -- by then, earlier successful
+	## placements had already locked engineers into _target_building,
+	## so a "no free engineer" blocker captured at one call could
+	## coexist with a stale "2 idle" overlay reading from a later
+	## call where new builds had completed mid-tick.
+	##
+	## Now the counter is a clean per-tick snapshot read straight off
+	## each engineer's current state, decoupled from the placement
+	## flow. The "moving" classification covers an engineer that has
+	## a unit-level move order but no builder target -- usually
+	## transient (just-finished build heading home, or stuck-rescue
+	## reset) but called out so the user can see it explicitly.
 	_engineer_total = 0
 	_engineer_idle = 0
 	_engineer_busy_build = 0
 	_engineer_busy_repair = 0
 	_engineer_garrisoned = 0
-	var picked: Node = null
+	_engineer_moving = 0
 	for node: Node in _units:
 		if not is_instance_valid(node):
 			continue
@@ -1833,32 +1882,94 @@ func _find_free_engineer() -> Node:
 		if not builder:
 			continue
 		_engineer_total += 1
-		# Garrisoned engineers can't reach a build site -- counted
-		# separately so the overlay can flag 'engineer rode into a
-		# transport and needs to disembark first'.
+		# Garrisoned: physically inside a transport, can't break
+		# ground until disembarked.
 		var garrisoned_var: Variant = node.get("_garrisoned_in") if "_garrisoned_in" in node else null
 		if typeof(garrisoned_var) == TYPE_OBJECT and is_instance_valid(garrisoned_var):
 			_engineer_garrisoned += 1
 			continue
-		# Read the target through Variant + typeof so a freed Building
-		# reference (queue_free'd but still cached on the builder)
-		# can't crash the cast. Treat freed targets as free-to-build.
+		# Build-locked: builder has a live, unfinished _target_building.
 		var target_var: Variant = builder.get("_target_building")
-		if typeof(target_var) == TYPE_OBJECT and is_instance_valid(target_var):
+		var target_alive: bool = typeof(target_var) == TYPE_OBJECT and is_instance_valid(target_var)
+		if target_alive:
 			var target_node: Node = target_var as Node
 			if target_node and not target_node.get("is_constructed"):
 				_engineer_busy_build += 1
 				continue
-		# Repair lock is informational only -- AI placement preempts
-		# repair so the base keeps growing.
+		# Repair-locked: BuilderComponent's auto-repair holds a
+		# valid _repair_target while it's healing.
+		var repair_var: Variant = builder.get("_repair_target") if "_repair_target" in builder else null
+		var repair_alive: bool = typeof(repair_var) == TYPE_OBJECT and is_instance_valid(repair_var)
+		if repair_alive:
+			_engineer_busy_repair += 1
+			continue
+		# Moving: unit has a move order but no builder target. Usually
+		# transient (just finished a build and walking home) and the
+		# engineer IS available for placement (the AI's command_move
+		# in start_building will overwrite the destination).
+		var move_target_v: Variant = node.get("move_target") if "move_target" in node else null
+		var has_move_order: bool = typeof(move_target_v) == TYPE_VECTOR3 and (move_target_v as Vector3) != Vector3.INF
+		if has_move_order:
+			_engineer_moving += 1
+			continue
+		_engineer_idle += 1
+
+
+func _find_free_engineer() -> Node:
+	## Returns the first AI engineer (Ratchet) eligible for a new
+	## build assignment. Eligibility tiers, in priority order:
+	##   1. Idle (no target, no move order).
+	##   2. Moving (has move order but no target -- finishing or
+	##      retreating; safe to redirect).
+	##   3. Repairing (has _repair_target -- placement preempts
+	##      auto-repair so the base keeps growing).
+	## Excluded: garrisoned engineers (can't break ground inside
+	## a transport) and engineers with a live unfinished target
+	## building (genuinely committed to a build).
+	##
+	## NOTE: this function does NOT update the diagnostic counters
+	## any more -- those are refreshed once per AI tick via
+	## _refresh_engineer_diagnostics so the overlay reflects current
+	## state instead of the last-call's stale state.
+	var idle_pick: Node = null
+	var moving_pick: Node = null
+	var repair_pick: Node = null
+	for node: Node in _units:
+		if not is_instance_valid(node):
+			continue
+		if node.get("owner_id") != owner_id:
+			continue
+		if "alive_count" in node and node.get("alive_count") <= 0:
+			continue
+		var builder: Node = node.get_builder() if node.has_method("get_builder") else null
+		if not builder:
+			continue
+		var garrisoned_var: Variant = node.get("_garrisoned_in") if "_garrisoned_in" in node else null
+		if typeof(garrisoned_var) == TYPE_OBJECT and is_instance_valid(garrisoned_var):
+			continue
+		var target_var: Variant = builder.get("_target_building")
+		if typeof(target_var) == TYPE_OBJECT and is_instance_valid(target_var):
+			var target_node: Node = target_var as Node
+			if target_node and not target_node.get("is_constructed"):
+				continue
 		var repair_var: Variant = builder.get("_repair_target") if "_repair_target" in builder else null
 		if typeof(repair_var) == TYPE_OBJECT and is_instance_valid(repair_var):
-			_engineer_busy_repair += 1
-		else:
-			_engineer_idle += 1
-		if picked == null:
-			picked = node
-	return picked
+			if repair_pick == null:
+				repair_pick = node
+			continue
+		var move_target_v: Variant = node.get("move_target") if "move_target" in node else null
+		var has_move_order: bool = typeof(move_target_v) == TYPE_VECTOR3 and (move_target_v as Vector3) != Vector3.INF
+		if has_move_order:
+			if moving_pick == null:
+				moving_pick = node
+			continue
+		if idle_pick == null:
+			idle_pick = node
+	if idle_pick:
+		return idle_pick
+	if moving_pick:
+		return moving_pick
+	return repair_pick
 
 
 func _find_building_at(pos: Vector3, footprint: Vector3) -> Node:
@@ -2379,4 +2490,5 @@ func get_debug_snapshot() -> Dictionary:
 		"eng_build": _engineer_busy_build,
 		"eng_repair": _engineer_busy_repair,
 		"eng_garrison": _engineer_garrisoned,
+		"eng_moving": _engineer_moving,
 	}
