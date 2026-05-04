@@ -1167,6 +1167,33 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 				muzzle.set_surface_override_material(0, muzzle_mat)
 				cannon_pivot.add_child(muzzle)
 				mats.append(muzzle_mat)
+
+				# Bore -- an unshaded near-black cylinder protruding from
+				# the brake centre. The dark face occupies the inside
+				# diameter of the brake so the player reads the cannon
+				# as a real hollow tube instead of a capped log. We
+				# extend slightly past the brake's front face so the
+				# silhouette wins over the brake's metal at any camera
+				# angle the top-down RTS allows.
+				var bore := MeshInstance3D.new()
+				var bore_cyl := CylinderMesh.new()
+				bore_cyl.top_radius = cannon_size.x * 0.62
+				bore_cyl.bottom_radius = cannon_size.x * 0.62
+				bore_cyl.height = 0.22
+				bore_cyl.radial_segments = 32
+				bore.mesh = bore_cyl
+				bore.rotate_object_local(Vector3.RIGHT, -PI / 2)
+				# Place the cylinder so its rear sits well inside the
+				# brake and its front pokes ~0.04u past the brake face.
+				bore.position.z = -barrel_len - 0.18
+				var bore_mat := StandardMaterial3D.new()
+				bore_mat.albedo_color = Color(0.03, 0.03, 0.04, 1.0)
+				bore_mat.metallic = 0.0
+				bore_mat.roughness = 1.0
+				bore_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+				bore.set_surface_override_material(0, bore_mat)
+				cannon_pivot.add_child(bore)
+				mats.append(bore_mat)
 	
 			shoulders.append(mantlet)
 			cannons.append(cannon_pivot)

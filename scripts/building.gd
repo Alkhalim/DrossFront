@@ -923,6 +923,25 @@ func _build_hq_corner_mg_nest(corner: Vector3) -> Node3D:
 	muzzle.position = Vector3(0.0, 0.04, -ic.height - 0.14)
 	muzzle.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.07, 0.06, 0.05)))
 	pivot.add_child(muzzle)
+	# Bore -- unshaded near-black cylinder protruding from the muzzle
+	# compensator centre. Reads the gun as a real hollow tube rather
+	# than a capped lump at the camera angle the player sees.
+	var bore := MeshInstance3D.new()
+	var bcyl := CylinderMesh.new()
+	bcyl.top_radius = 0.045
+	bcyl.bottom_radius = 0.045
+	bcyl.height = 0.14
+	bcyl.radial_segments = 24
+	bore.mesh = bcyl
+	bore.rotation.x = -PI / 2
+	bore.position = Vector3(0.0, 0.04, -ic.height - 0.20)
+	var bore_mat := StandardMaterial3D.new()
+	bore_mat.albedo_color = Color(0.03, 0.03, 0.04, 1.0)
+	bore_mat.metallic = 0.0
+	bore_mat.roughness = 1.0
+	bore_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bore.set_surface_override_material(0, bore_mat)
+	pivot.add_child(bore)
 	# Muzzle marker -- TurretComponent looks up a 'Muzzle' child of
 	# the pivot when picking the projectile spawn point so tracers
 	# leave from the actual barrel tip instead of the pivot centre.
