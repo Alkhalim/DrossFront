@@ -23,6 +23,27 @@ var _trail_timer: float = 0.0
 ## Missile arc state.
 var _is_missile: bool = false
 var _is_mortar: bool = false
+
+## Deferred damage payload. CombatComponent attaches this after
+## projectile.create() for any non-instant projectile style
+## (bullet / shell / missile / mortar / bomb). On _spawn_impact
+## the projectile applies pending_damage to pending_target (if
+## still alive) plus splash to anything in pending_splash_radius.
+## Beams and drone-release weapons stay instant -- their damage
+## is the visible event, not the projectile arrival.
+var pending_damage: int = 0
+var pending_target: Node3D = null
+var pending_shooter: Node3D = null
+var pending_splash_radius: float = 0.0
+var pending_splash_damage: int = 0
+
+
+func set_damage_payload(damage: int, target: Node3D, shooter: Node3D, splash_radius: float, splash_damage: int) -> void:
+	pending_damage = damage
+	pending_target = target
+	pending_shooter = shooter
+	pending_splash_radius = splash_radius
+	pending_splash_damage = splash_damage
 var _flight_time: float = 0.0
 var _total_flight_time: float = 1.0
 var _arc_height: float = 4.0
@@ -609,6 +630,52 @@ func _spawn_trail_puff() -> void:
 
 
 func _spawn_impact() -> void:
+	# Apply deferred damage payload. CombatComponent skipped the
+	# instant take_damage call for projectile-based fire and
+	# attached the payload here so damage lands when the
+	# projectile actually arrives. Target may have died mid-flight
+	# -- in that case the impact VFX still plays but no damage
+	# applies.
+	if pending_damage > 0 and pending_target and is_instance_valid(pending_target):
+		var alive: bool = true
+		if "alive_count" in pending_target:
+			alive = (pending_target.get("alive_count") as int) > 0
+		if alive and pending_target.has_method("take_damage"):
+			pending_target.take_damage(pending_damage, pending_shooter)
+	# Splash on impact -- scans hostile units + buildings within
+	# pending_splash_radius and chips them. Same shape as the
+	# previous CombatComponent splash code, just relocated to the
+	# arrival site so the area-of-effect VISIBLY centres on the
+	# impact rather than firing instantly from the unit's barrel.
+	if pending_splash_radius > 0.0 and pending_splash_damage > 0 and pending_shooter and is_instance_valid(pending_shooter):
+		var shooter_owner: int = (pending_shooter.get("owner_id") as int) if "owner_id" in pending_shooter else 0
+		var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+		for ent: Node in get_tree().get_nodes_in_group("units"):
+			if not is_instance_valid(ent) or ent == pending_target:
+				continue
+			if not ent.has_method("take_damage"):
+				continue
+			var ent_owner: int = (ent.get("owner_id") as int) if "owner_id" in ent else 0
+			var hostile: bool = true
+			if registry and registry.has_method("are_enemies"):
+				hostile = registry.call("are_enemies", shooter_owner, ent_owner)
+			if not hostile:
+				continue
+			if global_position.distance_to((ent as Node3D).global_position) <= pending_splash_radius:
+				ent.take_damage(pending_splash_damage, pending_shooter)
+		for ent2: Node in get_tree().get_nodes_in_group("buildings"):
+			if not is_instance_valid(ent2) or ent2 == pending_target:
+				continue
+			if not ent2.has_method("take_damage"):
+				continue
+			var ent2_owner: int = (ent2.get("owner_id") as int) if "owner_id" in ent2 else 0
+			var hostile2: bool = true
+			if registry and registry.has_method("are_enemies"):
+				hostile2 = registry.call("are_enemies", shooter_owner, ent2_owner)
+			if not hostile2:
+				continue
+			if global_position.distance_to((ent2 as Node3D).global_position) <= pending_splash_radius:
+				ent2.take_damage(pending_splash_damage, pending_shooter)
 	# Impact flash routed through the GPU-particle emitter — same
 	# bright-orange burst, no per-impact MeshInstance3D allocation.
 	var _pem_scene: Node = get_tree().current_scene

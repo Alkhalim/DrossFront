@@ -855,53 +855,42 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	# visibility source.
 	var firing_visible: bool = _firing_observable()
 
+	# Damage timing model: beams (instant flash) and drone-release
+	# (damage delivered by the spawned drone on arrival) keep their
+	# previous damage path. Every other projectile style (bullet /
+	# shell / missile / mortar / bomb) defers damage to the
+	# projectile's _spawn_impact -- payload attached after
+	# spawning the projectile below. This makes the damage land
+	# WHEN the visible projectile reaches the target instead of
+	# at fire-time, which the player kept noticing as
+	# 'why did that guy take damage before the missile got there?'.
+	var weapon_style: StringName = weapon.projectile_style if "projectile_style" in weapon else &""
+	# rof_tier -> default projectile style mapping mirrors
+	# Projectile.ROF_STYLES so beams (rof=continuous) get instant
+	# damage; explicit projectile_style override on the weapon
+	# wins.
+	var inferred_style: String = "bullet"
+	if weapon.rof_tier == &"continuous":
+		inferred_style = "beam"
+	elif weapon.rof_tier == &"single" or weapon.rof_tier == &"slow" or weapon.rof_tier == &"volley":
+		inferred_style = "missile"
+	var effective_style: String = String(weapon_style) if weapon_style != &"" else inferred_style
+	var damage_is_instant: bool = (
+		effective_style == "beam"
+		or weapon.is_drone_release
+		or is_shotgun  # shotgun pellets stay instant for now -- the cone is the whole damage event
+	)
+	var splash_r: float = weapon.splash_radius if "splash_radius" in weapon else 0.0
 	for i: int in shots:
 		var hit: bool = randf() < hit_chance
-		# Drone-release weapons defer damage to the drone's arrival
-		# at the target, so the per-shot damage stays in sync with
-		# the visible drone striking. Regular weapons apply damage
-		# at fire-time so projectiles can be cosmetic.
-		if hit and not weapon.is_drone_release:
+		if hit and damage_is_instant and not weapon.is_drone_release:
 			_current_target.take_damage(per_member_dmg, _unit)
-			# Splash damage -- weapon.splash_radius > 0 means every
-			# shot that lands on the primary target also chips
-			# every other hostile within that radius for a
-			# fraction (splash_damage_mult) of the per-shot
-			# damage. Used by Breacher Mortar so the high-arc
-			# shells ACTUALLY clear a squad cluster, matching
-			# the unit's anti-light identity.
-			var splash_r: float = weapon.splash_radius if "splash_radius" in weapon else 0.0
+			# Splash for instant-damage weapons -- mirrors the
+			# pre-deferral behaviour. Mortar / missile splash now
+			# applies on projectile impact instead (handled inside
+			# Projectile._spawn_impact via the payload).
 			if splash_r > 0.0:
-				var splash_dmg: int = maxi(int(round(float(per_member_dmg) * weapon.splash_damage_mult)), 1)
-				var t_pos: Vector3 = _current_target.global_position
-				var shooter_owner: int = (_unit.get("owner_id") as int) if _unit and "owner_id" in _unit else 0
-				var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
-				for ent: Node in get_tree().get_nodes_in_group("units"):
-					if not is_instance_valid(ent) or ent == _current_target:
-						continue
-					if not ent.has_method("take_damage"):
-						continue
-					var ent_owner: int = (ent.get("owner_id") as int) if "owner_id" in ent else 0
-					var hostile2: bool = true
-					if registry and registry.has_method("are_enemies"):
-						hostile2 = registry.call("are_enemies", shooter_owner, ent_owner)
-					if not hostile2:
-						continue
-					if t_pos.distance_to((ent as Node3D).global_position) <= splash_r:
-						ent.take_damage(splash_dmg, _unit)
-				for ent: Node in get_tree().get_nodes_in_group("buildings"):
-					if not is_instance_valid(ent) or ent == _current_target:
-						continue
-					if not ent.has_method("take_damage"):
-						continue
-					var ent_owner_b: int = (ent.get("owner_id") as int) if "owner_id" in ent else 0
-					var hostile_b: bool = true
-					if registry and registry.has_method("are_enemies"):
-						hostile_b = registry.call("are_enemies", shooter_owner, ent_owner_b)
-					if not hostile_b:
-						continue
-					if t_pos.distance_to((ent as Node3D).global_position) <= splash_r:
-						ent.take_damage(splash_dmg, _unit)
+				_apply_instant_splash(per_member_dmg, _current_target, splash_r, weapon.splash_damage_mult)
 
 		# Pick a per-shot aim point: distribute shots across the live members
 		# of the target squad so projectiles arrive at different bodies.
@@ -1003,9 +992,20 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 					var proj: Node3D = proj_script.create(fire_pos, aim_pos, weapon.role_tag, weapon.rof_tier, weapon.projectile_style, _shooter_faction_id(), weapon.damage_tier)
 					if is_glowing_volley and not _glowing_pellet_mode and proj.has_method("set_glow_boost"):
 						proj.call("set_glow_boost", 3.0, Color(1.0, 0.85, 0.20, 1.0))
+					# Damage-on-impact: attach payload to the
+					# projectile so it lands when the visible
+					# round arrives, not at fire-time. Skipped
+					# for instant-style (beams / shotgun /
+					# drone-release) which already applied
+					# damage in the hit branch above.
+					if hit and not damage_is_instant and proj.has_method("set_damage_payload"):
+						var splash_dmg_int: int = 0
+						if splash_r > 0.0:
+							splash_dmg_int = maxi(int(round(float(per_member_dmg) * weapon.splash_damage_mult)), 1)
+						proj.call("set_damage_payload", per_member_dmg, _current_target, _unit, splash_r, splash_dmg_int)
 					get_tree().current_scene.add_child(proj)
 				else:
-					_spawn_staggered_projectile(stagger_sec, weapon, fire_pos, aim_pos, is_glowing_volley)
+					_spawn_staggered_projectile(stagger_sec, weapon, fire_pos, aim_pos, is_glowing_volley, per_member_dmg if (hit and not damage_is_instant) else 0, splash_r, weapon.splash_damage_mult)
 
 	# Muzzle flash on each member — colored by the weapon's role.
 	# Recoil animation runs even off-screen so units that re-enter
@@ -1121,7 +1121,44 @@ func _spawn_drone(damage: int, role_tag: StringName, variant: StringName = &"def
 	_active_drones.append(drone)
 
 
-func _spawn_staggered_projectile(delay_sec: float, weapon: WeaponResource, fire_pos: Vector3, aim_pos: Vector3, is_glowing_volley: bool) -> void:
+func _apply_instant_splash(per_shot_dmg: int, primary_target: Node3D, splash_r: float, splash_mult: float) -> void:
+	## Splash for instant-damage weapons (beam / shotgun pellets).
+	## Mirrors the projectile-impact splash code, just dispatched
+	## here at fire-time. Mortar / missile splash applies on
+	## projectile arrival via Projectile._spawn_impact instead.
+	var splash_dmg: int = maxi(int(round(float(per_shot_dmg) * splash_mult)), 1)
+	var t_pos: Vector3 = primary_target.global_position
+	var shooter_owner: int = (_unit.get("owner_id") as int) if _unit and "owner_id" in _unit else 0
+	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	for ent: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(ent) or ent == primary_target:
+			continue
+		if not ent.has_method("take_damage"):
+			continue
+		var ent_owner: int = (ent.get("owner_id") as int) if "owner_id" in ent else 0
+		var hostile: bool = true
+		if registry and registry.has_method("are_enemies"):
+			hostile = registry.call("are_enemies", shooter_owner, ent_owner)
+		if not hostile:
+			continue
+		if t_pos.distance_to((ent as Node3D).global_position) <= splash_r:
+			ent.take_damage(splash_dmg, _unit)
+	for ent2: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(ent2) or ent2 == primary_target:
+			continue
+		if not ent2.has_method("take_damage"):
+			continue
+		var ent2_owner: int = (ent2.get("owner_id") as int) if "owner_id" in ent2 else 0
+		var hostile2: bool = true
+		if registry and registry.has_method("are_enemies"):
+			hostile2 = registry.call("are_enemies", shooter_owner, ent2_owner)
+		if not hostile2:
+			continue
+		if t_pos.distance_to((ent2 as Node3D).global_position) <= splash_r:
+			ent2.take_damage(splash_dmg, _unit)
+
+
+func _spawn_staggered_projectile(delay_sec: float, weapon: WeaponResource, fire_pos: Vector3, aim_pos: Vector3, is_glowing_volley: bool, payload_damage: int = 0, payload_splash_r: float = 0.0, payload_splash_mult: float = 0.0) -> void:
 	## Schedules a single projectile spawn after `delay_sec`. Used by
 	## salvo_stagger weapons so multi-barrel cannons (Bulwark triple,
 	## Breacher twin) can fire their barrels in quick succession
@@ -1134,6 +1171,11 @@ func _spawn_staggered_projectile(delay_sec: float, weapon: WeaponResource, fire_
 	var style: StringName = weapon.projectile_style
 	var role: StringName = weapon.role_tag
 	var dmg_tier: StringName = weapon.damage_tier
+	# Capture the target + shooter as weak references so the lambda
+	# doesn't keep them alive past their own death. The deferred
+	# spawn checks is_instance_valid before applying damage.
+	var captured_target: Node3D = _current_target
+	var captured_shooter: Node3D = _unit
 	var timer: SceneTreeTimer = get_tree().create_timer(delay_sec)
 	timer.timeout.connect(func() -> void:
 		if not is_inside_tree():
@@ -1144,6 +1186,14 @@ func _spawn_staggered_projectile(delay_sec: float, weapon: WeaponResource, fire_
 		var proj: Node3D = proj_script.create(fire_pos, aim_pos, role, rof_tier, style, faction, dmg_tier)
 		if is_glowing_volley and proj.has_method("set_glow_boost"):
 			proj.call("set_glow_boost", 3.0, Color(1.0, 0.85, 0.20, 1.0))
+		# Damage-on-impact payload for staggered shots. payload_damage
+		# 0 = caller didn't want this shot to deal damage (miss or
+		# instant-style), so the projectile flies as cosmetic.
+		if payload_damage > 0 and proj.has_method("set_damage_payload") and is_instance_valid(captured_target):
+			var splash_dmg_int: int = 0
+			if payload_splash_r > 0.0:
+				splash_dmg_int = maxi(int(round(float(payload_damage) * payload_splash_mult)), 1)
+			proj.call("set_damage_payload", payload_damage, captured_target, captured_shooter, payload_splash_r, splash_dmg_int)
 		get_tree().current_scene.add_child(proj)
 	)
 

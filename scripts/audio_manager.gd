@@ -591,7 +591,13 @@ func _pick_weapon_fire_stream(weapon: WeaponResource) -> AudioStream:
 	# read as cannon shots, not launches.
 	var rof: StringName = weapon.rof_tier
 	var pstyle: StringName = weapon.get("projectile_style") if "projectile_style" in weapon else &""
-	var is_kinetic_override: bool = pstyle == &"bullet" or pstyle == &"shell"
+	# Kinetic overrides: bullet, shell, mortar all read as cannon /
+	# artillery shots rather than missile launches. Without 'mortar'
+	# in this list, the Mortar Breacher's 'single' rof_tier routed
+	# to the missile-launch SFX bank, giving the player a 'rocket
+	# sound + mortar shell visual' mismatch (perceived as two
+	# different projectiles fired at once).
+	var is_kinetic_override: bool = pstyle == &"bullet" or pstyle == &"shell" or pstyle == &"mortar"
 	if (rof == &"single" or rof == &"slow" or rof == &"volley") and not _sfx_missile_launch.is_empty() and not is_kinetic_override:
 		return _pick(_sfx_missile_launch)
 	# Beam-style projectiles (Jackal pulse lasers etc.) always use
