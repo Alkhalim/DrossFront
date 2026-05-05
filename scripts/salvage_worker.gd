@@ -57,23 +57,32 @@ var _carried_microchips: int = 0
 ## packed AI building walls. _stuck_pos remembers where progress last
 ## stalled; when that lasts past STUCK_GIVE_UP_SEC the worker drops
 ## the current target and goes IDLE so it can reacquire a different
-## wreck on the next tick.
-const STUCK_GIVE_UP_SEC: float = 4.0
-const STUCK_PROGRESS_EPS: float = 0.6
+## wreck on the next tick. Pulled 4s -> 1.5s so the worker reacts
+## within a single attack-window instead of grinding for half a
+## production cycle; eps tightened so a worker that's drifting in
+## place but not actually traversing also counts.
+const STUCK_GIVE_UP_SEC: float = 1.5
+const STUCK_PROGRESS_EPS: float = 0.3
 var _stuck_check_pos: Vector3 = Vector3.INF
 var _stuck_time: float = 0.0
 
-## Unstuck phase -- when the stuck-detect trips, we don't just go
-## straight back to IDLE (which would re-target the same wreck and
-## re-stuck against the same wall). Instead we push laterally in a
-## random horizontal direction for ~1.2s so the worker physically
-## clears the obstacle before re-scanning. The stuck wreck is
-## remembered for a short cooldown so the very next scan also
-## prefers a different target.
+## Unstuck phase -- when the stuck-detect trips, push laterally for
+## a short window so the worker physically clears the obstacle
+## before re-scanning. Direction is chosen perpendicular to the
+## desired path (not random) so the side-step actually side-steps
+## the blocker rather than sometimes pushing straight INTO it. The
+## stuck wreck is remembered for a short cooldown so the very next
+## scan also prefers a different target.
 const UNSTUCK_PUSH_SEC: float = 1.2
 const UNSTUCK_TARGET_BLACKLIST_SEC: float = 6.0
+const WORKER_GRAVITY: float = 18.0
 var _unstuck_dir: Vector3 = Vector3.ZERO
 var _unstuck_timer: float = 0.0
+var _last_intent_dir: Vector3 = Vector3.ZERO
+## Alternates the side-step direction across consecutive unstuck
+## attempts so a worker stuck against a corner that the first
+## perpendicular pick failed to clear tries the OTHER side next.
+var _unstuck_flip: int = 1
 ## { wreck_instance_id : float seconds_until_clear }
 var _blacklisted_wrecks: Dictionary = {}
 
@@ -92,6 +101,16 @@ func _ready() -> void:
 	# stuck-pathfinding cases.
 	collision_layer = 2  # unit layer (so enemies can still shoot us)
 	collision_mask = 1   # ground only
+	# Floor snap so the worker stays glued to the ground across the
+	# tiny lip where flat ground meets a plateau ramp foot. Without
+	# the snap the body briefly loses floor contact on the
+	# transition, the next physics step's gravity push pulls
+	# velocity.y negative, and move_and_slide reports zero progress
+	# even though there's no horizontal blocker -- which trips the
+	# stuck-detect for no real reason.
+	floor_snap_length = 0.5
+	floor_max_angle = deg_to_rad(45.0)
+	up_direction = Vector3.UP
 
 	# Round-robin half-frame stagger across worker fleet.
 	# Third-frame stagger across the worker fleet. Worker state-
@@ -555,7 +574,21 @@ func _move_toward(target: Vector3, delta: float) -> bool:
 		return true
 
 	var direction := to_target / distance
-	velocity = direction * MOVE_SPEED
+	velocity.x = direction.x * MOVE_SPEED
+	velocity.z = direction.z * MOVE_SPEED
+	# Gravity push so workers settle on slopes instead of floating
+	# against ramp lips. Without this the body's collider could
+	# catch on the tiny lip where a flat ground tile meets a
+	# plateau ramp and report zero progress -- the stuck-detect
+	# would fire repeatedly.
+	if is_on_floor():
+		velocity.y = 0.0
+	else:
+		velocity.y -= WORKER_GRAVITY * delta
+	# Remember where we WANTED to go so the unstuck side-step picks
+	# a perpendicular axis to the actual desired path instead of
+	# rolling random.
+	_last_intent_dir = direction
 
 	if direction.length_squared() > 0.001:
 		look_at(global_position + direction, Vector3.UP)
@@ -595,12 +628,20 @@ func _move_toward(target: Vector3, delta: float) -> bool:
 
 
 func _enter_unstuck() -> void:
-	## Pick a random horizontal direction biased AWAY from the centre
-	## of mass of nearby colliders. We don't have cheap access to that,
-	## so just roll a uniform random direction; over multiple unstuck
-	## attempts the worker eventually clears any pocket.
-	var ang: float = randf() * TAU
-	_unstuck_dir = Vector3(cos(ang), 0.0, sin(ang))
+	## Side-step perpendicular to the desired path instead of rolling
+	## random. The flip alternates each invocation so a worker stuck
+	## against a corner that the first perpendicular pick failed to
+	## clear tries the OTHER side on the next stuck-trip. Falls
+	## back to a random direction when the intent is unknown
+	## (fresh worker, no prior _move_toward call).
+	var fwd: Vector3 = _last_intent_dir
+	if fwd.length_squared() < 0.01:
+		var ang: float = randf() * TAU
+		_unstuck_dir = Vector3(cos(ang), 0.0, sin(ang))
+	else:
+		var perp: Vector3 = Vector3(-fwd.z, 0.0, fwd.x) * float(_unstuck_flip)
+		_unstuck_dir = perp.normalized()
+		_unstuck_flip = -_unstuck_flip
 	_unstuck_timer = UNSTUCK_PUSH_SEC
 	state = State.UNSTUCKING
 	_stuck_time = 0.0
@@ -613,7 +654,12 @@ func _unstuck_step(delta: float) -> void:
 	## wreck (now that we've cleared the obstacle and the previous
 	## target is briefly blacklisted).
 	_unstuck_timer -= delta
-	velocity = _unstuck_dir * MOVE_SPEED * 0.7
+	velocity.x = _unstuck_dir.x * MOVE_SPEED * 0.7
+	velocity.z = _unstuck_dir.z * MOVE_SPEED * 0.7
+	if is_on_floor():
+		velocity.y = 0.0
+	else:
+		velocity.y -= WORKER_GRAVITY * delta
 	if _unstuck_dir.length_squared() > 0.001:
 		look_at(global_position + _unstuck_dir, Vector3.UP)
 	move_and_slide()
