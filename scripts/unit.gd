@@ -6003,36 +6003,17 @@ func _physics_process(delta: float) -> void:
 			velocity = Vector3.ZERO
 			return
 
-	# When the new GroundMovement component is active for this body, it
-	# owns velocity and move_and_slide every physics frame. Continuing
-	# into the legacy nav_agent / direct-seek block would double-step
-	# the body (two move_and_slide calls) and overwrite the velocity
-	# that GroundMovement already wrote. Skip all legacy movement
-	# integration when the new system is present.
-	# NOTE: EMP paralysis, idle-spread, gravity, and stuck-rescue are
-	# also skipped here; those concerns need to be handled inside
-	# GroundMovement (or its callers) for flag-on units.
+	_per_frame_bookkeeping(delta)
 	if get_node_or_null("MovementComponent") is GroundMovement:
-		return
+		return  # New movement system owns velocity + move_and_slide
+	_legacy_movement_step(delta)
 
-	# EChO override / EMP paralysis. While the timer is hot, force
-	# velocity to zero, drop any pending move target, and skip the
-	# rest of the physics frame so the unit is fully frozen even
-	# if the AI keeps re-issuing commands. Gravity still settles
-	# via move_and_slide so airborne units don't hover.
-	if _emp_paralysis_remaining > 0.0:
-		_emp_paralysis_remaining = maxf(0.0, _emp_paralysis_remaining - delta)
-		velocity.x = 0.0
-		velocity.z = 0.0
-		if not is_on_floor():
-			velocity.y -= GRAVITY * delta
-		else:
-			velocity.y = 0.0
-		move_target = Vector3.INF
-		has_move_order = false
-		move_and_slide()
-		return
 
+## Per-frame bookkeeping that runs regardless of which movement system
+## owns this unit's velocity. Pulled out of _physics_process when the
+## new MovementComponent path landed (Plan B Phase 0) so flag-on units
+## still get animations, HP bars, ability cooldowns, etc.
+func _per_frame_bookkeeping(delta: float) -> void:
 	# Damage flash countdown (cheap — runs every frame).
 	if _flash_timer > 0.0:
 		_flash_timer -= delta
@@ -6090,18 +6071,11 @@ func _physics_process(delta: float) -> void:
 			_stealth_check_throttle = STEALTH_CHECK_INTERVAL
 			_tick_stealth()
 
-	# 1-in-3 frame stagger — each unit runs heavy work every 3rd physics
-	# frame (~20Hz) instead of every frame (60Hz). At 360+ units the
-	# half-frame stagger still ate the whole frame budget; tightening
-	# further drops the per-frame batch from 180 to ~120 units. Off
-	# frames just integrate velocity + gravity so motion stays smooth.
+	# 1-in-3 frame stagger for heavy visual work — camera cull check,
+	# walk animation, recoil, build claw, and HP bar reposition only
+	# run every 3rd physics frame (~20Hz). The light ticks above
+	# (flash, cooldown, courier tracks, stealth) run every frame.
 	if (_physics_frame_counter % 3) != _walk_bob_phase:
-		# Gravity must run every frame to keep airborne units pinned.
-		if not is_on_floor():
-			velocity.y -= GRAVITY * delta
-		else:
-			velocity.y = 0.0
-		move_and_slide()
 		return
 
 	# Camera-distance cull flag. AI / pathing / combat still run; only
@@ -6178,6 +6152,46 @@ func _physics_process(delta: float) -> void:
 			# check — saves a get_viewport().get_camera_3d() per frame.
 			if _camera_cached:
 				_hp_bar.global_rotation = _camera_cached.global_rotation
+
+
+## Legacy movement integration: NavigationAgent3D pathfinding + direct-
+## seek fallback + velocity writes + move_and_slide. Only meaningful
+## when _nav_agent is non-null (i.e., the unit was constructed under
+## the legacy code path). The internal _nav_agent != null guards
+## already cause this to no-op cleanly when the new system is on.
+## Plan D will delete this whole helper.
+func _legacy_movement_step(delta: float) -> void:
+	# EChO override / EMP paralysis. While the timer is hot, force
+	# velocity to zero, drop any pending move target, and skip the
+	# rest of the physics frame so the unit is fully frozen even
+	# if the AI keeps re-issuing commands. Gravity still settles
+	# via move_and_slide so airborne units don't hover.
+	if _emp_paralysis_remaining > 0.0:
+		_emp_paralysis_remaining = maxf(0.0, _emp_paralysis_remaining - delta)
+		velocity.x = 0.0
+		velocity.z = 0.0
+		if not is_on_floor():
+			velocity.y -= GRAVITY * delta
+		else:
+			velocity.y = 0.0
+		move_target = Vector3.INF
+		has_move_order = false
+		move_and_slide()
+		return
+
+	# 1-in-3 frame stagger — each unit runs heavy work every 3rd physics
+	# frame (~20Hz) instead of every frame (60Hz). At 360+ units the
+	# half-frame stagger still ate the whole frame budget; tightening
+	# further drops the per-frame batch from 180 to ~120 units. Off
+	# frames just integrate velocity + gravity so motion stays smooth.
+	if (_physics_frame_counter % 3) != _walk_bob_phase:
+		# Gravity must run every frame to keep airborne units pinned.
+		if not is_on_floor():
+			velocity.y -= GRAVITY * delta
+		else:
+			velocity.y = 0.0
+		move_and_slide()
+		return
 
 	# Gravity — keeps a unit pinned to the ground even when it ends up
 	# briefly above floor level (e.g. spawned with a slight Y offset, or
