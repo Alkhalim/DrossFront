@@ -149,14 +149,22 @@ func _ready() -> void:
 	_build_hp_bar()
 
 	# Navigation agent for movement around obstacles.
-	_nav_agent = NavigationAgent3D.new()
-	_nav_agent.name = "NavAgent"
-	_nav_agent.path_desired_distance = 1.0
-	_nav_agent.target_desired_distance = 1.5
-	_nav_agent.avoidance_enabled = true
-	_nav_agent.radius = 2.5
-	_nav_agent.max_speed = _move_speed
-	add_child(_nav_agent)
+	if MovementFlags.use_new_system():
+		var cm := CrawlerMovement.new()
+		cm.name = "MovementComponent"
+		cm.max_speed = _move_speed
+		cm.max_accel = _move_speed * 4.0
+		cm.max_turn_rate_rad_s = TAU * 0.25  # crawlers turn slowly
+		add_child(cm)
+	else:
+		_nav_agent = NavigationAgent3D.new()
+		_nav_agent.name = "NavAgent"
+		_nav_agent.path_desired_distance = 1.0
+		_nav_agent.target_desired_distance = 1.5
+		_nav_agent.avoidance_enabled = true
+		_nav_agent.radius = 2.5
+		_nav_agent.max_speed = _move_speed
+		add_child(_nav_agent)
 
 	# Floor snapping so the Crawler stays planted on ramps. Without
 	# this the body could clip into ground geometry at the foot of
@@ -178,7 +186,8 @@ func _ready() -> void:
 		if stats:
 			current_hp = maxi(stats.hp_total, current_hp)
 			_move_speed = stats.resolved_speed()
-			_nav_agent.max_speed = _move_speed
+			if _nav_agent != null:
+				_nav_agent.max_speed = _move_speed
 
 	# Worker management — reuse the existing SalvageYardComponent with
 	# Crawler-spec overrides (per v3.3 §1.3): wider 45m harvest radius,
@@ -902,7 +911,11 @@ func command_move(target: Vector3, _clear_combat: bool = true) -> void:
 	move_target = Vector3(target.x, global_position.y, target.z)
 	has_move_order = true
 	_stuck_timer = 0.0
-	if _nav_agent:
+	var mc: Node = get_node_or_null("MovementComponent")
+	if mc != null and mc is CrawlerMovement:
+		(mc as CrawlerMovement).goto_world(move_target)
+		return
+	if _nav_agent != null:
 		_nav_agent.target_position = move_target
 
 
@@ -978,6 +991,11 @@ func _physics_process(delta: float) -> void:
 	elif global_position.distance_to(_last_relocation_anchor) >= RELOCATION_DROP_DISTANCE:
 		_drop_carried_salvage_on_relocation()
 		_last_relocation_anchor = global_position
+
+	# New movement system owns velocity + move_and_slide; legacy nav_agent
+	# code below is skipped when it is active.
+	if get_node_or_null("MovementComponent") is CrawlerMovement:
+		return
 
 	if move_target == Vector3.INF:
 		return
