@@ -68,6 +68,30 @@ func _map_rid_for(_profile: AgentProfile) -> RID:
 		return RID()
 	return world_3d.get_navigation_map()
 
+func project_to_navmesh(world_pos: Vector3,
+		profile: AgentProfile,
+		max_distance: float = 8.0) -> Vector3:
+	## Projects a world position onto the nearest valid navmesh cell.
+	## Returns world_pos unchanged if it's already on the navmesh OR if
+	## the nearest navmesh point is more than max_distance away (avoids
+	## yanking the position implausibly far for off-map queries).
+	##
+	## Used by SquadGroup._slot_world to keep formation slots reachable
+	## even when the slot's geometry-naive position would land in a
+	## wall, building, or off-map void.
+	var map_rid: RID = _map_rid_for(profile)
+	if not map_rid.is_valid():
+		return world_pos
+	var snapped: Vector3 = NavigationServer3D.map_get_closest_point(map_rid, world_pos)
+	var d_sq: float = world_pos.distance_squared_to(snapped)
+	var max_sq: float = max_distance * max_distance
+	if d_sq > max_sq:
+		# Snapped point is too far — likely the world_pos is in a deep
+		# off-map region. Return the original; the caller's stuck
+		# detector will catch the unreachable case via Phase 2 escalation.
+		return world_pos
+	return snapped
+
 @warning_ignore("unused_parameter")
 func update_obstacle_tile(aabb: AABB) -> void:
 	## Plan A: forwards to the scene's existing navmesh rebake
