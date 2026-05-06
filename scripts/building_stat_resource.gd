@@ -70,6 +70,20 @@ extends Resource
 ## the HQ.
 @export var requires_geothermic_vent: bool = false
 
+@export_group("Turret weapons")
+## Weapons available on this building's turret(s). Empty for buildings
+## that don't have a TurretComponent (Generators, Foundries, Yard).
+## Single-entry array for fixed turrets (Sable basic emplacement, SAM,
+## HQ MG nest); multi-entry for swappable turrets (Anvil emplacement
+## carries Balanced + Anti-Light + Anti-Heavy).
+##
+## Populated by tools/migrate_balance_stats.py from the (legacy)
+## PROFILES dict in turret_component.gd. Once code reads these directly
+## (Task 7 of the refactor plan) the PROFILES dict goes away.
+@export var weapons: Array[WeaponResource] = []
+## Index into `weapons` selected at construction time.
+@export var default_weapon_index: int = 0
+
 @export_group("Superweapon")
 ## Empty when this building isn't a superweapon. Set to a kind id
 ## (e.g. &"molot", &"echo") to attach a SuperweaponComponent that

@@ -69,8 +69,21 @@ func get_display_name() -> String:
 ## Flat damage reduction (0.0..1.0). -1 = use armor_class default.
 @export var armor_reduction_value: float = -1.0
 
+@export_group("Direct numeric stats (post-refactor)")
+## Movement speed in units/second. -1 = fall back to speed_tier /
+## speed_value (legacy). Migration bakes the resolved value here.
+@export var speed: float = -1.0
+## Sight radius in world units. -1 = fall back to sight_tier /
+## sight_radius_value.
+@export var sight_radius: float = -1.0
+## Flat damage reduction (0.0..1.0). -1 = fall back to armor_class
+## default via CombatTables.
+@export var armor_reduction: float = -1.0
+
 
 func resolved_speed() -> float:
+	if speed >= 0.0:
+		return speed
 	if speed_value >= 0.0:
 		return speed_value
 	# UNIT_SPEED_MAP duplicates Unit.SPEED_MAP — kept on the resource
@@ -84,6 +97,8 @@ func resolved_speed() -> float:
 
 
 func resolved_sight_radius() -> float:
+	if sight_radius >= 0.0:
+		return sight_radius
 	if sight_radius_value >= 0.0:
 		return sight_radius_value
 	const SIGHT_MAP: Dictionary = {
@@ -94,6 +109,8 @@ func resolved_sight_radius() -> float:
 
 
 func resolved_armor_reduction() -> float:
+	if armor_reduction >= 0.0:
+		return armor_reduction
 	if armor_reduction_value >= 0.0:
 		return armor_reduction_value
 	return CombatTables.get_armor_reduction(armor_class)

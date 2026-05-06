@@ -176,57 +176,109 @@ extends Resource
 @export var is_shotgun: bool = false
 
 
+@export_group("Direct numeric stats (post-refactor)")
+## Damage per shot. -1 = fall back to damage_tier / damage_value
+## (legacy). The migration script bakes the resolved value here on
+## every existing .tres; new weapons set it directly.
+@export var damage: int = -1
+## Range in world units. -1 = fall back to range_tier / range_value.
+@export var range: float = -1.0
+## Seconds between shots. -1 = fall back to rof_tier / rof_seconds_value.
+@export var rof_seconds: float = -1.0
+## Explicit air-engagement flag. When use_explicit_air is true,
+## engages_air() ignores role_tag / can_hit_air and returns this
+## directly. Migration sets both true on every weapon.
+@export var engages_air_explicit: bool = false
+## When true, engages_air() trusts engages_air_explicit. When false
+## (legacy), it dispatches via role_tag and can_hit_air.
+@export var use_explicit_air: bool = false
+
+@export_group("Direct armor multipliers (post-refactor)")
+## Per-armor-class damage multipliers. -1 = fall back to legacy
+## mult_vs_* override fields, which themselves fall back to the
+## CombatTables role-vs-armor table. Migration bakes the resolved
+## value into every entry so each weapon is self-contained.
+@export var mult_vs_unarmored_v2: float = -1.0
+@export var mult_vs_light_v2: float = -1.0
+@export var mult_vs_medium_v2: float = -1.0
+@export var mult_vs_heavy_v2: float = -1.0
+@export var mult_vs_structure_v2: float = -1.0
+@export var mult_vs_light_air_v2: float = -1.0
+@export var mult_vs_heavy_air_v2: float = -1.0
+
+
 func engages_air() -> bool:
-	## True when the weapon should fire at aircraft. Auto-true for
-	## AAir and AAir_Light roles (their multipliers vs air are the
-	## whole point); explicit can_hit_air opt-in covers the
-	## "generalist primary that can also chip airframes" case.
+	## True when the weapon should fire at aircraft. Post-refactor
+	## path uses engages_air_explicit; legacy path dispatches via
+	## role_tag (AAir / AAir_Light auto-engage) and can_hit_air opt-in.
+	if use_explicit_air:
+		return engages_air_explicit
 	if role_tag == &"AAir" or role_tag == &"AAir_Light":
 		return true
 	return can_hit_air
 
 
 func resolved_damage() -> int:
+	if damage >= 0:
+		return damage
 	if damage_value >= 0:
 		return damage_value
 	return CombatTables.get_damage(damage_tier)
 
 
 func resolved_range() -> float:
+	if range >= 0.0:
+		return range
 	if range_value >= 0.0:
 		return range_value
 	return CombatTables.get_range(range_tier)
 
 
 func resolved_rof_seconds() -> float:
+	if rof_seconds >= 0.0:
+		return rof_seconds
 	if rof_seconds_value >= 0.0:
 		return rof_seconds_value
 	return CombatTables.get_rof(rof_tier)
 
 
 func get_role_mult_for(armor_class: StringName) -> float:
-	## Returns the effective role multiplier vs the given armor
-	## class. Honours per-weapon overrides first, then falls back to
-	## the CombatTables role-vs-armor table. HUD displays + combat
+	## Resolution order: post-refactor _v2 field → legacy override
+	## field → CombatTables role-vs-armor table. HUD displays + combat
 	## damage paths funnel through this so the displayed multiplier
 	## always matches what the gun actually does.
 	match armor_class:
+		&"unarmored":
+			if mult_vs_unarmored_v2 >= 0.0:
+				return mult_vs_unarmored_v2
 		&"light":
+			if mult_vs_light_v2 >= 0.0:
+				return mult_vs_light_v2
 			if mult_vs_light > 0.0:
 				return mult_vs_light
 		&"medium":
+			if mult_vs_medium_v2 >= 0.0:
+				return mult_vs_medium_v2
 			if mult_vs_medium > 0.0:
 				return mult_vs_medium
 		&"heavy":
+			if mult_vs_heavy_v2 >= 0.0:
+				return mult_vs_heavy_v2
 			if mult_vs_heavy > 0.0:
 				return mult_vs_heavy
 		&"light_air":
+			if mult_vs_light_air_v2 >= 0.0:
+				return mult_vs_light_air_v2
 			if mult_vs_light_air > 0.0:
 				return mult_vs_light_air
 		&"heavy_air":
+			if mult_vs_heavy_air_v2 >= 0.0:
+				return mult_vs_heavy_air_v2
 			if mult_vs_heavy_air > 0.0:
 				return mult_vs_heavy_air
 		&"structure":
+			if mult_vs_structure_v2 >= 0.0:
+				return mult_vs_structure_v2
 			if structure_damage_mult > 0.0:
 				return structure_damage_mult
 	return CombatTables.get_role_modifier(role_tag, armor_class)
