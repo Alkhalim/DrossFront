@@ -132,6 +132,22 @@ func _ready() -> void:
 	# 20 Hz is invisible compared to the previous 30 Hz tick.
 	_phase = int(get_instance_id() % 3)
 
+	# PB-11: Attach GroundMovement when the new system is active.
+	# Workers are solo agents (no SquadGroup). MOVE_SPEED drives
+	# max_speed; accel is 6× speed (same ratio as squads). The
+	# path_unreachable signal replaces the legacy custom stuck
+	# detection: when GroundMovement exhausts its recovery ladder
+	# the worker re-scans for a different wreck instead of grinding.
+	if MovementFlags.use_new_system():
+		var gm := GroundMovement.new()
+		gm.name = "MovementComponent"
+		gm.max_speed = MOVE_SPEED
+		gm.max_accel = MOVE_SPEED * 6.0
+		gm.max_turn_rate_rad_s = TAU * 0.5
+		gm.agent_profile = AgentProfile.new(0.5, 0.5, 35.0, &"worker")
+		add_child(gm)
+		gm.path_unreachable.connect(_on_movement_path_unreachable)
+
 	_build_visuals()
 
 
@@ -395,6 +411,12 @@ func drop_carried_salvage() -> int:
 func _physics_process(delta: float) -> void:
 	if alive_count <= 0:
 		return
+	# PB-11: When GroundMovement is active it owns velocity +
+	# move_and_slide. This guard runs the AI tick (target selection,
+	# harvest, cargo glow) but skips legacy movement code below.
+	if get_node_or_null("MovementComponent") is GroundMovement:
+		_per_frame_worker_tick(delta)
+		return
 	# Stagger heavy state-machine work to ~20 Hz; off frames just
 	# skip. Worker movement is coarse-grained (drive toward target,
 	# harvest, drop off) -- sampling at 20 Hz vs 60 Hz is invisible
@@ -440,6 +462,49 @@ func _physics_process(delta: float) -> void:
 	# Only push to the material when the integer fill bucket
 	# actually changed; the previous unconditional write reuploaded
 	# the material every staggered frame for every worker.
+	if _cargo_mat:
+		var fill_bucket: int = (_carried_salvage * 16) / maxi(CARRY_CAPACITY, 1)
+		if fill_bucket != _cargo_fill_last:
+			_cargo_fill_last = fill_bucket
+			var fill: float = float(_carried_salvage) / float(CARRY_CAPACITY)
+			_cargo_mat.emission_enabled = fill > 0.0
+			_cargo_mat.emission = Color(1.0, 0.7, 0.2)
+			_cargo_mat.emission_energy_multiplier = fill * 1.4
+
+
+## PB-11: AI tick for GroundMovement path. Handles target selection,
+## harvest, deposit and cargo glow — everything except velocity /
+## move_and_slide, which GroundMovement owns.
+## Runs at full physics rate (no frame-stagger) because the
+## arrive-check in _move_toward_wreck_new must see the position
+## updated each frame to fire cleanly.
+func _per_frame_worker_tick(delta: float) -> void:
+	# Blacklist cooldown — same as legacy path.
+	if not _blacklisted_wrecks.is_empty():
+		var stale: Array = []
+		for k in _blacklisted_wrecks.keys():
+			_blacklisted_wrecks[k] = (_blacklisted_wrecks[k] as float) - delta
+			if (_blacklisted_wrecks[k] as float) <= 0.0:
+				stale.append(k)
+		for k in stale:
+			_blacklisted_wrecks.erase(k)
+
+	match state:
+		State.IDLE:
+			_idle_rescan_cooldown -= delta
+			if _idle_rescan_cooldown <= 0.0:
+				_idle_rescan_cooldown = IDLE_RESCAN_INTERVAL
+				_find_wreck_new()
+		State.MOVING_TO_WRECK:
+			_move_toward_wreck_new(delta)
+		State.HARVESTING:
+			_harvest(delta)
+		State.RETURNING:
+			_return_to_yard_new(delta)
+		# UNSTUCKING state is not used in the new path;
+		# GroundMovement handles stuck recovery internally.
+
+	# Cargo-bin glow (unchanged).
 	if _cargo_mat:
 		var fill_bucket: int = (_carried_salvage * 16) / maxi(CARRY_CAPACITY, 1)
 		if fill_bucket != _cargo_fill_last:
@@ -692,3 +757,150 @@ func _unstuck_step(delta: float) -> void:
 	if _unstuck_timer <= 0.0:
 		state = State.IDLE
 		velocity = Vector3.ZERO
+
+
+## --- PB-11: New-system variants of the AI helper methods ---
+## These mirror the legacy helpers but route destination updates
+## through GroundMovement.goto_world instead of direct velocity
+## writes. The legacy helpers (_find_wreck, _move_toward, etc.)
+## remain unchanged so the legacy path is always available.
+
+func _find_wreck_new() -> void:
+	## Same candidate-search logic as _find_wreck; routes the
+	## destination through GroundMovement when a wreck is found.
+	var wrecks: Array[Node] = get_tree().get_nodes_in_group("wrecks")
+	if wrecks.is_empty():
+		return
+
+	var nearest: Wreck = null
+	var nearest_dist: float = INF
+	var search_origin: Vector3 = home_yard.global_position if is_instance_valid(home_yard) else global_position
+	for node: Node in wrecks:
+		var wreck: Wreck = node as Wreck
+		if not wreck:
+			continue
+		if _blacklisted_wrecks.has(wreck.get_instance_id()):
+			continue
+		var dist_to_yard: float = search_origin.distance_to(wreck.global_position)
+		if dist_to_yard > search_radius:
+			continue
+		var dist: float = global_position.distance_to(wreck.global_position)
+		if dist < nearest_dist:
+			nearest_dist = dist
+			nearest = wreck
+
+	if nearest:
+		_target_wreck = nearest
+		_move_target = nearest.global_position
+		state = State.MOVING_TO_WRECK
+		var mc: Node = get_node_or_null("MovementComponent")
+		if mc != null and mc is GroundMovement:
+			(mc as GroundMovement).goto_world(_move_target)
+		return
+	# No wreck in range — walk home if we've drifted.
+	if is_instance_valid(home_yard):
+		var d_home: float = global_position.distance_to(home_yard.global_position)
+		if d_home > 2.5:
+			state = State.RETURNING
+			var mc: Node = get_node_or_null("MovementComponent")
+			if mc != null and mc is GroundMovement:
+				(mc as GroundMovement).goto_world(home_yard.global_position)
+
+
+func _move_toward_wreck_new(delta: float) -> void:
+	## Arrive-check for MOVING_TO_WRECK under GroundMovement.
+	## GroundMovement drives velocity; we only watch distance to
+	## detect arrival or wreck-disappearance.
+	if not is_instance_valid(_target_wreck):
+		state = State.IDLE
+		_target_wreck = null
+		var mc: Node = get_node_or_null("MovementComponent")
+		if mc != null and mc is GroundMovement:
+			(mc as GroundMovement).clear_target()
+		return
+
+	# Keep destination fresh in case the wreck drifts (shouldn't
+	# normally happen, but guards against floating wrecks).
+	var dest: Vector3 = _target_wreck.global_position
+	if dest.distance_squared_to(_move_target) > 0.25:
+		_move_target = dest
+		var mc: Node = get_node_or_null("MovementComponent")
+		if mc != null and mc is GroundMovement:
+			(mc as GroundMovement).goto_world(_move_target)
+
+	var dist: float = global_position.distance_to(dest)
+	# Use the same ARRIVE_THRESHOLD as the legacy path.
+	if dist < ARRIVE_THRESHOLD:
+		state = State.HARVESTING
+		_harvest_timer = 0.0
+		var mc: Node = get_node_or_null("MovementComponent")
+		if mc != null and mc is GroundMovement:
+			(mc as GroundMovement).clear_target()
+
+
+func _return_to_yard_new(delta: float) -> void:
+	## Return-and-deposit leg under GroundMovement.
+	if not is_instance_valid(home_yard):
+		_carried_salvage = 0
+		_carried_microchips = 0
+		state = State.IDLE
+		return
+
+	# Drive toward home. Update destination every tick in case the
+	# Crawler (home_yard) has moved.
+	var dest: Vector3 = home_yard.global_position
+	if dest.distance_squared_to(_move_target) > 0.25:
+		_move_target = dest
+		var mc: Node = get_node_or_null("MovementComponent")
+		if mc != null and mc is GroundMovement:
+			(mc as GroundMovement).goto_world(dest)
+
+	# Deposit when within DROPOFF_RADIUS (same logic as legacy).
+	var d: float = global_position.distance_to(dest)
+	if d < DROPOFF_RADIUS:
+		if resource_manager:
+			resource_manager.add_salvage(_carried_salvage)
+			if _carried_microchips > 0 and resource_manager.has_method("add_microchips"):
+				resource_manager.add_microchips(_carried_microchips)
+		if is_instance_valid(home_yard) and (_carried_salvage > 0 or _carried_microchips > 0):
+			home_yard.set_meta("last_delivery_msec", Time.get_ticks_msec())
+		if owner_id == 0 and is_instance_valid(home_yard):
+			var drop_pos: Vector3 = home_yard.global_position + Vector3(
+				randf_range(-0.6, 0.6), 1.6, randf_range(-0.6, 0.6)
+			)
+			if _carried_salvage > 0:
+				FloatingNumber.spawn(
+					get_tree().current_scene,
+					drop_pos,
+					"+%d S" % _carried_salvage,
+					FloatingNumber.COLOR_SALVAGE,
+					1.6, 1.4, 1.5,
+				)
+			if _carried_microchips > 0:
+				FloatingNumber.spawn(
+					get_tree().current_scene,
+					drop_pos + Vector3(0.0, 0.5, 0.0),
+					"+%d M" % _carried_microchips,
+					FloatingNumber.COLOR_MICROCHIPS,
+					1.6, 1.4, 1.5,
+				)
+		_carried_salvage = 0
+		_carried_microchips = 0
+		state = State.IDLE
+		var mc: Node = get_node_or_null("MovementComponent")
+		if mc != null and mc is GroundMovement:
+			(mc as GroundMovement).clear_target()
+
+
+## Called when GroundMovement gives up on the current target
+## (Plan B: stuck-recovery Level 2 exhausted). Worker re-picks
+## a different salvage target rather than grinding indefinitely.
+## Replaces the legacy custom stuck detection for the new path.
+func _on_movement_path_unreachable(_reason: int) -> void:
+	# Blacklist the wreck we were trying to reach so the next
+	# _find_wreck_new scan skips it for a few seconds.
+	if is_instance_valid(_target_wreck):
+		_blacklisted_wrecks[_target_wreck.get_instance_id()] = UNSTUCK_TARGET_BLACKLIST_SEC
+	_target_wreck = null
+	_move_target = Vector3.INF
+	state = State.IDLE
