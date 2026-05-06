@@ -16,9 +16,9 @@ damage_value = 173
 structure_damage_mult = 3.0
 can_damage_trees = true
 
-damage = 173
+damage = 373
 range = 15.0
-rof_seconds = 2.0
+rof_seconds = 3.2
 use_explicit_air = true
 engages_air_explicit = false
 mult_vs_unarmored_v2 = 0.6

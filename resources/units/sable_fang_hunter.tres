@@ -16,8 +16,8 @@ base_accuracy = 0.90
 can_hit_air = true
 
 damage = 21
-range = 15.0
-rof_seconds = 0.5
+range = 16.0
+rof_seconds = 0.8
 use_explicit_air = true
 engages_air_explicit = true
 mult_vs_unarmored_v2 = 0.8

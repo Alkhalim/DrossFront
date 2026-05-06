@@ -25,19 +25,19 @@ use_explicit_air = true
 engages_air_explicit = true
 mult_vs_unarmored_v2 = 1.0
 mult_vs_light_v2 = 1.0
-mult_vs_medium_v2 = 0.4
-mult_vs_heavy_v2 = 0.3
+mult_vs_medium_v2 = 0.3
+mult_vs_heavy_v2 = 0.2
 mult_vs_structure_v2 = 0.4
 mult_vs_light_air_v2 = 1.0
-mult_vs_heavy_air_v2 = 0.3
+mult_vs_heavy_air_v2 = 0.2
 
 [resource]
 script = ExtResource("1")
 unit_name = "Specter (Glitch)"
 display_name = "SHADE Scout (Glitch)"
 unit_class = &"light"
-hp_total = 880
-hp_per_unit = 220
+hp_total = 740
+hp_per_unit = 185
 armor_class = &"light"
 speed_tier = &"fast"
 sight_tier = &"long"

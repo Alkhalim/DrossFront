@@ -17,34 +17,15 @@ const TURRET_RANGE: float = 20.0
 const TURRET_DAMAGE: int = 45
 const FIRE_INTERVAL: float = 0.8
 
-## Profile presets. Keep keys stable — HUD code references them by name.
-## Damage values are 3x the original tuning so static defenses can actually
-## threaten an attacking squad rather than tickle it.
-##
-## anti_air stays in PROFILES because the SAM Site uses the same component
-## with profile preset to anti_air (no UI swap; it's a dedicated AA building).
-## The HUD's profile selector lists only the ground profiles below.
-const PROFILES: Dictionary = {
-	&"balanced":   { "damage": 45,  "fire": 0.9,  "range": 20.0, "role": &"Universal", "name": "Balanced" },
-	&"anti_light": { "damage": 24,  "fire": 0.3,  "range": 18.0, "role": &"AP",        "name": "Anti-Light" },
-	&"anti_heavy": { "damage": 135, "fire": 2.2,  "range": 22.0, "role": &"AP",        "name": "Anti-Heavy" },
-	&"anti_air":   { "damage": 36,  "fire": 0.25, "range": 24.0, "role": &"AAir",      "name": "Anti-Air" },
-	# Built-in HQ self-defense -- light Universal MG cluster meant
-	# to discourage early bumrushes. Range bumped 16 -> 22 so the
-	# HQ outranges short + medium-tier mech weapons (8u / 15u),
-	# giving the defender breathing room against light pushes.
-	# Burst fires `burst_count` projectiles per cooldown (with
-	# brief intra-burst gaps for the visual stagger) so the salvo
-	# reads as a real MG nest, not single-tap shots. Targets both
-	# ground AND air -- HQ MGs work as light flak.
-	&"hq_defense": { "damage": 19, "fire": 1.1, "range": 28.0, "role": &"Universal", "name": "HQ Defense", "burst_count": 5, "burst_gap": 0.08, "targets_air": true },
-}
+## Index into _building.stats.weapons. Set via set_active_weapon_index()
+## or the legacy set_profile() shim. The previous PROFILES dict lived
+## here; data has moved to per-building .tres files (BuildingStatResource.weapons).
+var active_weapon_index: int = 0
 
-## Anvil's industrial-doctrine turret hits harder than the baseline
-## emplacement. +15% damage on every profile; HP bonus lives on the
-## building's stats (Anvil .tres has hp 932, baseline has 810).
-const ANVIL_DAMAGE_MULT: float = 1.15
-
+## Backwards-compat alias. Several call-sites still read `turret.profile`
+## as a StringName (e.g. selection_manager pulse FX, HUD visual labels).
+## Updated whenever the active weapon changes; mapped from the active
+## WeaponResource.weapon_name via _profile_key_from_weapon_name().
 var profile: StringName = &"balanced"
 
 ## When set, overrides the parent building's shared `turret_pivot`
@@ -85,7 +66,18 @@ func _get_registry_cached() -> PlayerRegistry:
 
 func _ready() -> void:
 	_building = get_parent()
-	# Apply the visual barrel matching the default profile.
+	# Sync active_weapon_index + profile alias with the building's
+	# configured default. Without this, every turret initialised with
+	# `profile = &"balanced"` regardless of what its weapons array
+	# actually carried — fine for gun_emplacement (whose default IS
+	# Balanced) but wrong for SAM (Anti-Air) and HQ (HQ Defense),
+	# which would then build the wrong barrel visual.
+	var s: BuildingStatResource = _stats()
+	if s and not s.weapons.is_empty():
+		active_weapon_index = clampi(s.default_weapon_index, 0, s.weapons.size() - 1)
+		var w: WeaponResource = s.weapons[active_weapon_index]
+		if w:
+			profile = _profile_key_from_weapon_name(w.weapon_name)
 	_apply_visual_profile()
 
 
@@ -98,18 +90,44 @@ func _building_id() -> StringName:
 	return s.get("building_id") as StringName
 
 
-func _damage_multiplier() -> float:
-	## Anvil's specialised emplacement deals +15% damage on every
-	## profile. Sable's basic emplacement and the SAM Site use the
-	## raw profile damage.
-	return ANVIL_DAMAGE_MULT if _building_id() == &"gun_emplacement" else 1.0
+func _stats() -> BuildingStatResource:
+	if not _building:
+		return null
+	return _building.get("stats") as BuildingStatResource
+
+
+func _active_weapon() -> WeaponResource:
+	## The currently-selected weapon from the building's stats.weapons
+	## array. Returns null if the building has no turret weapons (in
+	## which case the get_*() accessors fall through to the
+	## TURRET_DAMAGE / TURRET_RANGE / FIRE_INTERVAL defaults).
+	var s: BuildingStatResource = _stats()
+	if not s or s.weapons.is_empty():
+		return null
+	var idx: int = clampi(active_weapon_index, 0, s.weapons.size() - 1)
+	return s.weapons[idx]
+
+
+func _profile_key_from_weapon_name(name: String) -> StringName:
+	## Maps WeaponResource.weapon_name back to the legacy profile key
+	## that selection_manager / HUD visuals / detail builders still
+	## branch on. Stable mapping across the migration.
+	match name:
+		"Balanced":   return &"balanced"
+		"Anti-Light": return &"anti_light"
+		"Anti-Heavy": return &"anti_heavy"
+		"Anti-Air":   return &"anti_air"
+		"HQ Defense": return &"hq_defense"
+	return &"balanced"
 
 
 func is_profile_swap_allowed() -> bool:
-	## Only Anvil's specialised emplacement exposes profile selection
-	## in the HUD. Sable's basic turret is fixed at the baseline
-	## ground role; the SAM Site is fixed at anti_air.
-	return _building_id() == &"gun_emplacement"
+	## True when the building has more than one turret weapon and the
+	## HUD should expose a profile selector. Anvil's gun_emplacement
+	## carries 3 weapons; Sable's basic emplacement / SAM Site / HQ
+	## carry exactly 1 and stay locked.
+	var s: BuildingStatResource = _stats()
+	return s != null and s.weapons.size() > 1
 
 
 ## Anvil HQ Battery upgrade -- when the parent HQ has hq_battery_active
@@ -125,42 +143,90 @@ func _hq_battery_active() -> bool:
 
 
 func get_damage() -> int:
-	var base: int = (PROFILES[profile] as Dictionary).get("damage", TURRET_DAMAGE) as int
-	var dmg: float = float(base) * _damage_multiplier()
+	## Per-shot damage. Anvil's +15% bonus is baked into the .tres,
+	## not applied here. HQ Battery upgrade is still a runtime
+	## modifier on top.
+	var w: WeaponResource = _active_weapon()
+	var base: int = w.resolved_damage() if w else TURRET_DAMAGE
+	var dmg: float = float(base)
 	if _hq_battery_active():
 		dmg *= HQ_BATTERY_DAMAGE_MULT
 	return int(round(dmg))
 
 
 func get_fire_interval() -> float:
-	return (PROFILES[profile] as Dictionary).get("fire", FIRE_INTERVAL) as float
+	var w: WeaponResource = _active_weapon()
+	return w.resolved_rof_seconds() if w else FIRE_INTERVAL
 
 
 func get_range() -> float:
-	var base: float = (PROFILES[profile] as Dictionary).get("range", TURRET_RANGE) as float
+	var w: WeaponResource = _active_weapon()
+	var base: float = w.resolved_range() if w else TURRET_RANGE
 	if _hq_battery_active():
 		base += HQ_BATTERY_RANGE_BONUS
 	return base
 
 
 func get_role() -> StringName:
-	return (PROFILES[profile] as Dictionary).get("role", &"Universal") as StringName
+	## Cosmetic role label for HUD chips / projectile style. Combat
+	## math no longer dispatches on this -- weapons carry explicit
+	## per-armor mults + engages_air().
+	var w: WeaponResource = _active_weapon()
+	return w.role_tag if w else &"Universal"
 
 
 func get_dps() -> float:
+	## Per-second damage including salvo multiplier.
 	var fi: float = get_fire_interval()
 	if fi <= 0.0:
 		return 0.0
-	return float(get_damage()) / fi
+	var w: WeaponResource = _active_weapon()
+	var salvo: int = maxi(int(w.salvo_count), 1) if w else 1
+	return float(get_damage() * salvo) / fi
 
 
-func set_profile(new_profile: StringName) -> void:
-	if not PROFILES.has(new_profile):
+func set_active_weapon_index(new_index: int) -> void:
+	## Primary entry point for weapon selection. Validates against
+	## stats.weapons.size() and syncs the legacy `profile` alias so
+	## existing HUD / FX paths keep reading turret.profile.
+	var s: BuildingStatResource = _stats()
+	if not s or new_index < 0 or new_index >= s.weapons.size():
 		return
-	profile = new_profile
+	active_weapon_index = new_index
+	var w: WeaponResource = s.weapons[new_index]
+	profile = _profile_key_from_weapon_name(w.weapon_name) if w else &"balanced"
 	_target = null
 	_fire_timer = 0.0
 	_apply_visual_profile()
+
+
+func get_active_weapon_name() -> String:
+	var w: WeaponResource = _active_weapon()
+	return w.weapon_name if w else ""
+
+
+func set_profile(new_profile: StringName) -> void:
+	## Backwards-compat shim: accept a legacy profile key, find the
+	## matching weapon by name, route through set_active_weapon_index.
+	## Existing HUD code that calls turret.set_profile(&"anti_light")
+	## continues to work without rewrite.
+	var s: BuildingStatResource = _stats()
+	if not s:
+		return
+	var target_name: String = ""
+	match new_profile:
+		&"balanced":   target_name = "Balanced"
+		&"anti_light": target_name = "Anti-Light"
+		&"anti_heavy": target_name = "Anti-Heavy"
+		&"anti_air":   target_name = "Anti-Air"
+		&"hq_defense": target_name = "HQ Defense"
+	if target_name == "":
+		return
+	for i in range(s.weapons.size()):
+		var w: WeaponResource = s.weapons[i]
+		if w and w.weapon_name == target_name:
+			set_active_weapon_index(i)
+			return
 
 
 func _apply_visual_profile() -> void:
@@ -227,13 +293,13 @@ func _process(delta: float) -> void:
 
 		var damage: int = maxi(int(float(get_damage()) * efficiency), 1)
 
-		# Burst-fire support. profile_dict.burst_count > 1 schedules
-		# extra shots after the initial one with burst_gap seconds
-		# between them, so HQ MG nests fire a 3-round salvo per
+		# Burst-fire support. WeaponResource.salvo_count > 1 schedules
+		# extra shots after the initial one with salvo_stagger_sec
+		# between them, so HQ MG nests fire a 5-round salvo per
 		# cooldown instead of a single tap.
-		var profile_dict: Dictionary = PROFILES[profile] as Dictionary
-		var burst_count: int = int(profile_dict.get("burst_count", 1))
-		var burst_gap: float = float(profile_dict.get("burst_gap", 0.0))
+		var burst_w: WeaponResource = _active_weapon()
+		var burst_count: int = maxi(int(burst_w.salvo_count), 1) if burst_w else 1
+		var burst_gap: float = burst_w.salvo_stagger_sec if burst_w else 0.0
 
 		# Initial shot lands now.
 		_fire_one_shot(damage)
@@ -252,40 +318,21 @@ func _fire_one_shot(damage: int) -> void:
 		return
 	if not _is_valid_target(_target):
 		return
-	# HQ-defense per-class profile per balance brief:
-	#   vs light       1.0
-	#   vs medium      0.7
-	#   vs heavy       0.4
-	#   vs light_air   1.0
-	#   vs heavy_air   0.4
-	# AA branch caps at ~45% of AG DPS (an HQ is a deterrent
-	# against air, not a flak battery). With damage=18 + burst 3 /
-	# fire 1.0 = 54 ground DPS, the AA branch's 0.45 base scales to
-	# ~24 AA DPS before per-class mults. Both factions share this
-	# profile via the same _detail_hq_defense_turret build path.
+	# HQ-defense applies the weapon's per-armor-class multiplier
+	# directly (the rest of the turret types deliver raw damage to
+	# take_damage and let other paths handle effectiveness). The
+	# multipliers live on the WeaponResource itself -- migration
+	# baked the doctrine table (vs light 1.0 / vs medium 0.7 /
+	# vs heavy 0.4 / vs structure 0.3) and the 0.45 air-damage
+	# scalar (folded into the air mults) into the .tres.
 	var final_damage: int = damage
-	if profile == &"hq_defense":
+	var hq_w: WeaponResource = _active_weapon()
+	if hq_w and hq_w.weapon_name == "HQ Defense":
 		var target_armor: StringName = _resolve_target_armor(_target)
-		var base_dmg: float = float(damage)
-		var mult: float = 1.0
-		match target_armor:
-			&"light":
-				mult = 1.0
-			&"medium":
-				mult = 0.7
-			&"heavy":
-				mult = 0.4
-			&"structure":
-				mult = 0.3
-			&"light_air":
-				base_dmg = float(damage) * 0.45
-				mult = 1.0
-			&"heavy_air":
-				base_dmg = float(damage) * 0.45
-				mult = 0.4
-			_:
-				mult = 0.7
-		final_damage = int(round(base_dmg * mult))
+		var mult: float = hq_w.get_role_mult_for(target_armor)
+		var is_air: bool = target_armor == &"light_air" or target_armor == &"heavy_air"
+		var air_mult: float = hq_w.air_damage_mult if is_air else 1.0
+		final_damage = int(round(float(damage) * mult * air_mult))
 	_target.take_damage(final_damage, _building as Node3D)
 
 	var observable: bool = _firing_observable()
@@ -349,14 +396,15 @@ func _find_nearest_enemy() -> Node3D:
 	var nearest: Node3D = null
 	var nearest_dist: float = INF
 	var registry: PlayerRegistry = _get_registry_cached()
-	# Targeting filter:
-	#  - AAir profile (SAM Site, etc): air-only.
-	#  - Profiles with targets_air = true (HQ MG nests): both air
-	#    AND ground.
-	#  - Everything else: ground-only.
-	var is_aa: bool = get_role() == &"AA" or get_role() == &"AAir" or profile == &"anti_air"
-	var profile_dict: Dictionary = PROFILES[profile] as Dictionary
-	var dual_purpose: bool = bool(profile_dict.get("targets_air", false))
+	# Targeting filter, post-refactor:
+	#  - AAir-only weapon (SAM Site): role_tag == "AAir" with all
+	#    ground mults at 0 — engages aircraft, skips ground entirely.
+	#  - engages_air weapon that isn't AAir-only (HQ MG nest): hits
+	#    both ground AND air.
+	#  - Everything else (Balanced, Anti-Light, Anti-Heavy): ground-only.
+	var w_target: WeaponResource = _active_weapon()
+	var is_aa: bool = w_target != null and w_target.role_tag == &"AAir"
+	var dual_purpose: bool = w_target != null and w_target.engages_air() and not is_aa
 
 	var units: Array[Node] = get_tree().get_nodes_in_group("units")
 	for node: Node in units:

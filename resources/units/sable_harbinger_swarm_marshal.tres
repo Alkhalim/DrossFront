@@ -13,9 +13,9 @@ range_tier = &"long"
 rof_tier = &"slow"
 can_damage_trees = true
 
-damage = 85
-range = 25.0
-rof_seconds = 2.0
+damage = 75
+range = 20.0
+rof_seconds = 2.5
 use_explicit_air = true
 engages_air_explicit = false
 mult_vs_unarmored_v2 = 1.0
@@ -39,8 +39,8 @@ drone_variant = &"fast"
 max_active_drones = 10
 
 damage = 25
-range = 15.0
-rof_seconds = 0.5
+range = 25.0
+rof_seconds = 0.9
 use_explicit_air = true
 engages_air_explicit = false
 mult_vs_unarmored_v2 = 0.8

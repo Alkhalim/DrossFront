@@ -3026,19 +3026,13 @@ func _build_building_stat_sheet(building: Node3D, bstats: BuildingStatResource, 
 		# Read the turret's actual current profile (Anvil emplacement
 		# damage already includes the +15% multiplier; basic / SAM
 		# variants don't).
-		var t_dmg: int = int(turret.call("get_damage")) if turret.has_method("get_damage") else TurretComponent.TURRET_DAMAGE
 		var t_fi: float = float(turret.call("get_fire_interval")) if turret.has_method("get_fire_interval") else TurretComponent.FIRE_INTERVAL
 		var t_rng: float = float(turret.call("get_range")) if turret.has_method("get_range") else TurretComponent.TURRET_RANGE
-		# Burst-fire profiles (HQ MG nests fire 3-shot salvos per
-		# cooldown) need to multiply per-shot damage by burst_count
-		# to get the displayed DPS to match what the turret actually
-		# outputs over time.
-		var t_burst: int = 1
-		var profile_key: StringName = (turret.get("profile") as StringName) if "profile" in turret else &""
-		if profile_key != &"" and TurretComponent.PROFILES.has(profile_key):
-			var p_dict: Dictionary = TurretComponent.PROFILES[profile_key] as Dictionary
-			t_burst = int(p_dict.get("burst_count", 1))
-		var dps: float = (float(t_dmg) * float(t_burst)) / maxf(t_fi, 0.01)
+		# turret.get_dps() already folds salvo_count into the
+		# returned per-second number, so the displayed DPS matches
+		# the turret's true sustained output (HQ MG nests at 5-shot
+		# burst included).
+		var dps: float = float(turret.call("get_dps")) if turret.has_method("get_dps") else 0.0
 		var combat_row: Array = [
 			_stat_chip("DPS", "%.0f" % dps, STAT_LABEL_COLOR_DAMAGE),
 			_stat_chip("Range", "%.0fu" % t_rng, STAT_LABEL_COLOR_RANGE),
@@ -3201,24 +3195,30 @@ func _rebuild_turret_profile_buttons(building: Building) -> void:
 		return
 
 	_action_label.text = "Turret Profile"
-	var profiles: Array[Dictionary] = [
-		{ "key": &"balanced",   "hotkey": "Q" },
-		{ "key": &"anti_light", "hotkey": "W" },
-		{ "key": &"anti_heavy", "hotkey": "E" },
-	]
-	for entry: Dictionary in profiles:
-		var key: StringName = entry["key"] as StringName
-		var data: Dictionary = TurretComponent.PROFILES[key] as Dictionary
-		var dps: float = float(data["damage"]) / float(data["fire"])
+	var stats: BuildingStatResource = building.stats
+	if stats == null:
+		return
+	const HOTKEYS: PackedStringArray = ["Q", "W", "E", "R"]
+	for i in range(stats.weapons.size()):
+		var w: WeaponResource = stats.weapons[i]
+		if w == null:
+			continue
+		# Derive the legacy profile key from the weapon's name -- HUD
+		# state (highlight tracking, _on_turret_profile_button) keys on
+		# StringName for backwards-compat.
+		var key: StringName = _profile_key_from_name(w.weapon_name)
+		var hotkey: String = HOTKEYS[i] if i < HOTKEYS.size() else "%d" % (i + 1)
+		var rof: float = w.resolved_rof_seconds()
+		var dps: float = float(w.resolved_damage() * maxi(int(w.salvo_count), 1)) / maxf(rof, 0.01)
 		var btn := Button.new()
 		btn.custom_minimum_size = Vector2(120, 50)
 		btn.text = "[%s] %s\nDPS %.0f  Rng %d" % [
-			entry["hotkey"],
-			data["name"],
+			hotkey,
+			w.weapon_name,
 			dps,
-			int(data["range"]),
+			int(w.resolved_range()),
 		]
-		btn.tooltip_text = _turret_profile_tooltip(key, data)
+		btn.tooltip_text = _turret_profile_tooltip(key, w)
 		btn.pressed.connect(_on_turret_profile_button.bind(turret, key))
 		_button_grid.add_child(btn)
 		_action_buttons.append({ "button": btn, "kind": "turret_profile", "key": key })
@@ -3251,12 +3251,14 @@ func _on_turret_profile_button(turret: Node, key: StringName) -> void:
 		turret.set_profile(key)
 
 
-func _turret_profile_tooltip(key: StringName, data: Dictionary) -> String:
-	var role: StringName = data["role"] as StringName
+func _turret_profile_tooltip(key: StringName, weapon: WeaponResource) -> String:
 	var lines: PackedStringArray = PackedStringArray()
-	lines.append("%s turret" % data["name"])
+	lines.append("%s turret" % weapon.weapon_name)
 	lines.append("Damage %d   ROF %.2fs   Range %d   Role %s" % [
-		data["damage"], data["fire"], int(data["range"]), str(role)
+		weapon.resolved_damage(),
+		weapon.resolved_rof_seconds(),
+		int(weapon.resolved_range()),
+		str(weapon.role_tag),
 	])
 	match key:
 		&"anti_light":
@@ -3268,6 +3270,20 @@ func _turret_profile_tooltip(key: StringName, data: Dictionary) -> String:
 		_:
 			lines.append("Generalist autocannon. Decent vs everything, specialised vs nothing.")
 	return "\n".join(lines)
+
+
+func _profile_key_from_name(weapon_name: String) -> StringName:
+	## Inverse of TurretComponent._profile_key_from_weapon_name. Used
+	## by the HUD's profile-swap UI to keep its highlight + click
+	## handlers keyed on the legacy StringName regardless of how the
+	## underlying WeaponResource is named.
+	match weapon_name:
+		"Balanced":   return &"balanced"
+		"Anti-Light": return &"anti_light"
+		"Anti-Heavy": return &"anti_heavy"
+		"Anti-Air":   return &"anti_air"
+		"HQ Defense": return &"hq_defense"
+	return &"balanced"
 
 
 ## Faction roster of base units that have a branch commit, split by

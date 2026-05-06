@@ -13,18 +13,16 @@ range_tier = &"long"
 rof_tier = &"slow"
 can_damage_trees = true
 
-damage = 85
-range = 25.0
-rof_seconds = 2.0
-use_explicit_air = true
+damage = 105
+range = 29.0
+rof_seconds = 3.0
+use_explicit_air = false
 engages_air_explicit = false
-mult_vs_unarmored_v2 = 1.0
-mult_vs_light_v2 = 1.0
-mult_vs_medium_v2 = 0.4
-mult_vs_heavy_v2 = 0.3
-mult_vs_structure_v2 = 0.4
-mult_vs_light_air_v2 = 1.0
-mult_vs_heavy_air_v2 = 0.5
+mult_vs_unarmored_v2 = 0.2
+mult_vs_light_v2 = 0.2
+mult_vs_medium_v2 = 0.5
+mult_vs_heavy_v2 = 1.0
+mult_vs_structure_v2 = 0.5
 
 [sub_resource type="Resource" id="weapon_overseer_drone_swarm"]
 script = ExtResource("2")

@@ -13,7 +13,7 @@ range_tier = &"long"
 rof_tier = &"fast"
 base_accuracy = 0.94
 
-damage = 50
+damage = 57
 range = 25.0
 rof_seconds = 0.5
 use_explicit_air = true

@@ -68,6 +68,6 @@ is_aircraft = true
 flight_altitude = 8.5
 flight_speed = 11.0
 
-speed = 8.0
+speed = 7.0
 sight_radius = 26.0
 armor_reduction = 0.35
