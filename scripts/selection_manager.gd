@@ -932,18 +932,20 @@ func command_move_to_world(ground_pos: Vector3, queue: bool = false) -> void:
 		_legacy_command_move_to_world(ground_pos, queue)
 		return
 
-	# New system: collect ground squads (GroundMovement) and route them through
-	# a SquadGroup. Aircraft / crawlers / workers stay on legacy.
+	# New system: collect ground squads (GroundMovement) and aircraft
+	# (AircraftMovement) and route them through the new system. Crawlers /
+	# workers stay on legacy.
 	# NOTE: `queue` is intentionally not forwarded to the new system
 	# (Plan A: queueing not yet supported; see helper docstring).
-	_new_system_dispatch_ground_move(ground_pos)
+	_new_system_dispatch_movables(ground_pos)
 
-	# Legacy fall-through for non-GroundMovement movables (aircraft, crawlers, etc.)
+	# Legacy fall-through for non-GroundMovement / non-AircraftMovement movables
+	# (crawlers, workers, etc.)
 	for s: Node3D in _selected_units:
 		if not is_instance_valid(s):
 			continue
-		var mc: Node = s.get_node_or_null("MovementComponent")
-		if mc != null and mc is GroundMovement:
+		var mc_skip: Node = s.get_node_or_null("MovementComponent")
+		if mc_skip is GroundMovement or mc_skip is AircraftMovement:
 			continue  # already handled above
 		if s.has_method("command_move"):
 			s.command_move(ground_pos)
@@ -994,20 +996,23 @@ func _legacy_command_move_to_world(ground_pos: Vector3, queue: bool = false) -> 
 			movable.command_move(slot)
 
 
-func _new_system_dispatch_ground_move(ground_pos: Vector3) -> void:
-	## Dispatches ground squads through the new MovementComponent / SquadGroup
-	## system. The `queue` parameter on the public wrappers is INTENTIONALLY
-	## NOT THREADED here — Plan A doesn't support waypoint queueing on the new
-	## path (spec §17 lists it as out of scope). A queued shift-click move on
-	## a flag-on selection runs as a normal single move. Plan B may add queue
-	## support if SquadGroup gains a waypoint-chain feature.
+func _new_system_dispatch_movables(ground_pos: Vector3) -> void:
+	## Routes any selected entity with a MovementComponent through the new
+	## system. Plan B: ground squads form a SquadGroup as before; aircraft
+	## receive solo goto_world (mixed-domain SquadGroup is Plan C). Crawlers /
+	## workers are handled by their own command_move paths in the legacy
+	## fall-through.
 	##
-	## Shared helper: collect GroundMovement squads from the current selection
-	## and route them through a SquadGroup (multi-squad) or direct goto_world
-	## (single squad). Called by both command_move_to_world and
-	## command_attack_move_to_world when the new system is active.
-	# First, evict members from any prior SquadGroup so the old group's
-	# _physics_process stops overwriting the new one's targets.
+	## The `queue` parameter on the public wrappers is INTENTIONALLY NOT
+	## FORWARDED here — Plan A doesn't support waypoint queueing on the new
+	## path (spec §17 lists it as out of scope). A queued shift-click move on
+	## a flag-on selection runs as a normal single move.
+	##
+	## Called by both command_move_to_world and command_attack_move_to_world
+	## when the new system is active.
+
+	# Evict members from any prior SquadGroup so the old group's
+	# _physics_process stops overwriting the new targets.
 	for s: Node in _selected_units:
 		if not is_instance_valid(s):
 			continue
@@ -1017,16 +1022,20 @@ func _new_system_dispatch_ground_move(ground_pos: Vector3) -> void:
 			if prior_gm.squad_group_ref != null and is_instance_valid(prior_gm.squad_group_ref):
 				prior_gm.squad_group_ref.drop_member(s, SquadGroup.DropReason.PLAYER_ORDER)
 
+	# Bucket by movement type.
 	var ground_members: Array = []
-	for s: Node3D in _selected_units:
+	var aircraft_members: Array = []
+	for s: Node in _selected_units:
 		if not is_instance_valid(s):
 			continue
 		var mc: Node = s.get_node_or_null("MovementComponent")
-		if mc != null and mc is GroundMovement:
+		if mc is GroundMovement:
 			ground_members.append(s)
+		elif mc is AircraftMovement:
+			aircraft_members.append(s)
 
+	# Ground: single squad uses direct goto_world; multiple squads form a SquadGroup.
 	if ground_members.size() == 1:
-		# Single squad — no SquadGroup needed. Direct goto_world.
 		var gm: GroundMovement = ground_members[0].get_node("MovementComponent") as GroundMovement
 		gm.goto_world(ground_pos)
 	elif ground_members.size() > 1:
@@ -1041,6 +1050,11 @@ func _new_system_dispatch_ground_move(ground_pos: Vector3) -> void:
 			for m: Node3D in ground_members:
 				var gm2: GroundMovement = m.get_node("MovementComponent") as GroundMovement
 				gm2.goto_world(grp._slot_world(m))
+
+	# Aircraft: solo goto_world each (Plan C will add mixed-domain SquadGroup).
+	for a: Node in aircraft_members:
+		var am: AircraftMovement = a.get_node("MovementComponent") as AircraftMovement
+		am.goto_world(ground_pos)
 
 
 func _command_assist_build(building: Building) -> void:
@@ -1096,17 +1110,17 @@ func command_attack_move_to_world(ground_pos: Vector3, queue: bool = false) -> v
 		_legacy_command_attack_move_to_world(ground_pos, queue)
 		return
 
-	# New system: same SquadGroup creation as a normal move. The combat stance
-	# distinction (attack-move = divert to engage targets en route) is handled
-	# inside combat_component.gd's existing engagement logic, not here.
-	_new_system_dispatch_ground_move(ground_pos)
+	# New system: same SquadGroup/aircraft dispatch as a normal move. The combat
+	# stance distinction (attack-move = divert to engage targets en route) is
+	# handled inside combat_component.gd's existing engagement logic, not here.
+	_new_system_dispatch_movables(ground_pos)
 
-	# Legacy fall-through for non-GroundMovement movables (aircraft, etc.)
+	# Legacy fall-through for non-GroundMovement / non-AircraftMovement movables.
 	for s: Node3D in _selected_units:
 		if not is_instance_valid(s):
 			continue
-		var mc: Node = s.get_node_or_null("MovementComponent")
-		if mc != null and mc is GroundMovement:
+		var mc_skip: Node = s.get_node_or_null("MovementComponent")
+		if mc_skip is GroundMovement or mc_skip is AircraftMovement:
 			continue  # already handled above
 		var combat: Node = s.get_combat() if s.has_method("get_combat") else null
 		if combat and combat.has_method("command_attack_move"):
