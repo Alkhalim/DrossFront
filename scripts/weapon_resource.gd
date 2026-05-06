@@ -192,6 +192,12 @@ extends Resource
 ## When true, engages_air() trusts engages_air_explicit. When false
 ## (legacy), it dispatches via role_tag and can_hit_air.
 @export var use_explicit_air: bool = false
+## When true, this weapon can engage ground-class targets (Light /
+## Medium / Heavy / Apex / Structure / Unarmored armor classes).
+## Used by SquadGroup's range-rank sort: squads with no AG weapons
+## are slotted in the formation's middle (AA pool). Default true
+## because most weapons hit ground.
+@export var hits_ground: bool = true
 
 @export_group("Direct armor multipliers (post-refactor)")
 ## Per-armor-class damage multipliers. -1 = fall back to legacy

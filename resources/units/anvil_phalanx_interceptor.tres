@@ -18,6 +18,7 @@ range = 15.0
 rof_seconds = 0.5
 use_explicit_air = true
 engages_air_explicit = true
+hits_ground = false
 mult_vs_unarmored_v2 = 0.0
 mult_vs_light_v2 = 0.0
 mult_vs_medium_v2 = 0.0
