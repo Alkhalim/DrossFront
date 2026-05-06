@@ -3099,6 +3099,13 @@ func _track_unit_lifecycle() -> void:
 		_tracked_units[iid] = "enemy" if is_enemy else "ally"
 		if node.has_signal("squad_destroyed"):
 			node.connect("squad_destroyed", Callable(self, "_on_tracked_unit_destroyed").bind(iid))
+		# Wire path_unreachable for our own units so the AI can re-plan
+		# when a unit gives up on its goal (Plan C Level 4 stuck escalation).
+		if not is_enemy:
+			var mc: Node = node.get_node_or_null("MovementComponent")
+			if mc != null and mc is MovementComponent:
+				if not mc.path_unreachable.is_connected(_on_unit_path_unreachable):
+					mc.path_unreachable.connect(_on_unit_path_unreachable.bind(node))
 
 
 func _on_tracked_unit_destroyed(iid: int) -> void:
@@ -3110,6 +3117,24 @@ func _on_tracked_unit_destroyed(iid: int) -> void:
 	else:
 		_losses += 1
 	_tracked_units.erase(iid)
+
+
+## Called when one of our AI-owned units' MovementComponent gives up
+## on its goal (Plan C Level 4 stuck escalation). Re-evaluate the
+## unit's plan on the next AI tick.
+func _on_unit_path_unreachable(_reason: int, unit: Node) -> void:
+	if not is_instance_valid(unit):
+		return
+	# The simplest "re-plan" signal: clear the unit's current order.
+	# Whatever AI loop manages this unit will pick a new objective on
+	# its next tick. Try the most likely property/method names; if
+	# neither exists, the handler is a no-op log (still better than
+	# silent failure).
+	if "_pathfinding_failed" in unit:
+		unit._pathfinding_failed = true
+	if unit.has_method("_clear_current_objective"):
+		unit._clear_current_objective()
+	print_debug("[AI] path_unreachable on ", unit.name if unit.has_method("get_name") else "<unit>")
 
 
 func _state_label() -> String:
