@@ -202,13 +202,20 @@ func _check_dispersed_promotion() -> void:
 		_group_center = _centroid()
 		_query_group_path()
 
-func _check_drop_on_no_progress(_delta: float) -> void:
+func _check_drop_on_no_progress(delta: float) -> void:
 	for m: Node in _members.duplicate():
 		if not is_instance_valid(m): continue
 		var gm: GroundMovement = _gm_for(m)
 		if gm == null: continue
 		if gm._stuck_level >= 2:
-			drop_member(m, DropReason.NO_PROGRESS)
+			var t: float = _no_progress_timers.get(m, 0.0) as float
+			t += delta
+			_no_progress_timers[m] = t
+			if t >= drop_on_no_progress_seconds:
+				drop_member(m, DropReason.NO_PROGRESS)
+		else:
+			# Recovered (stuck_level reset) — clear the dwell timer
+			_no_progress_timers.erase(m)
 
 func _update_member_targets() -> void:
 	for m: Node in _members:
