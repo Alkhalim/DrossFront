@@ -406,15 +406,12 @@ func _ready() -> void:
 	# 120 with no visible quality loss for movement / animation.
 	_walk_bob_phase = int(get_instance_id() % 3)
 	# Navigation agent / movement component setup.
-	# Pilot feature flag: anvil_hound (and its variants) use the new
-	# GroundMovement system when MovementFlags.use_new_system() is true.
-	# All other units continue on the legacy NavigationAgent3D path.
-	# Pilot identifier — "anvil_hound" substring intentionally matches the
-	# base anvil_hound.tres plus the anvil_hound_ripper and anvil_hound_tracker
-	# variants (all share the chassis). PA-21 will replace this with a
-	# stats.use_ground_movement export on UnitStatResource.
-	var _is_pilot_class: bool = stats != null and "anvil_hound" in (stats.resource_path as String)
-	if MovementFlags.use_new_system() and _is_pilot_class:
+	# Ground unit predicate — every ground class uses the new MovementComponent
+	# when the feature flag is on. Aircraft and crawlers stay on legacy through
+	# Plan B. The is_aircraft / is_crawler flags on UnitStatResource are the
+	# canonical source of truth (see PA-21 backfill).
+	var _is_ground: bool = stats != null and not stats.is_aircraft and not stats.is_crawler
+	if MovementFlags.use_new_system() and _is_ground:
 		# New system: GroundMovement
 		var gm := GroundMovement.new()
 		gm.name = "MovementComponent"
