@@ -27,11 +27,16 @@ const LAYOUTS_GROUND: Dictionary = {
 }
 
 static func slots_for(size: int) -> Array[Vector3]:
+	var slots: Array[Vector3] = []
 	if LAYOUTS_GROUND.has(size):
-		return LAYOUTS_GROUND[size] as Array[Vector3]
+		# Dictionary values are stored as untyped Array (Godot 4 doesn't
+		# preserve Array[Vector3] inside a const Dictionary). Copy into
+		# a freshly-typed array so the return matches the signature.
+		for v: Variant in LAYOUTS_GROUND[size]:
+			slots.append(v as Vector3)
+		return slots
 	# Larger groups: tile a 3-wide grid centered on Z=0 with rank 0
 	# at the largest positive Z (consistent with the named layouts).
-	var slots: Array[Vector3] = []
 	var ranks: int = (size + 2) / 3
 	var idx: int = 0
 	while idx < size:
