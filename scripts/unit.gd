@@ -7462,8 +7462,8 @@ func get_ag_range() -> float:
 	for w: WeaponResource in [stats.primary_weapon, stats.secondary_weapon]:
 		if w == null:
 			continue
-		if "hits_ground" in w and w.hits_ground:
-			best = maxf(best, w.range)
+		if w.hits_ground:
+			best = maxf(best, w.resolved_range())
 	return best
 
 
@@ -7479,7 +7479,7 @@ func is_aa_only() -> bool:
 	for w: WeaponResource in [stats.primary_weapon, stats.secondary_weapon]:
 		if w == null:
 			continue
-		if "hits_ground" in w and w.hits_ground:
+		if w.hits_ground:
 			has_ag = true
 		if w.engages_air():
 			has_aa = true
