@@ -28,6 +28,10 @@ window/size/viewport_height=1080
 window/size/mode=2
 window/stretch/mode="canvas_items"
 
+[drossfront]
+
+movement/use_new_system=true
+
 [gui]
 
 timers/tooltip_delay_sec=0.2
@@ -74,10 +78,6 @@ camera_zoom_out={
 "events": [Object(InputEventMouseButton,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"button_mask":16,"position":Vector2(0, 0),"global_position":Vector2(0, 0),"factor":1.0,"button_index":5,"canceled":false,"pressed":true,"double_click":false,"script":null)
 ]
 }
-
-[drossfront]
-
-movement/use_new_system=false
 
 [rendering]
 
