@@ -134,7 +134,7 @@ func _assign_slots() -> void:
 	var sorted_members: Array = FormationLayouts.range_rank_sort(_members)
 	var slots: Array[Vector3] = FormationLayouts.slots_for(sorted_members.size())
 	_slot_offsets.clear()
-	for i in sorted_members.size():
+	for i: int in sorted_members.size():
 		_slot_offsets[sorted_members[i]] = slots[i] * formation_spacing
 
 func _recompute_caps() -> void:

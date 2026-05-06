@@ -128,7 +128,7 @@ var _stuck_pushout_dir: Vector3 = Vector3.ZERO
 func _ensure_stuck_buffer() -> void:
 	if _stuck_buffer.size() != stuck_window_frames:
 		_stuck_buffer.resize(stuck_window_frames)
-		for i in stuck_window_frames:
+		for i: int in stuck_window_frames:
 			_stuck_buffer[i] = max_speed * (1.0 / 60.0)  # seed as healthy
 		_stuck_buffer_idx = 0
 

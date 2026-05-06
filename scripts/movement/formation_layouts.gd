@@ -71,13 +71,13 @@ static func range_rank_sort(members: Array) -> Array:
 	var n: int = ag_pool.size()
 	var head_n: int = n / 2 + (n % 2)            # extra one to head; tail size = n - head_n
 	var sorted: Array = []
-	for i in head_n:
+	for i: int in head_n:
 		sorted.append(ag_pool[i])
-	for m in aa_pool:
+	for m: Variant in aa_pool:
 		sorted.append(m)
 	# Tail in DESCENDING ag_range so highest-range ends up rearmost
 	var tail: Array = ag_pool.slice(head_n, n)
 	tail.reverse()
-	for m in tail:
+	for m: Variant in tail:
 		sorted.append(m)
 	return sorted
