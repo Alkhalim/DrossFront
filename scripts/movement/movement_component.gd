@@ -49,6 +49,7 @@ func _physics_process(delta: float) -> void:
 			_velocity, Vector3.ZERO, max_accel, max_turn_rate_rad_s, delta)
 		_body.velocity = _velocity
 		_body.move_and_slide()
+		_stuck_step(delta, _is_combat_engaged())
 		return
 
 	var pos: Vector3 = _body.global_position
@@ -62,6 +63,9 @@ func _physics_process(delta: float) -> void:
 									  _avoid_obstacles(),
 									  avoid_min_distance,
 									  avoid_repel)
+	if _stuck_pushout_frames_left > 0:
+		desired += _stuck_pushout_dir * max_speed
+		_stuck_pushout_frames_left -= 1
 	# Clamp composed magnitude to capped speed
 	var dlen: float = desired.length()
 	if dlen > cap:
@@ -71,6 +75,7 @@ func _physics_process(delta: float) -> void:
 		_velocity, desired, max_accel, _capped_turn_rate(), delta)
 	_body.velocity = _velocity
 	_body.move_and_slide()
+	_stuck_step(delta, _is_combat_engaged())
 
 func has_target() -> bool:
 	return not _is_inf(target)
@@ -102,3 +107,109 @@ func _capped_turn_rate() -> float:
 
 static func _is_inf(v: Vector3) -> bool:
 	return is_inf(v.x) or is_inf(v.y) or is_inf(v.z)
+
+# --- Stuck detector ---
+@export var stuck_progress_ratio_threshold: float = 0.10
+@export var stuck_window_frames: int = 30
+@export var stuck_repath_cooldown: float = 1.5
+@export var stuck_pushout_cooldown: float = 2.0
+@export var stuck_pushout_duration_frames: int = 10
+
+var _stuck_buffer: PackedFloat32Array = PackedFloat32Array()
+var _stuck_buffer_idx: int = 0
+var _stuck_last_pos: Vector3 = Vector3.ZERO
+var _stuck_level: int = 0                       # 0 = healthy, 1 = repathed, 2 = pushed-out
+var _stuck_cooldown_remaining: float = 0.0
+var _stuck_pushout_frames_left: int = 0
+var _stuck_pushout_dir: Vector3 = Vector3.ZERO
+
+func _ensure_stuck_buffer() -> void:
+	if _stuck_buffer.size() != stuck_window_frames:
+		_stuck_buffer.resize(stuck_window_frames)
+		for i in stuck_window_frames:
+			_stuck_buffer[i] = max_speed * (1.0 / 60.0)  # seed as healthy
+		_stuck_buffer_idx = 0
+
+func _stuck_step(delta: float, combat_engaged: bool) -> void:
+	_ensure_stuck_buffer()
+	if _stuck_cooldown_remaining > 0.0:
+		_stuck_cooldown_remaining -= delta
+	var pos: Vector3 = _body.global_position
+	var disp: float = (pos - _stuck_last_pos).length()
+	_stuck_last_pos = pos
+	_stuck_buffer[_stuck_buffer_idx] = disp
+	_stuck_buffer_idx = (_stuck_buffer_idx + 1) % _stuck_buffer.size()
+
+	if not has_target():
+		return
+	if combat_engaged:
+		return
+	if _stuck_cooldown_remaining > 0.0:
+		return
+
+	var sum: float = 0.0
+	for v in _stuck_buffer:
+		sum += v
+	var mean_disp: float = sum / float(_stuck_buffer.size())
+	var expected: float = max_speed * delta
+	if expected <= 0.0:
+		return
+	var ratio: float = mean_disp / expected
+	if ratio > 0.5:
+		# Healthy progress — reset escalation level
+		_stuck_level = 0
+		return
+	if ratio < stuck_progress_ratio_threshold:
+		_escalate()
+
+func _escalate() -> void:
+	_stuck_level += 1
+	match _stuck_level:
+		1:
+			_stuck_cooldown_remaining = stuck_repath_cooldown
+			_on_stuck_level_1_repath()
+		2:
+			_stuck_cooldown_remaining = stuck_pushout_cooldown
+			_stuck_pushout_frames_left = stuck_pushout_duration_frames
+			_stuck_pushout_dir = _compute_pushout_dir()
+			_on_stuck_level_2_pushout()
+		_:
+			# Plan A clamps at level 2. Plan B adds Level 3-4.
+			_stuck_level = 2
+			emit_signal("path_unreachable", REASON_REPEATEDLY_STUCK)
+
+## Subclass override — request a fresh path.
+func _on_stuck_level_1_repath() -> void:
+	pass
+
+## Subclass override; default no-op. The pushout direction is
+## applied by the base (in _physics_process) for
+## stuck_pushout_duration_frames after this fires.
+func _on_stuck_level_2_pushout() -> void:
+	pass
+
+func _compute_pushout_dir() -> Vector3:
+	## Default: opposite of mean obstacle direction. If no obstacles,
+	## return a stable arbitrary perpendicular to current velocity.
+	var pos: Vector3 = _body.global_position
+	var obstacles: Array = _avoid_obstacles()
+	if obstacles.is_empty():
+		if _velocity.length() < 0.001:
+			return Vector3.RIGHT
+		return Vector3(-_velocity.z, 0, _velocity.x).normalized()
+	var sum: Vector3 = Vector3.ZERO
+	var n: int = 0
+	for o: Variant in obstacles:
+		if not (o is Node3D) or not is_instance_valid(o):
+			continue
+		sum += pos - (o as Node3D).global_position
+		n += 1
+	if n == 0:
+		return Vector3.RIGHT
+	sum.y = 0
+	return sum.normalized()
+
+## Subclass override — returns true if the unit is currently in
+## combat (suppresses stuck detection per spec §11).
+func _is_combat_engaged() -> bool:
+	return false
