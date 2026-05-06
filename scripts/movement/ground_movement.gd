@@ -49,7 +49,7 @@ func goto_world(world_pos: Vector3) -> void:
 	else:
 		path_waypoints = PackedVector3Array()
 		path_waypoint_idx = 0
-		emit_signal("path_unreachable", REASON_NO_NAVMESH_PATH)
+		path_unreachable.emit(REASON_NO_NAVMESH_PATH)
 
 func set_slot_target(slot_world: Vector3) -> void:
 	## Called per-frame by SquadGroup in cohesive mode. No path

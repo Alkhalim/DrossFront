@@ -287,7 +287,8 @@ func _physics_process(delta: float) -> void:
 		_current_target = forced_target
 	elif _current_target and not _is_valid_target(_current_target):
 		_current_target = null
-		emit_signal("combat_ended")
+		# Unguarded: the elif condition guarantees _current_target was non-null
+		combat_ended.emit()
 
 	# Auto-acquire targets: allowed when idle, or during attack-move. We scan a
 	# wider engage range than the weapon range so an idle unit will move toward
@@ -450,7 +451,7 @@ func clear_target() -> void:
 	_current_target = null
 	attack_move_target = Vector3.INF
 	if was_engaged:
-		emit_signal("combat_ended")
+		combat_ended.emit()
 
 
 func command_attack_move(pos: Vector3) -> void:
@@ -459,7 +460,7 @@ func command_attack_move(pos: Vector3) -> void:
 	forced_target = null
 	_current_target = null
 	if was_engaged:
-		emit_signal("combat_ended")
+		combat_ended.emit()
 	# Move without clearing combat state (bypass command_move's clear_target)
 	_unit.move_target = pos
 	_unit.move_target.y = _unit.global_position.y

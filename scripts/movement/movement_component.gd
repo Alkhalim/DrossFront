@@ -178,7 +178,7 @@ func _escalate() -> void:
 		_:
 			# Plan A clamps at level 2. Plan B adds Level 3-4.
 			_stuck_level = 2
-			emit_signal("path_unreachable", REASON_REPEATEDLY_STUCK)
+			path_unreachable.emit(REASON_REPEATEDLY_STUCK)
 
 ## Subclass override — request a fresh path.
 func _on_stuck_level_1_repath() -> void:
