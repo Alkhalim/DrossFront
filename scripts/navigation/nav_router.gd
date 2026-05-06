@@ -57,7 +57,13 @@ func _map_rid_for(_profile: AgentProfile) -> RID:
 	## NavigationRegion3D under test_arena). Plan B will introduce
 	## per-profile maps for the crawler. For now, return the
 	## default world map.
-	var world_3d: World3D = get_world_3d()
+	##
+	## NavRouter extends Node, not Node3D, so get_world_3d() is
+	## not directly available. We fetch via the viewport.
+	var viewport: Viewport = get_viewport()
+	if viewport == null:
+		return RID()
+	var world_3d: World3D = viewport.world_3d
 	if world_3d == null:
 		return RID()
 	return world_3d.get_navigation_map()
