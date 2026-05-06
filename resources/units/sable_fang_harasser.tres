@@ -1,6 +1,7 @@
 [gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
 
 [sub_resource type="Resource" id="weapon_harasser_repeater"]
@@ -14,6 +15,19 @@ damage_value = 10
 base_accuracy = 0.86
 can_hit_air = true
 air_damage_mult = 0.2
+
+damage = 10
+range = 15.0
+rof_seconds = 0.25
+use_explicit_air = true
+engages_air_explicit = true
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 1.0
+mult_vs_medium_v2 = 0.4
+mult_vs_heavy_v2 = 0.3
+mult_vs_structure_v2 = 0.4
+mult_vs_light_air_v2 = 1.0
+mult_vs_heavy_air_v2 = 0.5
 
 [resource]
 script = ExtResource("1")
@@ -38,3 +52,7 @@ flight_speed = 16.5
 special_description = "Fang Harasser — fast (22 u/s) high-ROF light pulse repeaters tuned for picking off enemy salvage workers + Crawler escorts. Lower HP, lower pop cost, much higher mobility. Reads as the economy-disruption build."
 passive_description = "Economy Disruption Loadout — high-ROF light pulse repeaters and 22 u/s top speed for picking off enemy workers + Crawler escorts."
 branch_summary = "Faster, lighter, repeater-armed economy disruption build. Pick off enemy workers and Crawler escorts; runs from anything that shoots back."
+
+speed = 16.0
+sight_radius = 26.0
+armor_reduction = 0.1

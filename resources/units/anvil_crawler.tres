@@ -20,3 +20,7 @@ build_time = 45.0
 built_at = &"headquarters"
 special_description = "Mobile salvage harvester. Spawns workers at its current position; harvests within 45m. Crushes light/medium wrecks for 25% salvage. Max 3 per player."
 is_crawler = true
+
+speed = 3.0
+sight_radius = 18.0
+armor_reduction = 0.45

@@ -1,6 +1,7 @@
 [gd_resource type="Resource" script_class="UnitStatResource" load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
 
 [sub_resource type="Resource" id="weapon_pintle"]
@@ -12,6 +13,19 @@ range_tier = &"medium"
 rof_tier = &"rapid"
 base_accuracy = 0.78
 can_hit_air = true
+
+damage = 5
+range = 15.0
+rof_seconds = 0.25
+use_explicit_air = true
+engages_air_explicit = true
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 1.0
+mult_vs_medium_v2 = 0.4
+mult_vs_heavy_v2 = 0.3
+mult_vs_structure_v2 = 0.4
+mult_vs_light_air_v2 = 1.0
+mult_vs_heavy_air_v2 = 0.5
 
 [resource]
 script = ExtResource("1")
@@ -44,3 +58,7 @@ flight_altitude = 8.0
 flight_speed = 18.0
 special_description = "Hammerhead Escort — anti-air variant. Pintle suppression for ground harassment + a 9s-cooldown 6-missile AAir barrage that autocasts in combat. The screening variant — flies with Bombers."
 branch_summary = "Twin AAir cannons replace the bomb bay. Air-superiority gunship that protects bombers and clears AAir threats."
+
+speed = 12.0
+sight_radius = 26.0
+armor_reduction = 0.35

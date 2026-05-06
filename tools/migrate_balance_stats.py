@@ -159,13 +159,19 @@ def parse_tres(path: Path) -> tuple[str, list[Section]]:
 
 
 def write_tres(path: Path, preamble: str, sections: list[Section]) -> None:
+    """Write back with one blank line between sections — strips any
+    trailing blanks inside each section so newly-appended fields don't
+    end up after the section's original trailing blank."""
     parts: list[str] = []
     if preamble:
-        parts.append(preamble)
+        parts.append(preamble.rstrip("\n"))
     for s in sections:
         parts.append(f"[{s.header}]")
-        for line in s.lines:
-            parts.append(line)
+        kvs = list(s.lines)
+        while kvs and kvs[-1].strip() == "":
+            kvs.pop()
+        parts.extend(kvs)
+        parts.append("")  # one blank line between sections
     text = "\n".join(parts)
     if not text.endswith("\n"):
         text += "\n"
@@ -367,13 +373,20 @@ def _find_weapon_ext_id(sections: list[Section]) -> str | None:
     return None
 
 
-def _bump_load_steps(preamble: str, delta: int) -> str:
-    """Increase the load_steps count in the gd_resource header by delta."""
-    m = re.search(r'load_steps=(\d+)', preamble)
+def _bump_load_steps(sections: list[Section], delta: int) -> None:
+    """Increase the load_steps count in the gd_resource header by delta.
+    The gd_resource header is itself parsed as the first Section (its kvs
+    live in the header string, so we rewrite that string in place)."""
+    if not sections:
+        return
+    first = sections[0]
+    if not first.header.startswith("gd_resource"):
+        return
+    m = re.search(r'load_steps=(\d+)', first.header)
     if not m:
-        return preamble
+        return
     new_count = int(m.group(1)) + delta
-    return preamble[: m.start()] + f"load_steps={new_count}" + preamble[m.end():]
+    first.header = first.header[:m.start()] + f"load_steps={new_count}" + first.header[m.end():]
 
 
 def _fmt_float(v: float) -> str:
@@ -465,7 +478,7 @@ def migrate_building(path: Path, strip: bool = False) -> bool:
     res_section.set_or_append("default_weapon_index", "0")
 
     # Bump load_steps to count the new ext + new subs.
-    preamble = _bump_load_steps(preamble, added_ext + len(new_subs))
+    _bump_load_steps(sections, added_ext + len(new_subs))
 
     write_tres(path, preamble, sections)
     return True

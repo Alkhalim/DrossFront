@@ -1,6 +1,7 @@
 [gd_resource type="Resource" script_class="UnitStatResource" load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
 
 [sub_resource type="Resource" id="weapon_salvo_pod"]
@@ -21,6 +22,19 @@ mult_vs_light = 0.55
 mult_vs_medium = 0.95
 mult_vs_heavy = 1.10
 structure_damage_mult = 0.70
+
+damage = 23
+range = 25.0
+rof_seconds = 3.6
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 0.55
+mult_vs_medium_v2 = 0.95
+mult_vs_heavy_v2 = 1.1
+mult_vs_structure_v2 = 0.7
+mult_vs_light_air_v2 = 1.0
+mult_vs_heavy_air_v2 = 0.5
 
 [resource]
 script = ExtResource("1")
@@ -44,3 +58,7 @@ rof_ramp_max = 0.55
 special_description = "Breacher Salvo branch — main gun replaced by a six-tube rocket battery that ripples all six rockets in tight succession. Each consecutive salvo at the same target shortens the next reload by 10%, capped at 55% off (cycle floor ~1.6s). Locks onto a target and tears it apart faster the longer it stays painted."
 passive_description = "Lock-On Cycle — every consecutive salvo at the same target shortens the next reload (-10% per shot, max -55%). Resets when the target changes."
 branch_summary = "Six-tube ripple-fire rocket battery with a fire-rate ramp -- best when you can keep the squad painting one heavy mech."
+
+speed = 5.0
+sight_radius = 18.0
+armor_reduction = 0.3

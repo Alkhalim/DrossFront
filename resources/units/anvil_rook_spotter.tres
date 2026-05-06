@@ -1,6 +1,7 @@
 [gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
 
 [sub_resource type="Resource" id="weapon_spotter_mg"]
@@ -16,6 +17,19 @@ can_hit_air = true
 air_damage_mult = 0.7
 mult_vs_light_air = 1.00
 mult_vs_heavy_air = 0.30
+
+damage = 5
+range = 27.0
+rof_seconds = 0.25
+use_explicit_air = true
+engages_air_explicit = true
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 1.0
+mult_vs_medium_v2 = 0.4
+mult_vs_heavy_v2 = 0.3
+mult_vs_structure_v2 = 0.4
+mult_vs_light_air_v2 = 1.0
+mult_vs_heavy_air_v2 = 0.3
 
 [resource]
 script = ExtResource("1")
@@ -39,3 +53,7 @@ sees_over_buildings = true
 special_description = "Rook Spotter — replaces one MG with a sensor mast. Extreme sight range + 200u stealth-detection radius. The Anvil counter to Sable stealth: park a Spotter squad on a flank and any concealed Specter passing through becomes targetable."
 passive_description = "Sensor Mast — 200u stealth-detection radius. Reveals concealed Sable units. Sees over buildings + dense terrain."
 branch_summary = "Trades the demolition charges for a tall sensor mast — sees over rooftops and pierces forest canopies. Long-range recon with no AS punch."
+
+speed = 12.0
+sight_radius = 36.0
+armor_reduction = 0.15

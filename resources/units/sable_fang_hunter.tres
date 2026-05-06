@@ -1,6 +1,7 @@
 [gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
 
 [sub_resource type="Resource" id="weapon_hunter_at"]
@@ -13,6 +14,19 @@ rof_tier = &"fast"
 damage_value = 21
 base_accuracy = 0.90
 can_hit_air = true
+
+damage = 21
+range = 15.0
+rof_seconds = 0.5
+use_explicit_air = true
+engages_air_explicit = true
+mult_vs_unarmored_v2 = 0.8
+mult_vs_light_v2 = 0.5
+mult_vs_medium_v2 = 0.8
+mult_vs_heavy_v2 = 1.2
+mult_vs_structure_v2 = 0.6
+mult_vs_light_air_v2 = 0.3
+mult_vs_heavy_air_v2 = 0.4
 
 [resource]
 script = ExtResource("1")
@@ -37,3 +51,7 @@ flight_speed = 13.5
 special_description = "Fang Hunter — micro-missiles retuned for anti-armour work (AA tag, moderate damage). Drops light micro-rockets that crack heavy armour. Pair with Switchblades or Specters; the Hunter alone won't beat dedicated AAir defenses."
 passive_description = "Anti-Armour Micro-Missiles — AA-tagged warheads tuned for cracking heavy ground armour."
 branch_summary = "Micro-missiles re-armed for AT (heavy-armour cracking) work. Slower-firing cluster volleys; the Fang variant that can actually threaten heavies."
+
+speed = 16.0
+sight_radius = 18.0
+armor_reduction = 0.1

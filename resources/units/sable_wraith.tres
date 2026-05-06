@@ -1,6 +1,7 @@
 [gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
 
 [sub_resource type="Resource" id="weapon_wraith_bomb_bay"]
@@ -14,6 +15,19 @@ base_accuracy = 0.87
 damage_value = 173
 structure_damage_mult = 3.0
 can_damage_trees = true
+
+damage = 173
+range = 15.0
+rof_seconds = 2.0
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 0.6
+mult_vs_light_v2 = 0.6
+mult_vs_medium_v2 = 0.6
+mult_vs_heavy_v2 = 0.7
+mult_vs_structure_v2 = 3.0
+mult_vs_light_air_v2 = 0.2
+mult_vs_heavy_air_v2 = 0.2
 
 [resource]
 script = ExtResource("1")
@@ -41,3 +55,7 @@ detection_radius = 60.0
 stealth_restore_time = 5.0
 special_description = "Sable stealth bomber. Anti-structure bomb bay (heavy damage vs buildings, weak vs mechs). Stealthed when not damaged or under direct surveillance — ideal for backline-strike plays. Requires Black Pylon to build."
 passive_description = "Stealth Bomber — concealed when not under fire or observed. AS-tagged bomb bay devastates structures; weak vs mechs."
+
+speed = 12.0
+sight_radius = 26.0
+armor_reduction = 0.35

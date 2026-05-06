@@ -1,8 +1,11 @@
 [gd_resource type="Resource" script_class="UnitStatResource" load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
 [ext_resource type="Resource" path="res://resources/units/sable_harbinger_swarm_marshal.tres" id="3"]
+
 [ext_resource type="Resource" path="res://resources/units/sable_harbinger_overseer.tres" id="4"]
 
 [sub_resource type="Resource" id="weapon_harbinger_railgun"]
@@ -13,6 +16,19 @@ damage_tier = &"very_high"
 range_tier = &"long"
 rof_tier = &"slow"
 can_damage_trees = true
+
+damage = 85
+range = 25.0
+rof_seconds = 2.0
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 1.0
+mult_vs_medium_v2 = 0.4
+mult_vs_heavy_v2 = 0.3
+mult_vs_structure_v2 = 0.4
+mult_vs_light_air_v2 = 1.0
+mult_vs_heavy_air_v2 = 0.5
 
 [sub_resource type="Resource" id="weapon_drone_swarm"]
 script = ExtResource("2")
@@ -25,6 +41,19 @@ salvo_count = 4
 is_drone_release = true
 drone_variant = &"default"
 max_active_drones = 6
+
+damage = 25
+range = 15.0
+rof_seconds = 1.0
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 0.8
+mult_vs_light_v2 = 0.8
+mult_vs_medium_v2 = 1.0
+mult_vs_heavy_v2 = 0.8
+mult_vs_structure_v2 = 0.8
+mult_vs_light_air_v2 = 0.4
+mult_vs_heavy_air_v2 = 0.3
 
 [resource]
 script = ExtResource("1")
@@ -53,3 +82,7 @@ branch_a_name = "Swarm Marshal"
 branch_b_name = "Overseer"
 branch_a_stats = ExtResource("3")
 branch_b_stats = ExtResource("4")
+
+speed = 5.0
+sight_radius = 26.0
+armor_reduction = 0.45

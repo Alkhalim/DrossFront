@@ -1,6 +1,7 @@
 [gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
 
 [sub_resource type="Resource" id="weapon_widow_needles"]
@@ -18,6 +19,19 @@ air_damage_mult = 0.2
 mult_vs_light = 0.40
 mult_vs_medium = 1.00
 mult_vs_heavy = 0.60
+
+damage = 36
+range = 25.0
+rof_seconds = 0.5
+use_explicit_air = true
+engages_air_explicit = true
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 0.4
+mult_vs_medium_v2 = 1.0
+mult_vs_heavy_v2 = 0.6
+mult_vs_structure_v2 = 0.4
+mult_vs_light_air_v2 = 1.0
+mult_vs_heavy_air_v2 = 0.5
 
 [resource]
 script = ExtResource("1")
@@ -39,3 +53,7 @@ primary_weapon = SubResource("weapon_widow_needles")
 special_description = "Jackal Widow branch — long pulse lasers extend reach so the Widow picks targets from outside their detection bubble. Lower HP, no missile secondary. Damage rolled into the lasers."
 passive_description = "Long Pulse Lasers — extended-range laser line. Engages from outside the enemy's reaction bubble; fragile if caught."
 branch_summary = "Lighter chassis with stealth coating. Trades survivability for a much wider sight + ambush potential. Cannot fire at air."
+
+speed = 12.0
+sight_radius = 26.0
+armor_reduction = 0.3

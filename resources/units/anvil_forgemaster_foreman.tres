@@ -1,6 +1,7 @@
 [gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
 
 [sub_resource type="Resource" id="weapon_riveter"]
@@ -12,6 +13,19 @@ range_tier = &"medium"
 rof_tier = &"fast"
 base_accuracy = 0.84
 
+damage = 12
+range = 15.0
+rof_seconds = 0.5
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 1.0
+mult_vs_medium_v2 = 0.4
+mult_vs_heavy_v2 = 0.3
+mult_vs_structure_v2 = 0.4
+mult_vs_light_air_v2 = 1.0
+mult_vs_heavy_air_v2 = 0.5
+
 [sub_resource type="Resource" id="weapon_skyspike"]
 script = ExtResource("2")
 weapon_name = "Skyspike AA Battery"
@@ -20,6 +34,19 @@ damage_tier = &"high"
 range_tier = &"long"
 rof_tier = &"moderate"
 base_accuracy = 0.92
+
+damage = 50
+range = 25.0
+rof_seconds = 1.0
+use_explicit_air = true
+engages_air_explicit = true
+mult_vs_unarmored_v2 = 0.0
+mult_vs_light_v2 = 0.0
+mult_vs_medium_v2 = 0.0
+mult_vs_heavy_v2 = 0.0
+mult_vs_structure_v2 = 0.0
+mult_vs_light_air_v2 = 1.2
+mult_vs_heavy_air_v2 = 1.0
 
 [resource]
 script = ExtResource("1")
@@ -47,3 +74,7 @@ ability_duration = 5.0
 ability_description = "Heal friendly mechs within 22u for 156 HP/s over 5s (780 total). The army-wide medic upgrade."
 special_description = "Forgemaster Foreman branch — bigger Factory Pulse radius and a heavier heal tick. Same Skyspike AA battery as the base, lighter Riveter for self-defense. The army-wide medic build."
 branch_summary = "Heavier cannon and a stronger Factory Pulse heal aura. The frontline support build that can trade with mechs as well as mend them."
+
+speed = 5.0
+sight_radius = 18.0
+armor_reduction = 0.3

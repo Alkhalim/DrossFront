@@ -1,8 +1,11 @@
 [gd_resource type="Resource" script_class="UnitStatResource" load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
 [ext_resource type="Resource" path="res://resources/units/anvil_hound_tracker.tres" id="3"]
+
 [ext_resource type="Resource" path="res://resources/units/anvil_hound_ripper.tres" id="4"]
 
 [sub_resource type="Resource" id="weapon_autocannons"]
@@ -17,6 +20,19 @@ mult_vs_light = 0.40
 mult_vs_medium = 1.00
 mult_vs_heavy = 0.60
 
+damage = 25
+range = 15.0
+rof_seconds = 1.0
+use_explicit_air = true
+engages_air_explicit = true
+mult_vs_unarmored_v2 = 0.8
+mult_vs_light_v2 = 0.4
+mult_vs_medium_v2 = 1.0
+mult_vs_heavy_v2 = 0.6
+mult_vs_structure_v2 = 0.8
+mult_vs_light_air_v2 = 0.4
+mult_vs_heavy_air_v2 = 0.3
+
 [sub_resource type="Resource" id="weapon_at_missiles"]
 script = ExtResource("2")
 weapon_name = "Shoulder AT Missile Rack"
@@ -24,6 +40,19 @@ role_tag = &"AA"
 damage_tier = &"high"
 range_tier = &"medium"
 rof_tier = &"slow"
+
+damage = 50
+range = 15.0
+rof_seconds = 2.0
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 0.8
+mult_vs_light_v2 = 0.5
+mult_vs_medium_v2 = 0.8
+mult_vs_heavy_v2 = 1.2
+mult_vs_structure_v2 = 0.6
+mult_vs_light_air_v2 = 0.3
+mult_vs_heavy_air_v2 = 0.4
 
 [resource]
 script = ExtResource("1")
@@ -49,3 +78,7 @@ branch_a_stats = ExtResource("3")
 branch_b_stats = ExtResource("4")
 branch_a_name = "Tracker"
 branch_b_name = "Ripper"
+
+speed = 7.2
+sight_radius = 18.0
+armor_reduction = 0.3

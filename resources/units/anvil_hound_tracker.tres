@@ -1,6 +1,7 @@
 [gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
 
 [sub_resource type="Resource" id="weapon_autocannons"]
@@ -14,6 +15,19 @@ can_hit_air = true
 mult_vs_light = 0.40
 mult_vs_medium = 1.00
 mult_vs_heavy = 0.60
+
+damage = 25
+range = 15.0
+rof_seconds = 1.0
+use_explicit_air = true
+engages_air_explicit = true
+mult_vs_unarmored_v2 = 0.8
+mult_vs_light_v2 = 0.4
+mult_vs_medium_v2 = 1.0
+mult_vs_heavy_v2 = 0.6
+mult_vs_structure_v2 = 0.8
+mult_vs_light_air_v2 = 0.4
+mult_vs_heavy_air_v2 = 0.3
 
 [resource]
 script = ExtResource("1")
@@ -35,3 +49,7 @@ primary_weapon = SubResource("weapon_autocannons")
 special_description = "Recon-support refit. Very-long sight extends Anvil scouting range. Friendly units within 25u of a Tracker get +15% sight radius -- park a Tracker squad with your line to extend the army's eyes."
 passive_description = "Sight Aura — friendly units within 25u gain +15% sight radius. Stacks with each Tracker squad in range."
 branch_summary = "Trades raw rate of fire for a tall sensor mast that projects a +15% sight aura on nearby Anvil units. Read as the recon variant — the eyes of an Anvil push."
+
+speed = 8.0
+sight_radius = 36.0
+armor_reduction = 0.3

@@ -1,6 +1,7 @@
 [gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
 
 [sub_resource type="Resource" id="weapon_strafe"]
@@ -11,6 +12,19 @@ damage_tier = &"high"
 range_tier = &"medium"
 rof_tier = &"fast"
 base_accuracy = 0.86
+
+damage = 50
+range = 15.0
+rof_seconds = 0.5
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 1.0
+mult_vs_medium_v2 = 0.4
+mult_vs_heavy_v2 = 0.3
+mult_vs_structure_v2 = 0.4
+mult_vs_light_air_v2 = 1.0
+mult_vs_heavy_air_v2 = 0.5
 
 [resource]
 script = ExtResource("1")
@@ -35,3 +49,7 @@ flight_speed = 22.0
 special_description = "Switchblade Strafe Runner — Pulse Cannons retuned for ground attack (AP tag). Eats medium / heavy mech armour but is helpless against enemy air. Pair with Dogfighter Switchblades or SAM coverage."
 passive_description = "AP Strafe Loadout — Pulse Cannons retuned for anti-ground work. Helpless against enemy aircraft."
 branch_summary = "AAir guns replaced with high-RoF strafing cannons. Skims low to crater ground formations; vulnerable to AAir cover."
+
+speed = 16.0
+sight_radius = 26.0
+armor_reduction = 0.1

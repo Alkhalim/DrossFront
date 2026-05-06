@@ -1,6 +1,7 @@
 [gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
 
 [sub_resource type="Resource" id="weapon_bomb_run"]
@@ -14,6 +15,19 @@ base_accuracy = 0.78
 damage_value = 81
 bomb_drop = true
 can_damage_trees = true
+
+damage = 81
+range = 15.0
+rof_seconds = 2.0
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 0.6
+mult_vs_light_v2 = 0.6
+mult_vs_medium_v2 = 0.6
+mult_vs_heavy_v2 = 0.7
+mult_vs_structure_v2 = 2.5
+mult_vs_light_air_v2 = 0.2
+mult_vs_heavy_air_v2 = 0.2
 
 [resource]
 script = ExtResource("1")
@@ -44,3 +58,7 @@ flight_altitude = 8.0
 flight_speed = 16.0
 special_description = "Hammerhead Bomber — anti-structure carpet bombing variant. AS-tagged Cluster Bomb Bay devastates buildings and squad formations. Slower in dogfights; pair with Escort Hammerheads or SAM cover."
 branch_summary = "Pintle gun replaced with a heavy bomb bay (AS-tagged). Devastates buildings and packed squads; vulnerable in dogfights — needs Escort cover."
+
+speed = 12.0
+sight_radius = 26.0
+armor_reduction = 0.35

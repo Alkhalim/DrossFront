@@ -1,8 +1,11 @@
 [gd_resource type="Resource" script_class="UnitStatResource" load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
 [ext_resource type="Resource" path="res://resources/units/anvil_hammerhead_bomber.tres" id="3"]
+
 [ext_resource type="Resource" path="res://resources/units/anvil_hammerhead_escort.tres" id="4"]
 
 [sub_resource type="Resource" id="weapon_pintle"]
@@ -15,6 +18,19 @@ rof_tier = &"rapid"
 damage_value = 30
 rof_seconds_value = 0.25
 base_accuracy = 0.78
+
+damage = 30
+range = 15.0
+rof_seconds = 0.25
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 0.1
+mult_vs_light_v2 = 0.1
+mult_vs_medium_v2 = 0.2
+mult_vs_heavy_v2 = 0.3
+mult_vs_structure_v2 = 2.0
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
 
 [resource]
 script = ExtResource("1")
@@ -51,3 +67,7 @@ branch_b_stats = ExtResource("4")
 is_aircraft = true
 flight_altitude = 8.5
 flight_speed = 11.0
+
+speed = 8.0
+sight_radius = 26.0
+armor_reduction = 0.35

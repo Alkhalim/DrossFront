@@ -1,6 +1,7 @@
 [gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
 
 [sub_resource type="Resource" id="weapon_striker_cannons"]
@@ -16,6 +17,19 @@ base_accuracy = 0.85
 mult_vs_light = 0.40
 mult_vs_medium = 1.00
 mult_vs_heavy = 0.60
+
+damage = 75
+range = 15.0
+rof_seconds = 1.0
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 0.4
+mult_vs_medium_v2 = 1.0
+mult_vs_heavy_v2 = 0.6
+mult_vs_structure_v2 = 0.4
+mult_vs_light_air_v2 = 1.0
+mult_vs_heavy_air_v2 = 0.5
 
 [resource]
 script = ExtResource("1")
@@ -37,3 +51,7 @@ primary_weapon = SubResource("weapon_striker_cannons")
 special_description = "Jackal Striker branch — heavier laser cannons (75 dmg per shot vs base 45) and a thicker chassis. Reads as a duelling line skirmisher rather than a flanker."
 passive_description = "Heavy Laser Cannons — 75 dmg per shot duelling-line laser pair. Thicker chassis trades flank speed for stand-and-shoot durability."
 branch_summary = "Twin pulse lasers replaced with a heavy beam cannon and reinforced chassis. Trades mobility and air-coverage for sustained ground DPS."
+
+speed = 12.0
+sight_radius = 18.0
+armor_reduction = 0.3

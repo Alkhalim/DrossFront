@@ -1,8 +1,31 @@
-[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=4 format=3]
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
 [ext_resource type="Resource" path="res://resources/units/anvil_ratchet.tres" id="2"]
+
 [ext_resource type="Resource" path="res://resources/units/anvil_crawler.tres" id="3"]
+
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="4"]
+
+[sub_resource type="Resource" id="turret_headquarters_0_hq_defense"]
+script = ExtResource("4")
+weapon_name = "HQ Defense"
+role_tag = &"Universal"
+damage = 19
+range = 28.0
+rof_seconds = 1.1
+use_explicit_air = true
+engages_air_explicit = true
+salvo_count = 5
+salvo_stagger_sec = 0.08
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 1.0
+mult_vs_medium_v2 = 0.7
+mult_vs_heavy_v2 = 0.4
+mult_vs_structure_v2 = 0.3
+mult_vs_light_air_v2 = 0.45
+mult_vs_heavy_air_v2 = 0.18
 
 [resource]
 script = ExtResource("1")
@@ -16,3 +39,6 @@ power_production = 0
 producible_units = [ExtResource("2"), ExtResource("3")]
 footprint_size = Vector3(7, 5, 7)
 placeholder_color = Color(0.4, 0.35, 0.3, 1)
+
+weapons = [SubResource("turret_headquarters_0_hq_defense")]
+default_weapon_index = 0

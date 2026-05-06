@@ -1,6 +1,7 @@
 [gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
 
 [sub_resource type="Resource" id="weapon_courier_chaingun"]
@@ -11,6 +12,19 @@ damage_tier = &"low"
 range_tier = &"short"
 rof_tier = &"rapid"
 base_accuracy = 0.84
+
+damage = 12
+range = 8.0
+rof_seconds = 0.25
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 1.0
+mult_vs_medium_v2 = 0.4
+mult_vs_heavy_v2 = 0.3
+mult_vs_structure_v2 = 0.4
+mult_vs_light_air_v2 = 1.0
+mult_vs_heavy_air_v2 = 0.5
 
 [resource]
 script = ExtResource("1")
@@ -39,3 +53,7 @@ detection_radius = 80.0
 stealth_restore_time = 4.0
 special_description = "Courier Infiltrator — stealth-capable transport variant. Same Garrison hardware as the base Courier; vehicle-scale stealth shrouding lets it ferry units through enemy territory undetected."
 branch_summary = "Trades cargo capacity for a cloak field — moves invisibly into the enemy backline before unloading. Specialist for sneaky drops; delicate."
+
+speed = 12.0
+sight_radius = 26.0
+armor_reduction = 0.3

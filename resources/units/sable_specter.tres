@@ -1,8 +1,11 @@
 [gd_resource type="Resource" script_class="UnitStatResource" load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
 [ext_resource type="Resource" path="res://resources/units/sable_specter_ghost.tres" id="3"]
+
 [ext_resource type="Resource" path="res://resources/units/sable_specter_glitch.tres" id="4"]
 
 [sub_resource type="Resource" id="weapon_pulse_repeater"]
@@ -18,6 +21,19 @@ can_hit_air = true
 air_damage_mult = 0.7
 mult_vs_light_air = 1.00
 mult_vs_heavy_air = 0.30
+
+damage = 12
+range = 17.0
+rof_seconds = 0.25
+use_explicit_air = true
+engages_air_explicit = true
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 1.0
+mult_vs_medium_v2 = 0.4
+mult_vs_heavy_v2 = 0.3
+mult_vs_structure_v2 = 0.4
+mult_vs_light_air_v2 = 1.0
+mult_vs_heavy_air_v2 = 0.3
 
 [resource]
 script = ExtResource("1")
@@ -45,3 +61,7 @@ branch_a_name = "Ghost"
 branch_b_name = "Glitch"
 branch_a_stats = ExtResource("3")
 branch_b_stats = ExtResource("4")
+
+speed = 12.0
+sight_radius = 26.0
+armor_reduction = 0.15

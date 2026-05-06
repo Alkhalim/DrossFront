@@ -1,6 +1,7 @@
 [gd_resource type="Resource" script_class="UnitStatResource" load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
 
 [sub_resource type="Resource" id="weapon_plow_at_missiles"]
@@ -19,6 +20,19 @@ mult_vs_light = 0.45
 mult_vs_medium = 0.85
 mult_vs_heavy = 1.20
 structure_damage_mult = 0.70
+
+damage = 55
+range = 25.0
+rof_seconds = 1.8
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 0.45
+mult_vs_medium_v2 = 0.85
+mult_vs_heavy_v2 = 1.2
+mult_vs_structure_v2 = 0.7
+mult_vs_light_air_v2 = 1.0
+mult_vs_heavy_air_v2 = 0.5
 
 [resource]
 script = ExtResource("1")
@@ -42,3 +56,7 @@ damage_ramp_max = 0.50
 special_description = "Grinder Tank — Plow branch. Twin AT-missile launchers replace the universal cannon. Each successive missile that lands on the same target ramps damage by 10%, capped at +50% — focus-fire pays off."
 passive_description = "Locked-On Salvo — every consecutive missile against the same target deals +10% damage, up to +50%. Ramp resets when the target changes."
 branch_summary = "Twin AT missiles with a focus-fire ramp passive. Best when you can keep painting the same heavy mech; falls off if the target keeps changing."
+
+speed = 8.0
+sight_radius = 18.0
+armor_reduction = 0.3
