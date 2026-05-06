@@ -6,7 +6,7 @@ extends RefCounted
 ## recovery / fall back to last_order_destination.
 
 var waypoints: PackedVector3Array = PackedVector3Array()
-var valid: bool = false
+var valid: bool = false              # if false, callers MUST NOT consume waypoints
 
 func _init(p_waypoints: PackedVector3Array = PackedVector3Array(),
 	p_valid: bool = false) -> void:
