@@ -252,11 +252,24 @@ func _update_member_targets() -> void:
 		var gm: GroundMovement = _gm_for(m)
 		if gm == null: continue
 		if _is_cohesive:
-			var slot_world: Vector3 = _slot_world(m)
-			if gm.has_method("set_slot_target"):
-				gm.set_slot_target(slot_world)
-			gm.effective_max_speed_cap = _speed_cap_for(m)
-			gm.effective_max_turn_rate_cap = _convoy_turn_rate_cap
+			# Relax formation during combat — let engaged members hold
+			# their current position to fight rather than dragging them
+			# back to slot. When combat ends, the next tick re-applies
+			# set_slot_target and the member sprints back (catch-up
+			# phase via _speed_cap_for returns INF).
+			var combat_engaged: bool = false
+			if gm.has_method("_is_combat_engaged"):
+				combat_engaged = gm._is_combat_engaged()
+			if combat_engaged:
+				gm.clear_target()                       # no SEEK; unit holds + fires
+				gm.effective_max_speed_cap = INF        # uncapped for post-combat sprint
+				gm.effective_max_turn_rate_cap = INF
+			else:
+				var slot_world: Vector3 = _slot_world(m)
+				if gm.has_method("set_slot_target"):
+					gm.set_slot_target(slot_world)
+				gm.effective_max_speed_cap = _speed_cap_for(m)
+				gm.effective_max_turn_rate_cap = _convoy_turn_rate_cap
 		else:
 			# Dispersed: each squad has its own goto from selection_manager.
 			gm.effective_max_speed_cap = INF
