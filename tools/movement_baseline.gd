@@ -51,6 +51,9 @@ func _run() -> void:
 	entries.sort()
 	lines.append_array(entries)
 	var f: FileAccess = FileAccess.open("res://tools/movement_baseline.txt", FileAccess.WRITE)
+	if f == null:
+		push_error("movement_baseline: can't write tools/movement_baseline.txt")
+		return
 	f.store_string("\n".join(lines))
 	f.close()
 	print("Wrote tools/movement_baseline.txt with %d entries — fill MANUAL_RECORD by stopwatching." % entries.size())
