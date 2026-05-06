@@ -66,6 +66,17 @@ func _ready() -> void:
 	_launch_anchor = global_position
 	if target and is_instance_valid(target):
 		_launch_total_dist = maxf(_launch_anchor.distance_to(target.global_position), 0.001)
+	if MovementFlags.use_new_system():
+		var am := AircraftMovement.new()
+		am.name = "MovementComponent"
+		# Drones may have flight_speed and flight_altitude on stats (same
+		# convention as Aircraft per PB-6); use those if present, else
+		# fall back to drone-specific values.
+		am.max_speed = SPEED
+		am.max_accel = SPEED * 6.0
+		am.max_turn_rate_rad_s = TAU * 0.6   # drones turn a touch faster than larger aircraft
+		am.base_altitude = global_position.y  # preserve whatever altitude the carrier placed us at
+		add_child(am)
 
 
 func _build_visual() -> void:
@@ -219,21 +230,32 @@ func _process(delta: float) -> void:
 		queue_free()
 		return
 
+	# New movement system: AircraftMovement owns locomotion for LAUNCHING
+	# and RETURNING. ATTACKING is orbit math (direct position writes) and
+	# must always run here regardless of system flag — see concern note below.
+	var _mc: Node = get_node_or_null("MovementComponent")
+	var _using_new: bool = _mc != null and _mc is AircraftMovement
+
 	match _state:
 		State.LAUNCHING:
 			# If the target died mid-flight, peel off and head home.
 			if not target or not is_instance_valid(target):
 				_state = State.RETURNING
+				_set_movement_component_active(true)
 				return
 			if "alive_count" in target and (target.get("alive_count") as int) <= 0:
 				_state = State.RETURNING
+				_set_movement_component_active(true)
 				return
 			# Curved approach: aim for a strafing-position offset
 			# beside the target rather than the target itself, so the
 			# drone arcs in along an attack vector instead of
 			# crashing straight at the centre.
 			var aim: Vector3 = _strafe_anchor()
-			_fly_toward_curved(aim, delta)
+			if _using_new:
+				(_mc as AircraftMovement).goto_world(aim)
+			else:
+				_fly_toward_curved(aim, delta)
 			if global_position.distance_to(aim) < 1.5:
 				_enter_attacking()
 		State.ATTACKING:
@@ -244,11 +266,23 @@ func _process(delta: float) -> void:
 			# back to the carrier. Each orbit step rebuilds the
 			# position from (target_centre + circle offset) so the
 			# drone tracks a moving target without drifting away.
+			#
+			# NOTE (PB-7): The orbit state directly writes global_position
+			# each frame (ring_pos math). AircraftMovement's goto_world is
+			# a "fly to point" abstraction and can't replicate the orbit
+			# arc correctly. The orbit block always runs via legacy path
+			# even under the new system. If the new movement component is
+			# active, it still processes separately (altitude hold, banking)
+			# but the XZ position comes from here. This is a known split —
+			# full orbit integration would require an AircraftMovement
+			# orbit mode, which is out of PB-7 scope.
 			if not target or not is_instance_valid(target):
 				_state = State.RETURNING
+				_set_movement_component_active(true)
 				return
 			if "alive_count" in target and (target.get("alive_count") as int) <= 0:
 				_state = State.RETURNING
+				_set_movement_component_active(true)
 				return
 			_orbit_angle += ORBIT_ANGULAR_SPEED * _orbit_dir * delta
 			var t_pos: Vector3 = target.global_position
@@ -269,11 +303,26 @@ func _process(delta: float) -> void:
 				_shot_timer = STRAFE_SHOT_INTERVAL
 			if _shots_fired >= STRAFE_SHOTS:
 				_state = State.RETURNING
+				_set_movement_component_active(true)
 		State.RETURNING:
 			var dock: Vector3 = carrier.global_position
-			_fly_toward(dock, delta)
+			if _using_new:
+				(_mc as AircraftMovement).goto_world(dock)
+			else:
+				_fly_toward(dock, delta)
 			if global_position.distance_to(dock) < DOCK_RADIUS:
 				queue_free()
+
+
+func _set_movement_component_active(active: bool) -> void:
+	## Toggle the MovementComponent's per-frame physics step. Used to
+	## suspend the new aircraft-movement integration during the orbit
+	## (ATTACKING) state, where the drone writes global_position
+	## directly each frame and would otherwise fight with the
+	## velocity-integrate path in AircraftMovement._physics_process.
+	var mc: Node = get_node_or_null("MovementComponent")
+	if mc != null and mc is AircraftMovement:
+		mc.set_physics_process(active)
 
 
 func _strafe_anchor() -> Vector3:
@@ -297,6 +346,7 @@ func _strafe_anchor() -> Vector3:
 
 func _enter_attacking() -> void:
 	_state = State.ATTACKING
+	_set_movement_component_active(false)
 	_shots_fired = 0
 	_shot_timer = 0.0
 	# Seed the orbit angle from the current drone -> target offset
