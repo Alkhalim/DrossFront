@@ -1,3 +1,4 @@
+@tool
 class_name CombatTables
 extends RefCounted
 ## Static lookup tables for combat resolution.

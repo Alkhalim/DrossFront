@@ -1,7 +1,12 @@
+@tool
 class_name UnitStatResource
 extends Resource
 ## Defines a unit type's base stats. One per unit class (not per instance).
 ## Branch variants are separate UnitStatResource files.
+##
+## @tool so EditorScripts (e.g. tools/dps_snapshot.gd) can call our
+## helper methods on .tres-loaded instances; without @tool those load
+## as placeholder instances and method calls silently no-op.
 
 ## Stable identifier used by code paths that dispatch on unit type
 ## (overlay builders, ability dispatch, etc.). Player-facing UI

@@ -1,6 +1,11 @@
+@tool
 class_name WeaponResource
 extends Resource
 ## Defines a single weapon's properties for a unit.
+##
+## @tool so EditorScripts (e.g. tools/dps_snapshot.gd) can call our
+## helper methods on .tres-loaded instances; without @tool those load
+## as placeholder instances and method calls silently no-op.
 
 ## Display name.
 @export var weapon_name: String = ""
