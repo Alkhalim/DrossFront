@@ -89,11 +89,11 @@ static func inertia_step(current_velocity: Vector3,
 		var des_dir: Vector3 = desired_velocity / des_speed
 		var max_step_rad: float = max_turn_rate_rad_s * dt
 		# Angle between them (XZ plane)
-		var cur_dir_xz := Vector2(cur_dir.x, cur_dir.z)
-		var des_dir_xz := Vector2(des_dir.x, des_dir.z)
+		var cur_dir_xz: Vector2 = Vector2(cur_dir.x, cur_dir.z)
+		var des_dir_xz: Vector2 = Vector2(des_dir.x, des_dir.z)
 		var ang_to: float = cur_dir_xz.angle_to(des_dir_xz)
 		var ang_step: float = clampf(ang_to, -max_step_rad, max_step_rad)
-		var rot_xz := cur_dir_xz.rotated(ang_step)
+		var rot_xz: Vector2 = cur_dir_xz.rotated(ang_step)
 		new_dir = Vector3(rot_xz.x, 0.0, rot_xz.y)
 
 	# Magnitude change (rate-limited)
