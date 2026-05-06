@@ -40,8 +40,8 @@ func _run() -> void:
 			if "is_aircraft" in stat:
 				is_aircraft = stat.is_aircraft
 			else:
-				for prefix in ["anvil_hammerhead", "sable_switchblade",
-							   "sable_wraith", "sable_specter"]:
+				for prefix in ["anvil_hammerhead", "anvil_phalanx",
+							   "sable_switchblade", "sable_wraith"]:
 					if fname.begins_with(prefix):
 						is_aircraft = true
 						break
