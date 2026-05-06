@@ -3,6 +3,12 @@ extends Node
 ## Handles targeting, weapon firing, and damage calculation for a unit.
 ## Attached as a child of Unit by Unit._ready().
 
+## Emitted whenever the squad transitions from "currently engaging
+## a target" to "no engagement". Used by MovementComponent's
+## auto-rejoin flow (spec §10) and by SquadGroup to attempt
+## re-incorporation of soft-dropped squads.
+signal combat_ended()
+
 var _unit: Node = null  # Parent Unit — accessed via duck typing to avoid class resolution issues
 var _current_target: Node3D = null
 var _fire_cooldown: float = 0.0
@@ -281,6 +287,7 @@ func _physics_process(delta: float) -> void:
 		_current_target = forced_target
 	elif _current_target and not _is_valid_target(_current_target):
 		_current_target = null
+		emit_signal("combat_ended")
 
 	# Auto-acquire targets: allowed when idle, or during attack-move. We scan a
 	# wider engage range than the weapon range so an idle unit will move toward
@@ -438,15 +445,21 @@ func clear_target() -> void:
 	## state — including attack_move_target — so a stale attack-move from a
 	## previous command can't slip through and let notify_attacked retaliate
 	## during the plain move.
+	var was_engaged: bool = _current_target != null
 	forced_target = null
 	_current_target = null
 	attack_move_target = Vector3.INF
+	if was_engaged:
+		emit_signal("combat_ended")
 
 
 func command_attack_move(pos: Vector3) -> void:
+	var was_engaged: bool = _current_target != null
 	attack_move_target = pos
 	forced_target = null
 	_current_target = null
+	if was_engaged:
+		emit_signal("combat_ended")
 	# Move without clearing combat state (bypass command_move's clear_target)
 	_unit.move_target = pos
 	_unit.move_target.y = _unit.global_position.y
