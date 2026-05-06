@@ -26,15 +26,18 @@ const LAYOUTS_GROUND: Dictionary = {
 		Vector3(0, 0, -3)],                                             # T+stub
 }
 
-static func slots_for(size: int) -> Array:
+static func slots_for(size: int) -> Array[Vector3]:
 	if LAYOUTS_GROUND.has(size):
-		return LAYOUTS_GROUND[size] as Array
-	# Larger groups: tile a 3-wide line of 1-tile-deep ranks
-	var slots: Array = []
+		return LAYOUTS_GROUND[size] as Array[Vector3]
+	# Larger groups: tile a 3-wide grid centered on Z=0 with rank 0
+	# at the largest positive Z (consistent with the named layouts).
+	var slots: Array[Vector3] = []
+	var ranks: int = (size + 2) / 3
 	var idx: int = 0
 	while idx < size:
 		var col: int = idx % 3 - 1
-		var row: int = -idx / 3
+		var rank_idx: int = idx / 3
+		var row: int = (ranks - 1) - 2 * rank_idx
 		slots.append(Vector3(col, 0, row))
 		idx += 1
 	return slots
@@ -51,6 +54,8 @@ static func range_rank_sort(members: Array) -> Array:
 	var aa_pool: Array = []
 	for m: Variant in members:
 		if not is_instance_valid(m):
+			continue
+		if not (m is Node):
 			continue
 		if (m as Node).is_aa_only():
 			aa_pool.append(m)
