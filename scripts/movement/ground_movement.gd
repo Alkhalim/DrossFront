@@ -10,6 +10,10 @@ var squad_group_ref: SquadGroup = null            # set when joined to a group
 var path_waypoints: PackedVector3Array = PackedVector3Array()
 var path_waypoint_idx: int = 0
 
+# Cached singleton refs to avoid per-frame linear scans of scene root children
+var _cached_spatial_idx: SpatialIndex = null
+var _cached_nav_router: NavRouter = null
+
 # Auto-rejoin state (PA-15)
 var last_group_ref: SquadGroup = null
 var last_drop_reason: int = -1                    # SquadGroup.DropReason or -1
@@ -25,8 +29,14 @@ const WAYPOINT_REACH_DIST: float = 1.5
 func goto_world(world_pos: Vector3) -> void:
 	## Solo path-query. Used when not in a SquadGroup or in
 	## dispersed mode (each squad routes its own way).
+	##
+	## On null-router or no-path, `target` stays set to the goal so
+	## the unit falls back to direct SEEK; eventually the stuck
+	## detector escalates to repath/push-out. This is intentional
+	## "best effort" behavior — leaving the unit idle would mask
+	## navmesh setup problems during early development.
 	target = world_pos
-	var router: NavRouter = NavRouter.get_instance(get_tree().current_scene)
+	var router: NavRouter = _get_nav_router()
 	if router == null:
 		path_waypoints = PackedVector3Array()
 		path_waypoint_idx = 0
@@ -63,7 +73,7 @@ func _physics_process(delta: float) -> void:
 	super._physics_process(delta)
 
 func _separate_neighbors() -> Array:
-	var idx: SpatialIndex = SpatialIndex.get_instance(get_tree().current_scene)
+	var idx: SpatialIndex = _get_spatial_idx()
 	if idx == null:
 		return []
 	var pos: Vector3 = _body.global_position
@@ -84,7 +94,7 @@ func _separate_neighbors() -> Array:
 	return filtered
 
 func _avoid_obstacles() -> Array:
-	var idx: SpatialIndex = SpatialIndex.get_instance(get_tree().current_scene)
+	var idx: SpatialIndex = _get_spatial_idx()
 	if idx == null:
 		return []
 	var pos: Vector3 = _body.global_position
@@ -101,7 +111,7 @@ func _on_stuck_level_1_repath() -> void:
 	## Re-query the path with the current target.
 	if not has_target():
 		return
-	var router: NavRouter = NavRouter.get_instance(get_tree().current_scene)
+	var router: NavRouter = _get_nav_router()
 	if router == null:
 		return
 	var result: PathResult = router.query_path(
@@ -117,3 +127,13 @@ func _is_combat_engaged() -> bool:
 	if "in_combat" in owner_unit:
 		return owner_unit.in_combat as bool
 	return false
+
+func _get_spatial_idx() -> SpatialIndex:
+	if _cached_spatial_idx == null or not is_instance_valid(_cached_spatial_idx):
+		_cached_spatial_idx = SpatialIndex.get_instance(get_tree().current_scene)
+	return _cached_spatial_idx
+
+func _get_nav_router() -> NavRouter:
+	if _cached_nav_router == null or not is_instance_valid(_cached_nav_router):
+		_cached_nav_router = NavRouter.get_instance(get_tree().current_scene)
+	return _cached_nav_router
