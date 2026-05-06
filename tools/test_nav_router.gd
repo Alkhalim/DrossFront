@@ -16,6 +16,6 @@ func _run() -> void:
 		Vector3(-30, 0, -30),
 		Vector3(30, 0, 30),
 		profile)
-	print("valid: %s, waypoints: %d" % [result.valid, result.waypoints.size()])
+	print_debug("valid: %s, waypoints: %d" % [result.valid, result.waypoints.size()])
 	for w in result.waypoints:
-		print("  ", w)
+		print_debug("  ", w)
