@@ -78,9 +78,10 @@ func _physics_process(delta: float) -> void:
 	# in AircraftMovement._update_bank; this is for ground units only.
 	if _body != null:
 		var dir_xz: Vector3 = Vector3(_velocity.x, 0.0, _velocity.z)
-		# Higher threshold to suppress jitter from near-zero velocity
-		# noise; only rotate when actually moving.
-		if dir_xz.length_squared() > 0.5:
+		# Higher threshold (4.0 = 2 u/s) suppresses rotation jitter
+		# from low-speed velocity oscillation near slot. Below this
+		# the body holds its current facing.
+		if dir_xz.length_squared() > 4.0:
 			# Godot Node3D forward is -Z; convert dir_xz to a target
 			# yaw and step the body's yaw toward it, rate-limited.
 			var desired_yaw: float = atan2(-dir_xz.x, -dir_xz.z)

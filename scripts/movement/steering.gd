@@ -152,6 +152,8 @@ static func inertia_step(current_velocity: Vector3,
 	var cur_speed: float = current_velocity.length()
 	var des_speed: float = desired_velocity.length()
 	var new_dir: Vector3
+	# Default 1.0; only updated in the "both > 0" branch where ang_to is known.
+	var alignment_factor: float = 1.0
 	if cur_speed < 0.001:
 		new_dir = desired_velocity.normalized() if des_speed > 0.001 else Vector3.FORWARD
 	elif des_speed < 0.001:
@@ -167,10 +169,16 @@ static func inertia_step(current_velocity: Vector3,
 		var ang_step: float = clampf(ang_to, -max_step_rad, max_step_rad)
 		var rot_xz: Vector2 = cur_dir_xz.rotated(ang_step)
 		new_dir = Vector3(rot_xz.x, 0.0, rot_xz.y)
+		# Turn-priority: slow down while turning so units don't draw wide
+		# arcs through the world. At full alignment (0°): factor=1.0.
+		# At 180° (target behind): factor=0.15. Scales linearly.
+		var abs_ang: float = absf(ang_to)
+		alignment_factor = lerpf(1.0, 0.15, clampf(abs_ang / PI, 0.0, 1.0))
 
 	# Magnitude change (rate-limited)
 	var max_speed_step: float = max_accel * dt
-	var new_speed: float = clampf(des_speed,
+	var target_speed: float = des_speed * alignment_factor
+	var new_speed: float = clampf(target_speed,
 		cur_speed - max_speed_step,
 		cur_speed + max_speed_step)
 	new_speed = maxf(new_speed, 0.0)
