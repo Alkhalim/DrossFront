@@ -3183,7 +3183,13 @@ func _finish_construction() -> void:
 	# active — without this, pathfinders keep routing units straight into
 	# the new wall and stuck-rescue eventually gives up on the move order.
 	var arena: Node = get_tree().current_scene
-	if arena and arena.has_method("request_navmesh_rebake"):
+	if MovementFlags.use_new_system():
+		var router: NavRouter = NavRouter.get_instance(arena)
+		if router != null:
+			var fp: Vector3 = stats.footprint_size
+			var aabb := AABB(global_position - Vector3(fp.x * 0.5, 0.0, fp.z * 0.5), fp)
+			router.update_obstacle_tile(aabb)
+	elif arena and arena.has_method("request_navmesh_rebake"):
 		arena.request_navmesh_rebake()
 	# Belt-and-suspenders: even though _is_foundation_clear gates progress,
 	# fast-moving units can slip into the footprint between frames. Push any
@@ -5227,7 +5233,13 @@ func take_damage(amount: int, _attacker: Node3D = null) -> void:
 		destroyed.emit()
 		# Re-bake so units can walk through the now-empty footprint.
 		var arena_dead: Node = get_tree().current_scene
-		if arena_dead and arena_dead.has_method("request_navmesh_rebake"):
+		if MovementFlags.use_new_system():
+			var router: NavRouter = NavRouter.get_instance(arena_dead)
+			if router != null:
+				var fp: Vector3 = stats.footprint_size
+				var aabb := AABB(global_position - Vector3(fp.x * 0.5, 0.0, fp.z * 0.5), fp)
+				router.update_obstacle_tile(aabb)
+		elif arena_dead and arena_dead.has_method("request_navmesh_rebake"):
 			arena_dead.request_navmesh_rebake()
 		# Big screen shake — buildings going down should feel weighty.
 		var cam: Camera3D = get_viewport().get_camera_3d() if get_viewport() else null
