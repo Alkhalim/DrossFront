@@ -11,6 +11,13 @@ var _state_timer: float = 0.0
 var _wave_count: int = 0
 
 var _hq: Node = null
+## Scene-level singletons cached on first need. The AI tick fetches
+## PlayerRegistry (and a few others) from many helper functions each
+## 5 Hz tick; profiling showed those scene-tree lookups adding up
+## even though each call is individually cheap. The helpers route
+## through `_get_registry()` so the lookup happens once and gets
+## reused for the rest of the match.
+var _registry_cached: Node = null
 var _foundry: Node = null
 var _adv_foundry: Node = null
 var _generator: Node = null
@@ -220,6 +227,19 @@ func _enter_tree() -> void:
 			_turret_path = "res://resources/buildings/gun_emplacement_basic.tres"
 
 
+func _get_registry() -> Node:
+	## Lazy cache for PlayerRegistry. The AI's per-tick helpers used
+	## to fetch this from the scene tree on every call (a dozen
+	## scene-traversals per 5 Hz tick); the cache reduces that to
+	## one lookup per match.
+	if _registry_cached and is_instance_valid(_registry_cached):
+		return _registry_cached
+	if not get_tree():
+		return null
+	_registry_cached = get_tree().current_scene.get_node_or_null("PlayerRegistry")
+	return _registry_cached
+
+
 func _resolve_my_faction(settings: Node) -> int:
 	## Mirrors test_arena_controller._faction_for_player so the AI
 	## resolves its own faction the same way the spawner does — checks
@@ -229,7 +249,7 @@ func _resolve_my_faction(settings: Node) -> int:
 		return 0
 	if settings.has_method("has_ai_faction") and settings.call("has_ai_faction", owner_id):
 		return settings.call("get_ai_faction", owner_id) as int
-	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	var registry: Node = _get_registry()
 	if registry and registry.has_method("get_state"):
 		var st: Variant = registry.call("get_state", owner_id)
 		if st and "team_id" in st and (st.team_id as int) == 0:
@@ -328,7 +348,7 @@ func _setup() -> void:
 	# Resource manager: prefer the registry lookup (works regardless of
 	# how many AIs are in the scene) and fall back to the legacy node-name
 	# convention for headless/test scenes.
-	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	var registry: Node = _get_registry()
 	if registry and registry.has_method("get_resource_manager"):
 		_ai_resource_manager = registry.get_resource_manager(owner_id)
 	if not _ai_resource_manager:
@@ -411,7 +431,7 @@ func _roll_strategy_and_layout() -> void:
 
 
 func _find_nearest_enemy_hq_pos(buildings: Array[Node]) -> Vector3:
-	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	var registry: Node = _get_registry()
 	var origin: Vector3 = (_hq.global_position if _hq else Vector3.ZERO)
 	var best_pos: Vector3 = origin
 	var best_dist: float = INF
@@ -952,7 +972,7 @@ func _refresh_enemy_armor_counts() -> void:
 	## scene per foundry per tick.
 	_enemy_armor_counts.clear()
 	_enemy_total_seen = 0
-	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	var registry: Node = _get_registry()
 	for node: Node in get_tree().get_nodes_in_group("units"):
 		if not is_instance_valid(node):
 			continue
@@ -1963,7 +1983,7 @@ func _dispatch_crawler_defenders(crawler_pos: Vector3) -> void:
 	## Engineers stay home so the base keeps building. Attack-move means
 	## defenders engage anything they pass on the way too — fine, that's
 	## the threat's escort.
-	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	var registry: Node = _get_registry()
 	var attacker_pos: Vector3 = Vector3.INF
 	var nearest_enemy_dist: float = CRAWLER_DEFENSE_SCAN_RADIUS
 	for node: Node in get_tree().get_nodes_in_group("units"):
@@ -2025,7 +2045,7 @@ var _threat_dispatch_at_msec: Dictionary = {}
 func _check_threat_response() -> void:
 	if not is_instance_valid(_hq):
 		return
-	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	var registry: Node = _get_registry()
 	var hq_pos: Vector3 = _hq.global_position
 	var hq_radius_sq: float = HQ_DEFENSE_RADIUS * HQ_DEFENSE_RADIUS
 	var bldg_radius_sq: float = BUILDING_DEFENSE_RADIUS * BUILDING_DEFENSE_RADIUS
@@ -2218,7 +2238,7 @@ func _find_expansion_site() -> Vector3:
 	## enemies inside EXPANSION_MAX_ENEMY_DIST, and no friendly yards /
 	## Crawlers inside EXPANSION_MIN_FRIENDLY_DIST. Scans wrecks as
 	## anchor points (they're where harvesters want to be).
-	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	var registry: Node = _get_registry()
 	var friendly_centers: Array[Vector3] = []
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(node):
@@ -2328,7 +2348,7 @@ func _find_relocation_target(from: Vector3, max_dist: float) -> Node3D:
 	## harvest claim. Keeps the two AI players from racing to the same pile
 	## in 2v2 (and stops a future AI ally from siphoning off the player's
 	## near-base wrecks).
-	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	var registry: Node = _get_registry()
 	var ally_centers: Array[Vector3] = []
 	if registry and registry.has_method("are_allied"):
 		# Allied Crawlers (different player_id, same team).
@@ -2615,7 +2635,7 @@ func _ally_hq_positions() -> Array[Vector3]:
 	## Returns world positions of all friendly HQs other than ours.
 	## Used by the vent picker to avoid stealing an ally's expansion vent.
 	var out: Array[Vector3] = []
-	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	var registry: Node = _get_registry()
 	if not registry or not registry.has_method("get_state"):
 		return out
 	var my_team: int = -1
@@ -2724,7 +2744,7 @@ func _is_placement_clear(pos: Vector3, footprint: Vector3, vent_keepout: float =
 				return false
 
 	# Allied HQ keep-out — skip our own HQ, but stay clear of any teammate's.
-	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+	var registry: Node = _get_registry()
 	if registry and registry.has_method("are_allied"):
 		for node: Node in get_tree().get_nodes_in_group("buildings"):
 			if not is_instance_valid(node):
@@ -3073,7 +3093,7 @@ func _track_unit_lifecycle() -> void:
 		# resolved via PlayerRegistry.are_enemies(...) when present, else
 		# straight owner_id comparison.
 		var is_enemy: bool = (n_owner != owner_id)
-		var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
+		var registry: Node = _get_registry()
 		if registry and registry.has_method("are_allied"):
 			is_enemy = not registry.are_allied(owner_id, n_owner) and n_owner != owner_id
 		_tracked_units[iid] = "enemy" if is_enemy else "ally"

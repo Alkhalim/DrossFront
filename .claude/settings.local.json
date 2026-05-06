@@ -33,7 +33,8 @@
       "Bash(xargs -I {} basename {})",
       "Bash(godot --headless --check-only --script scripts/selection_manager.gd)",
       "Bash(python *)",
-      "Bash(py --version)"
+      "Bash(py --version)",
+      "Bash(dir \"D:\\\\\\\\Programme\")"
     ]
   }
 }

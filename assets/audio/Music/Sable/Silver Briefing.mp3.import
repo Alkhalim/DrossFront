@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://b30iwmfmjhwfc"
+path="res://.godot/imported/Silver Briefing.mp3-c1f33c74fda9042db79f16e7dad066c7.mp3str"
+
+[deps]
+
+source_file="res://assets/audio/Music/Sable/Silver Briefing.mp3"
+dest_files=["res://.godot/imported/Silver Briefing.mp3-c1f33c74fda9042db79f16e7dad066c7.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

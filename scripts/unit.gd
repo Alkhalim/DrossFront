@@ -5242,8 +5242,16 @@ func _try_unit_detour_around_building() -> bool:
 	var origin: Vector3 = global_position
 	var best_blocker: Node3D = null
 	var best_blocker_d: float = DETOUR_SCAN_RADIUS
-	for node: Node in get_tree().get_nodes_in_group("buildings"):
-		if not is_instance_valid(node):
+	# Spatial-index narrows the candidate list to entities within a
+	# few buckets; the previous full-group walk visited every
+	# building in the scene per stuck-detour attempt.
+	var idx: SpatialIndex = SpatialIndex.get_instance(get_tree().current_scene) if get_tree() else null
+	var candidates: Array = idx.nearby(origin, DETOUR_SCAN_RADIUS) if idx else get_tree().get_nodes_in_group("buildings")
+	for raw in candidates:
+		if raw == null or not is_instance_valid(raw):
+			continue
+		var node: Node = raw as Node
+		if not node or not node.is_in_group("buildings"):
 			continue
 		var b: Node3D = node as Node3D
 		if not b:
@@ -6376,11 +6384,21 @@ func _physics_process(delta: float) -> void:
 func _apply_idle_spread() -> void:
 	## Gently pushes the unit away from any same-team neighbour that's
 	## inside `IDLE_SPREAD_MIN_DIST`. Sums per-neighbour push vectors
-	## (closer = stronger) and writes them to `velocity.x/.z`. Cheap —
-	## one distance check per same-team unit, called only while idle.
+	## (closer = stronger) and writes them to `velocity.x/.z`.
+	## Spatial-index lookup so a 200-pop match doesn't pay
+	## O(N) per idle unit -- the previous full-group walk produced
+	## the dominant cost in the per-tick stagger profile because
+	## every idle unit visited every other unit. Index buckets only
+	## return entities within a few cells, so the per-call cost
+	## stays bounded regardless of fleet size.
 	var push: Vector3 = Vector3.ZERO
-	for node: Node in get_tree().get_nodes_in_group("units"):
-		if node == self or not is_instance_valid(node):
+	var idx: SpatialIndex = SpatialIndex.get_instance(get_tree().current_scene) if get_tree() else null
+	var candidates: Array = idx.nearby(global_position, IDLE_SPREAD_MIN_DIST) if idx else get_tree().get_nodes_in_group("units")
+	for raw in candidates:
+		if raw == null or not is_instance_valid(raw):
+			continue
+		var node: Node = raw as Node
+		if not node or node == self:
 			continue
 		if not ("owner_id" in node) or node.get("owner_id") != owner_id:
 			continue

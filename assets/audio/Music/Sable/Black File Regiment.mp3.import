@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://bd6nb0yhro6r"
+path="res://.godot/imported/Black File Regiment.mp3-c1d699f9ec58720e5f39d0a3bfef49fb.mp3str"
+
+[deps]
+
+source_file="res://assets/audio/Music/Sable/Black File Regiment.mp3"
+dest_files=["res://.godot/imported/Black File Regiment.mp3-c1d699f9ec58720e5f39d0a3bfef49fb.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

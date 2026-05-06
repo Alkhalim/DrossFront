@@ -52,6 +52,17 @@ const REPAIR_RATE_FACTOR: float = 0.5
 
 
 var _builder_phys_frame: int = 0
+## Idle-engineer scan throttle. The repair-target / auto-assist
+## searches walk every building (and for repair, every unit) in the
+## scene -- running at the previous 30Hz cadence was the dominant
+## per-engineer cost in profiling. Build / repair gameplay timers
+## are on the order of seconds, so dropping the IDLE scan to ~5Hz
+## (one in every 6 staggered physics frames) is invisible at the
+## gameplay layer and slashes the cost by 6x. The throttle is reset
+## the moment the engineer picks up a real target so the active
+## build / repair path keeps running every staggered frame.
+const IDLE_SCAN_FRAME_INTERVAL: int = 6
+var _idle_scan_frame: int = 0
 
 
 func _physics_process(delta: float) -> void:
@@ -67,22 +78,48 @@ func _physics_process(delta: float) -> void:
 	if not _target_building or not is_instance_valid(_target_building):
 		_target_building = null
 		_set_build_anim(false)
-		# No construction in progress — try to repair something nearby
-		# that's damaged. Falls back to construction-assist if there's
-		# nothing to fix. Either path is skipped if the player is
-		# actively moving the engineer somewhere.
+		# No construction in progress — auto-assist construction
+		# takes priority over auto-repair, so the engineer always
+		# moves to the nearest unfinished friendly site before
+		# tending to damaged allies. Either path is skipped if the
+		# player is actively moving the engineer somewhere. The
+		# scans walk every building / unit in the scene; throttle
+		# to ~5Hz since build_time is on a multi-second cadence
+		# anyway. An already-assigned repair patient still ticks
+		# every staggered frame so the engineer doesn't lose its
+		# in-progress heal between scans.
+		if _repair_target and is_instance_valid(_repair_target):
+			if _process_repair(delta):
+				return
+		_idle_scan_frame += 1
+		if _idle_scan_frame < IDLE_SCAN_FRAME_INTERVAL:
+			return
+		_idle_scan_frame = 0
+		_try_auto_assist()
+		if _target_building and is_instance_valid(_target_building):
+			# Picked up a construction site -- bail before the
+			# repair-scan so the next staggered frame routes through
+			# the active-target branch above.
+			return
 		if _process_repair(delta):
 			return
-		_try_auto_assist()
 		return
+	# Active target re-acquired -- reset the idle throttle so the next
+	# IDLE entry kicks off a scan immediately.
+	_idle_scan_frame = 0
 
 	if _target_building.is_constructed:
 		_target_building = null
 		_unit.stop()
 		_set_build_anim(false)
+		# Same priority order on the just-finished branch -- look
+		# for a fresh construction site first, then fall through to
+		# repair if nothing else needs building.
+		_try_auto_assist()
+		if _target_building and is_instance_valid(_target_building):
+			return
 		if _process_repair(delta):
 			return
-		_try_auto_assist()
 		return
 
 	var dist: float = _unit.global_position.distance_to(_target_building.global_position)

@@ -89,6 +89,14 @@ func queue_glowing_volley(damage_mult: float, pellet_mode: bool = true) -> void:
 ## instead of comparing raw owner_ids. Falls back to the raw compare when
 ## the registry isn't present, so headless / test scenes keep working.
 var _registry: PlayerRegistry = null
+## Cached scene-level singletons. The fire path used to refetch FogOfWar
+## and MeshSystem from the scene tree on every shot; profiling on the
+## 250-pop stress test showed combat-tick scene lookups as a measurable
+## chunk of script time. Cached at first need (lazy because some test
+## scenes load CombatComponent before the singletons are wired up).
+var _fow_cached: Node = null
+var _mesh_sys_cached: Node = null
+var _scene_cached: Node = null
 
 ## Burst-fire state for high-RoF weapons. Counts shots within the current
 ## burst; once the burst is full the cooldown is bumped up so the average
@@ -349,15 +357,17 @@ func _physics_process(delta: float) -> void:
 	# the same team as the local player.
 	var owner_id: int = _unit.get("owner_id") as int
 	var uses_shared_los: bool = owner_id == 0
-	if not uses_shared_los:
-		var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
-		if registry and registry.has_method("are_allied"):
-			uses_shared_los = registry.call("are_allied", owner_id, 0)
+	if not uses_shared_los and _registry:
+		uses_shared_los = _registry.are_allied(owner_id, 0)
 	var team_can_see: bool = false
 	if uses_shared_los:
-		var fow: Node = get_tree().current_scene.get_node_or_null("FogOfWar") if get_tree() else null
-		if fow and fow.has_method("is_visible_world"):
-			team_can_see = fow.call("is_visible_world", _current_target.global_position)
+		if not _fow_cached or not is_instance_valid(_fow_cached):
+			if not _scene_cached or not is_instance_valid(_scene_cached):
+				_scene_cached = get_tree().current_scene if get_tree() else null
+			if _scene_cached:
+				_fow_cached = _scene_cached.get_node_or_null("FogOfWar")
+		if _fow_cached and _fow_cached.has_method("is_visible_world"):
+			team_can_see = _fow_cached.call("is_visible_world", _current_target.global_position)
 	if dist > sight_r and not team_can_see:
 		_unit.command_move(_current_target.global_position, false)
 		return
@@ -620,9 +630,15 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 
 	# Mesh strength bonus — V3 §Pillar 2. Sable units inside friendly
 	# Mesh provider auras get faster reload (rof shrinks) AND higher
-	# accuracy. Looked up via the scene-level MeshSystem singleton.
+	# accuracy. Looked up via the scene-level MeshSystem singleton --
+	# cached at first need so the per-shot scene lookup doesn't repeat.
 	var mesh_strength: int = 0
-	var mesh_sys: Node = get_tree().current_scene.get_node_or_null("MeshSystem") if get_tree() else null
+	if not _mesh_sys_cached or not is_instance_valid(_mesh_sys_cached):
+		if not _scene_cached or not is_instance_valid(_scene_cached):
+			_scene_cached = get_tree().current_scene if get_tree() else null
+		if _scene_cached:
+			_mesh_sys_cached = _scene_cached.get_node_or_null("MeshSystem")
+	var mesh_sys: Node = _mesh_sys_cached
 	if mesh_sys and mesh_sys.has_method("strength_for"):
 		mesh_strength = mesh_sys.call("strength_for", _unit.global_position, _unit.get("owner_id") as int) as int
 	var reload_factor: float = 1.0

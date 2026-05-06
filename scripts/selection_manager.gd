@@ -183,15 +183,31 @@ func _update_cursor_kind(hovered: Node3D) -> void:
 	if not _selected_units.is_empty() or not _selected_crawlers.is_empty():
 		var screen_pos: Vector2 = get_viewport().get_mouse_position()
 		var building: Building = _find_building_at(screen_pos, false)
-		if building and building.owner_id != 0:
-			if registry and registry.are_enemies(0, building.owner_id):
-				cursor_mgr.set_kind(1)  # ATTACK
-				return
-			# Neutral structures (owner_id == 2) — also hostile-attack
-			# the player can manually engage them, so keep the reticle.
-			if building.owner_id == 2:
-				cursor_mgr.set_kind(1)
-				return
+		if building:
+			if building.owner_id != 0:
+				if registry and registry.are_enemies(0, building.owner_id):
+					cursor_mgr.set_kind(1)  # ATTACK
+					return
+				# Neutral structures (owner_id == 2) — also hostile-attack
+				# the player can manually engage them, so keep the reticle.
+				if building.owner_id == 2:
+					cursor_mgr.set_kind(1)
+					return
+			# Friendly building. Engineer hover variants:
+			#  - under construction (not yet is_constructed) -> BUILD
+			#    cursor so the player reads 'click here to assist'.
+			#  - already constructed but damaged -> REPAIR cursor for
+			#    the same gesture (hover + click = heal). Buildings
+			#    weren't covered by the unit-hover REPAIR branch above
+			#    because that path only inspected the raycast-hit
+			#    Unit; structures fall through here.
+			elif _has_engineer_selected():
+				if "is_constructed" in building and not building.is_constructed:
+					cursor_mgr.set_kind(3)  # BUILD
+					return
+				if building.has_method("is_damaged") and building.is_damaged():
+					cursor_mgr.set_kind(2)  # REPAIR
+					return
 
 	cursor_mgr.set_kind(0)  # DEFAULT
 

@@ -86,6 +86,20 @@ var _unstuck_flip: int = 1
 ## { wreck_instance_id : float seconds_until_clear }
 var _blacklisted_wrecks: Dictionary = {}
 
+## Throttle for the IDLE -> wreck-search scan. The scan walks every
+## wreck node in the scene; doing it every staggered frame
+## (~20Hz) was wasteful since fresh wrecks don't appear faster
+## than ~once per second. Skip ticks until the cooldown expires.
+const IDLE_RESCAN_INTERVAL: float = 0.5
+var _idle_rescan_cooldown: float = 0.0
+
+## Cached emission state for the cargo bin. Writing the
+## StandardMaterial3D properties every staggered frame causes
+## RenderingServer to reupload the material even when nothing
+## changed; only push updates when the carry ratio actually
+## crossed an integer fill bucket.
+var _cargo_fill_last: int = -1
+
 
 func _ready() -> void:
 	add_to_group("units")
@@ -406,7 +420,13 @@ func _physics_process(delta: float) -> void:
 
 	match state:
 		State.IDLE:
-			_find_wreck()
+			# Throttle the wreck scan -- walks the entire wrecks
+			# group, so doing it every staggered frame burned CPU
+			# during long IDLE stretches (no reachable wreck nearby).
+			_idle_rescan_cooldown -= delta
+			if _idle_rescan_cooldown <= 0.0:
+				_idle_rescan_cooldown = IDLE_RESCAN_INTERVAL
+				_find_wreck()
 		State.MOVING_TO_WRECK:
 			_move_toward_wreck(delta)
 		State.HARVESTING:
@@ -417,11 +437,17 @@ func _physics_process(delta: float) -> void:
 			_unstuck_step(delta)
 
 	# Subtle cargo-bin glow that brightens as salvage is carried.
+	# Only push to the material when the integer fill bucket
+	# actually changed; the previous unconditional write reuploaded
+	# the material every staggered frame for every worker.
 	if _cargo_mat:
-		var fill: float = float(_carried_salvage) / float(CARRY_CAPACITY)
-		_cargo_mat.emission_enabled = fill > 0.0
-		_cargo_mat.emission = Color(1.0, 0.7, 0.2)
-		_cargo_mat.emission_energy_multiplier = fill * 1.4
+		var fill_bucket: int = (_carried_salvage * 16) / maxi(CARRY_CAPACITY, 1)
+		if fill_bucket != _cargo_fill_last:
+			_cargo_fill_last = fill_bucket
+			var fill: float = float(_carried_salvage) / float(CARRY_CAPACITY)
+			_cargo_mat.emission_enabled = fill > 0.0
+			_cargo_mat.emission = Color(1.0, 0.7, 0.2)
+			_cargo_mat.emission_energy_multiplier = fill * 1.4
 
 
 func _find_wreck() -> void:

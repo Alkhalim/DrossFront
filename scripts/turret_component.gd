@@ -25,9 +25,9 @@ const FIRE_INTERVAL: float = 0.8
 ## with profile preset to anti_air (no UI swap; it's a dedicated AA building).
 ## The HUD's profile selector lists only the ground profiles below.
 const PROFILES: Dictionary = {
-	&"balanced":   { "damage": 45,  "fire": 0.8,  "range": 20.0, "role": &"Universal", "name": "Balanced" },
-	&"anti_light": { "damage": 24,  "fire": 0.4,  "range": 18.0, "role": &"AP",        "name": "Anti-Light" },
-	&"anti_heavy": { "damage": 135, "fire": 2.0,  "range": 22.0, "role": &"AP",        "name": "Anti-Heavy" },
+	&"balanced":   { "damage": 45,  "fire": 0.9,  "range": 20.0, "role": &"Universal", "name": "Balanced" },
+	&"anti_light": { "damage": 24,  "fire": 0.3,  "range": 18.0, "role": &"AP",        "name": "Anti-Light" },
+	&"anti_heavy": { "damage": 135, "fire": 2.2,  "range": 22.0, "role": &"AP",        "name": "Anti-Heavy" },
 	&"anti_air":   { "damage": 36,  "fire": 0.25, "range": 24.0, "role": &"AAir",      "name": "Anti-Air" },
 	# Built-in HQ self-defense -- light Universal MG cluster meant
 	# to discourage early bumrushes. Range bumped 16 -> 22 so the
@@ -37,7 +37,7 @@ const PROFILES: Dictionary = {
 	# brief intra-burst gaps for the visual stagger) so the salvo
 	# reads as a real MG nest, not single-tap shots. Targets both
 	# ground AND air -- HQ MGs work as light flak.
-	&"hq_defense": { "damage": 23, "fire": 1.0, "range": 22.0, "role": &"Universal", "name": "HQ Defense", "burst_count": 3, "burst_gap": 0.08, "targets_air": true },
+	&"hq_defense": { "damage": 19, "fire": 1.1, "range": 28.0, "role": &"Universal", "name": "HQ Defense", "burst_count": 5, "burst_gap": 0.08, "targets_air": true },
 }
 
 ## Anvil's industrial-doctrine turret hits harder than the baseline
@@ -66,6 +66,21 @@ var _building: Node = null
 var _target: Node3D = null
 var _fire_timer: float = 0.0
 var _search_timer: float = 0.0
+## Cached scene-level singletons. The targeting + validation paths
+## fetched PlayerRegistry from the scene tree on every call -- a
+## measurable cost across many active turrets at high fire rates.
+var _registry_cached: PlayerRegistry = null
+var _scene_cached: Node = null
+
+
+func _get_registry_cached() -> PlayerRegistry:
+	if _registry_cached and is_instance_valid(_registry_cached):
+		return _registry_cached
+	if not _scene_cached or not is_instance_valid(_scene_cached):
+		_scene_cached = get_tree().current_scene if get_tree() else null
+	if _scene_cached:
+		_registry_cached = _scene_cached.get_node_or_null("PlayerRegistry") as PlayerRegistry
+	return _registry_cached
 
 
 func _ready() -> void:
@@ -333,7 +348,7 @@ func _find_nearest_enemy() -> Node3D:
 	var range_v: float = get_range()
 	var nearest: Node3D = null
 	var nearest_dist: float = INF
-	var registry: PlayerRegistry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
+	var registry: PlayerRegistry = _get_registry_cached()
 	# Targeting filter:
 	#  - AAir profile (SAM Site, etc): air-only.
 	#  - Profiles with targets_air = true (HQ MG nests): both air
@@ -467,7 +482,7 @@ func _is_valid_target(target: Node3D) -> bool:
 		return false
 	var my_owner: int = _building.get("owner_id")
 	var target_owner: int = target.get("owner_id")
-	var registry: PlayerRegistry = get_tree().current_scene.get_node_or_null("PlayerRegistry") as PlayerRegistry
+	var registry: PlayerRegistry = _get_registry_cached()
 	var hostile: bool = (registry.are_enemies(my_owner, target_owner)
 		if registry
 		else target_owner != my_owner)

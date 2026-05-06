@@ -291,6 +291,24 @@ var local_player_id: int = 0
 ## Per-cell state, flat array of length GRID_SIZE * GRID_SIZE.
 var _cells: PackedByteArray = PackedByteArray()
 
+## Indices of every cell stamped VISIBLE during the previous
+## recompute. Used to skip the full-grid demote walk -- iterating
+## 40000 cells at 5 Hz was the dominant cost on recompute even
+## though the stamp set is typically <1% of that. We demote only
+## the cells that were actually visible last tick, then refill
+## from this tick's stamps. The set's a PackedInt32Array because
+## indices are 32-bit and we never re-read individual entries by
+## position; just iterate.
+var _visible_cells_last_tick: PackedInt32Array = PackedInt32Array()
+
+## True iff the previous _recompute_visibility ran in
+## omniscient_local cheat mode. The cheat path stamps every cell
+## VISIBLE and skips the per-observer tracking -- so when the cheat
+## flips off mid-match the next normal tick has to do ONE full-grid
+## demote to clear the residual visibility, then resumes the
+## tracked-set fast path.
+var _was_omniscient_last_tick: bool = false
+
 ## Cached PlayerRegistry — used to expand vision to allies.
 var _registry: PlayerRegistry = null
 
@@ -400,7 +418,13 @@ func reveal_area(pos: Vector3, radius: float, duration_sec: float) -> void:
 	})
 	# Stamp immediately so the next renderer tick sees the reveal
 	# instead of waiting up to 200ms for the next 5 Hz recompute.
-	_stamp_visibility(pos, radius)
+	# Track the stamped cells in _visible_cells_last_tick so the
+	# next recompute's demote pass can clear them on expiry --
+	# without this the reveal would stick after the temp entry
+	# was popped, since the tracked-set demote only walks cells
+	# previously logged as visible.
+	var collected_now: PackedInt32Array = _stamp_visibility(pos, radius, false, false, true)
+	_visible_cells_last_tick.append_array(collected_now)
 	revision += 1
 
 
@@ -412,6 +436,14 @@ func _recompute_visibility() -> void:
 	if omniscient_local:
 		for i: int in _cells.size():
 			_cells[i] = CellState.VISIBLE
+		# Reset the tracked-visible set: under omniscient_local every
+		# cell is visible, so the next non-cheat tick must demote
+		# everything. Storing all 40000 indices is wasteful; we flag
+		# the cheat below so the first normal tick after toggle does
+		# one full-grid demote, then resumes the tracked-set fast
+		# path.
+		_visible_cells_last_tick = PackedInt32Array()
+		_was_omniscient_last_tick = true
 		revision += 1
 		_apply_entity_visibility()
 		return
@@ -429,31 +461,36 @@ func _recompute_visibility() -> void:
 	# is wiped each tick).
 	_stamp_signature_cache.clear()
 
-	# Demote currently-VISIBLE cells to EXPLORED. New vision will
+	# Demote last tick's VISIBLE cells to EXPLORED. New vision will
 	# bump them back up below; cells that were visible last tick but
 	# aren't this tick stay EXPLORED so the player can still see
-	# terrain features but not live enemy positions.
-	for i: int in _cells.size():
-		if _cells[i] == CellState.VISIBLE:
-			_cells[i] = CellState.EXPLORED
+	# terrain features but not live enemy positions. Walking the
+	# previously-visible set instead of the full 40000-cell grid
+	# was the biggest single win on _recompute_visibility -- the
+	# typical visible set is 1-5% of the grid.
+	if _was_omniscient_last_tick:
+		# Cheat just toggled off -- the entire grid was VISIBLE last
+		# tick, so do one full-grid demote to clear it before
+		# returning to the tracked-set path.
+		for i: int in _cells.size():
+			if _cells[i] == CellState.VISIBLE:
+				_cells[i] = CellState.EXPLORED
+		_was_omniscient_last_tick = false
+	else:
+		var prev_visible: PackedInt32Array = _visible_cells_last_tick
+		for i: int in prev_visible.size():
+			var pi: int = prev_visible[i]
+			if _cells[pi] == CellState.VISIBLE:
+				_cells[pi] = CellState.EXPLORED
+	_visible_cells_last_tick = PackedInt32Array()
 
-	# Pre-collect Hound Tracker positions so the per-unit sight loop
-	# below can apply the +15% sight aura when a friendly Anvil unit
-	# stands within TRACKER_AURA_RADIUS of any Tracker. Cheap because
-	# trackers are usually few; we stop scanning once the boost is
-	# applied to a given unit.
+	# Pre-collect friendly alive units once so the tracker scan and
+	# the stamp loop below don't both walk the full units group +
+	# re-run _is_friendly / alive_count checks. Profiling showed
+	# both passes hitting the registry-allied path for every entry,
+	# which adds up at high unit counts.
+	var friendly_units: Array[Node3D] = []
 	var tracker_positions: Array[Vector3] = []
-	for node: Node in get_tree().get_nodes_in_group("units"):
-		if not is_instance_valid(node) or not _is_friendly(node):
-			continue
-		if "alive_count" in node and (node.get("alive_count") as int) <= 0:
-			continue
-		var ts: UnitStatResource = (node.get("stats") as UnitStatResource) if "stats" in node else null
-		if ts and ts.unit_name.findn("Tracker") >= 0:
-			tracker_positions.append((node as Node3D).global_position)
-
-	# Walk every unit + building owned by the local player or any
-	# ally and stamp visible cells around them.
 	for node: Node in get_tree().get_nodes_in_group("units"):
 		if not is_instance_valid(node):
 			continue
@@ -461,7 +498,18 @@ func _recompute_visibility() -> void:
 			continue
 		if "alive_count" in node and (node.get("alive_count") as int) <= 0:
 			continue
-		var node3d: Node3D = node as Node3D
+		var n3d: Node3D = node as Node3D
+		if not n3d:
+			continue
+		friendly_units.append(n3d)
+		var ts: UnitStatResource = (node.get("stats") as UnitStatResource) if "stats" in node else null
+		if ts and ts.unit_name.findn("Tracker") >= 0:
+			tracker_positions.append(n3d.global_position)
+
+	# Walk every unit + building owned by the local player or any
+	# ally and stamp visible cells around them.
+	for node3d: Node3D in friendly_units:
+		var node: Node = node3d as Node
 		var radius: float = _unit_sight_radius(node)
 		var is_air: bool = node.is_in_group("aircraft")
 		var is_elevated: bool = is_air or node3d.global_position.y >= ELEVATED_OBSERVER_Y
@@ -526,7 +574,12 @@ func _recompute_visibility() -> void:
 		if (entry["expires_at"] as float) <= now_sec:
 			_temp_reveals.remove_at(i)
 		else:
-			_stamp_visibility(entry["pos"] as Vector3, entry["radius"] as float)
+			# collect_cells=true so the temp-reveal stamp is tracked
+			# in _visible_cells_last_tick alongside per-observer
+			# stamps. Without this the next tick's tracked-set demote
+			# would miss those cells and they'd stick on the grid.
+			var collected_temp: PackedInt32Array = _stamp_visibility(entry["pos"] as Vector3, entry["radius"] as float, false, false, true)
+			_visible_cells_last_tick.append_array(collected_temp)
 		i -= 1
 
 	revision += 1
@@ -798,6 +851,7 @@ func _stamp_visibility_cached(observer_id: int, world_pos: Vector3, radius: floa
 		# build time below.
 		for i: int in n:
 			_cells[cached_cells[i]] = CellState.VISIBLE
+		_visible_cells_last_tick.append_array(cached_cells)
 		return
 	# Per-tick signature dedup BEFORE doing the full stamp work.
 	# Quantise the radius to integer cells so a 18.0 / 18.05 difference
@@ -820,6 +874,7 @@ func _stamp_visibility_cached(observer_id: int, world_pos: Vector3, radius: floa
 		var sn: int = sig_cells.size()
 		for i: int in sn:
 			_cells[sig_cells[i]] = CellState.VISIBLE
+		_visible_cells_last_tick.append_array(sig_cells)
 		_observer_stamp_cache[observer_id] = {
 			"cell": origin_cell_idx,
 			"radius": radius,
@@ -835,6 +890,7 @@ func _stamp_visibility_cached(observer_id: int, world_pos: Vector3, radius: floa
 	# PackedInt32Array is pass-by-value-with-COW in GDScript and an
 	# in-place out-arg pattern doesn't propagate to the caller).
 	var collected: PackedInt32Array = _stamp_visibility(world_pos, radius, observer_elevated, observer_aircraft, true)
+	_visible_cells_last_tick.append_array(collected)
 	_observer_stamp_cache[observer_id] = {
 		"cell": origin_cell_idx,
 		"radius": radius,
