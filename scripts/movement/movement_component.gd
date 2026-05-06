@@ -202,7 +202,7 @@ func _compute_pushout_dir() -> Vector3:
 	var sum: Vector3 = Vector3.ZERO
 	var n: int = 0
 	for o: Variant in obstacles:
-		if not (o is Node3D) or not is_instance_valid(o):
+		if not is_instance_valid(o) or not (o is Node3D):
 			continue
 		sum += pos - (o as Node3D).global_position
 		n += 1

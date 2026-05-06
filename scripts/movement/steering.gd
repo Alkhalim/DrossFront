@@ -31,9 +31,7 @@ static func separate(current_pos: Vector3,
 	## Output is unbounded — caller clamps.
 	var force: Vector3 = ZERO
 	for n: Variant in neighbors:
-		if not (n is Node3D):
-			continue
-		if not is_instance_valid(n):
+		if not is_instance_valid(n) or not (n is Node3D):
 			continue
 		var neighbor_pos: Vector3 = (n as Node3D).global_position
 		var diff: Vector3 = current_pos - neighbor_pos

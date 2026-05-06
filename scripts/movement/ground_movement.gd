@@ -80,7 +80,7 @@ func _separate_neighbors() -> Array:
 	var raw: Array = idx.nearby(pos, separate_min_distance + 1.0)
 	var filtered: Array = []
 	for n: Variant in raw:
-		if not (n is Node3D) or not is_instance_valid(n):
+		if not is_instance_valid(n) or not (n is Node3D):
 			continue
 		if n == _body or n == get_parent():
 			continue
@@ -101,7 +101,7 @@ func _avoid_obstacles() -> Array:
 	var raw: Array = idx.nearby(pos, avoid_min_distance + 2.0)
 	var filtered: Array = []
 	for n: Variant in raw:
-		if not (n is Node3D) or not is_instance_valid(n):
+		if not is_instance_valid(n) or not (n is Node3D):
 			continue
 		if (n as Node).is_in_group("buildings") or (n as Node).is_in_group("wrecks"):
 			filtered.append(n)
