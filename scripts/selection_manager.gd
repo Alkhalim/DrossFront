@@ -934,6 +934,8 @@ func command_move_to_world(ground_pos: Vector3, queue: bool = false) -> void:
 
 	# New system: collect ground squads (GroundMovement) and route them through
 	# a SquadGroup. Aircraft / crawlers / workers stay on legacy.
+	# NOTE: `queue` is intentionally not forwarded to the new system
+	# (Plan A: queueing not yet supported; see helper docstring).
 	_new_system_dispatch_ground_move(ground_pos)
 
 	# Legacy fall-through for non-GroundMovement movables (aircraft, crawlers, etc.)
@@ -993,6 +995,13 @@ func _legacy_command_move_to_world(ground_pos: Vector3, queue: bool = false) -> 
 
 
 func _new_system_dispatch_ground_move(ground_pos: Vector3) -> void:
+	## Dispatches ground squads through the new MovementComponent / SquadGroup
+	## system. The `queue` parameter on the public wrappers is INTENTIONALLY
+	## NOT THREADED here — Plan A doesn't support waypoint queueing on the new
+	## path (spec §17 lists it as out of scope). A queued shift-click move on
+	## a flag-on selection runs as a normal single move. Plan B may add queue
+	## support if SquadGroup gains a waypoint-chain feature.
+	##
 	## Shared helper: collect GroundMovement squads from the current selection
 	## and route them through a SquadGroup (multi-squad) or direct goto_world
 	## (single squad). Called by both command_move_to_world and
