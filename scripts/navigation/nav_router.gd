@@ -35,8 +35,8 @@ func query_path(start: Vector3,
 	# Quantise start/goal to ~1u so nearby agents starting from
 	# the same cell share the cache hit.
 	var key: String = "%d:%d:%d:%d:%s" % [
-		int(start.x), int(start.z),
-		int(goal.x),  int(goal.z),
+		floori(start.x), floori(start.z),
+		floori(goal.x),  floori(goal.z),
 		profile.profile_id]
 	if _frame_cache.has(key):
 		return _frame_cache[key] as PathResult
