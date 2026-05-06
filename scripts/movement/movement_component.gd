@@ -1,5 +1,5 @@
 class_name MovementComponent
-extends Node
+extends Node                  # attached as child of CharacterBody3D, not the body itself
 ## Abstract base for all movement. Attached to a CharacterBody3D
 ## (the unit chassis). Reads `target` from the order layer or its
 ## own routing logic; produces a desired velocity each physics
@@ -18,14 +18,14 @@ const REASON_AGENT_OFF_NAVMESH: int = 3
 # --- Configurable per-instance (set by owning unit on _ready) ---
 var max_speed: float = 8.0
 var max_accel: float = 30.0
-var max_turn_rate_rad_s: float = TAU            # default: 1 turn/sec
+var max_turn_rate_rad_s: float = TAU            # default: one full rotation per second (2π rad/s)
 var separate_min_distance: float = 2.5
 var separate_repel: float = 6.0
 var avoid_min_distance: float = 4.0
 var avoid_repel: float = 12.0
 
 # --- Set every frame by the order layer or solo logic ---
-var target: Vector3 = Vector3.INF                # INF = no order
+var target: Vector3 = Vector3.INF                # INF = no active order; checked via has_target()
 var effective_max_speed_cap: float = INF         # convoy cap from SquadGroup
 var effective_max_turn_rate_cap: float = INF
 
@@ -52,7 +52,8 @@ func _physics_process(delta: float) -> void:
 		return
 
 	var pos: Vector3 = _body.global_position
-	var desired: Vector3 = Steering.seek(pos, target, _capped_speed())
+	var cap: float = _capped_speed()
+	var desired: Vector3 = Steering.seek(pos, target, cap)
 	desired += Steering.separate(pos,
 								  _separate_neighbors(),
 								  separate_min_distance,
@@ -63,8 +64,8 @@ func _physics_process(delta: float) -> void:
 									  avoid_repel)
 	# Clamp composed magnitude to capped speed
 	var dlen: float = desired.length()
-	if dlen > _capped_speed():
-		desired = desired * (_capped_speed() / dlen)
+	if dlen > cap:
+		desired = desired * (cap / dlen)
 
 	_velocity = Steering.inertia_step(
 		_velocity, desired, max_accel, _capped_turn_rate(), delta)
@@ -79,16 +80,16 @@ func clear_target() -> void:
 
 # --- Subclass hooks ---
 
+## Return non-group-member dynamic agents within sensing range.
+## Subclass overrides to query SpatialIndex and filter by
+## SquadGroup membership and entity type.
 func _separate_neighbors() -> Array:
-	## Return non-group-member dynamic agents within sensing range.
-	## Subclass overrides to query SpatialIndex and filter by
-	## SquadGroup membership and entity type.
 	return []
 
+## Return static obstacles (buildings, wrecks, terrain hazards).
+## Subclass overrides to query SpatialIndex filtered to "buildings"
+## group / wreck class etc.
 func _avoid_obstacles() -> Array:
-	## Return static obstacles (buildings, wrecks, terrain hazards).
-	## Subclass overrides to query SpatialIndex filtered to "buildings"
-	## group / wreck class etc.
 	return []
 
 # --- Helpers ---
