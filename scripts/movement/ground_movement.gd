@@ -73,6 +73,16 @@ func _physics_process(delta: float) -> void:
 		# else: target remains the final goal already set by goto_world
 	super._physics_process(delta)
 
+	# Body facing — rotate to face velocity direction. Aircraft handles
+	# its own rotation in AircraftMovement._update_bank; this is for
+	# ground units only.
+	if _body != null:
+		var dir_xz: Vector3 = Vector3(_velocity.x, 0.0, _velocity.z)
+		if dir_xz.length_squared() > 0.01:
+			var ahead: Vector3 = _body.global_position + dir_xz
+			ahead.y = _body.global_position.y  # keep look_at on the horizontal plane
+			_body.look_at(ahead, Vector3.UP)
+
 	# Gravity — new system owns Y velocity for ground units. Aircraft
 	# don't get this (AircraftMovement holds Y at base_altitude).
 	# _body_physics is non-null only when parent is CharacterBody3D,

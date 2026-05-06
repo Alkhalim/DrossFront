@@ -417,7 +417,7 @@ func _ready() -> void:
 		gm.name = "MovementComponent"
 		gm.max_speed = stats.speed
 		gm.max_accel = stats.speed * 6.0  # TODO(PA-21): tune accel curve per-class via UnitStatResource
-		gm.max_turn_rate_rad_s = TAU * 0.5  # TODO(PA-21): per-class turn rate via UnitStatResource (default = 1 rotation per 2 sec)
+		gm.max_turn_rate_rad_s = TAU * 1.5  # TODO(PA-21): per-class turn rate via UnitStatResource (default ≈ 1.5 rotations/sec)
 		gm.agent_profile = AgentProfile.new(0.6, 0.5, 35.0, &"squad_default")  # TODO(PA-21): per-class agent profile (radius/climb/slope)
 		add_child(gm)
 	else:
