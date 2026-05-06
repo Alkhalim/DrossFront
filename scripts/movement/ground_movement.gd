@@ -124,8 +124,8 @@ func _is_combat_engaged() -> bool:
 	var owner_unit: Node = get_parent()
 	if owner_unit == null:
 		return false
-	if "in_combat" in owner_unit:
-		return owner_unit.in_combat as bool
+	if owner_unit.has_method("_in_active_combat"):
+		return owner_unit._in_active_combat() as bool
 	return false
 
 func _get_spatial_idx() -> SpatialIndex:

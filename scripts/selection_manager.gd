@@ -1006,6 +1006,17 @@ func _new_system_dispatch_ground_move(ground_pos: Vector3) -> void:
 	## and route them through a SquadGroup (multi-squad) or direct goto_world
 	## (single squad). Called by both command_move_to_world and
 	## command_attack_move_to_world when the new system is active.
+	# First, evict members from any prior SquadGroup so the old group's
+	# _physics_process stops overwriting the new one's targets.
+	for s: Node in _selected_units:
+		if not is_instance_valid(s):
+			continue
+		var prior_mc: Node = s.get_node_or_null("MovementComponent")
+		if prior_mc is GroundMovement:
+			var prior_gm: GroundMovement = prior_mc as GroundMovement
+			if prior_gm.squad_group_ref != null and is_instance_valid(prior_gm.squad_group_ref):
+				prior_gm.squad_group_ref.drop_member(s, SquadGroup.DropReason.PLAYER_ORDER)
+
 	var ground_members: Array = []
 	for s: Node3D in _selected_units:
 		if not is_instance_valid(s):

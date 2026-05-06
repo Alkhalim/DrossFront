@@ -47,6 +47,13 @@ func setup(members: Array, destination: Vector3) -> void:
 		if m is Node:
 			_members.append(m as Node)
 	_destination = destination
+	# Wire each member's back-pointer so GroundMovement._separate_neighbors
+	# can filter same-group friendlies. (Without this, members repel each
+	# other inside their own formation.)
+	for m: Node in _members:
+		var gm: GroundMovement = _gm_for(m)
+		if gm != null:
+			gm.squad_group_ref = self
 	_decide_mode()
 	_assign_slots()
 	_recompute_caps()
@@ -96,6 +103,18 @@ func has_member_for_body(body: Node3D) -> bool:
 # --- Per-frame ---
 
 func _physics_process(delta: float) -> void:
+	# Prune freed/invalid Node refs so the empty-check below catches
+	# whole-squad wipeouts. Without this, freed members stay in
+	# _members forever and the group ticks indefinitely.
+	var live: Array[Node] = []
+	for m: Node in _members:
+		if is_instance_valid(m):
+			live.append(m)
+		else:
+			_slot_offsets.erase(m)
+			_no_progress_timers.erase(m)
+	_members = live
+
 	if _members.is_empty():
 		queue_free()
 		return
