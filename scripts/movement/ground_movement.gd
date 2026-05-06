@@ -78,7 +78,9 @@ func _physics_process(delta: float) -> void:
 	# ground units only.
 	if _body != null:
 		var dir_xz: Vector3 = Vector3(_velocity.x, 0.0, _velocity.z)
-		if dir_xz.length_squared() > 0.01:
+		# Higher threshold to suppress jitter from near-zero velocity
+		# noise; only rotate when actually moving.
+		if dir_xz.length_squared() > 0.5:
 			var ahead: Vector3 = _body.global_position + dir_xz
 			ahead.y = _body.global_position.y  # keep look_at on the horizontal plane
 			_body.look_at(ahead, Vector3.UP)
