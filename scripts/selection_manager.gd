@@ -919,6 +919,15 @@ func command_move_to_world(ground_pos: Vector3, queue: bool = false) -> void:
 	## Issue a formation move to the current selection, anchored at the
 	## given world position. Routed through SquadGroup when the new movement
 	## system is enabled; falls back to legacy grid formation otherwise.
+	# Side effects fire on BOTH the new-system and legacy paths.
+	_prune_selection()
+	# Don't cancel in-progress build tasks when *queueing* — the player wants
+	# the engineer to finish what it's doing and then walk to the waypoint.
+	if not queue:
+		_cancel_builder_tasks()
+	if _audio and _audio.has_method("play_voice_move"):
+		_audio.play_voice_move()
+
 	if not MovementFlags.use_new_system():
 		_legacy_command_move_to_world(ground_pos, queue)
 		return
@@ -946,7 +955,8 @@ func _legacy_command_move_to_world(ground_pos: Vector3, queue: bool = false) -> 
 	## given world position. Used by the in-world right-click path
 	## (after raycasting screen->world) and by the minimap right-click
 	## handler (which already has world coords).
-	_prune_selection()
+	## NOTE: _prune_selection(), _cancel_builder_tasks(), and play_voice_move()
+	## are called by the public wrapper command_move_to_world before delegating here.
 	# Combined movables list — units and crawlers both honor command_move(target).
 	var movables: Array = []
 	for u: Node3D in _selected_units:
@@ -957,12 +967,6 @@ func _legacy_command_move_to_world(ground_pos: Vector3, queue: bool = false) -> 
 			movables.append(c)
 	if movables.is_empty():
 		return
-	# Don't cancel in-progress build tasks when *queueing* — the player wants
-	# the engineer to finish what it's doing and then walk to the waypoint.
-	if not queue:
-		_cancel_builder_tasks()
-	if _audio and _audio.has_method("play_voice_move"):
-		_audio.play_voice_move()
 
 	# Simple formation: offset entries in a grid around the target. Crawlers
 	# slot into the formation alongside units — the wider crawler footprint
@@ -1048,12 +1052,6 @@ func _command_attack(target: Node3D) -> void:
 
 
 func _command_attack_move(screen_pos: Vector2) -> void:
-	_prune_selection()
-	if _selected_units.is_empty():
-		return
-	_cancel_builder_tasks()
-	if _audio and _audio.has_method("play_voice_attack"):
-		_audio.play_voice_attack()
 	var ground_pos := _raycast_ground(screen_pos)
 	if ground_pos == Vector3.INF:
 		return
@@ -1066,6 +1064,14 @@ func command_attack_move_to_world(ground_pos: Vector3, queue: bool = false) -> v
 	## falls back to legacy per-unit dispatch otherwise. The queue parameter
 	## is accepted for API symmetry with command_move_to_world but attack-move
 	## queueing is not implemented in the legacy path either.
+	# Side effects fire on BOTH the new-system and legacy paths.
+	_prune_selection()
+	if _selected_units.is_empty():
+		return
+	_cancel_builder_tasks()
+	if _audio and _audio.has_method("play_voice_attack"):
+		_audio.play_voice_attack()
+
 	if not MovementFlags.use_new_system():
 		_legacy_command_attack_move_to_world(ground_pos, queue)
 		return
