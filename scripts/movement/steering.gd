@@ -25,21 +25,24 @@ static func separate(current_pos: Vector3,
                      min_distance: float,
                      repel_strength: float) -> Vector3:
 	## Returns a repulsion velocity from any neighbor within
-	## min_distance. neighbors is Array[Node3D]. Repulsion grows
-	## linearly as the gap shrinks (1.0 at 0 distance, 0.0 at
-	## min_distance). Output is unbounded — caller clamps.
+	## min_distance. `neighbors` is an untyped Array; non-Node3D
+	## entries are silently skipped. Repulsion grows linearly as
+	## the gap shrinks (1.0 at 0 distance, 0.0 at min_distance).
+	## Output is unbounded — caller clamps.
 	var force: Vector3 = ZERO
 	for n: Variant in neighbors:
 		if not (n is Node3D):
 			continue
 		if not is_instance_valid(n):
 			continue
-		var npos: Vector3 = (n as Node3D).global_position
-		var diff: Vector3 = current_pos - npos
+		var neighbor_pos: Vector3 = (n as Node3D).global_position
+		var diff: Vector3 = current_pos - neighbor_pos
 		diff.y = 0.0
 		var d: float = diff.length()
 		if d < 0.001:
-			# Coincident — push out in an arbitrary stable direction
+			# Coincident — push out in an arbitrary stable direction.
+			# True coincidence is vanishingly rare at normal agent
+			# densities; the bias toward Vector3.RIGHT is acceptable.
 			force += Vector3.RIGHT * repel_strength
 			continue
 		if d >= min_distance:
