@@ -30,6 +30,15 @@ var _convoy_speed_cap: float = 8.0
 var _convoy_turn_rate_cap: float = TAU
 var _no_progress_timers: Dictionary = {}          # Node -> float
 
+# Shared default profile — Plan A uses one ground-squad profile for
+# all group path queries. Plan B introduces per-profile maps (crawler).
+static var _DEFAULT_GROUND_PROFILE: AgentProfile = null
+
+static func _get_default_ground_profile() -> AgentProfile:
+	if _DEFAULT_GROUND_PROFILE == null:
+		_DEFAULT_GROUND_PROFILE = AgentProfile.new(0.6, 0.5, 35.0, &"squad_default")
+	return _DEFAULT_GROUND_PROFILE
+
 # --- Public API ---
 
 func setup(members: Array, destination: Vector3) -> void:
@@ -153,7 +162,7 @@ func _query_group_path() -> void:
 		_path_waypoints = PackedVector3Array()
 		_path_idx = 0
 		return
-	var profile: AgentProfile = AgentProfile.new(0.6, 0.5, 35.0, &"squad_default")
+	var profile: AgentProfile = _get_default_ground_profile()
 	var result: PathResult = router.query_path(_group_center, _destination, profile)
 	if result.valid:
 		_path_waypoints = result.waypoints
@@ -163,7 +172,8 @@ func _advance_cohesive(delta: float) -> void:
 	if _path_waypoints.size() < 2 or _path_idx >= _path_waypoints.size():
 		return
 	var lag_count: int = 0
-	var lag_thresh_sq: float = pow(lag_distance_multiplier * formation_spacing, 2.0)
+	var lag_thresh: float = lag_distance_multiplier * formation_spacing
+	var lag_thresh_sq: float = lag_thresh * lag_thresh
 	for m: Node in _members:
 		if not is_instance_valid(m): continue
 		var slot_world: Vector3 = _slot_world(m)
@@ -253,6 +263,10 @@ func _connect_combat_end_for(m: Node, _gm: GroundMovement) -> void:
 	if not combat.has_signal("combat_ended"):
 		return
 	var cb: Callable = _on_member_combat_ended.bind(m)
+	# is_connected works for bind()-created Callables because Godot 4
+	# compares Callables by target+method+bound-args. If this is ever
+	# refactored to a lambda or sub-object method, this guard silently
+	# stops deduplicating — re-check before changing.
 	if not combat.is_connected("combat_ended", cb):
 		combat.connect("combat_ended", cb)
 
