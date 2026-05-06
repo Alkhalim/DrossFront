@@ -405,17 +405,32 @@ func _ready() -> void:
 	# to a 1-in-3 cadence drops the per-frame batch from 180 units to
 	# 120 with no visible quality loss for movement / animation.
 	_walk_bob_phase = int(get_instance_id() % 3)
-	# Navigation agent for pathfinding
-	_nav_agent = NavigationAgent3D.new()
-	_nav_agent.name = "NavAgent"
-	_nav_agent.path_desired_distance = 0.8
-	_nav_agent.target_desired_distance = 1.2
-	_nav_agent.avoidance_enabled = true
-	_nav_agent.radius = 1.5
-	_nav_agent.neighbor_distance = 10.0
-	_nav_agent.max_neighbors = 8
-	_nav_agent.max_speed = 16.0
-	add_child(_nav_agent)
+	# Navigation agent / movement component setup.
+	# Pilot feature flag: anvil_hound (and its variants) use the new
+	# GroundMovement system when MovementFlags.use_new_system() is true.
+	# All other units continue on the legacy NavigationAgent3D path.
+	var _is_pilot_class: bool = stats != null and "anvil_hound" in (stats.resource_path as String)
+	if MovementFlags.use_new_system() and _is_pilot_class:
+		# New system: GroundMovement
+		var gm := GroundMovement.new()
+		gm.name = "MovementComponent"
+		gm.max_speed = stats.speed
+		gm.max_accel = stats.speed * 6.0  # accel/decel curve; tune later
+		gm.max_turn_rate_rad_s = TAU * 0.5  # 1 turn/2sec — adjust per-class via stats later
+		gm.agent_profile = AgentProfile.new(0.6, 0.5, 35.0, &"squad_default")
+		add_child(gm)
+	else:
+		# Legacy NavigationAgent3D path
+		_nav_agent = NavigationAgent3D.new()
+		_nav_agent.name = "NavAgent"
+		_nav_agent.path_desired_distance = 0.8
+		_nav_agent.target_desired_distance = 1.2
+		_nav_agent.avoidance_enabled = true
+		_nav_agent.radius = 1.5
+		_nav_agent.neighbor_distance = 10.0
+		_nav_agent.max_neighbors = 8
+		_nav_agent.max_speed = 16.0
+		add_child(_nav_agent)
 
 	if stats:
 		_move_speed = stats.resolved_speed()
@@ -465,7 +480,8 @@ func _ready() -> void:
 		# don't request more clearance than the navmesh provides
 		# (which strands them against terrain corners).
 		var torso_w: float = (shape["torso"] as Vector3).x
-		_nav_agent.radius = minf(torso_w * 0.5 + 0.4, 1.4)
+		if _nav_agent != null:
+			_nav_agent.radius = minf(torso_w * 0.5 + 0.4, 1.4)
 		_init_hp()
 		_build_squad_visuals()
 		_build_hp_bar()
@@ -5131,7 +5147,10 @@ func command_move(target: Vector3, clear_combat: bool = true) -> void:
 	move_target.y = global_position.y
 	has_move_order = true
 	_stuck_timer = 0.0
-	if _nav_agent:
+	var _mc: Node = get_node_or_null("MovementComponent")
+	if _mc != null and _mc is GroundMovement:
+		(_mc as GroundMovement).goto_world(move_target)
+	elif _nav_agent != null:
 		_nav_agent.target_position = move_target
 	if clear_combat:
 		var combat: Node = get_combat()
@@ -5982,6 +6001,18 @@ func _physics_process(delta: float) -> void:
 			global_position = _garrisoned_in.global_position
 			velocity = Vector3.ZERO
 			return
+
+	# When the new GroundMovement component is active for this body, it
+	# owns velocity and move_and_slide every physics frame. Continuing
+	# into the legacy nav_agent / direct-seek block would double-step
+	# the body (two move_and_slide calls) and overwrite the velocity
+	# that GroundMovement already wrote. Skip all legacy movement
+	# integration when the new system is present.
+	# NOTE: EMP paralysis, idle-spread, gravity, and stuck-rescue are
+	# also skipped here; those concerns need to be handled inside
+	# GroundMovement (or its callers) for flag-on units.
+	if get_node_or_null("MovementComponent") is GroundMovement:
+		return
 
 	# EChO override / EMP paralysis. While the timer is hot, force
 	# velocity to zero, drop any pending move target, and skip the
