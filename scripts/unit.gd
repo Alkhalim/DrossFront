@@ -409,15 +409,19 @@ func _ready() -> void:
 	# Pilot feature flag: anvil_hound (and its variants) use the new
 	# GroundMovement system when MovementFlags.use_new_system() is true.
 	# All other units continue on the legacy NavigationAgent3D path.
+	# Pilot identifier — "anvil_hound" substring intentionally matches the
+	# base anvil_hound.tres plus the anvil_hound_ripper and anvil_hound_tracker
+	# variants (all share the chassis). PA-21 will replace this with a
+	# stats.use_ground_movement export on UnitStatResource.
 	var _is_pilot_class: bool = stats != null and "anvil_hound" in (stats.resource_path as String)
 	if MovementFlags.use_new_system() and _is_pilot_class:
 		# New system: GroundMovement
 		var gm := GroundMovement.new()
 		gm.name = "MovementComponent"
 		gm.max_speed = stats.speed
-		gm.max_accel = stats.speed * 6.0  # accel/decel curve; tune later
-		gm.max_turn_rate_rad_s = TAU * 0.5  # 1 turn/2sec — adjust per-class via stats later
-		gm.agent_profile = AgentProfile.new(0.6, 0.5, 35.0, &"squad_default")
+		gm.max_accel = stats.speed * 6.0  # TODO(PA-21): tune accel curve per-class via UnitStatResource
+		gm.max_turn_rate_rad_s = TAU * 0.5  # TODO(PA-21): per-class turn rate via UnitStatResource (default = 1 rotation per 2 sec)
+		gm.agent_profile = AgentProfile.new(0.6, 0.5, 35.0, &"squad_default")  # TODO(PA-21): per-class agent profile (radius/climb/slope)
 		add_child(gm)
 	else:
 		# Legacy NavigationAgent3D path
