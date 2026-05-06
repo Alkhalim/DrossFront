@@ -46,6 +46,21 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	if _body == null:
 		return
+
+	# EMP paralysis: zero velocity, skip steering. Mirrors the legacy
+	# path in unit.gd's _physics_process.
+	var owner_unit: Node = get_parent()
+	if owner_unit != null and "_emp_paralysis_remaining" in owner_unit:
+		var emp_state: Variant = owner_unit.get("_emp_paralysis_remaining")
+		var emp_active: bool = false
+		if emp_state is float:
+			emp_active = (emp_state as float) > 0.0
+		if emp_active:
+			_velocity = Vector3.ZERO
+			_body.velocity = Vector3.ZERO
+			_body.move_and_slide()
+			return
+
 	if not has_target():
 		# Decelerate to rest and idle
 		_velocity = Steering.inertia_step(
