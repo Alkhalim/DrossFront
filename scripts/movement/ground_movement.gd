@@ -75,13 +75,14 @@ func _physics_process(delta: float) -> void:
 
 	# Gravity — new system owns Y velocity for ground units. Aircraft
 	# don't get this (AircraftMovement holds Y at base_altitude).
-	# PB-6 will rename _body to _body_physics here when it lands.
-	if _body != null:
-		if _body.is_on_floor() and _body.velocity.y < 0.0:
-			_body.velocity.y = 0.0
+	# _body_physics is non-null only when parent is CharacterBody3D,
+	# which is always true for ground units.
+	if _body_physics != null:
+		if _body_physics.is_on_floor() and _body_physics.velocity.y < 0.0:
+			_body_physics.velocity.y = 0.0
 		else:
-			_body.velocity.y -= GRAVITY * delta
-			_body.move_and_slide()
+			_body_physics.velocity.y -= GRAVITY * delta
+			_body_physics.move_and_slide()
 
 func _separate_neighbors() -> Array:
 	var idx: SpatialIndex = _get_spatial_idx()

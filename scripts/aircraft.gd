@@ -116,6 +116,18 @@ func _ready() -> void:
 		stealth_revealed = false
 		_apply_stealth_visual(true)
 
+	# Feature-flagged AircraftMovement (PB-6). When enabled the new
+	# steering system owns XZ position; the legacy _process lerp is
+	# gated out via an early return below.
+	if MovementFlags.use_new_system():
+		var am := AircraftMovement.new()
+		am.name = "MovementComponent"
+		am.max_speed = stats.flight_speed if stats != null else 12.0
+		am.max_accel = am.max_speed * 6.0
+		am.max_turn_rate_rad_s = TAU * 0.7    # aircraft turn slower than ground
+		am.base_altitude = stats.flight_altitude if stats != null else 12.0
+		add_child(am)
+
 
 ## --- Shadow / selection visuals ---
 
@@ -273,6 +285,9 @@ func _process(delta: float) -> void:
 	# visible flight-feel changes (off-frames still integrate
 	# position so motion stays smooth).
 	if (_ac_phys_frame % 3) != int(get_instance_id() % 3):
+		# New system owns position — skip legacy integration on off-frames too.
+		if get_node_or_null("MovementComponent") is AircraftMovement:
+			return
 		if move_target != Vector3.INF and stats:
 			global_position += velocity * delta
 		return
@@ -321,6 +336,11 @@ func _process(delta: float) -> void:
 			drone.position.y = sin(_drone_anim_time * 2.5 + phase) * 0.18
 			# Subtle Z roll mimicking drone yaw correction.
 			drone.rotation.z = sin(_drone_anim_time * 1.7 + phase) * 0.05
+
+	# New system owns XZ position when active (PB-6). Visual-only work
+	# above (altitude bob, shadow, rotor spin, drone bob) still runs.
+	if get_node_or_null("MovementComponent") is AircraftMovement:
+		return
 
 	if move_target == Vector3.INF:
 		velocity = Vector3.ZERO
@@ -2720,6 +2740,19 @@ func _die() -> void:
 ## --- Movement commands (mirror Unit's API so SelectionManager works) ---
 
 func command_move(target: Vector3, clear_combat: bool = true) -> void:
+	# Route through AircraftMovement when the new system is active (PB-6).
+	var mc: Node = get_node_or_null("MovementComponent")
+	if mc != null and mc is AircraftMovement:
+		(mc as AircraftMovement).goto_world(target)
+		has_move_order = true
+		is_holding_position = false
+		if clear_combat and _combat:
+			if "_current_target" in _combat:
+				_combat.set("_current_target", null)
+			if _combat.has_method("clear_target"):
+				_combat.call("clear_target")
+		return
+	# Legacy direct-lerp path.
 	move_target = Vector3(target.x, stats.flight_altitude if stats else global_position.y, target.z)
 	move_queue.clear()
 	has_move_order = true

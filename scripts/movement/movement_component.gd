@@ -1,9 +1,13 @@
 class_name MovementComponent
 extends Node                  # attached as child of CharacterBody3D, not the body itself
-## Abstract base for all movement. Attached to a CharacterBody3D
-## (the unit chassis). Reads `target` from the order layer or its
-## own routing logic; produces a desired velocity each physics
-## frame; writes velocity to its parent body.
+## Abstract base for all movement. Attached to a Node3D (or
+## CharacterBody3D) unit chassis. Reads `target` from the order
+## layer or its own routing logic; produces a desired velocity each
+## physics frame; writes velocity to its parent body.
+##
+## When the parent is a CharacterBody3D (ground units), velocity is
+## written via move_and_slide(). When the parent is a plain Node3D
+## (aircraft, drones), position is integrated directly.
 ##
 ## Subclasses (GroundMovement / AircraftMovement / CrawlerMovement)
 ## implement neighbor and obstacle queries plus path planning. The
@@ -32,15 +36,18 @@ var effective_max_turn_rate_cap: float = INF
 
 # --- Internal state ---
 var _velocity: Vector3 = Vector3.ZERO
-var _body: CharacterBody3D = null
+var _body: Node3D = null                       # primary reference: position reads
+var _body_physics: CharacterBody3D = null      # set if parent is CharacterBody3D
 
 func _ready() -> void:
-	# Parent should be the unit's CharacterBody3D chassis.
-	_body = get_parent() as CharacterBody3D
-	if _body == null:
-		push_error("MovementComponent must be a child of CharacterBody3D")
+	var p: Node = get_parent()
+	if not (p is Node3D):
+		push_error("MovementComponent must be a child of Node3D or CharacterBody3D")
 		set_physics_process(false)
 		return
+	_body = p as Node3D
+	if p is CharacterBody3D:
+		_body_physics = p as CharacterBody3D
 	_stuck_last_pos = _body.global_position
 
 func _physics_process(delta: float) -> void:
@@ -57,16 +64,20 @@ func _physics_process(delta: float) -> void:
 			emp_active = (emp_state as float) > 0.0
 		if emp_active:
 			_velocity = Vector3.ZERO
-			_body.velocity = Vector3.ZERO
-			_body.move_and_slide()
+			if _body_physics != null:
+				_body_physics.velocity = Vector3.ZERO
+				_body_physics.move_and_slide()
 			return
 
 	if not has_target():
 		# Decelerate to rest and idle
 		_velocity = Steering.inertia_step(
 			_velocity, Vector3.ZERO, max_accel, max_turn_rate_rad_s, delta)
-		_body.velocity = _velocity
-		_body.move_and_slide()
+		if _body_physics != null:
+			_body_physics.velocity = _velocity
+			_body_physics.move_and_slide()
+		else:
+			_body.global_position += _velocity * delta
 		_stuck_step(delta, _is_combat_engaged())
 		return
 
@@ -91,8 +102,11 @@ func _physics_process(delta: float) -> void:
 
 	_velocity = Steering.inertia_step(
 		_velocity, desired, max_accel, _capped_turn_rate(), delta)
-	_body.velocity = _velocity
-	_body.move_and_slide()
+	if _body_physics != null:
+		_body_physics.velocity = _velocity
+		_body_physics.move_and_slide()
+	else:
+		_body.global_position += _velocity * delta
 	_stuck_step(delta, _is_combat_engaged())
 
 func has_target() -> bool:
