@@ -30,6 +30,12 @@ var _convoy_speed_cap: float = 8.0
 var _convoy_turn_rate_cap: float = TAU
 var _no_progress_timers: Dictionary = {}          # Node -> float
 
+# Per-frame slot-world cache; cleared at the start of each
+# _physics_process tick. Avoids repeated NavigationServer3D queries
+# when multiple methods read the same slot in one frame.
+var _slot_world_cache: Dictionary = {}    # Node -> Vector3
+var _slot_world_cache_frame: int = -1
+
 # Shared default profile — Plan A uses one ground-squad profile for
 # all group path queries. Plan B introduces per-profile maps (crawler).
 static var _DEFAULT_GROUND_PROFILE: AgentProfile = null
@@ -276,8 +282,20 @@ func _update_member_targets() -> void:
 			gm.effective_max_turn_rate_cap = INF
 
 func _slot_world(m: Node) -> Vector3:
+	var cur_frame: int = Engine.get_process_frames()
+	if cur_frame != _slot_world_cache_frame:
+		_slot_world_cache.clear()
+		_slot_world_cache_frame = cur_frame
+	if _slot_world_cache.has(m):
+		return _slot_world_cache[m] as Vector3
 	var off_local: Vector3 = _slot_offsets.get(m, Vector3.ZERO)
-	return _group_center + _group_orientation * off_local
+	var raw_world: Vector3 = _group_center + _group_orientation * off_local
+	var projected: Vector3 = raw_world
+	var router: NavRouter = NavRouter.get_instance(get_tree().current_scene)
+	if router != null:
+		projected = router.project_to_navmesh(raw_world, _get_default_ground_profile(), 8.0)
+	_slot_world_cache[m] = projected
+	return projected
 
 func _speed_cap_for(m: Node) -> float:
 	var gm: GroundMovement = _gm_for(m)
