@@ -25,6 +25,7 @@ func _ready() -> void:
 		agent_profile = AgentProfile.new(0.6, 0.5, 35.0, &"squad_default")
 
 const WAYPOINT_REACH_DIST: float = 1.5
+const GRAVITY: float = 18.0  # matches scripts/unit.gd legacy value (PB-3)
 
 func goto_world(world_pos: Vector3) -> void:
 	## Solo path-query. Used when not in a SquadGroup or in
@@ -71,6 +72,16 @@ func _physics_process(delta: float) -> void:
 			target = path_waypoints[path_waypoint_idx]
 		# else: target remains the final goal already set by goto_world
 	super._physics_process(delta)
+
+	# Gravity — new system owns Y velocity for ground units. Aircraft
+	# don't get this (AircraftMovement holds Y at base_altitude).
+	# PB-6 will rename _body to _body_physics here when it lands.
+	if _body != null:
+		if _body.is_on_floor() and _body.velocity.y < 0.0:
+			_body.velocity.y = 0.0
+		else:
+			_body.velocity.y -= GRAVITY * delta
+			_body.move_and_slide()
 
 func _separate_neighbors() -> Array:
 	var idx: SpatialIndex = _get_spatial_idx()
