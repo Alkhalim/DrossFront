@@ -176,6 +176,8 @@ static func _is_inf(v: Vector3) -> bool:
 @export var stuck_repath_cooldown: float = 1.5
 @export var stuck_pushout_cooldown: float = 2.0
 @export var stuck_pushout_duration_frames: int = 10
+@export var stuck_drop_cooldown: float = 3.0
+@export var stuck_goal_snap_radius: float = 4.0
 
 var _stuck_buffer: PackedFloat32Array = PackedFloat32Array()
 var _stuck_buffer_idx: int = 0
@@ -242,10 +244,20 @@ func _escalate() -> void:
 			_stuck_pushout_frames_left = stuck_pushout_duration_frames
 			_stuck_pushout_dir = _compute_pushout_dir()
 			_on_stuck_level_2_pushout()
+		3:
+			_stuck_cooldown_remaining = stuck_drop_cooldown
+			_on_stuck_level_3_drop()
 		_:
-			# Plan A clamps at level 2. Plan B adds Level 3-4.
-			_stuck_level = 2
+			# Level 4: terminal. Halt and emit; clamp _stuck_level so
+			# the signal isn't re-emitted every escalation tick.
+			_stuck_level = 4
+			_stuck_cooldown_remaining = stuck_drop_cooldown
+			_velocity = Vector3.ZERO
+			if _body_physics != null:
+				_body_physics.velocity = Vector3.ZERO
+			clear_target()
 			path_unreachable.emit(REASON_REPEATEDLY_STUCK)
+			_on_stuck_level_4_abandon()
 
 ## Subclass override — request a fresh path.
 func _on_stuck_level_1_repath() -> void:
@@ -255,6 +267,16 @@ func _on_stuck_level_1_repath() -> void:
 ## applied by the base (in _physics_process) for
 ## stuck_pushout_duration_frames after this fires.
 func _on_stuck_level_2_pushout() -> void:
+	pass
+
+## Subclass override — drop from SquadGroup with NO_PROGRESS reason,
+## then retry with a wider goal-snap radius. Default: no-op.
+func _on_stuck_level_3_drop() -> void:
+	pass
+
+## Subclass override — terminal halt. Default: no-op (the base class
+## already zeroed velocity and emitted path_unreachable).
+func _on_stuck_level_4_abandon() -> void:
 	pass
 
 func _compute_pushout_dir() -> Vector3:
