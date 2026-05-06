@@ -10,7 +10,7 @@ extends Node
 
 enum DropReason { COMBAT, NO_PROGRESS, PLAYER_ORDER }
 
-@export var formation_spacing: float = 4.0
+@export var formation_spacing: float = 2.5    # squad-to-squad gap; tune in inspector
 @export var cohesion_radius_multiplier: float = 4.0
 @export var lag_distance_multiplier: float = 2.0
 @export var group_center_throttle_factor: float = 0.5
