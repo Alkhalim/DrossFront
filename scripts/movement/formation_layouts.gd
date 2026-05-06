@@ -64,8 +64,7 @@ static func range_rank_sort(members: Array) -> Array:
 		return ra < rb)
 	# Split ag_pool into head / tail at midpoint, with aa_pool in middle.
 	var n: int = ag_pool.size()
-	var head_n: int = n / 2 + (n % 2)            # extra one to head
-	var tail_n: int = n - head_n
+	var head_n: int = n / 2 + (n % 2)            # extra one to head; tail size = n - head_n
 	var sorted: Array = []
 	for i in head_n:
 		sorted.append(ag_pool[i])
