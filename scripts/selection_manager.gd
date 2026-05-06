@@ -917,6 +917,32 @@ func _command_move(screen_pos: Vector2, queue: bool = false) -> void:
 
 func command_move_to_world(ground_pos: Vector3, queue: bool = false) -> void:
 	## Issue a formation move to the current selection, anchored at the
+	## given world position. Routed through SquadGroup when the new movement
+	## system is enabled; falls back to legacy grid formation otherwise.
+	if not MovementFlags.use_new_system():
+		_legacy_command_move_to_world(ground_pos, queue)
+		return
+
+	# New system: collect ground squads (GroundMovement) and route them through
+	# a SquadGroup. Aircraft / crawlers / workers stay on legacy.
+	_new_system_dispatch_ground_move(ground_pos)
+
+	# Legacy fall-through for non-GroundMovement movables (aircraft, crawlers, etc.)
+	for s: Node3D in _selected_units:
+		if not is_instance_valid(s):
+			continue
+		var mc: Node = s.get_node_or_null("MovementComponent")
+		if mc != null and mc is GroundMovement:
+			continue  # already handled above
+		if s.has_method("command_move"):
+			s.command_move(ground_pos)
+	for c: SalvageCrawler in _selected_crawlers:
+		if is_instance_valid(c) and c.alive_count > 0:
+			c.command_move(ground_pos)
+
+
+func _legacy_command_move_to_world(ground_pos: Vector3, queue: bool = false) -> void:
+	## Issue a formation move to the current selection, anchored at the
 	## given world position. Used by the in-world right-click path
 	## (after raycasting screen->world) and by the minimap right-click
 	## handler (which already has world coords).
@@ -962,6 +988,37 @@ func command_move_to_world(ground_pos: Vector3, queue: bool = false) -> void:
 			movable.command_move(slot)
 
 
+func _new_system_dispatch_ground_move(ground_pos: Vector3) -> void:
+	## Shared helper: collect GroundMovement squads from the current selection
+	## and route them through a SquadGroup (multi-squad) or direct goto_world
+	## (single squad). Called by both command_move_to_world and
+	## command_attack_move_to_world when the new system is active.
+	var ground_members: Array = []
+	for s: Node3D in _selected_units:
+		if not is_instance_valid(s):
+			continue
+		var mc: Node = s.get_node_or_null("MovementComponent")
+		if mc != null and mc is GroundMovement:
+			ground_members.append(s)
+
+	if ground_members.size() == 1:
+		# Single squad — no SquadGroup needed. Direct goto_world.
+		var gm: GroundMovement = ground_members[0].get_node("MovementComponent") as GroundMovement
+		gm.goto_world(ground_pos)
+	elif ground_members.size() > 1:
+		# Multi-squad — create a SquadGroup to manage formation and cohesion.
+		# setup() internally assigns squad_group_ref on each member's GroundMovement.
+		var grp := SquadGroup.new()
+		grp.name = "SquadGroup_%d" % Time.get_ticks_msec()
+		get_tree().current_scene.add_child(grp)
+		grp.setup(ground_members, ground_pos)
+		# In dispersed mode each squad routes independently to its formation slot.
+		if not grp._is_cohesive:
+			for m: Node3D in ground_members:
+				var gm2: GroundMovement = m.get_node("MovementComponent") as GroundMovement
+				gm2.goto_world(grp._slot_world(m))
+
+
 func _command_assist_build(building: Building) -> void:
 	_prune_selection()
 	for unit: Node3D in _selected_units:
@@ -1000,6 +1057,40 @@ func _command_attack_move(screen_pos: Vector2) -> void:
 	var ground_pos := _raycast_ground(screen_pos)
 	if ground_pos == Vector3.INF:
 		return
+	command_attack_move_to_world(ground_pos)
+
+
+func command_attack_move_to_world(ground_pos: Vector3, queue: bool = false) -> void:
+	## Issue an attack-move to the current selection anchored at ground_pos.
+	## Routed through SquadGroup when the new movement system is enabled;
+	## falls back to legacy per-unit dispatch otherwise. The queue parameter
+	## is accepted for API symmetry with command_move_to_world but attack-move
+	## queueing is not implemented in the legacy path either.
+	if not MovementFlags.use_new_system():
+		_legacy_command_attack_move_to_world(ground_pos, queue)
+		return
+
+	# New system: same SquadGroup creation as a normal move. The combat stance
+	# distinction (attack-move = divert to engage targets en route) is handled
+	# inside combat_component.gd's existing engagement logic, not here.
+	_new_system_dispatch_ground_move(ground_pos)
+
+	# Legacy fall-through for non-GroundMovement movables (aircraft, etc.)
+	for s: Node3D in _selected_units:
+		if not is_instance_valid(s):
+			continue
+		var mc: Node = s.get_node_or_null("MovementComponent")
+		if mc != null and mc is GroundMovement:
+			continue  # already handled above
+		var combat: Node = s.get_combat() if s.has_method("get_combat") else null
+		if combat and combat.has_method("command_attack_move"):
+			combat.command_attack_move(ground_pos)
+		else:
+			s.command_move(ground_pos)
+
+
+func _legacy_command_attack_move_to_world(ground_pos: Vector3, _queue: bool = false) -> void:
+	## Original per-unit attack-move dispatch. Preserved intact for the legacy path.
 	for unit: Node3D in _selected_units:
 		var combat: Node = unit.get_combat()
 		if combat and combat.has_method("command_attack_move"):
