@@ -83,13 +83,14 @@ func _physics_process(delta: float) -> void:
 
 	var pos: Vector3 = _body.global_position
 	var cap: float = _capped_speed()
-	var desired: Vector3
-	if _is_combat_engaged():
-		# Combat: hold position to fire. SEPARATE/AVOID still apply
-		# so units can sidestep collision but won't pursue slot.
-		desired = Vector3.ZERO
-	else:
-		desired = Steering.seek(pos, target, cap, arrival_radius)
+	# NOTE: a previous Plan B fix tried to zero SEEK during combat
+	# (_is_combat_engaged()) to stop "moves while firing" cosmetic
+	# circling. That regressed attack-move (units froze before
+	# reaching range) and ignored new move commands during the frame
+	# combat was clearing. Reverted. Plan C will add a proper stance
+	# system that distinguishes "acquired target out of range" (keep
+	# moving) from "actively firing in range" (hold position).
+	var desired: Vector3 = Steering.seek(pos, target, cap, arrival_radius)
 	desired += Steering.separate(pos,
 								  _separate_neighbors(),
 								  separate_min_distance,
