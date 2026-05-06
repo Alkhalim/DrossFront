@@ -88,7 +88,7 @@ func _separate_neighbors() -> Array:
 		if squad_group_ref != null and squad_group_ref.has_member_for_body(n as Node3D):
 			continue
 		# Skip buildings — those go to AVOID, not SEPARATE.
-		if (n as Node).is_in_group("buildings"):
+		if n is Building:
 			continue
 		filtered.append(n)
 	return filtered
@@ -103,7 +103,7 @@ func _avoid_obstacles() -> Array:
 	for n: Variant in raw:
 		if not is_instance_valid(n) or not (n is Node3D):
 			continue
-		if (n as Node).is_in_group("buildings") or (n as Node).is_in_group("wrecks"):
+		if n is Building or (n as Node).is_in_group("wrecks"):
 			filtered.append(n)
 	return filtered
 

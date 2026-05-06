@@ -31,6 +31,17 @@ func _run() -> void:
 	print_debug("far east: ", s2, "  expected (0,0,0)")
 	n_node.queue_free()
 
+	print_debug("--- Steering.seek arrival ---")
+	# Inside arrival_radius (1u of 4u radius): speed scales to 10*(1/4)=2.5
+	var a1: Vector3 = Steering.seek(Vector3.ZERO, Vector3(1, 0, 0), 10.0, 4.0)
+	print_debug("inside arrival 1u/4r: ", a1, "  expected ~(2.5,0,0)")
+	# Outside arrival_radius: full speed
+	var a2: Vector3 = Steering.seek(Vector3.ZERO, Vector3(10, 0, 0), 10.0, 4.0)
+	print_debug("outside arrival 10u/4r: ", a2, "  expected ~(10,0,0)")
+	# arrival_radius=0 (legacy): full speed regardless of distance
+	var a3: Vector3 = Steering.seek(Vector3.ZERO, Vector3(1, 0, 0), 10.0, 0.0)
+	print_debug("no arrival radius: ", a3, "  expected ~(10,0,0)")
+
 	print_debug("--- Steering.inertia_step ---")
 	# Already at desired, no change
 	var i1: Vector3 = Steering.inertia_step(

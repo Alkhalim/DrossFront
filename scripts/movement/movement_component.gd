@@ -23,6 +23,7 @@ var separate_min_distance: float = 2.5
 var separate_repel: float = 6.0
 var avoid_min_distance: float = 4.0
 var avoid_repel: float = 12.0
+@export var arrival_radius: float = 2.0
 
 # --- Set every frame by the order layer or solo logic ---
 var target: Vector3 = Vector3.INF                # INF = no active order; checked via has_target()
@@ -56,7 +57,7 @@ func _physics_process(delta: float) -> void:
 
 	var pos: Vector3 = _body.global_position
 	var cap: float = _capped_speed()
-	var desired: Vector3 = Steering.seek(pos, target, cap)
+	var desired: Vector3 = Steering.seek(pos, target, cap, arrival_radius)
 	desired += Steering.separate(pos,
 								  _separate_neighbors(),
 								  separate_min_distance,

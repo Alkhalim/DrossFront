@@ -10,15 +10,21 @@ const ZERO: Vector3 = Vector3.ZERO
 
 static func seek(current_pos: Vector3,
                  target_pos: Vector3,
-                 max_speed: float) -> Vector3:
-	## Returns a desired velocity pointing at target at full speed.
-	## Caller composes / clamps / inertia-steps the result.
+                 max_speed: float,
+                 arrival_radius: float = 0.0) -> Vector3:
+	## Returns a desired velocity pointing at target. When `arrival_radius`
+	## is > 0 and the unit is within it, scales speed linearly by distance
+	## so the unit naturally damps to a stop at the target instead of
+	## overshooting.
 	var diff: Vector3 = target_pos - current_pos
 	diff.y = 0.0
 	var d: float = diff.length()
 	if d < 0.001:
 		return ZERO
-	return (diff / d) * max_speed
+	var speed: float = max_speed
+	if arrival_radius > 0.0 and d < arrival_radius:
+		speed = max_speed * (d / arrival_radius)
+	return (diff / d) * speed
 
 static func separate(current_pos: Vector3,
                      neighbors: Array,
