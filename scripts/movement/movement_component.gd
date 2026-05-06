@@ -39,6 +39,8 @@ func _ready() -> void:
 	if _body == null:
 		push_error("MovementComponent must be a child of CharacterBody3D")
 		set_physics_process(false)
+		return
+	_stuck_last_pos = _body.global_position
 
 func _physics_process(delta: float) -> void:
 	if _body == null:
@@ -148,10 +150,10 @@ func _stuck_step(delta: float, combat_engaged: bool) -> void:
 		return
 
 	var sum: float = 0.0
-	for v in _stuck_buffer:
+	for v: float in _stuck_buffer:
 		sum += v
 	var mean_disp: float = sum / float(_stuck_buffer.size())
-	var expected: float = max_speed * delta
+	var expected: float = max_speed * (1.0 / 60.0)
 	if expected <= 0.0:
 		return
 	var ratio: float = mean_disp / expected
