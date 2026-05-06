@@ -30,3 +30,21 @@ func _run() -> void:
 	var s2: Vector3 = Steering.separate(Vector3.ZERO, [n_node], 4.0, 10.0)
 	print_debug("far east: ", s2, "  expected (0,0,0)")
 	n_node.queue_free()
+
+	print_debug("--- Steering.inertia_step ---")
+	# Already at desired, no change
+	var i1: Vector3 = Steering.inertia_step(
+		Vector3(5, 0, 0), Vector3(5, 0, 0), 10.0, PI, 1.0/60.0)
+	print_debug("at-target: ", i1, "  expected ~(5,0,0)")
+	# Accelerate from rest toward east
+	var i2: Vector3 = Steering.inertia_step(
+		Vector3.ZERO, Vector3(10, 0, 0), 60.0, PI, 1.0/60.0)
+	print_debug("accel 1f at 60u/s²: ", i2, "  expected ~(1,0,0)")
+	# Decelerate from speed
+	var i3: Vector3 = Steering.inertia_step(
+		Vector3(10, 0, 0), Vector3.ZERO, 60.0, PI, 1.0/60.0)
+	print_debug("decel 1f: ", i3, "  expected ~(9,0,0)")
+	# Turn-limit: 90° turn at PI rad/s, 1/60s = 3°/frame
+	var i4: Vector3 = Steering.inertia_step(
+		Vector3(10, 0, 0), Vector3(0, 0, 10), 60.0, PI, 1.0/60.0)
+	print_debug("turn-limited: ", i4, "  expected new_dir ~3° toward north")
