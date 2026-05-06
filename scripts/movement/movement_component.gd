@@ -21,8 +21,8 @@ var max_accel: float = 30.0
 var max_turn_rate_rad_s: float = TAU            # default: one full rotation per second (2π rad/s)
 var separate_min_distance: float = 2.5
 var separate_repel: float = 6.0
-var avoid_min_distance: float = 4.0
-var avoid_repel: float = 12.0
+var avoid_min_distance: float = 6.0
+var avoid_repel: float = 24.0
 @export var arrival_radius: float = 2.0
 
 # --- Set every frame by the order layer or solo logic ---
@@ -149,6 +149,13 @@ func _stuck_step(delta: float, combat_engaged: bool) -> void:
 		return
 	if _stuck_cooldown_remaining > 0.0:
 		return
+	# Arrived at destination — not stuck, just standing still on slot.
+	# Reset escalation level so a future actual-stuck case starts fresh.
+	if arrival_radius > 0.0:
+		var d_to_target: float = Vector2(pos.x - target.x, pos.z - target.z).length()
+		if d_to_target < arrival_radius:
+			_stuck_level = 0
+			return
 
 	var sum: float = 0.0
 	for v: float in _stuck_buffer:

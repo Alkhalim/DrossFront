@@ -59,14 +59,44 @@ static func avoid_static(current_pos: Vector3,
                          obstacles: Array,
                          min_distance: float,
                          repel_strength: float) -> Vector3:
-	## Same falloff math as separate(), but for static obstacles
-	## (Node3D entities tagged as buildings/wrecks/terrain). Caller
-	## supplies the obstacle list — typically filtered from
-	## SpatialIndex by group membership ("buildings" group) or
-	## a per-script tag. Identical implementation to separate but
-	## kept distinct so future tuning (different falloff curve
-	## for static vs dynamic) doesn't require touching both.
-	return separate(current_pos, obstacles, min_distance, repel_strength)
+	## Same falloff math as separate(), but for static obstacles.
+	## For Building obstacles with a known footprint, use the closest
+	## point on the building's footprint AABB instead of the building's
+	## center — otherwise large buildings (HQ, factory) effectively have
+	## avoidance radius 0 because the center is far inside.
+	## NOTE: Steering → Building coupling is intentional for Plan A.
+	## Plan B should refactor with a proper IObstacle interface.
+	var force: Vector3 = ZERO
+	for n: Variant in obstacles:
+		if not is_instance_valid(n):
+			continue
+		if not (n is Node3D):
+			continue
+		var ref_pos: Vector3 = (n as Node3D).global_position
+		# Building closest-point: use AABB face instead of center so
+		# large buildings get meaningful falloff at the unit's actual
+		# touch distance.
+		if n is Building:
+			var b: Building = n as Building
+			if b.stats != null and "footprint_size" in b.stats:
+				var fp: Vector3 = b.stats.footprint_size
+				var aabb_min: Vector3 = ref_pos - Vector3(fp.x * 0.5, 0.0, fp.z * 0.5)
+				var aabb_max: Vector3 = ref_pos + Vector3(fp.x * 0.5, 0.0, fp.z * 0.5)
+				ref_pos = Vector3(
+					clampf(current_pos.x, aabb_min.x, aabb_max.x),
+					current_pos.y,
+					clampf(current_pos.z, aabb_min.z, aabb_max.z))
+		var diff: Vector3 = current_pos - ref_pos
+		diff.y = 0.0
+		var d: float = diff.length()
+		if d < 0.001:
+			force += Vector3.RIGHT * repel_strength
+			continue
+		if d >= min_distance:
+			continue
+		var falloff: float = 1.0 - (d / min_distance)
+		force += (diff / d) * (repel_strength * falloff)
+	return force
 
 static func inertia_step(current_velocity: Vector3,
                          desired_velocity: Vector3,
