@@ -7450,3 +7450,52 @@ func _scrappy_neutral_tint(c: Color) -> Color:
 	mixed.b *= 0.72
 	mixed.a = c.a
 	return mixed
+
+
+## Maximum range across this unit's weapons that hit ground.
+## Returns 0.0 if the unit has no AG weapons (combine with
+## is_aa_only() to test).
+func get_ag_range() -> float:
+	var best: float = 0.0
+	if stats == null:
+		return 0.0
+	for w: WeaponResource in [stats.primary_weapon, stats.secondary_weapon]:
+		if w == null:
+			continue
+		if "hits_ground" in w and w.hits_ground:
+			best = maxf(best, w.range)
+	return best
+
+
+## True if the unit has at least one AA weapon AND no AG weapons.
+## Squads identified as AA-only are slotted in the formation's
+## middle (where they are protected and where their cover matters
+## most).
+func is_aa_only() -> bool:
+	if stats == null:
+		return false
+	var has_ag: bool = false
+	var has_aa: bool = false
+	for w: WeaponResource in [stats.primary_weapon, stats.secondary_weapon]:
+		if w == null:
+			continue
+		if "hits_ground" in w and w.hits_ground:
+			has_ag = true
+		if w.engages_air():
+			has_aa = true
+	return has_aa and not has_ag
+
+
+## Heavier armor → larger value. Used as a tiebreaker in
+## range-rank sort (heavier in front for equal AG range).
+func get_armor_weight() -> float:
+	if stats == null:
+		return 0.0
+	match stats.armor_class:
+		&"unarmored": return 1.0
+		&"light":     return 2.0
+		&"medium":    return 3.0
+		&"heavy":     return 4.0
+		&"apex":      return 5.0
+		&"structure": return 6.0
+		_:            return 0.0
