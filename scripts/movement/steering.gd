@@ -39,8 +39,33 @@ static func separate(current_pos: Vector3,
 	for n: Variant in neighbors:
 		if not is_instance_valid(n) or not (n is Node3D):
 			continue
-		var neighbor_pos: Vector3 = (n as Node3D).global_position
-		var diff: Vector3 = current_pos - neighbor_pos
+		var ref_pos: Vector3 = (n as Node3D).global_position
+		# Building closest-point: large buildings would have near-zero falloff
+		# if we measured from their center; use nearest AABB face instead.
+		if n is Building:
+			var b: Building = n as Building
+			if b.stats != null and "footprint_size" in b.stats:
+				var fp: Vector3 = b.stats.footprint_size
+				var aabb_min: Vector3 = ref_pos - Vector3(fp.x * 0.5, 0.0, fp.z * 0.5)
+				var aabb_max: Vector3 = ref_pos + Vector3(fp.x * 0.5, 0.0, fp.z * 0.5)
+				ref_pos = Vector3(
+					clampf(current_pos.x, aabb_min.x, aabb_max.x),
+					current_pos.y,
+					clampf(current_pos.z, aabb_min.z, aabb_max.z))
+		# Crawler closest-point: crawlers are ~8u wide; measuring from center
+		# means units touch the collider before any repulsion fires. Use a
+		# fixed 8×8 AABB. Plan B: replace with large_footprint on UnitStatResource.
+		elif (n as Node).get("stats") != null:
+			var stats_var: Variant = (n as Node).get("stats")
+			if "is_crawler" in stats_var and stats_var.is_crawler:
+				var fp: Vector3 = Vector3(8.0, 0.0, 8.0)
+				var aabb_min: Vector3 = ref_pos - Vector3(fp.x * 0.5, 0.0, fp.z * 0.5)
+				var aabb_max: Vector3 = ref_pos + Vector3(fp.x * 0.5, 0.0, fp.z * 0.5)
+				ref_pos = Vector3(
+					clampf(current_pos.x, aabb_min.x, aabb_max.x),
+					current_pos.y,
+					clampf(current_pos.z, aabb_min.z, aabb_max.z))
+		var diff: Vector3 = current_pos - ref_pos
 		diff.y = 0.0
 		var d: float = diff.length()
 		if d < 0.001:
@@ -80,6 +105,19 @@ static func avoid_static(current_pos: Vector3,
 			var b: Building = n as Building
 			if b.stats != null and "footprint_size" in b.stats:
 				var fp: Vector3 = b.stats.footprint_size
+				var aabb_min: Vector3 = ref_pos - Vector3(fp.x * 0.5, 0.0, fp.z * 0.5)
+				var aabb_max: Vector3 = ref_pos + Vector3(fp.x * 0.5, 0.0, fp.z * 0.5)
+				ref_pos = Vector3(
+					clampf(current_pos.x, aabb_min.x, aabb_max.x),
+					current_pos.y,
+					clampf(current_pos.z, aabb_min.z, aabb_max.z))
+		# Crawler closest-point: crawlers are ~8u wide; measuring from center
+		# means units touch the collider before any repulsion fires. Use a
+		# fixed 8×8 AABB. Plan B: replace with large_footprint on UnitStatResource.
+		elif (n as Node).get("stats") != null:
+			var stats_var: Variant = (n as Node).get("stats")
+			if "is_crawler" in stats_var and stats_var.is_crawler:
+				var fp: Vector3 = Vector3(8.0, 0.0, 8.0)
 				var aabb_min: Vector3 = ref_pos - Vector3(fp.x * 0.5, 0.0, fp.z * 0.5)
 				var aabb_max: Vector3 = ref_pos + Vector3(fp.x * 0.5, 0.0, fp.z * 0.5)
 				ref_pos = Vector3(
