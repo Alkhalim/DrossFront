@@ -75,6 +75,10 @@ camera_zoom_out={
 ]
 }
 
+[drossfront]
+
+movement/use_new_system=false
+
 [rendering]
 
 anti_aliasing/quality/screen_space_aa=1
