@@ -3809,42 +3809,6 @@ func _setup_ground_patches() -> void:
 			{"pos": Vector3(0.0, 0.025, 75.0), "size": 40.0, "tint": Color(0.62, 0.28, 0.14, 0.85), "rough": 0.95, "tex": "metal"},
 			{"pos": Vector3(0.0, 0.025, -75.0), "size": 40.0, "tint": Color(0.62, 0.28, 0.14, 0.85), "rough": 0.95, "tex": "metal"},
 		]
-	# DEBUG (TEMPORARY): three markers near the south HQ approach so
-	# we can isolate the rendering bug.
-	#   - Opaque box (already visible per last run) — confirms the
-	#     scene tree wiring works.
-	#   - Opaque custom-mesh blob (CYAN at z=100) — uses our soft-blob
-	#     ArrayMesh but with NO transparency. If visible, the mesh is
-	#     fine and the bug is in the transparent-material path.
-	#   - Transparent custom-mesh blob (MAGENTA at z=110) — original
-	#     test, expected invisible based on last screenshot.
-	print_debug("[debug] _setup_ground_patches called: biomes=%d" % biomes.size())
-	var dbg_box := MeshInstance3D.new()
-	var dbg_mesh := BoxMesh.new()
-	dbg_mesh.size = Vector3(8.0, 4.0, 8.0)
-	dbg_box.mesh = dbg_mesh
-	var dbg_mat := StandardMaterial3D.new()
-	dbg_mat.albedo_color = Color(1.0, 0.0, 1.0, 1.0)
-	dbg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	dbg_box.material_override = dbg_mat
-	dbg_box.position = Vector3(0.0, 2.0, 100.0)
-	add_child(dbg_box)
-	# Opaque custom-mesh blob — same ArrayMesh _spawn_soft_patch uses,
-	# but with TRANSPARENCY_DISABLED so we isolate whether the mesh
-	# itself renders.
-	var dbg_opaque_blob := MeshInstance3D.new()
-	dbg_opaque_blob.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	dbg_opaque_blob.mesh = _build_soft_blob_mesh(8.0, 1.0, 1.0)
-	var dbg_opaque_mat := StandardMaterial3D.new()
-	dbg_opaque_mat.albedo_color = Color(0.0, 1.0, 1.0, 1.0)
-	dbg_opaque_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	dbg_opaque_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	dbg_opaque_blob.material_override = dbg_opaque_mat
-	dbg_opaque_blob.position = Vector3(0.0, 2.0, 100.0)
-	add_child(dbg_opaque_blob)
-	# Transparent variant via the normal _spawn_soft_patch path.
-	_spawn_soft_patch(Vector3(15.0, 0.10, 110.0), 12.0, Color(1.0, 0.0, 1.0, 1.0), 1.0, false, "")
-
 	for b: Dictionary in biomes:
 		_spawn_soft_patch(
 			b["pos"] as Vector3,
@@ -3957,12 +3921,16 @@ func _setup_ground_patches() -> void:
 
 
 func _spawn_soft_patch(pos: Vector3, base_size: float, tint: Color, roughness: float, oil: bool, texture_key: String = "") -> void:
-	# Soft-edged organic patch built from a triangle-fan ArrayMesh with
-	# vertex-color alpha (1 at center → 0 at perimeter). The fade is
-	# entirely driven by per-vertex interpolation, so we don't depend on
-	# transparency-texture sampling working correctly across drivers
-	# (which was the bug producing solid black rectangles in earlier
-	# attempts that used a procedural alpha texture).
+	# Tinted ground patch built from an irregular ArrayMesh disc. Earlier
+	# version relied on `vertex_color_use_as_albedo + TRANSPARENCY_ALPHA`
+	# for a soft per-vertex alpha fade, but that combo (with depth_draw
+	# disabled) produced invisible patches across the board on the
+	# user's renderer — diagnostic blobs at full vertex alpha never
+	# rendered. The opaque-with-tint path verified working via the same
+	# ArrayMesh, so we drop the vertex-color fade and use uniform alpha
+	# from `tint.a`. The mesh's perimeter still has random radial
+	# jitter, so silhouettes read organic rather than clean circles;
+	# we just lose the soft feathered edge.
 	var patch := MeshInstance3D.new()
 	patch.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var x_scale: float = randf_range(0.85, 1.25)
@@ -3981,21 +3949,15 @@ func _spawn_soft_patch(pos: Vector3, base_size: float, tint: Color, roughness: f
 	var mat := StandardMaterial3D.new()
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.albedo_color = tint
-	# Vertex color carries the alpha falloff; multiplied with albedo_color
-	# this gives `tint` at the center fading smoothly to fully transparent
-	# at the blob edge.
-	mat.vertex_color_use_as_albedo = true
 	mat.roughness = roughness
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED if oil else BaseMaterial3D.SHADING_MODE_PER_PIXEL
+	# Double-sided so winding errors in the band quads can't invisible
+	# the patch. Cheap on flat horizontal discs.
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	# Bump render priority so the patch draws after the opaque ground
 	# in the transparency pass even when the renderer's depth sort
 	# tie-breaks the wrong way.
 	mat.render_priority = 2
-	# Disable depth-WRITE so neighbouring transparent patches don't
-	# occlude each other through their own depth output. Depth test
-	# stays on so wrecks / buildings still mask the patches under
-	# their footprint.
-	mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
 	if oil:
 		# Kept for backwards-compat (the recommended path is now
 		# `_spawn_oil_spill`). Subtle emission to fake the wet glint.
