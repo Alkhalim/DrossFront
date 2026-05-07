@@ -153,7 +153,11 @@ func _ready() -> void:
 		var cm := CrawlerMovement.new()
 		cm.name = "MovementComponent"
 		cm.max_speed = _move_speed
-		cm.max_accel = _move_speed * 4.0
+		# Snappier accel/decel so the crawler settles cleanly inside its
+		# arrival zone instead of orbiting the target. 4× was too lazy —
+		# inertia carried the chassis past, seek pulled it back, and the
+		# user saw "circles in place after reaching destination."
+		cm.max_accel = _move_speed * 6.0
 		cm.max_turn_rate_rad_s = TAU * 0.25  # crawlers turn slowly
 		add_child(cm)
 	else:

@@ -370,11 +370,21 @@ func _physics_process(delta: float) -> void:
 		# Reset the burst counter so a half-finished burst from the previous
 		# target doesn't bleed into the next engagement.
 		_burst_count = 0
-		# If attack-move and arrived, stay put and keep scanning
+		# Attack-move resume: if we have an attack-move destination and
+		# we're not already heading there, command the unit to walk to it.
+		# Without this, after the engaged target dies the unit's mc.target
+		# is the chase position from the last engagement — the unit just
+		# sits there instead of continuing the attack-move.
 		if attack_move_target != Vector3.INF:
-			if _unit.get("move_target") == Vector3.INF:
-				# Arrived at attack-move destination — keep scanning
-				pass
+			var mc_amt: Node = _unit.get_node_or_null("MovementComponent")
+			if mc_amt is GroundMovement:
+				var cur_mc_target: Vector3 = (mc_amt as GroundMovement).target
+				var unit_pos: Vector3 = _unit.global_position
+				var d_to_dest: float = unit_pos.distance_to(attack_move_target)
+				var arr_r: float = (mc_amt as GroundMovement).arrival_radius
+				if d_to_dest > arr_r and cur_mc_target.distance_to(attack_move_target) > 1.0:
+					if _unit.has_method("command_move"):
+						_unit.command_move(attack_move_target, false)
 		# Patrol return-to-home: if this unit has a home position and no
 		# current target, send it back home so it doesn't drift across
 		# the map after a brief chase ends.
@@ -500,11 +510,13 @@ func set_target(target: Node3D) -> void:
 		if not _is_hostile(my_owner, target.get("owner_id") as int):
 			return
 	# Target changed — reset the in-range hysteresis so the unit can
-	# chase the new target into range. (Without this, a unit that was
-	# already engaged on target A would refuse to move toward newly-
-	# clicked target B.)
+	# chase the new target into range, AND stop the current movement so
+	# the player's attack click cancels any in-flight move command. The
+	# combat tick will then chase or fire as appropriate.
 	if target != forced_target:
 		_was_in_range = false
+		if _unit.has_method("stop"):
+			_unit.stop()
 	forced_target = target
 	_current_target = target
 	attack_move_target = Vector3.INF
