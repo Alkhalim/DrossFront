@@ -473,6 +473,15 @@ func _ready() -> void:
 		# right now.
 		if stats.unit_class == &"transport":
 			_move_speed *= 1.10
+		# New-system MovementComponent: mirror the multiplied _move_speed
+		# onto gm.max_speed so the new path uses the same effective speed
+		# the legacy path does. Without this, gm.max_speed stays at the
+		# raw stats.speed (Anvil units would run 5% faster than intended,
+		# Sable engineers 10%, and transports would lose their +10% bump).
+		var mc_speed_sync: Node = get_node_or_null("MovementComponent")
+		if mc_speed_sync != null and mc_speed_sync is MovementComponent:
+			(mc_speed_sync as MovementComponent).max_speed = _move_speed
+			(mc_speed_sync as MovementComponent).max_accel = _move_speed * 6.0
 		var shape: Dictionary = CLASS_SHAPES.get(stats.unit_class, CLASS_SHAPES[&"medium"])
 		shape = _maybe_override_shape_for_unit(shape)
 		_turn_speed = shape.get("turn_speed", 6.0) as float

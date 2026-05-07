@@ -113,7 +113,16 @@ func _ready() -> void:
 	# only papered over. Letting workers phase through other units
 	# costs a tiny bit of physical realism for a big reduction in
 	# stuck-pathfinding cases.
-	collision_layer = 2  # unit layer (so enemies can still shoot us)
+	# Workers are noncombat economy agents — other units (and the player's
+	# build placement check, foundation-clear, etc.) should treat them as
+	# pass-through. Layer 0 = on no physics layer, so any other body's
+	# mask intersects nothing here and move_and_slide on units, mechs,
+	# crawlers, and engineers walks straight through workers. Targeting
+	# (combat acquisition) goes through SpatialIndex/group iteration, not
+	# physics queries, so enemies can still shoot at workers via that
+	# path. Mask 1 keeps the worker's own ground detection intact for
+	# gravity / floor snap.
+	collision_layer = 0
 	collision_mask = 1   # ground only
 	# Floor snap so the worker stays glued to the ground across the
 	# tiny lip where flat ground meets a plateau ramp foot. Without

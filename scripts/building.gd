@@ -3092,6 +3092,12 @@ func _is_foundation_clear() -> bool:
 		var node3d: Node3D = node as Node3D
 		if not node3d:
 			continue
+		# Workers don't block construction — they're noncombat economy
+		# agents and the player shouldn't have to babysit them off build
+		# sites. The friendly-evacuate sweep also skips them via the
+		# same is-worker check below.
+		if node is SalvageWorker:
+			continue
 		var dx: float = absf(node3d.global_position.x - global_position.x)
 		var dz: float = absf(node3d.global_position.z - global_position.z)
 		if dx < half_x and dz < half_z:
@@ -3146,6 +3152,9 @@ func _evacuate_foundation_blockers() -> void:
 			continue
 		var node3d: Node3D = node as Node3D
 		if not node3d:
+			continue
+		# Workers don't block construction — see _is_foundation_clear.
+		if node is SalvageWorker:
 			continue
 		var dx_signed: float = node3d.global_position.x - global_position.x
 		var dz_signed: float = node3d.global_position.z - global_position.z
