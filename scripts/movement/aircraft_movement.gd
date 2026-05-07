@@ -35,30 +35,49 @@ func _physics_process(delta: float) -> void:
 	_update_bank(delta)
 
 func _update_bank(delta: float) -> void:
-	## Visual banking: roll the aircraft chassis when turning. This is
-	## visual-only — doesn't affect physics or steering. The bank angle
-	## is proportional to the heading change rate.
+	## Yaw the aircraft to face its current velocity AND apply visual
+	## bank/roll proportional to the turn rate. The previous version
+	## reset the basis to (UP, current_basis.get_euler().y) every
+	## frame — i.e. it preserved whatever yaw the body already had
+	## without ever turning toward the velocity heading. Aircraft
+	## tasked to a new direction kept facing the OLD heading because
+	## nothing actually wrote the new yaw. Visible bug: Wraiths
+	## (and any other AircraftMovement-driven aircraft) sliding
+	## sideways without rotating.
 	if _body == null:
 		return
 	var heading: Vector2 = Vector2(_velocity.x, _velocity.z)
 	var heading_len: float = heading.length()
+	var current_y: float = _body.transform.basis.get_euler().y
+	var desired_y: float = current_y
 	var target_bank: float = 0.0
-	if heading_len > 0.5 and _last_heading_xz.length() > 0.5:
+	if heading_len > 0.5:
 		var heading_dir: Vector2 = heading / heading_len
-		var ang: float = _last_heading_xz.normalized().angle_to(heading_dir)
-		# Bank toward the inside of the turn — sign matches angle delta.
-		target_bank = clampf(ang / maxf(delta, 0.001) * 0.1,
-		                     -bank_angle_max_rad, bank_angle_max_rad)
+		# Aircraft scenes are oriented with the nose along -Z.
+		# atan2(x, -z) gives the Y rotation that points -Z toward
+		# (heading_dir.x, heading_dir.y).
+		desired_y = atan2(heading_dir.x, -heading_dir.y)
+		if _last_heading_xz.length() > 0.5:
+			var ang: float = _last_heading_xz.normalized().angle_to(heading_dir)
+			target_bank = clampf(ang / maxf(delta, 0.001) * 0.1,
+			                     -bank_angle_max_rad, bank_angle_max_rad)
 	_last_heading_xz = heading
+	# Slew the actual yaw toward the desired heading at a fixed
+	# turn rate. Wrapping the delta into [-PI, PI] avoids the long
+	# way around when crossing the +PI/-PI seam.
+	const TURN_RATE_RAD_PER_SEC: float = 4.5
+	var dy: float = desired_y - current_y
+	while dy > PI:
+		dy -= TAU
+	while dy < -PI:
+		dy += TAU
+	var step: float = clampf(dy, -TURN_RATE_RAD_PER_SEC * delta, TURN_RATE_RAD_PER_SEC * delta)
+	var new_y: float = current_y + step
 	_bank_angle_current = lerpf(_bank_angle_current, target_bank,
 	                             bank_response_rate * delta)
-	# Apply visual roll to the body's transform. Implementer may need
-	# to adjust the rotation axis depending on how aircraft scenes
-	# are oriented (Godot default: forward = -Z; roll = around -Z).
+	# Compose: yaw around Y (heading) then roll around forward (-Z) for visual bank.
 	var t: Transform3D = _body.transform
-	t.basis = t.basis.orthonormalized()
-	# Reset roll, then apply current bank
-	t.basis = Basis(Vector3.UP, t.basis.get_euler().y).rotated(Vector3.FORWARD, _bank_angle_current)
+	t.basis = Basis(Vector3.UP, new_y).rotated(Vector3.FORWARD, _bank_angle_current)
 	_body.transform = t
 
 func _separate_neighbors() -> Array:
