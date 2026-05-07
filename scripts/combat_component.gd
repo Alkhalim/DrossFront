@@ -259,6 +259,19 @@ func _physics_process(delta: float) -> void:
 
 	var unit_has_move_order: bool = _unit.get("has_move_order") as bool
 
+	# Movement-priority window (Plan C hotfix): when the player
+	# issued command_move(clear_combat=true) recently, suppress all
+	# combat acquisition so the retreat actually completes. Plan D
+	# replaces this with a proper stance system.
+	var move_priority_until: int = (_unit.get("_move_priority_until_ms") as int) if "_move_priority_until_ms" in _unit else 0
+	var move_priority_active: bool = move_priority_until > Time.get_ticks_msec()
+	if move_priority_active:
+		# Drop any retaliation/forced acquisition; the player's order wins.
+		forced_target = null
+		if _current_target != null:
+			_current_target = null
+			combat_ended.emit()
+
 	# Forced target wins. If it's gone or dead, drop it.
 	if forced_target and not _is_valid_target(forced_target):
 		forced_target = null
@@ -296,7 +309,7 @@ func _physics_process(delta: float) -> void:
 	# Stand-ground units skip this — they shoot what walks into actual
 	# range but don't hunt.
 	var holding: bool = bool(_unit.get("is_holding_position"))
-	var can_auto_target: bool = (not unit_has_move_order or attack_move_target != Vector3.INF) and not holding
+	var can_auto_target: bool = (not unit_has_move_order or attack_move_target != Vector3.INF) and not holding and not move_priority_active
 	if not _current_target and can_auto_target and _search_timer <= 0.0:
 		_search_timer = SEARCH_INTERVAL
 		var stats: UnitStatResource = _unit.get("stats") as UnitStatResource

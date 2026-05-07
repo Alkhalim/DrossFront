@@ -33,6 +33,12 @@ var move_target: Vector3 = Vector3.INF
 var move_queue: Array[Vector3] = []
 var is_selected: bool = false
 var has_move_order: bool = false
+## Wall-clock timestamp (msec) until which combat re-engagement is
+## suppressed. Set by command_move(clear_combat=true) so the player's
+## retreat command isn't immediately overridden by retaliation.
+## Plan D's stance system will replace this with a proper Move vs
+## Attack-move stance.
+var _move_priority_until_ms: int = 0
 ## Stand-ground state. When true the combat component skips auto-acquire
 ## scanning and the movement loop refuses to chase out-of-range enemies.
 ## The unit still fires at anything that wanders into actual weapon range,
@@ -5157,6 +5163,9 @@ func command_move(target: Vector3, clear_combat: bool = true) -> void:
 		var combat: Node = get_combat()
 		if combat and combat.has_method("clear_target"):
 			combat.clear_target()
+		# Suppress combat re-engagement for ~4 seconds so retaliation
+		# can't immediately pull the unit back into the fight.
+		_move_priority_until_ms = Time.get_ticks_msec() + 4000
 
 
 func command_hold_position() -> void:
