@@ -996,7 +996,7 @@ func _legacy_command_move_to_world(ground_pos: Vector3, queue: bool = false) -> 
 			movable.command_move(slot)
 
 
-func _new_system_dispatch_movables(ground_pos: Vector3) -> void:
+func _new_system_dispatch_movables(ground_pos: Vector3, clear_combat: bool = true) -> void:
 	## Routes any selected entity with a MovementComponent through the new
 	## system. Plan B: ground squads form a SquadGroup as before; aircraft
 	## receive solo goto_world (mixed-domain SquadGroup is Plan C). Crawlers /
@@ -1007,6 +1007,12 @@ func _new_system_dispatch_movables(ground_pos: Vector3) -> void:
 	## FORWARDED here — Plan A doesn't support waypoint queueing on the new
 	## path (spec §17 lists it as out of scope). A queued shift-click move on
 	## a flag-on selection runs as a normal single move.
+	##
+	## clear_combat=true (plain move): each unit's combat state is cleared and a
+	## 4-second movement-priority window is opened so CombatComponent can't
+	## immediately override the retreat. Uses unit.command_move() which wires
+	## all of this up. clear_combat=false (attack-move): go through goto_world
+	## directly so the combat layer stays live for en-route engagement.
 	##
 	## Called by both command_move_to_world and command_attack_move_to_world
 	## when the new system is active.
@@ -1034,10 +1040,17 @@ func _new_system_dispatch_movables(ground_pos: Vector3) -> void:
 		elif mc is AircraftMovement:
 			aircraft_members.append(s)
 
-	# Ground: single squad uses direct goto_world; multiple squads form a SquadGroup.
+	# Ground: single squad uses command_move (which calls goto_world internally
+	# and — when clear_combat=true — also clears the combat target and opens the
+	# 4-second movement-priority window so CombatComponent can't chase an enemy
+	# back over the player's retreat order).
 	if ground_members.size() == 1:
-		var gm: GroundMovement = ground_members[0].get_node("MovementComponent") as GroundMovement
-		gm.goto_world(ground_pos)
+		var unit: Node = ground_members[0]
+		if clear_combat and unit.has_method("command_move"):
+			unit.command_move(ground_pos, true)
+		else:
+			var gm: GroundMovement = unit.get_node("MovementComponent") as GroundMovement
+			gm.goto_world(ground_pos)
 	elif ground_members.size() > 1:
 		# Multi-squad — create a SquadGroup to manage formation and cohesion.
 		# setup() internally assigns squad_group_ref on each member's GroundMovement.
@@ -1048,10 +1061,28 @@ func _new_system_dispatch_movables(ground_pos: Vector3) -> void:
 		# In dispersed mode each squad routes independently to its formation slot.
 		if not grp._is_cohesive:
 			for m: Node3D in ground_members:
-				var gm2: GroundMovement = m.get_node("MovementComponent") as GroundMovement
-				gm2.goto_world(grp._slot_world(m))
+				if clear_combat and m.has_method("command_move"):
+					m.command_move(grp._slot_world(m), true)
+				else:
+					var gm2: GroundMovement = m.get_node("MovementComponent") as GroundMovement
+					gm2.goto_world(grp._slot_world(m))
+		elif clear_combat:
+			# Cohesive mode: SquadGroup drives targets per-frame via set_slot_target,
+			# but we still need to open the priority window and clear combat state
+			# for every member so CombatComponent doesn't race against the move.
+			for m: Node in ground_members:
+				if m.has_method("command_move"):
+					# command_move sets _move_priority_until_ms and clears the combat
+					# target. The goto_world it triggers is immediately superseded by
+					# SquadGroup._update_member_targets → set_slot_target on the next
+					# physics tick, which is the correct slot-based position.
+					m.command_move(ground_pos, true)
 
 	# Aircraft: solo goto_world each (Plan C will add mixed-domain SquadGroup).
+	# Aircraft have their own command_move in aircraft.gd but it doesn't set the
+	# movement-priority timestamp yet — keep goto_world for now; aircraft don't
+	# have the same chase-override problem because their CombatComponent targets
+	# are cleared via command_move(clear_combat=true) above when applicable.
 	for a: Node in aircraft_members:
 		var am: AircraftMovement = a.get_node("MovementComponent") as AircraftMovement
 		am.goto_world(ground_pos)
@@ -1110,10 +1141,11 @@ func command_attack_move_to_world(ground_pos: Vector3, queue: bool = false) -> v
 		_legacy_command_attack_move_to_world(ground_pos, queue)
 		return
 
-	# New system: same SquadGroup/aircraft dispatch as a normal move. The combat
-	# stance distinction (attack-move = divert to engage targets en route) is
-	# handled inside combat_component.gd's existing engagement logic, not here.
-	_new_system_dispatch_movables(ground_pos)
+	# New system: same SquadGroup/aircraft dispatch as a normal move. Pass
+	# clear_combat=false so the movement-priority window is NOT opened and the
+	# combat target is NOT cleared — attack-move explicitly wants en-route
+	# engagement, so CombatComponent should stay active.
+	_new_system_dispatch_movables(ground_pos, false)
 
 	# Legacy fall-through for non-GroundMovement / non-AircraftMovement movables.
 	for s: Node3D in _selected_units:

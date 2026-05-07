@@ -403,7 +403,9 @@ func _physics_process(delta: float) -> void:
 		if _fow_cached and _fow_cached.has_method("is_visible_world"):
 			team_can_see = _fow_cached.call("is_visible_world", _current_target.global_position)
 	if dist > sight_r and not team_can_see:
-		_unit.command_move(_current_target.global_position, false)
+		# Don't override movement during a player-issued retreat.
+		if not _is_movement_priority_active():
+			_unit.command_move(_current_target.global_position, false)
 		return
 
 	if dist <= primary_range:
@@ -449,7 +451,8 @@ func _physics_process(delta: float) -> void:
 		# or auto-engaged on sight). Pass `clear_combat=false` so command_move
 		# doesn't wipe the very target we're chasing; that bug used to make
 		# units walk all the way into melee before re-acquiring and firing.
-		if forced_target:
+		# Don't override movement during a player-issued retreat.
+		if forced_target and not _is_movement_priority_active():
 			_unit.command_move(_current_target.global_position, false)
 
 
