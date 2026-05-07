@@ -167,22 +167,43 @@ var ANATOLIA: PackedVector2Array = PackedVector2Array([
 	_ll(41.7, 41.5),    # Trabzon
 ])
 
-## Italian boot -- separate peninsula polygon.
+## Italian boot -- mainland peninsula. The previous version had
+## (13.9, 44.9) "Pula" listed which is the Istrian peninsula in
+## CROATIA, not Italy — that vertex pushed the Italian polygon into
+## Croatian territory and overlapped with BALKANS, causing the
+## boot to look like a deformed blob with no recognisable shape.
+## Replaced with the actual Italian Adriatic coast (Venice → Ancona
+## → Pescara → Bari → heel) plus a denser west-coast walk through
+## the Tyrrhenian (Reggio toe → Salerno → Naples → Anzio → Rome →
+## Civitavecchia → Pisa → Genoa → Riviera) so the iconic boot reads.
 var ITALY: PackedVector2Array = PackedVector2Array([
-	_ll( 7.3, 43.7),    # Riviera
+	_ll( 7.3, 43.7),    # Riviera (Italian-French border)
 	_ll( 8.9, 44.4),    # Genoa
-	_ll(10.5, 45.0),    # Po valley north
-	_ll(13.9, 45.7),    # Trieste
-	_ll(13.9, 44.9),    # Pula
-	_ll(15.0, 41.5),    # Adriatic mid
-	_ll(17.9, 40.6),    # Brindisi (heel)
-	_ll(18.5, 40.0),    # Lecce
-	_ll(17.0, 39.0),    # Gulf of Taranto
-	_ll(15.6, 38.1),    # Reggio (toe)
-	_ll(13.5, 39.5),    # Salerno
-	_ll(14.3, 40.8),    # Naples
-	_ll(12.4, 41.9),    # Rome
+	_ll( 9.85, 44.06),  # La Spezia
 	_ll(11.2, 43.5),    # Pisa
+	_ll(12.27, 41.74),  # Civitavecchia
+	_ll(12.30, 41.45),  # Anzio
+	_ll(13.50, 40.80),  # Gaeta
+	_ll(14.27, 40.83),  # Naples
+	_ll(14.95, 40.57),  # Salerno
+	_ll(15.65, 40.05),  # Sapri
+	_ll(15.86, 38.92),  # Tropea
+	_ll(15.65, 38.10),  # Reggio (toe of the boot)
+	_ll(17.13, 38.92),  # Crotone
+	_ll(17.20, 39.40),  # Gulf of Taranto inner
+	_ll(18.00, 40.00),  # Santa Maria di Leuca (heel tip)
+	_ll(18.50, 40.15),  # Lecce
+	_ll(17.93, 40.64),  # Brindisi
+	_ll(17.20, 41.10),  # Bari
+	_ll(15.95, 41.93),  # Manfredonia (spur of the boot)
+	_ll(14.50, 42.36),  # Pescara
+	_ll(13.50, 43.62),  # Ancona
+	_ll(12.50, 44.42),  # Rimini / Ravenna
+	_ll(12.34, 45.44),  # Venice
+	_ll(13.78, 45.65),  # Trieste (Italian side)
+	_ll(13.10, 45.90),  # Friuli
+	_ll(11.00, 46.50),  # Bolzano (Alpine ridge)
+	_ll( 8.00, 46.20),  # Mont Blanc shoulder
 ])
 
 ## Balkans + Greek peninsula.
