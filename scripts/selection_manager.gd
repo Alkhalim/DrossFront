@@ -997,28 +997,16 @@ func _legacy_command_move_to_world(ground_pos: Vector3, queue: bool = false) -> 
 
 
 func _new_system_dispatch_movables(ground_pos: Vector3, clear_combat: bool = true) -> void:
-	## Routes any selected entity with a MovementComponent through the new
-	## system. Plan B: ground squads form a SquadGroup as before; aircraft
-	## receive solo goto_world (mixed-domain SquadGroup is Plan C). Crawlers /
-	## workers are handled by their own command_move paths in the legacy
-	## fall-through.
+	## Per-unit dispatch — every selected ground/aircraft unit pathfinds solo
+	## to ground_pos. Spacing is handled by the steering layer's SEPARATE
+	## force; units cluster naturally around the destination instead of being
+	## placed into formation slots. The previous SquadGroup-based "squad of
+	## squads" system was removed in favor of this blob movement after the
+	## interaction surface (slot projection ↔ arrival ↔ combat-relax ↔ speed
+	## cap) produced too many edge-case bugs to be worth the gameplay payoff.
 	##
-	## The `queue` parameter on the public wrappers is INTENTIONALLY NOT
-	## FORWARDED here — Plan A doesn't support waypoint queueing on the new
-	## path (spec §17 lists it as out of scope). A queued shift-click move on
-	## a flag-on selection runs as a normal single move.
-	##
-	## clear_combat=true (plain move): each unit's combat state is cleared and a
-	## 4-second movement-priority window is opened so CombatComponent can't
-	## immediately override the retreat. Uses unit.command_move() which wires
-	## all of this up. clear_combat=false (attack-move): go through goto_world
-	## directly so the combat layer stays live for en-route engagement.
-	##
-	## Called by both command_move_to_world and command_attack_move_to_world
-	## when the new system is active.
-
-	# Evict members from any prior SquadGroup so the old group's
-	# _physics_process stops overwriting the new targets.
+	## Any prior SquadGroup membership is evicted so a leftover group from
+	## an earlier dispatch doesn't keep writing slot targets behind us.
 	for s: Node in _selected_units:
 		if not is_instance_valid(s):
 			continue
@@ -1028,71 +1016,20 @@ func _new_system_dispatch_movables(ground_pos: Vector3, clear_combat: bool = tru
 			if prior_gm.squad_group_ref != null and is_instance_valid(prior_gm.squad_group_ref):
 				prior_gm.squad_group_ref.drop_member(s, SquadGroup.DropReason.PLAYER_ORDER)
 
-	# Bucket by movement type.
-	var ground_members: Array = []
-	var aircraft_members: Array = []
 	for s: Node in _selected_units:
 		if not is_instance_valid(s):
 			continue
 		var mc: Node = s.get_node_or_null("MovementComponent")
 		if mc is GroundMovement:
-			ground_members.append(s)
+			# clear_combat=true: route through unit.command_move so combat state
+			# is cleared and the move-priority window opens (retreat). False:
+			# route through goto_world to preserve combat state for attack-move.
+			if clear_combat and s.has_method("command_move"):
+				s.command_move(ground_pos, true)
+			else:
+				(mc as GroundMovement).goto_world(ground_pos)
 		elif mc is AircraftMovement:
-			aircraft_members.append(s)
-
-	# Ground: single squad uses command_move (which calls goto_world internally
-	# and — when clear_combat=true — also clears the combat target and opens the
-	# 4-second movement-priority window so CombatComponent can't chase an enemy
-	# back over the player's retreat order).
-	if ground_members.size() == 1:
-		var unit: Node = ground_members[0]
-		if clear_combat and unit.has_method("command_move"):
-			unit.command_move(ground_pos, true)
-		else:
-			var gm: GroundMovement = unit.get_node("MovementComponent") as GroundMovement
-			gm.goto_world(ground_pos)
-	elif ground_members.size() > 1:
-		# Multi-squad — create a SquadGroup to manage formation and cohesion.
-		# setup() internally assigns squad_group_ref on each member's GroundMovement.
-		var grp := SquadGroup.new()
-		grp.name = "SquadGroup_%d" % Time.get_ticks_msec()
-		get_tree().current_scene.add_child(grp)
-		grp.setup(ground_members, ground_pos)
-		# Dispersed mode: members are too spread out for a meaningful formation,
-		# so each one paths independently to the destination. SquadGroup's
-		# _check_dispersed_promotion watches for them all to gather near the
-		# destination, then flips to cohesive mode and assigns formation slots
-		# from there. Sending them to _slot_world(m) here was the bug — that
-		# function returns _group_center + slot_offset, and _group_center is
-		# the starting centroid (which sits between scattered units, not at
-		# the click target), so everyone collapsed to the centroid instead.
-		if not grp._is_cohesive:
-			for m: Node3D in ground_members:
-				if clear_combat and m.has_method("command_move"):
-					m.command_move(ground_pos, true)
-				else:
-					var gm2: GroundMovement = m.get_node("MovementComponent") as GroundMovement
-					gm2.goto_world(ground_pos)
-		elif clear_combat:
-			# Cohesive mode: SquadGroup drives targets per-frame via set_slot_target,
-			# but we still need to open the priority window and clear combat state
-			# for every member so CombatComponent doesn't race against the move.
-			for m: Node in ground_members:
-				if m.has_method("command_move"):
-					# command_move sets _move_priority_until_ms and clears the combat
-					# target. The goto_world it triggers is immediately superseded by
-					# SquadGroup._update_member_targets → set_slot_target on the next
-					# physics tick, which is the correct slot-based position.
-					m.command_move(ground_pos, true)
-
-	# Aircraft: solo goto_world each (Plan C will add mixed-domain SquadGroup).
-	# Aircraft have their own command_move in aircraft.gd but it doesn't set the
-	# movement-priority timestamp yet — keep goto_world for now; aircraft don't
-	# have the same chase-override problem because their CombatComponent targets
-	# are cleared via command_move(clear_combat=true) above when applicable.
-	for a: Node in aircraft_members:
-		var am: AircraftMovement = a.get_node("MovementComponent") as AircraftMovement
-		am.goto_world(ground_pos)
+			(mc as AircraftMovement).goto_world(ground_pos)
 
 
 func _command_assist_build(building: Building) -> void:

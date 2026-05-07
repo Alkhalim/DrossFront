@@ -27,7 +27,7 @@ var separate_min_distance: float = 2.5
 var separate_repel: float = 6.0
 var avoid_min_distance: float = 6.0
 var avoid_repel: float = 24.0
-@export var arrival_radius: float = 2.0
+@export var arrival_radius: float = 3.0
 
 # --- Set every frame by the order layer or solo logic ---
 var target: Vector3 = Vector3.INF                # INF = no active order; checked via has_target()
