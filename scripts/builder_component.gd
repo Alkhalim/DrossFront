@@ -11,7 +11,11 @@ signal construction_finished(building: Building)
 ## Clearance the engineer needs from the building edge to start working.
 ## Distance is measured from the building's edge (footprint half-extent), not its
 ## center, so big buildings still have a workable construction perimeter.
-const BUILD_BUFFER: float = 2.5
+## 3.5u (was 2.5u) gives a little extra leniency so the engineer doesn't drop
+## out of build range from being nudged a unit or two by separation forces or
+## another unit walking past — that previously interrupted construction and
+## made the engineer re-approach for what looked like no reason.
+const BUILD_BUFFER: float = 3.5
 
 var _target_building: Building = null
 ## Damaged friendly node (Building or Unit) the engineer is currently

@@ -381,7 +381,11 @@ const CLASS_SHAPES: Dictionary = {
 		"cannon": Vector3(0.0, 0.0, 0.0), "cannon_x": 0.0, "cannon_kind": "none",
 		"antenna": 0.0,
 		"color": Color(0.18, 0.18, 0.22),
-		"formation_spacing": 3.5,
+		# Spacing tightened from 3.5 to 3.0 to match the 0.9× tank
+		# visual scale applied in the build dispatcher (see Courier /
+		# Breacher tank scaling below). Tanks now read smaller and
+		# their squad clusters tighter.
+		"formation_spacing": 3.0,
 		# Tracked tank: ~5 rad/s = ~290 deg/s. Tracks pivot in
 		# place faster than legs need to reposition.
 		"turn_speed": 5.0,
@@ -724,19 +728,33 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		# uses a casemate (no-turret) tank-destroyer build that
 		# diverges from the Sable Courier Tank's turreted
 		# transport silhouette; defaults route to Courier Tank.
+		var tank_result: Dictionary
+		var is_grinder: bool = stats.unit_name.findn("Grinder") >= 0
 		if stats.unit_name.findn("Breacher") >= 0:
 			# Branch variants get distinct silhouettes -- Mortar
 			# is an open-topped artillery vehicle, Salvo carries
 			# vertical missile pods. Both lose the casemate +
 			# main cannon of the base Breacher.
 			if stats.unit_name.findn("Mortar") >= 0:
-				return _build_breacher_mortar_member(index, offset, team_color)
-			if stats.unit_name.findn("Salvo") >= 0:
-				return _build_breacher_salvo_member(index, offset, team_color)
-			return _build_breacher_tank_member(index, offset, team_color)
-		if stats.unit_name.findn("Grinder") >= 0:
-			return _build_grinder_tank_member(index, offset, team_color)
-		return _build_courier_tank_member(index, offset, team_color)
+				tank_result = _build_breacher_mortar_member(index, offset, team_color)
+			elif stats.unit_name.findn("Salvo") >= 0:
+				tank_result = _build_breacher_salvo_member(index, offset, team_color)
+			else:
+				tank_result = _build_breacher_tank_member(index, offset, team_color)
+		elif is_grinder:
+			tank_result = _build_grinder_tank_member(index, offset, team_color)
+		else:
+			tank_result = _build_courier_tank_member(index, offset, team_color)
+		# Tank-visual shrink: user feedback that Breacher and Courier
+		# read too large for the squad-of-3 footprint. 0.9 trims them
+		# down without losing the tank silhouette. Grinder is a
+		# different vehicle class (industrial wrecker) and stays at
+		# its original size — only the dual tank silhouettes scale.
+		if not is_grinder and "root" in tank_result:
+			var tank_root: Variant = tank_result["root"]
+			if tank_root is Node3D:
+				(tank_root as Node3D).scale = Vector3(0.9, 0.9, 0.9)
+		return tank_result
 	var hip_y: float = shape["hip_y"] as float
 	var torso_size: Vector3 = shape["torso"] as Vector3
 	var head_size: Vector3 = shape["head"] as Vector3
@@ -3282,14 +3300,13 @@ func _maybe_override_shape_for_unit(base: Dictionary) -> Dictionary:
 	if not stats:
 		return base
 	if stats.unit_name.findn("Breacher") >= 0:
-		# Breacher Tank squad of 3 sits looser than it needs to.
-		# Chassis is ~2.91u wide (hull 1.55 + 2 * track 0.68); the
-		# transport-class default spacing of 3.5u left a ~0.6u gap
-		# between adjacent tanks. Tighten to 3.15u for a ~0.24u
-		# gap -- visibly closer formation without the tracks
-		# clipping into each other.
+		# Breacher Tank squad of 3. Chassis at the default visual scale
+		# was ~2.91u wide; with the 0.9× tank scaling applied in the
+		# build dispatcher the chassis is now ~2.62u wide. Spacing
+		# tightens to match: 2.85u between centres = ~0.23u gap, still
+		# visibly distinct without tracks clipping.
 		var ovb: Dictionary = base.duplicate()
-		ovb["formation_spacing"] = 3.15
+		ovb["formation_spacing"] = 2.85
 		return ovb
 	if stats.unit_name.findn("Harbinger") >= 0:
 		var ovh: Dictionary = base.duplicate()
