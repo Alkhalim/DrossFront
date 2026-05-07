@@ -4499,6 +4499,13 @@ func _process(delta: float) -> void:
 			_build_amount_this_tick = 0.0
 			_last_build_tick_time_msec = now_msec
 			_update_progress_bar()
+		# Foundation-clearing sweep runs even without an active builder so
+		# units (especially idle engineers) standing on a freshly-placed
+		# foundation walk out on their own. Previously _evacuate only ran
+		# from advance_construction, so a foundation with no builder yet
+		# left blockers in place. _evacuate has its own 600ms throttle.
+		if not _is_foundation_clear():
+			_evacuate_foundation_blockers()
 
 	# Selection-bar refresh. Selected buildings update every frame
 	# so the HP / production fill stays smooth under the player's

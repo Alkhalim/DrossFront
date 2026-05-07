@@ -118,11 +118,12 @@ func _ensure_sfx_bus() -> void:
 	AudioServer.add_bus(idx)
 	AudioServer.set_bus_name(idx, "SFX")
 	AudioServer.set_bus_send(idx, "Master")
-	# SFX overall volume — combat sounds (gunfire, explosions, deaths)
-	# were too loud relative to VO. -3 dB pulls them under so the
-	# voicelines come through without ducking. Settings UI can later
-	# expose this to the player as a slider.
-	AudioServer.set_bus_volume_db(idx, -3.0)
+	# SFX overall volume — combat sounds were dominating the mix; user
+	# feedback that even -3 dB was still too loud. -8 dB feels like a
+	# proper "background" level under the music + voicelines, and the
+	# settings slider gives a positive headroom up to +6 dB if anyone
+	# wants the heavy mix back.
+	AudioServer.set_bus_volume_db(idx, -8.0)
 
 
 func _ensure_music_bus() -> void:

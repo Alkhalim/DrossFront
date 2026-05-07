@@ -11,6 +11,10 @@ var _player_color := Color(0.08, 0.25, 0.85, 1.0)
 var _enemy_color := Color(0.80, 0.10, 0.10, 1.0)
 var _neutral_color := Color(0.85, 0.7, 0.3, 1.0)
 var _wreck_color := Color(0.4, 0.35, 0.25, 0.5)
+## Satellite-pile wrecks ping bright on the minimap regardless of fog
+## of war. They're the player's incentive to scout to that point — the
+## "go investigate" signal — and dimming/hiding them defeats the purpose.
+var _satellite_wreck_color := Color(1.00, 0.85, 0.30, 1.0)
 
 ## Faction-coloured decorative border + ping flash overlay. Border is
 ## drawn each frame around the actual map area; pings are short-lived
@@ -391,17 +395,26 @@ func _draw() -> void:
 		])
 		draw_colored_polygon(pts, color)
 
-	# Draw wrecks — only those in EXPLORED or VISIBLE cells.
-	# Unexplored map cells should be totally featureless on the
-	# minimap, so the player can't scout salvage piles for free.
+	# Draw wrecks. Regular battle wrecks only show in EXPLORED cells —
+	# the minimap shouldn't act as a free scout. Satellite-pile wrecks
+	# ARE the scout incentive (their whole purpose is "go there!"), so
+	# they ping bright regardless of fog state.
 	var wrecks: Array[Node] = get_tree().get_nodes_in_group("wrecks")
 	for node: Node in wrecks:
 		if not is_instance_valid(node):
 			continue
-		if fow and not fow.is_explored_world((node as Node3D).global_position):
-			continue
+		var is_sat: bool = false
+		if "is_satellite" in node:
+			is_sat = node.get("is_satellite") as bool
 		var pos: Vector2 = _world_to_map(node.global_position, map_size, half_world)
-		draw_circle(pos, 2.0, _wreck_color)
+		if is_sat:
+			# Bright pin, drawn at a slightly larger radius so the eye
+			# catches it at a glance even on a busy map.
+			draw_circle(pos, 3.0, _satellite_wreck_color)
+		else:
+			if fow and not fow.is_explored_world((node as Node3D).global_position):
+				continue
+			draw_circle(pos, 2.0, _wreck_color)
 
 	# Draw units. Aircraft get a slightly larger ring + a small
 	# diamond-shape pip so the player can tell at a glance whether

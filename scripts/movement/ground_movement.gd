@@ -142,6 +142,12 @@ func _separate_neighbors() -> Array:
 		# Skip buildings — those go to AVOID, not SEPARATE.
 		if n is Building:
 			continue
+		# Skip workers — they're noncombat pass-through agents (collision_layer
+		# 0, foundation-clear ignores them). Letting them push other units via
+		# SEPARATE made the salvage crawler drift around erratically inside its
+		# own gatherer cloud — every worker counted as a separation contact.
+		if n is SalvageWorker:
+			continue
 		filtered.append(n)
 	return filtered
 
