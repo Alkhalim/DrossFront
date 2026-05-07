@@ -47,9 +47,18 @@ var _salvage_accumulator: float = 0.0
 ## sum / window for an average-per-second readout.
 const INCOME_WINDOW_SEC: float = 30.0
 var _income_log: Array[Dictionary] = []
+## Pause-aware "game seconds" counter. _process doesn't run while
+## the SceneTree is paused (default PROCESS_MODE_INHERIT), so this
+## stops accumulating during pause. Income-log timestamps reference
+## this instead of Time.get_ticks_msec() — without it, old entries
+## aged out of the rolling window during pause (wall clock keeps
+## moving) and the HUD's salvage/s readout fell to 0 the longer
+## the player stayed paused.
+var _game_seconds: float = 0.0
 
 
 func _process(delta: float) -> void:
+	_game_seconds += delta
 	# HQ passive salvage trickle
 	_salvage_accumulator += HQ_SALVAGE_TRICKLE * delta
 	if _salvage_accumulator >= 1.0:
@@ -144,7 +153,7 @@ func add_microchips(amount: int) -> void:
 func _record_income(salvage_amt: int, fuel_amt: int) -> void:
 	if salvage_amt <= 0 and fuel_amt <= 0:
 		return
-	var now: float = float(Time.get_ticks_msec()) / 1000.0
+	var now: float = _game_seconds
 	# Drop entries older than the window.
 	while not _income_log.is_empty() and (_income_log[0]["t"] as float) < now - INCOME_WINDOW_SEC:
 		_income_log.pop_front()
@@ -156,7 +165,7 @@ func get_average_income() -> Vector2:
 	## INCOME_WINDOW_SEC. Empty log → (0, 0).
 	if _income_log.is_empty():
 		return Vector2.ZERO
-	var now: float = float(Time.get_ticks_msec()) / 1000.0
+	var now: float = _game_seconds
 	var total_s: int = 0
 	var total_f: int = 0
 	for entry: Dictionary in _income_log:

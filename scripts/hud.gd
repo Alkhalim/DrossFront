@@ -894,7 +894,12 @@ var _hud_throttle: float = 0.0
 const HUD_REFRESH_INTERVAL: float = 0.066  # ~15 Hz; HUD readouts don't need 60Hz
 
 func _process(delta: float) -> void:
-	_match_time += delta
+	# Pause-aware match clock. The HUD itself runs PROCESS_MODE_ALWAYS
+	# so the pause overlay can re-render under input — without this
+	# guard the timer kept counting up during pause (and any other
+	# per-second readouts derived from it would too).
+	if not get_tree().paused:
+		_match_time += delta
 	# FPS counter and resource display run every frame so the readout
 	# is responsive. The heavier panels (selection, buttons, tutorial,
 	# gift, queue) refresh ~15Hz — they only need to redraw when the
