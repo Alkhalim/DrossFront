@@ -2280,6 +2280,25 @@ func _setup_terrain_schwarzwald() -> void:
 
 	# Tree field. Walk a jittered grid; drop a tree whenever the cell
 	# is OUTSIDE every corridor and clear of every HQ + ramp.
+	# Coarse forest-cell mask drives the navmesh carve (one big
+	# blocked rectangle per non-empty 20u tile, not one per tree).
+	const FOREST_CELL_SIZE: float = 20.0
+	var forest_cells: Dictionary = {}
+	# Salvage groves — small clearings the tree spawn loop must
+	# leave open so units can reach the wrecks inside, plus an
+	# access lane back to the nearest corridor centreline so the
+	# whole cluster is reachable. Same lane pattern the deposit
+	# and vent skip-checks already use. Lifted above the tree
+	# loop so the lane logic can reference these positions.
+	var GROVE_POSITIONS: Array[Vector3] = [
+		Vector3(-95.0, 0.0,  60.0),
+		Vector3( 95.0, 0.0,  60.0),
+		Vector3(-95.0, 0.0, -60.0),
+		Vector3( 95.0, 0.0, -60.0),
+		Vector3(-30.0, 0.0,  85.0),
+		Vector3( 30.0, 0.0, -85.0),
+	]
+	const GROVE_CLEAR_RADIUS: float = 7.0
 	var tree_script: GDScript = load("res://scripts/forest_tree.gd") as GDScript
 	if not tree_script:
 		return
@@ -2383,6 +2402,32 @@ func _setup_terrain_schwarzwald() -> void:
 						break
 			if too_close_to_vent:
 				continue
+			# Skip cells too close to a salvage grove (so the
+			# clearing actually exists) and along an access lane
+			# from each grove back to the nearest corridor — same
+			# pattern as the deposit / vent lanes. Without this,
+			# the forest carve below blocks every cell containing
+			# trees, making the off-corridor groves unreachable.
+			var too_close_to_grove: bool = false
+			for gp: Vector3 in GROVE_POSITIONS:
+				if pos.distance_to(gp) <= GROVE_CLEAR_RADIUS:
+					too_close_to_grove = true
+					break
+				if absf(pz - gp.z) <= 4.0:
+					var gv_corr_x: float = corridor_centres_x[0]
+					var gv_best: float = INF
+					for ccx2: float in corridor_centres_x:
+						var ccd2: float = absf(gp.x - ccx2)
+						if ccd2 < gv_best:
+							gv_best = ccd2
+							gv_corr_x = ccx2
+					var gv_lo: float = minf(gp.x, gv_corr_x) - 1.5
+					var gv_hi: float = maxf(gp.x, gv_corr_x) + 1.5
+					if px >= gv_lo and px <= gv_hi:
+						too_close_to_grove = true
+						break
+			if too_close_to_grove:
+				continue
 			# Skip ramp clearance + plateau footprints (none placed
 			# on Schwarzwald yet, but cheap insurance for later).
 			if _overlaps_plateau_footprint(pos, Vector3(2.0, 0.0, 2.0), 0.5):
@@ -2390,43 +2435,46 @@ func _setup_terrain_schwarzwald() -> void:
 			var tree: Node3D = tree_script.new() as Node3D
 			tree.position = pos
 			add_child(tree)
-			# Carve the tree's trunk out of the ground navmesh so the
-			# path planner doesn't route units through it. forest_tree's
-			# StaticBody3D collision (TRUNK_COLLISION_RADIUS = 1.55u)
-			# was physically blocking units, but the navmesh still saw
-			# the footprint as walkable, so units pathed straight into
-			# trunks and wedged. Footprint is a small AABB inflated by
-			# TREE_NAV_INFLATION so the surrounding walkable strip is
-			# wide enough for the path planner to route around adjacent
-			# trees instead of weaving slivers between them.
-			const TREE_TRUNK_HALF: float = 1.55  # forest_tree.TRUNK_COLLISION_RADIUS
-			const TREE_NAV_INFLATION: float = 0.6
-			var t_half: float = TREE_TRUNK_HALF + TREE_NAV_INFLATION
-			var tmin: Vector2 = Vector2(pos.x - t_half, pos.z - t_half)
-			var tmax: Vector2 = Vector2(pos.x + t_half, pos.z + t_half)
-			_pending_blocked_footprints.append(PackedVector2Array([
-				tmin,
-				Vector2(tmax.x, tmin.y),
-				tmax,
-				Vector2(tmin.x, tmax.y),
-			]))
+			# Record the tree's grid cell so we can carve a coarse
+			# forest mask AFTER the spawn loop. Per-tree footprint
+			# carving (the previous attempt) doesn't scale: with
+			# ~4000 trees on Schwarzwald, each adding 4 nav cuts,
+			# the strip-decomposition explodes to millions of
+			# cells and the bake fails. Clustering trees into 20u
+			# tiles reduces it to ~150 large blocked rectangles
+			# the navmesh handles cleanly. Forest reads as a
+			# single contiguous wall to the path planner so units
+			# stay in the cleared corridors instead of trying to
+			# weave between trunks.
+			var fcx: int = int(floor(pos.x / FOREST_CELL_SIZE))
+			var fcz: int = int(floor(pos.z / FOREST_CELL_SIZE))
+			forest_cells[Vector2i(fcx, fcz)] = true
 		x += TREE_GRID_STEP
 
-	# Salvage groves -- small clearings in the canopy with 3-5
-	# wrecks each. Reward exploration off the main corridor.
-	# Positions are deterministic per match seed so the player
-	# can learn rough locations across replays.
-	# `var` not `const` -- GDScript's compile-time const evaluator
-	# rejects Vector3() constructor calls inside Packed array
-	# literals. Same trap as the Wreck class faced.
-	var GROVE_POSITIONS: Array[Vector3] = [
-		Vector3(-95.0, 0.0,  60.0),
-		Vector3( 95.0, 0.0,  60.0),
-		Vector3(-95.0, 0.0, -60.0),
-		Vector3( 95.0, 0.0, -60.0),
-		Vector3(-30.0, 0.0,  85.0),
-		Vector3( 30.0, 0.0, -85.0),
-	]
+	# Forest carve. One blocked rectangle per non-empty 20u tile —
+	# the path planner now sees the dense forest as a contiguous
+	# wall and routes units through corridors / cleared lanes
+	# instead of trying to weave between trunks. Trees inside each
+	# cell still have their own physical collision (forest_tree's
+	# StaticBody3D), so units that DO end up inside a cell (e.g.
+	# trees felled later, or units pushed in by knockback) bump
+	# off individual trunks normally.
+	for cell_key: Vector2i in forest_cells:
+		var c_min: Vector2 = Vector2(
+			float(cell_key.x) * FOREST_CELL_SIZE,
+			float(cell_key.y) * FOREST_CELL_SIZE,
+		)
+		var c_max: Vector2 = c_min + Vector2(FOREST_CELL_SIZE, FOREST_CELL_SIZE)
+		_pending_blocked_footprints.append(PackedVector2Array([
+			c_min,
+			Vector2(c_max.x, c_min.y),
+			c_max,
+			Vector2(c_min.x, c_max.y),
+		]))
+
+	# Salvage groves -- spawn the wrecks in each cleared cluster.
+	# GROVE_POSITIONS was lifted up before the tree loop so the
+	# tree-skip + access-lane logic could reference it.
 	for grove_centre: Vector3 in GROVE_POSITIONS:
 		var n_wrecks: int = randi_range(3, 5)
 		for w_i: int in n_wrecks:

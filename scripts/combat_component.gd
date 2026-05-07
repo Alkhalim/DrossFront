@@ -739,6 +739,16 @@ func _is_valid_target(target: Node3D) -> bool:
 		return false
 	if not target.has_method("take_damage"):
 		return false
+	# Trees and similar neutral world-objects don't have owner_id.
+	# They're valid targets for any unit with a tree-damaging
+	# weapon (the tree's own take_damage gates on
+	# weapon.can_damage_trees, so non-heavy weapons silently
+	# drop the damage instead of preventing the fire). Without
+	# this branch the targeting layer rejected trees entirely
+	# and heavy units that the player commanded to attack a tree
+	# walked up to it but never fired.
+	if target is ForestTree:
+		return true
 	# Guard against targets that don't carry owner_id (rare -- some
 	# neutral terrain features get picked up via stray-shot rules).
 	# Casting `null` to int would crash; default to enemy faction
