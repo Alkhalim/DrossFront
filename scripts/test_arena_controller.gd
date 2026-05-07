@@ -733,12 +733,19 @@ func _setup_navigation() -> void:
 	nav_mesh.filter_low_hanging_obstacles = false
 	nav_mesh.filter_walkable_low_height_spans = false
 	# agent_radius shrinks the walkable area by this distance from
-	# every obstacle edge. With 2.5u and a 7u-wide ramp, the walkable
-	# strip on the slope was only 2u — too narrow for the path planner
-	# to keep a connection to plateau top, leaving units stuck at the
-	# wall. Dropping to 1.5u gives a 4u walkable strip on a 7u ramp,
-	# which is enough for both light and heavy units to traverse.
-	nav_mesh.agent_radius = 1.5
+	# every obstacle edge. The narrower this is, the more of a ramp's
+	# slope the path planner can use — including the pinched corners
+	# at the foot where ramps meet ground. 2.5u left only ~2u walkable
+	# on 7u ramps; 1.5u gave 4u but still pinched the foot triangle so
+	# units drifted off the navmesh onto the unbaked-but-physical edges
+	# at exactly those corners. 1.0u widens the strip to 5u and the
+	# foot transitions enough to keep a default-radius unit on-mesh.
+	# Building clearance: obstacle padding (1.3× footprint) provides
+	# the lion's share of separation; agent_radius mostly affects the
+	# inner cushion. Dropping it from 1.5 to 1.0 narrows that cushion
+	# by 0.5u, which the runtime avoid force (avoid_min_distance=3u,
+	# avoid_repel=24) compensates for when units come close.
+	nav_mesh.agent_radius = 1.0
 	nav_mesh.agent_height = 2.0
 	# agent_max_climb caps the vertical distance Recast will treat as
 	# a "step" between two adjacent walkable cells. Plateaus are 1.5-2u
