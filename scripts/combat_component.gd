@@ -317,6 +317,14 @@ func _physics_process(delta: float) -> void:
 		if stats and stats.primary_weapon:
 			weapon_range = stats.primary_weapon.resolved_range()
 		var engage_radius: float = weapon_range * ENGAGE_RANGE_MULT
+		# Attack-move: scan with full sight radius so the unit engages the
+		# moment an enemy becomes visible, not after walking to within
+		# 1.35× weapon range. Otherwise a unit with sight > engage chases
+		# halfway across the bubble before noticing and ends up firing at
+		# point-blank — the user's "zooms in then fights close" report.
+		if attack_move_target != Vector3.INF:
+			var sight_r_acq: float = stats.resolved_sight_radius() if stats else weapon_range * 2.0
+			engage_radius = maxf(engage_radius, sight_r_acq)
 		# Patrol units (any unit with a `home_position` set) get a -20%
 		# aggro multiplier so a careful player can sneak past them
 		# without triggering a fight.
