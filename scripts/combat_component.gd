@@ -475,12 +475,16 @@ func _physics_process(delta: float) -> void:
 				if not target_is_air or stats.secondary_weapon.engages_air():
 					_fire_weapon(stats.secondary_weapon, false)
 	else:
-		_was_in_range = false
-		# Out of range — chase if we have a forced target (player-set, retaliated,
-		# or auto-engaged on sight). Pass `clear_combat=false` so command_move
-		# doesn't wipe the very target we're chasing; that bug used to make
-		# units walk all the way into melee before re-acquiring and firing.
-		if forced_target:
+		# Once we've stopped to fire on the current target (_was_in_range
+		# became true), we don't chase the same target again. The user's
+		# design: units don't move while in a fight unless going for a
+		# NEW target or following a player command. So _was_in_range stays
+		# true here, suppressing chase. It gets reset elsewhere when the
+		# target changes (set_target / notify_attacked target-switch /
+		# command_attack_move) or is lost (combat_ended emit).
+		# Pass `clear_combat=false` so command_move doesn't wipe the
+		# forced target we're chasing.
+		if forced_target and not _was_in_range:
 			_unit.command_move(_chase_position(_current_target, primary_range), false)
 
 
@@ -495,6 +499,12 @@ func set_target(target: Node3D) -> void:
 		var my_owner: int = _unit.owner_id if "owner_id" in _unit else 0
 		if not _is_hostile(my_owner, target.get("owner_id") as int):
 			return
+	# Target changed — reset the in-range hysteresis so the unit can
+	# chase the new target into range. (Without this, a unit that was
+	# already engaged on target A would refuse to move toward newly-
+	# clicked target B.)
+	if target != forced_target:
+		_was_in_range = false
 	forced_target = target
 	_current_target = target
 	attack_move_target = Vector3.INF
@@ -644,6 +654,7 @@ func notify_attacked(attacker: Node3D) -> void:
 		if d_attacker < weapon_range and d_current > weapon_range * 1.5:
 			forced_target = attacker
 			_current_target = attacker
+			_was_in_range = false
 		return
 
 	var has_move_order: bool = _unit.get("has_move_order") as bool
@@ -658,6 +669,10 @@ func notify_attacked(attacker: Node3D) -> void:
 		if owner_id_v == 0:
 			return
 		_retaliation_lost_sight_timer = 0.0
+	# New attacker — reset the in-range flag so the unit can chase if
+	# the attacker is out of weapon range.
+	if forced_target != attacker:
+		_was_in_range = false
 	forced_target = attacker
 	_current_target = attacker
 
