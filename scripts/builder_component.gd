@@ -403,7 +403,12 @@ func _pick_clear_escape_point() -> Vector3:
 
 
 func _approach_point() -> Vector3:
-	## A point just outside the building edge on the side facing the engineer.
+	## Approach target on the side facing the engineer. Tries a CLOSE
+	## point first (right at the edge of the foundation, +0.5u clearance);
+	## if another engineer is already there, falls back to the FAR point
+	## (one buffer-radius out). Lets multiple engineers cluster at a
+	## single foundation without stacking on the same spot — first one
+	## tucks in close, others fan out at full range.
 	if not _target_building:
 		return _unit.global_position
 	var center: Vector3 = _target_building.global_position
@@ -412,12 +417,41 @@ func _approach_point() -> Vector3:
 	if to_unit.length_squared() < 0.01:
 		# Engineer is already on top of the building — pick any side.
 		to_unit = Vector3(1, 0, 0)
+	var dir: Vector3 = to_unit.normalized()
 	var extent: float = 0.0
 	if _target_building.stats:
 		var fs: Vector3 = _target_building.stats.footprint_size
 		extent = maxf(fs.x, fs.z) * 0.5
-	# Approach target sits one buffer-radius outside the edge.
-	return center + to_unit.normalized() * (extent + BUILD_BUFFER * 0.5)
+	var close_pt: Vector3 = center + dir * (extent + 0.5)
+	var far_pt: Vector3 = center + dir * (extent + BUILD_BUFFER * 0.5)
+	# If another engineer is already parked near the close spot, take
+	# the far spot instead. Self is excluded from the check.
+	if _spot_has_other_engineer(close_pt, 1.5):
+		return far_pt
+	return close_pt
+
+
+func _spot_has_other_engineer(spot: Vector3, radius: float) -> bool:
+	## True if another player-allied unit with a BuilderComponent is
+	## within `radius` of `spot` (excluding self).
+	var r2: float = radius * radius
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node) or node == _unit:
+			continue
+		var n3: Node3D = node as Node3D
+		if not n3:
+			continue
+		# Cheap check: only candidates that have a builder.
+		if not n3.has_method("get_builder"):
+			continue
+		var builder: Node = n3.get_builder() if n3.has_method("get_builder") else null
+		if not builder:
+			continue
+		var dx: float = n3.global_position.x - spot.x
+		var dz: float = n3.global_position.z - spot.z
+		if dx * dx + dz * dz < r2:
+			return true
+	return false
 
 
 func cancel_build() -> void:
