@@ -742,16 +742,29 @@ func _setup_navigation() -> void:
 	nav_mesh.agent_radius = 1.0
 	nav_mesh.agent_height = 2.0
 	# agent_max_climb caps the vertical distance Recast will treat as
-	# a "step" between two adjacent walkable cells. Plateaus are 1.5-2u
-	# tall — if max_climb >= plateau height, the bake creates a direct
-	# adjacency from the ground navmesh to the plateau-top navmesh
-	# along the ENTIRE plateau perimeter, not just at the ramp. The
-	# path planner then picks "walk off the cliff" as the shortest
-	# route, which is exactly the "unit dives off the plateau and gets
-	# stuck mid-air" symptom the user reported. Cap at 0.5u so the
-	# bake only connects plateau-top to the ground via the ramp's
-	# walkable slope (which has a smooth gradient, not a 1.5u step).
-	nav_mesh.agent_max_climb = 0.5
+	# a "step" between two adjacent walkable cells.
+	#
+	# Plateaus are 1.5-2u tall — if max_climb >= plateau height, the
+	# bake creates a direct adjacency from the ground navmesh to the
+	# plateau-top navmesh along the ENTIRE plateau perimeter (not just
+	# at the ramp), and the path planner picks "walk off the cliff" as
+	# the shortest route.
+	#
+	# At 0.5u, the lower end of a ramp's side flank — where the slope
+	# y rises from 0 toward 0.5u over the first ~2.5 units of run — was
+	# being classified as a stairstep too. Recast connected the inside-
+	# wedge slope cells (y=0..0.5) to the outside-wedge ground cells
+	# (y=0) across the side wall, producing navmesh polygons that
+	# physically can't be walked UP (the side wall is a vertical
+	# obstacle, not a slope). Going down works because gravity drops
+	# the unit off; going up gets the unit stuck against the wall.
+	#
+	# Cap at 0.15u — just over the cell_height (0.1u) so legitimate
+	# single-voxel steps still connect, but the slope's y exceeds the
+	# threshold within a fraction of a unit from the foot, so the side
+	# walls disconnect from the ground navmesh almost immediately.
+	# Plateau direct-connection still blocked (1.5-2u >> 0.15u).
+	nav_mesh.agent_max_climb = 0.15
 	nav_mesh.agent_max_slope = 30.0
 	# Pull source geometry from the "terrain" group + the ground
 	# collision (already in scene). The bake walks each shape, treats
