@@ -3777,38 +3777,45 @@ func _setup_ground_patches() -> void:
 		# (very dark asphalt, saturated rust, near-black mud) so
 		# each zone reads unambiguously against the neutral-grey
 		# Iron Gate ground.
+		# Iron Gate: tints toned down (snow no longer near-white,
+		# rust no longer saturated). Sizes bumped, positions shifted
+		# so neighbouring biomes overlap; the alpha-baked textures
+		# blend at the seam.
 		biomes = [
 			# Cleared road / vehicle-track zone -- exposed dark
 			# asphalt under trampled-down snow.
-			{"pos": Vector3(0.0, 0.025, 0.0), "size": 80.0, "tint": Color(0.10, 0.10, 0.13, 0.92), "rough": 1.0, "tex": "scorched"},
+			{"pos": Vector3(0.0, 0.025, 0.0), "size": 100.0, "tint": Color(0.13, 0.13, 0.16, 0.88), "rough": 1.0, "tex": "scorched"},
 			# Slush drift zones flanking the spawns -- packed snow.
-			{"pos": Vector3(0.0, 0.025, 80.0), "size": 105.0, "tint": Color(0.88, 0.92, 0.96, 0.85), "rough": 1.0, "tex": "snow"},
-			{"pos": Vector3(0.0, 0.025, -80.0), "size": 105.0, "tint": Color(0.88, 0.92, 0.96, 0.85), "rough": 1.0, "tex": "snow"},
+			{"pos": Vector3(10.0, 0.025, 70.0), "size": 130.0, "tint": Color(0.72, 0.76, 0.82, 0.78), "rough": 1.0, "tex": "snow"},
+			{"pos": Vector3(-10.0, 0.025, -70.0), "size": 130.0, "tint": Color(0.72, 0.76, 0.82, 0.78), "rough": 1.0, "tex": "snow"},
 			# Iron-stained patches around the central ruins.
-			{"pos": Vector3(48.0, 0.025, 30.0), "size": 50.0, "tint": Color(0.58, 0.26, 0.14, 0.88), "rough": 1.0, "tex": "metal"},
-			{"pos": Vector3(-48.0, 0.025, -30.0), "size": 50.0, "tint": Color(0.58, 0.26, 0.14, 0.88), "rough": 1.0, "tex": "metal"},
+			{"pos": Vector3(48.0, 0.025, 30.0), "size": 65.0, "tint": Color(0.42, 0.22, 0.14, 0.80), "rough": 1.0, "tex": "metal"},
+			{"pos": Vector3(-48.0, 0.025, -30.0), "size": 65.0, "tint": Color(0.42, 0.22, 0.14, 0.80), "rough": 1.0, "tex": "metal"},
 			# Far-flank dirt-windswept zones where the snow's been
 			# scoured off entirely -- exposed mud.
-			{"pos": Vector3(95.0, 0.025, 0.0), "size": 70.0, "tint": Color(0.20, 0.16, 0.10, 0.88), "rough": 1.0, "tex": "mud"},
-			{"pos": Vector3(-95.0, 0.025, 0.0), "size": 70.0, "tint": Color(0.20, 0.16, 0.10, 0.88), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(95.0, 0.025, 0.0), "size": 90.0, "tint": Color(0.22, 0.17, 0.12, 0.82), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(-95.0, 0.025, 0.0), "size": 90.0, "tint": Color(0.22, 0.17, 0.12, 0.82), "rough": 1.0, "tex": "mud"},
 		]
 	elif _is_ashplains():
+		# Ashplains: dial down the bleached-white and bright-sand
+		# tints so the surface reads as washed-out parched earth
+		# instead of bright cream. Bigger zones with overlap.
 		biomes = [
 			# Pale-ash drift zones -- sand-textured.
-			{"pos": Vector3(0.0, 0.025, 60.0), "size": 115.0, "tint": Color(0.78, 0.62, 0.36, 0.82), "rough": 1.0, "tex": "sand"},
-			{"pos": Vector3(0.0, 0.025, -60.0), "size": 115.0, "tint": Color(0.78, 0.62, 0.36, 0.82), "rough": 1.0, "tex": "sand"},
+			{"pos": Vector3(0.0, 0.025, 50.0), "size": 140.0, "tint": Color(0.55, 0.45, 0.28, 0.78), "rough": 1.0, "tex": "sand"},
+			{"pos": Vector3(0.0, 0.025, -50.0), "size": 140.0, "tint": Color(0.55, 0.45, 0.28, 0.78), "rough": 1.0, "tex": "sand"},
 			# Volcanic scar -- scorched-earth texture.
-			{"pos": Vector3(0.0, 0.025, 0.0), "size": 75.0, "tint": Color(0.10, 0.07, 0.05, 0.92), "rough": 1.0, "tex": "scorched"},
-			# Bleached bone-white salt-flat patches -- cracked mud
-			# texture in a pale tone.
-			{"pos": Vector3(50.0, 0.025, 95.0), "size": 55.0, "tint": Color(0.92, 0.85, 0.62, 0.85), "rough": 1.0, "tex": "mud"},
-			{"pos": Vector3(-50.0, 0.025, -95.0), "size": 55.0, "tint": Color(0.92, 0.85, 0.62, 0.85), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(0.0, 0.025, 0.0), "size": 90.0, "tint": Color(0.13, 0.10, 0.08, 0.88), "rough": 1.0, "tex": "scorched"},
+			# Bleached bone-white salt-flat patches -- toned down
+			# from near-cream so they don't read as glowing.
+			{"pos": Vector3(50.0, 0.025, 95.0), "size": 65.0, "tint": Color(0.70, 0.62, 0.45, 0.80), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(-50.0, 0.025, -95.0), "size": 65.0, "tint": Color(0.70, 0.62, 0.45, 0.80), "rough": 1.0, "tex": "mud"},
 			# Cracked-earth dark zones -- ferrous rust on cracked mud.
-			{"pos": Vector3(70.0, 0.025, 30.0), "size": 60.0, "tint": Color(0.40, 0.18, 0.10, 0.88), "rough": 1.0, "tex": "mud"},
-			{"pos": Vector3(-70.0, 0.025, -30.0), "size": 60.0, "tint": Color(0.40, 0.18, 0.10, 0.88), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(70.0, 0.025, 30.0), "size": 75.0, "tint": Color(0.32, 0.18, 0.12, 0.82), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(-70.0, 0.025, -30.0), "size": 75.0, "tint": Color(0.32, 0.18, 0.12, 0.82), "rough": 1.0, "tex": "mud"},
 			# Far-flank dust patches -- fine sand drift.
-			{"pos": Vector3(115.0, 0.025, 0.0), "size": 70.0, "tint": Color(0.66, 0.50, 0.28, 0.78), "rough": 1.0, "tex": "sand"},
-			{"pos": Vector3(-115.0, 0.025, 0.0), "size": 70.0, "tint": Color(0.66, 0.50, 0.28, 0.78), "rough": 1.0, "tex": "sand"},
+			{"pos": Vector3(110.0, 0.025, 0.0), "size": 85.0, "tint": Color(0.50, 0.40, 0.25, 0.74), "rough": 1.0, "tex": "sand"},
+			{"pos": Vector3(-110.0, 0.025, 0.0), "size": 85.0, "tint": Color(0.50, 0.40, 0.25, 0.74), "rough": 1.0, "tex": "sand"},
 		]
 	else:
 		# Foundry Belt — brown noise ground. Biome tints chosen for
@@ -3816,21 +3823,32 @@ func _setup_ground_patches() -> void:
 		# scar, pale-cream sand drifts, near-black mud loam, vivid rust
 		# stain. Earlier values sat in the same warm-brown family as
 		# the ground and disappeared into the noise.
+		# Tint values dialled down across the board after the user
+		# saw the bright sand drift as too saturated / golden. With
+		# the brightener removed (was ×1.6, then ×1.25, now ×1.0),
+		# tints go straight through the texture multiply, so the
+		# values here are roughly the final colour before texture
+		# variation. Sand pulled from (0.78, 0.68, 0.42) → (0.55,
+		# 0.45, 0.30) — muted tan instead of golden. Other biomes
+		# kept similar tone but bumped to compensate for the
+		# brightener loss.
+		# Sizes bumped + positions shifted so adjacent biomes can
+		# overlap each other (not only the base ground). The
+		# texture-baked radial alpha in each biome blends them at
+		# the seam without a hard transition.
 		biomes = [
-			# Soot scar across the contested mid -- nearly black.
-			{"pos": Vector3(0.0, 0.025, 0.0), "size": 95.0, "tint": Color(0.07, 0.06, 0.07, 0.92), "rough": 1.0, "tex": "scorched"},
-			# Sand drift on the east flank -- pale cream / yellow-tan.
-			{"pos": Vector3(95.0, 0.025, 35.0), "size": 75.0, "tint": Color(0.78, 0.68, 0.42, 0.85), "rough": 0.95, "tex": "sand"},
-			{"pos": Vector3(-95.0, 0.025, -35.0), "size": 75.0, "tint": Color(0.76, 0.66, 0.40, 0.85), "rough": 0.95, "tex": "sand"},
-			# Dried-mud zones near the back-doors -- very dark loam.
-			{"pos": Vector3(70.0, 0.025, -75.0), "size": 70.0, "tint": Color(0.16, 0.12, 0.08, 0.90), "rough": 0.95, "tex": "mud"},
-			{"pos": Vector3(-70.0, 0.025, 75.0), "size": 70.0, "tint": Color(0.16, 0.12, 0.08, 0.90), "rough": 0.95, "tex": "mud"},
-			# Industrial rust stain -- warm rust, dialled back from
-			# the previous (0.62, 0.28, 0.14, 0.85). Old version read
-			# as a vivid pure-orange disc; this is closer to weathered
-			# rust on dirt — warm but not eye-catching.
-			{"pos": Vector3(0.0, 0.025, 75.0), "size": 55.0, "tint": Color(0.45, 0.24, 0.15, 0.78), "rough": 0.95, "tex": "metal"},
-			{"pos": Vector3(0.0, 0.025, -75.0), "size": 55.0, "tint": Color(0.45, 0.24, 0.15, 0.78), "rough": 0.95, "tex": "metal"},
+			# Soot scar across the contested mid -- big dark scorch.
+			{"pos": Vector3(0.0, 0.025, 0.0), "size": 110.0, "tint": Color(0.10, 0.09, 0.09, 0.90), "rough": 1.0, "tex": "scorched"},
+			# Sand drift on the east + west flanks. Larger and pulled
+			# inward so each overlaps the central soot scar.
+			{"pos": Vector3(80.0, 0.025, 30.0), "size": 100.0, "tint": Color(0.55, 0.45, 0.30, 0.78), "rough": 0.95, "tex": "sand"},
+			{"pos": Vector3(-80.0, 0.025, -30.0), "size": 100.0, "tint": Color(0.55, 0.45, 0.30, 0.78), "rough": 0.95, "tex": "sand"},
+			# Dried-mud zones near the back-doors -- dark loam.
+			{"pos": Vector3(60.0, 0.025, -78.0), "size": 90.0, "tint": Color(0.20, 0.16, 0.12, 0.85), "rough": 0.95, "tex": "mud"},
+			{"pos": Vector3(-60.0, 0.025, 78.0), "size": 90.0, "tint": Color(0.20, 0.16, 0.12, 0.85), "rough": 0.95, "tex": "mud"},
+			# Industrial rust stain -- warm rust, kept muted.
+			{"pos": Vector3(0.0, 0.025, 70.0), "size": 70.0, "tint": Color(0.50, 0.28, 0.18, 0.78), "rough": 0.95, "tex": "metal"},
+			{"pos": Vector3(0.0, 0.025, -70.0), "size": 70.0, "tint": Color(0.50, 0.28, 0.18, 0.78), "rough": 0.95, "tex": "metal"},
 		]
 	for b: Dictionary in biomes:
 		_spawn_soft_patch(
@@ -3906,8 +3924,11 @@ func _setup_ground_patches() -> void:
 				# Dry-earth patch with reddish-clay tint.
 				_spawn_soft_patch(pos, randf_range(3.5, 7.5), Color(0.36, 0.20, 0.13, randf_range(0.72, 0.88)), 1.0, false)
 			elif roll < 0.86:
-				# Hardy moss — rare green patch where shade pools (small).
-				_spawn_soft_patch(pos, randf_range(2.5, 4.5), Color(0.20, 0.32, 0.16, randf_range(0.65, 0.82)), 1.0, false)
+				# Burnt-clay patch — replaces the old hardy-moss tuft
+				# (which read as artificial green smudge against the
+				# desert ground). Warmer rust-red, fits the parched
+				# palette.
+				_spawn_soft_patch(pos, randf_range(2.5, 4.5), Color(0.32, 0.16, 0.10, randf_range(0.68, 0.82)), 1.0, false)
 			elif roll < 0.93:
 				# Volcanic-glass shard — small dark high-contrast spot.
 				_spawn_soft_patch(pos, randf_range(2.5, 5.0), Color(0.06, 0.04, 0.05, randf_range(0.82, 0.95)), 0.55, false)
@@ -3916,28 +3937,32 @@ func _setup_ground_patches() -> void:
 				# they happen near old crash sites.
 				_spawn_oil_spill(pos)
 		else:
-			if roll < 0.32:
-				# Soot blot.
-				_spawn_soft_patch(pos, randf_range(5.0, 10.0), Color(0.05, 0.05, 0.05, randf_range(0.78, 0.92)), 1.0, false)
+			# Foundry detail spread. Hardy-moss green removed entirely
+			# — the cool-green tuft popped against the brown ground as
+			# 'painted-on smudge' rather than weathered surface
+			# detail. Replaced with extra dark-mud / slag variation
+			# so the scatter stays varied without the artificial
+			# colour pop. Size ranges widened to give more apparent
+			# size variety in the detail mass.
+			if roll < 0.30:
+				# Soot blot — large.
+				_spawn_soft_patch(pos, randf_range(4.5, 12.0), Color(0.06, 0.06, 0.06, randf_range(0.72, 0.90)), 1.0, false)
 			elif roll < 0.55:
-				# Sand smear (cooler than the desert).
-				_spawn_soft_patch(pos, randf_range(4.5, 8.5), Color(0.34, 0.27, 0.18, randf_range(0.70, 0.88)), 0.95, false)
-			elif roll < 0.70:
+				# Sand smear — cooler than the desert.
+				_spawn_soft_patch(pos, randf_range(3.0, 9.5), Color(0.34, 0.27, 0.18, randf_range(0.65, 0.85)), 0.95, false)
+			elif roll < 0.72:
 				# Dry-earth patch with cracking — reddish-brown.
-				_spawn_soft_patch(pos, randf_range(4.0, 8.0), Color(0.32, 0.22, 0.15, randf_range(0.72, 0.88)), 1.0, false)
-			elif roll < 0.82:
-				# Hardy moss / weed-grass tuft — cool green patch where
-				# the industrial belt has been left to itself for a while.
-				# Bigger range than the desert variant so it reads as
-				# actual green rather than a moss spot.
-				_spawn_soft_patch(pos, randf_range(3.5, 6.5), Color(0.22, 0.34, 0.18, randf_range(0.65, 0.82)), 1.0, false)
-			elif roll < 0.92:
+				_spawn_soft_patch(pos, randf_range(3.5, 8.5), Color(0.30, 0.20, 0.14, randf_range(0.68, 0.85)), 1.0, false)
+			elif roll < 0.84:
+				# Dark loam blot — smaller, deeper than dry-earth.
+				_spawn_soft_patch(pos, randf_range(2.5, 5.5), Color(0.14, 0.10, 0.07, randf_range(0.78, 0.92)), 1.0, false)
+			elif roll < 0.93:
 				# Reflective oil spill — multi-blob spawn for the puddle
 				# silhouette, low roughness for the wet-glint read.
 				_spawn_oil_spill(pos)
 			else:
 				# Slag-grey patch — cool industrial residue.
-				_spawn_soft_patch(pos, randf_range(3.5, 6.5), Color(0.22, 0.22, 0.24, randf_range(0.65, 0.82)), 0.95, false)
+				_spawn_soft_patch(pos, randf_range(2.8, 7.0), Color(0.22, 0.22, 0.24, randf_range(0.62, 0.82)), 0.95, false)
 
 
 func _spawn_soft_patch(pos: Vector3, base_size: float, tint: Color, roughness: float, oil: bool, texture_key: String = "") -> void:
@@ -3964,11 +3989,12 @@ func _spawn_soft_patch(pos: Vector3, base_size: float, tint: Color, roughness: f
 	# explored / unexplored cells.
 	var patch := MeshInstance3D.new()
 	patch.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	# Moderate perimeter jitter — the texture's alpha fade band rides
-	# on the mesh outer ring, so jitter on the outer ring creates an
-	# irregular silhouette without making the edge look jagged.
-	var x_scale: float = randf_range(0.85, 1.18)
-	var z_scale: float = randf_range(0.85, 1.18)
+	# Aspect-ratio jitter widened from (0.85, 1.18) so detail patches
+	# have visible shape variety — some elongated NS, some EW, some
+	# near-circular. Combined with the per-pixel boundary noise in
+	# the alpha mask, no two patches read as the same blob.
+	var x_scale: float = randf_range(0.70, 1.40)
+	var z_scale: float = randf_range(0.70, 1.40)
 	patch.mesh = _build_soft_blob_mesh(base_size * 0.5, x_scale, z_scale)
 	var lifted: Vector3 = pos
 	lifted.y = maxf(lifted.y, 0.05)
@@ -3995,19 +4021,12 @@ func _spawn_soft_patch(pos: Vector3, base_size: float, tint: Color, roughness: f
 	# alpha channel, NOT from vertex colors (the broken path).
 	if texture_key != "":
 		mat.albedo_texture = _get_biome_blob_texture(texture_key)
-		# UV scale 1.0 because the baked texture already maps the
-		# blob's UV (0,0)-(1,1) to the textured biome surface +
-		# radial alpha. No tiling — each blob shows the texture once.
-		# Brightener dialled back from 1.6× to 1.25×: the old factor
-		# pushed warm tints into vivid territory (saturated orange,
-		# bright cream) that read as too jarring against ground noise.
-		var bright_tint: Color = Color(
-			minf(tint.r * 1.25, 1.0),
-			minf(tint.g * 1.25, 1.0),
-			minf(tint.b * 1.25, 1.0),
-			tint.a,
-		)
-		mat.albedo_color = bright_tint
+		# Brightener dropped entirely (was 1.6×, then 1.25×). The
+		# 1.25 still pushed sand-style tints into bright golden
+		# territory the user found "too starkly contrasting / too
+		# bright". Tints now go straight through; the procedural
+		# biome textures provide the value variation.
+		mat.albedo_color = tint
 	else:
 		# Plain radial alpha mask. Tint comes from albedo_color, alpha
 		# fade comes from the mask texture's alpha channel.
@@ -4060,14 +4079,17 @@ func _build_radial_alpha_array(size: int, noise_seed: int = 0) -> PackedFloat32A
 	var out := PackedFloat32Array()
 	out.resize(size * size)
 	var center: float = float(size) / 2.0
-	# Inner solid core 40% of radius (down from 65%) so the fade
-	# band gets wider and the transition reads as a gentler blend.
-	const SOLID_FRAC: float = 0.40
-	# Boundary perturbation amplitude. 0.20 means the effective
-	# fade radius wobbles ±20% around the geometric circle; combined
-	# with the noise frequency below, this gives the blob outline
-	# blotchy lobes rather than a clean ring.
-	const PERTURB_AMP: float = 0.20
+	# Inner solid core shrunk further (was 0.40, then 0.65). 0.25
+	# means only the inner ~6% of the disc area is fully opaque —
+	# the rest is a long smooth gradient. The user kept seeing
+	# perceptible "edges" against ground; pushing more of the disc
+	# into the fade band makes the transition feel like a blend
+	# rather than a boundary.
+	const SOLID_FRAC: float = 0.25
+	# Boundary perturbation amplitude bumped from 0.20 → 0.32 for
+	# more visible blotchy lobes — the radial-noise irregularity
+	# breaks up any residual circular silhouette.
+	const PERTURB_AMP: float = 0.32
 	var noise := FastNoiseLite.new()
 	noise.seed = noise_seed
 	noise.noise_type = FastNoiseLite.TYPE_PERLIN
