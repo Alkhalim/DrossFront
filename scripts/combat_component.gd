@@ -171,6 +171,19 @@ func is_silenced() -> bool:
 	return _silence_remaining > 0.0
 
 
+## Returns true if the player issued command_move(clear_combat=true)
+## recently and the cease-fire window hasn't expired yet. Used to
+## suppress retaliation and external target-setting so the player's
+## retreat order isn't immediately overridden by incoming fire.
+func _is_movement_priority_active() -> bool:
+	if _unit == null:
+		return false
+	if not "_move_priority_until_ms" in _unit:
+		return false
+	var until_ms: int = _unit.get("_move_priority_until_ms") as int
+	return until_ms > Time.get_ticks_msec()
+
+
 func apply_damage_buff(multiplier: float, duration: float) -> void:
 	## Called by friendly damage-aura abilities (Forgemaster Reactor
 	## Surge). Stacks by MAX on both axes so re-casting an aura
@@ -441,6 +454,8 @@ func _physics_process(delta: float) -> void:
 
 
 func set_target(target: Node3D) -> void:
+	if _is_movement_priority_active():
+		return  # cease-fire; retreat order is in effect
 	# Defensive: never accept an allied (or self-owned) target. The
 	# selection_manager click-path already filters by PlayerRegistry, but
 	# this guard covers attack-move sweeps and any future command that
@@ -561,6 +576,8 @@ func notify_attacked(attacker: Node3D) -> void:
 	## player's current task: while the unit is executing a plain move order
 	## (or a builder task, which also routes through has_move_order) we do
 	## not retaliate. Use attack-move if you want en-route engagement.
+	if _is_movement_priority_active():
+		return  # cease-fire; retreat order is in effect
 	if not attacker or not is_instance_valid(attacker):
 		return
 	if not _is_valid_target(attacker):
