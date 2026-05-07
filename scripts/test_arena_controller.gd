@@ -2386,6 +2386,26 @@ func _setup_terrain_schwarzwald() -> void:
 			var tree: Node3D = tree_script.new() as Node3D
 			tree.position = pos
 			add_child(tree)
+			# Carve the tree's trunk out of the ground navmesh so the
+			# path planner doesn't route units through it. forest_tree's
+			# StaticBody3D collision (TRUNK_COLLISION_RADIUS = 1.55u)
+			# was physically blocking units, but the navmesh still saw
+			# the footprint as walkable, so units pathed straight into
+			# trunks and wedged. Footprint is a small AABB inflated by
+			# TREE_NAV_INFLATION so the surrounding walkable strip is
+			# wide enough for the path planner to route around adjacent
+			# trees instead of weaving slivers between them.
+			const TREE_TRUNK_HALF: float = 1.55  # forest_tree.TRUNK_COLLISION_RADIUS
+			const TREE_NAV_INFLATION: float = 0.6
+			var t_half: float = TREE_TRUNK_HALF + TREE_NAV_INFLATION
+			var tmin: Vector2 = Vector2(pos.x - t_half, pos.z - t_half)
+			var tmax: Vector2 = Vector2(pos.x + t_half, pos.z + t_half)
+			_pending_blocked_footprints.append(PackedVector2Array([
+				tmin,
+				Vector2(tmax.x, tmin.y),
+				tmax,
+				Vector2(tmin.x, tmax.y),
+			]))
 		x += TREE_GRID_STEP
 
 	# Salvage groves -- small clearings in the canopy with 3-5
