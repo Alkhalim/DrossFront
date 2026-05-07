@@ -12,6 +12,12 @@ signal combat_ended()
 var _unit: Node = null  # Parent Unit — accessed via duck typing to avoid class resolution issues
 var _current_target: Node3D = null
 var _fire_cooldown: float = 0.0
+## Whatever _fire_cooldown was set to on the most recent firing. Used
+## by Unit's reload bar to normalize 0..1 fill — burst weapons can
+## set _fire_cooldown to long_pause (rof × BURST_SHOTS - inter-shot
+## gaps), well above base rof_seconds, so a fixed rof denominator
+## produced a bar that never went above 1/3 fill before resetting.
+var _fire_cooldown_max: float = 1.0
 var _secondary_cooldown: float = 0.0
 var _search_timer: float = 0.0
 ## Silence timer set by Pulsefont's System Crash (and any other future
@@ -845,6 +851,7 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 		else:
 			_burst_count = 0
 			_fire_cooldown = rof
+		_fire_cooldown_max = maxf(_fire_cooldown, 0.0001)
 	else:
 		_secondary_cooldown = rof
 

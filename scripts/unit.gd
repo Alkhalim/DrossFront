@@ -5118,9 +5118,11 @@ func _update_hp_bar() -> void:
 
 func _update_reload_bar() -> void:
 	## Whitegrey reload bar under the HP bar. Reads the combat component's
-	## _fire_cooldown vs the primary weapon's rof_seconds — fills from
-	## empty (just fired) toward full (ready to fire). Hidden when the
-	## unit has no primary weapon or the cooldown is already done.
+	## _fire_cooldown vs _fire_cooldown_max (whatever the cooldown was
+	## set to on the most recent fire — burst weapons can set this to
+	## several × the base rof). Fills from empty (just fired) toward
+	## full (ready to fire). Hidden once ready so the silhouette stays
+	## clean.
 	if not _reload_bar_fill:
 		return
 	var combat: Node = get_combat()
@@ -5129,21 +5131,14 @@ func _update_reload_bar() -> void:
 		if _reload_bar_bg:
 			_reload_bar_bg.visible = false
 		return
-	var rof: float = stats.primary_weapon.resolved_rof_seconds() if stats.primary_weapon.has_method("resolved_rof_seconds") else stats.primary_weapon.rof_seconds
-	if rof <= 0.0:
-		_reload_bar_fill.visible = false
-		if _reload_bar_bg:
-			_reload_bar_bg.visible = false
-		return
 	var cd: float = (combat.get("_fire_cooldown") as float) if "_fire_cooldown" in combat else 0.0
-	# pct = how full the bar is. Just fired → cd = rof → bar empty (0).
-	# Cooldown ticked down → cd lower → bar fuller. cd = 0 → bar full.
-	var pct: float = clampf(1.0 - (cd / rof), 0.0, 1.0)
+	var cd_max: float = (combat.get("_fire_cooldown_max") as float) if "_fire_cooldown_max" in combat else 1.0
+	if cd_max <= 0.0:
+		cd_max = 1.0
+	var pct: float = clampf(1.0 - (cd / cd_max), 0.0, 1.0)
 	var bar_width: float = 2.0
 	_reload_bar_fill.scale.x = maxf(pct * bar_width, 0.01)
 	_reload_bar_fill.position.x = -bar_width / 2.0 * (1.0 - pct)
-	# When fully reloaded, hide the bar so the squad's HP bar isn't
-	# visually cluttered by a constant whitegrey stripe at full.
 	var ready: bool = pct >= 0.999
 	_reload_bar_fill.visible = not ready
 	if _reload_bar_bg:
