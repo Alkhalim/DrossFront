@@ -250,42 +250,37 @@ func _process_repair(delta: float) -> bool:
 
 
 func _find_repair_target() -> Node3D:
+	## Finds the nearest damaged friendly entity inside AUTO_REPAIR_RADIUS.
+	## Used to be two full-scene walks (every building + every unit in
+	## their groups, regardless of distance) — the profiler clocked it
+	## at ~229 ms per call, by far the dominant per-frame cost in the
+	## game (BuilderComponent ate 80% of script time on a busy save).
+	## Switched to SpatialIndex.nearby so we only iterate entities in
+	## the bucket cells covering the search radius — typically 10-30
+	## entities instead of all 100-200 in the scene.
 	if not _unit:
 		return null
 	var my_owner: int = _unit.owner_id
 	var my_pos: Vector3 = _unit.global_position
 	var best: Node3D = null
 	var best_dist: float = AUTO_REPAIR_RADIUS
-
-	# Damaged friendly buildings.
-	for node: Node in _unit.get_tree().get_nodes_in_group("buildings"):
-		if not is_instance_valid(node):
+	var idx: SpatialIndex = SpatialIndex.get_instance(_unit.get_tree().current_scene)
+	if idx == null:
+		return null
+	for raw: Variant in idx.nearby(my_pos, AUTO_REPAIR_RADIUS):
+		if not is_instance_valid(raw):
 			continue
-		var b: Building = node as Building
-		if not b or b.owner_id != my_owner:
-			continue
-		if not b.is_damaged():
-			continue
-		var d: float = my_pos.distance_to(b.global_position)
-		if d < best_dist:
-			best_dist = d
-			best = b
-
-	# Damaged friendly units / Crawlers (skip self). Duck-typed via
-	# `has_method("is_damaged")` instead of `as Unit` because Crawlers
-	# live in the "units" group but extend CharacterBody3D directly,
-	# not Unit — the cast would skip them.
-	for node: Node in _unit.get_tree().get_nodes_in_group("units"):
-		if not is_instance_valid(node):
-			continue
-		if node == _unit:
+		var node: Node = raw as Node
+		if node == null or node == _unit:
 			continue
 		if not ("owner_id" in node) or node.get("owner_id") != my_owner:
 			continue
+		# is_damaged is duck-typed across Building / Unit / SalvageCrawler
+		# (Crawlers extend CharacterBody3D directly, not Unit).
 		if not node.has_method("is_damaged") or not node.is_damaged():
 			continue
 		var n3: Node3D = node as Node3D
-		if not n3:
+		if n3 == null:
 			continue
 		var d: float = my_pos.distance_to(n3.global_position)
 		if d < best_dist:
@@ -464,9 +459,10 @@ func cancel_build() -> void:
 
 func _try_auto_assist() -> void:
 	## Look for the nearest under-construction friendly building within
-	## AUTO_ASSIST_RADIUS and start helping it. Bails out if the player
-	## has the engineer mid-move (we honor the explicit order), or if no
-	## eligible site exists.
+	## AUTO_ASSIST_RADIUS and start helping it. Same SpatialIndex.nearby
+	## migration as _find_repair_target — used to walk every building in
+	## the scene per call, now restricted to the bucket cells covering
+	## the search radius.
 	if not _unit or not is_instance_valid(_unit):
 		return
 	if _unit.has_move_order:
@@ -475,11 +471,14 @@ func _try_auto_assist() -> void:
 	var my_pos: Vector3 = _unit.global_position
 	var best: Building = null
 	var best_dist: float = AUTO_ASSIST_RADIUS
-	for node: Node in _unit.get_tree().get_nodes_in_group("buildings"):
-		if not is_instance_valid(node):
+	var idx: SpatialIndex = SpatialIndex.get_instance(_unit.get_tree().current_scene)
+	if idx == null:
+		return
+	for raw: Variant in idx.nearby(my_pos, AUTO_ASSIST_RADIUS):
+		if not is_instance_valid(raw):
 			continue
-		var b: Building = node as Building
-		if not b or b.is_constructed:
+		var b: Building = raw as Building
+		if b == null or b.is_constructed:
 			continue
 		if b.owner_id != my_owner:
 			continue

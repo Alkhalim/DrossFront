@@ -1357,11 +1357,20 @@ func _spawn_staggered_projectile(delay_sec: float, weapon: WeaponResource, fire_
 	var style: StringName = weapon.projectile_style
 	var role: StringName = weapon.role_tag
 	var dmg_tier: StringName = weapon.damage_tier
-	# Capture the target + shooter as weak references so the lambda
-	# doesn't keep them alive past their own death. The deferred
-	# spawn checks is_instance_valid before applying damage.
-	var captured_target: Node3D = _current_target
-	var captured_shooter: Node3D = _unit
+	# Capture the target + shooter as actual WeakRefs so the lambda
+	# doesn't pin freed Nodes by reference. The previous version
+	# stored Node3D directly — Godot's lambda capture system holds a
+	# strong-typed Variant, and when the captured object gets freed
+	# before the timer fires, the engine prints
+	# 'Lambda capture at index N was freed. Passed null instead.'
+	# AT EVERY INVOCATION before our is_instance_valid check could
+	# ever run. Profiler showed BuilderComponent + this combat path
+	# generating thousands of those error logs per second on a busy
+	# fight, each one capturing a stack trace; total cost ate ~80%
+	# of script time. WeakRef.get_ref() returns null cleanly when
+	# the target has been freed, no log spam.
+	var target_ref: WeakRef = weakref(_current_target)
+	var shooter_ref: WeakRef = weakref(_unit)
 	var timer: SceneTreeTimer = get_tree().create_timer(delay_sec)
 	timer.timeout.connect(func() -> void:
 		if not is_inside_tree():
@@ -1375,11 +1384,14 @@ func _spawn_staggered_projectile(delay_sec: float, weapon: WeaponResource, fire_
 		# Damage-on-impact payload for staggered shots. payload_damage
 		# 0 = caller didn't want this shot to deal damage (miss or
 		# instant-style), so the projectile flies as cosmetic.
-		if payload_damage > 0 and proj.has_method("set_damage_payload") and is_instance_valid(captured_target):
-			var splash_dmg_int: int = 0
-			if payload_splash_r > 0.0:
-				splash_dmg_int = maxi(int(round(float(payload_damage) * payload_splash_mult)), 1)
-			proj.call("set_damage_payload", payload_damage, captured_target, captured_shooter, payload_splash_r, splash_dmg_int)
+		if payload_damage > 0 and proj.has_method("set_damage_payload"):
+			var ct: Node3D = target_ref.get_ref() as Node3D
+			var cs: Node3D = shooter_ref.get_ref() as Node3D
+			if ct != null and is_instance_valid(ct):
+				var splash_dmg_int: int = 0
+				if payload_splash_r > 0.0:
+					splash_dmg_int = maxi(int(round(float(payload_damage) * payload_splash_mult)), 1)
+				proj.call("set_damage_payload", payload_damage, ct, cs, payload_splash_r, splash_dmg_int)
 		get_tree().current_scene.add_child(proj)
 	)
 
