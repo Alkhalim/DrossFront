@@ -4007,6 +4007,15 @@ func _spawn_soft_patch(pos: Vector3, base_size: float, tint: Color, roughness: f
 	mat.roughness = roughness
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED if oil else BaseMaterial3D.SHADING_MODE_PER_PIXEL
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	# DEPTH_DRAW_DISABLED + stable render_priority. Without this,
+	# overlapping biome patches at similar y values fought each
+	# other in the transparent queue: the depth-write race between
+	# solid cores caused the back/front sort to flip on camera
+	# move, producing the diagonal "tone seam" the user reported.
+	# render_priority = -1 keeps biomes under the fog overlay
+	# (priority 0) regardless of depth.
+	mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	mat.render_priority = -1
 	if oil:
 		# Kept for backwards-compat (the recommended path is now
 		# `_spawn_oil_spill`). Subtle emission to fake the wet glint.
@@ -4079,16 +4088,15 @@ func _build_radial_alpha_array(size: int, noise_seed: int = 0) -> PackedFloat32A
 	var out := PackedFloat32Array()
 	out.resize(size * size)
 	var center: float = float(size) / 2.0
-	# Inner solid core shrunk further (was 0.40, then 0.65). 0.25
-	# means only the inner ~6% of the disc area is fully opaque —
-	# the rest is a long smooth gradient. The user kept seeing
-	# perceptible "edges" against ground; pushing more of the disc
-	# into the fade band makes the transition feel like a blend
-	# rather than a boundary.
 	const SOLID_FRAC: float = 0.25
-	# Boundary perturbation amplitude bumped from 0.20 → 0.32 for
-	# more visible blotchy lobes — the radial-noise irregularity
-	# breaks up any residual circular silhouette.
+	# FADE_END is the normalized distance at which alpha hits 0.
+	# It MUST stay below 1.0 so the texture's perimeter (which the
+	# PlaneMesh / soft-blob mesh maps to its mesh edges) is fully
+	# transparent. Otherwise the user sees a hard square / diamond
+	# silhouette where the mesh perimeter samples non-zero alpha —
+	# exactly the artefact reported on satellite crash sites.
+	# 0.78 leaves ~22% of the texture beyond the alpha boundary.
+	const FADE_END: float = 0.78
 	const PERTURB_AMP: float = 0.32
 	var noise := FastNoiseLite.new()
 	noise.seed = noise_seed
@@ -4107,8 +4115,8 @@ func _build_radial_alpha_array(size: int, noise_seed: int = 0) -> PackedFloat32A
 			var a: float
 			if d_eff < SOLID_FRAC:
 				a = 1.0
-			elif d_eff < 1.0:
-				var t: float = (d_eff - SOLID_FRAC) / (1.0 - SOLID_FRAC)
+			elif d_eff < FADE_END:
+				var t: float = (d_eff - SOLID_FRAC) / (FADE_END - SOLID_FRAC)
 				a = 1.0 - smoothstep(0.0, 1.0, t)
 			else:
 				a = 0.0

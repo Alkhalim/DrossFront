@@ -271,13 +271,19 @@ static func _get_scorched_blob_texture() -> Texture2D:
 	if src_img and (src_img.get_width() != SIZE or src_img.get_height() != SIZE):
 		src_img = src_img.duplicate() as Image
 		src_img.resize(SIZE, SIZE, Image.INTERPOLATE_LANCZOS)
-	# Radial alpha — solid 35% core, smoothstep fade to 0 at the
-	# inscribed-circle radius. Boundary is jittered with a low-
-	# frequency noise so it's blotchy rather than a perfect circle,
-	# which reads as natural soot scatter when the patch overlaps
-	# the ground texture.
-	const SOLID_FRAC: float = 0.35
-	const PERTURB_AMP: float = 0.18
+	# Radial alpha — solid core, smoothstep fade to 0 BEFORE the
+	# inscribed-circle radius. The fade has to hit 0 well inside
+	# the texture so the *square* mesh perimeter (PlaneMesh UVs
+	# go from (0,0) to (1,1) — cardinal edges sample at d=1.0,
+	# corners at d=1.41) is entirely at alpha=0. Otherwise the
+	# user sees a hard-edged square / diamond on the ground —
+	# exactly the artefact the latest screenshot showed.
+	# FADE_END=0.78 keeps the visible alpha disc inside the
+	# inscribed circle with margin to spare; the plane corners
+	# (d=1.41) are well past it.
+	const SOLID_FRAC: float = 0.30
+	const FADE_END: float = 0.78
+	const PERTURB_AMP: float = 0.16
 	var noise := FastNoiseLite.new()
 	noise.seed = 9173
 	noise.noise_type = FastNoiseLite.TYPE_PERLIN
@@ -295,8 +301,8 @@ static func _get_scorched_blob_texture() -> Texture2D:
 			var a: float
 			if d_eff < SOLID_FRAC:
 				a = 1.0
-			elif d_eff < 1.0:
-				var t: float = (d_eff - SOLID_FRAC) / (1.0 - SOLID_FRAC)
+			elif d_eff < FADE_END:
+				var t: float = (d_eff - SOLID_FRAC) / (FADE_END - SOLID_FRAC)
 				a = 1.0 - smoothstep(0.0, 1.0, t)
 			else:
 				a = 0.0
@@ -320,6 +326,15 @@ func _make_scorched_ground_mat(tint_mul: float = 1.0) -> StandardMaterial3D:
 	m.albedo_color = Color(tint_mul, tint_mul, tint_mul, 1.0)
 	m.albedo_texture = _get_scorched_blob_texture()
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	# DEPTH_DRAW_DISABLED + stable render_priority. The user reported
+	# overlapping scorch patches flickering as the camera moved —
+	# that's the transparent-queue sort flipping when patches at
+	# similar y values change distance order. Skipping depth-write
+	# removes the depth-race between solid cores; render_priority
+	# (-2 = before fog overlay at default 0) keeps the wreck-level
+	# patches under fog regardless of camera angle.
+	m.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	m.render_priority = -2
 	m.roughness = 1.0
 	m.metallic = 0.0
 	return m
