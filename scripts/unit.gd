@@ -6057,7 +6057,15 @@ func _per_frame_bookkeeping(delta: float) -> void:
 				move_target = Vector3.INF
 				_settled_frames = 0
 			else:
-				var d: float = global_position.distance_to(mc_typed.target)
+				# Distance to the FINAL destination, not the live waypoint.
+				# GroundMovement updates `target` to each path waypoint as
+				# the unit advances, and seek's arrival_radius slowdown
+				# kicks in at every waypoint. Without using the final goal,
+				# a unit slowed near an intermediate waypoint by separation
+				# could accumulate the settle counter and stop in open
+				# terrain mid-route.
+				var goal: Vector3 = mc_typed.arrival_target()
+				var d: float = global_position.distance_to(goal)
 				var v_xz_sq: float = velocity.x * velocity.x + velocity.z * velocity.z
 				if d <= mc_typed.arrival_radius and v_xz_sq < 0.25:  # < 0.5 m/s
 					_settled_frames += 1

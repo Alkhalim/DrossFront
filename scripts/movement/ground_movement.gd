@@ -60,6 +60,16 @@ func set_slot_target(slot_world: Vector3) -> void:
 	path_waypoints = PackedVector3Array()
 	path_waypoint_idx = 0
 
+## Override of MovementComponent.arrival_target. When a path is active,
+## return the path's final waypoint — the unit-level arrival poll uses
+## this to avoid registering arrival at intermediate waypoints (where
+## seek's arrival_radius slowdown would otherwise count as "settled" if
+## separation forces happen to balance seek into low velocity).
+func arrival_target() -> Vector3:
+	if path_waypoints.size() > 0:
+		return path_waypoints[path_waypoints.size() - 1]
+	return target
+
 func _physics_process(delta: float) -> void:
 	# Advance waypoint if we have a path and have reached the current one
 	if path_waypoints.size() > 1 and path_waypoint_idx < path_waypoints.size():

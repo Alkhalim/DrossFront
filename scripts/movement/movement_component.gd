@@ -122,6 +122,15 @@ func has_target() -> bool:
 func clear_target() -> void:
 	target = Vector3.INF
 
+## Returns the position the unit is ultimately trying to reach. For
+## path-routed units, this is the final waypoint, not the live target
+## (which advances waypoint by waypoint during transit). The unit-level
+## arrival poll checks distance to this so it doesn't fire spuriously
+## when the unit slows near an intermediate waypoint. Subclasses with
+## path waypoints override this to return the path's endpoint.
+func arrival_target() -> Vector3:
+	return target
+
 # --- Subclass hooks ---
 
 ## Return non-group-member dynamic agents within sensing range.
