@@ -211,6 +211,15 @@ func _ready() -> void:
 
 	add_to_group("buildings")
 	add_to_group("owner_%d" % owner_id)
+	# Navmesh bake source: the test arena bakes its NavigationMesh with
+	# geometry_source_geometry_mode = SOURCE_GEOMETRY_GROUPS_WITH_CHILDREN
+	# and source group "terrain". Without this membership, the bake never
+	# walks into the building (or its NavigationObstacle3D child) and
+	# affect_navigation_mesh has nothing to carve — A* paths run straight
+	# through. Adding the building to "terrain" lets the bake see both
+	# the static collider (which carves the footprint) and the obstacle
+	# (which adds the conservative ~30% padding around it).
+	add_to_group("terrain")
 	# Round-robin phase for the half-frame stagger in `_process`.
 	_process_phase = int(get_instance_id() & 1)
 	if stats:
