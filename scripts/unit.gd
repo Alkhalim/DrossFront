@@ -72,6 +72,13 @@ var _color_shell: MeshInstance3D = null
 var _hp_bar: Node3D = null
 var _hp_bar_fill: MeshInstance3D = null
 var _hp_bar_bg: MeshInstance3D = null
+## Reload progress bar drawn under the HP bar — fills as the unit's
+## weapon cooldown progresses, so the player can see at a glance which
+## squad is mid-reload and which is ready to fire. Whitegrey for a
+## neutral, non-distracting read.
+var _reload_bar: Node3D = null
+var _reload_bar_fill: MeshInstance3D = null
+var _reload_bar_bg: MeshInstance3D = null
 var _anim_time: float = 0.0
 ## Continuously advancing clock for idle sway (never resets, unlike _anim_time).
 var _idle_time: float = 0.0
@@ -5037,6 +5044,51 @@ func _build_hp_bar() -> void:
 	_hp_bar_fill.set_surface_override_material(0, fill_mat)
 	_hp_bar.add_child(_hp_bar_fill)
 
+	# Squad-member dividers — vertical ticks at each per-member HP
+	# boundary so the player can read at a glance how many members
+	# are still alive and how close the next death is. squad_size 5
+	# gives 4 dividers at 1/5, 2/5, 3/5, 4/5.
+	if stats and stats.squad_size > 1:
+		var bar_w: float = 2.0
+		for i: int in stats.squad_size - 1:
+			var frac: float = float(i + 1) / float(stats.squad_size)
+			var divider := MeshInstance3D.new()
+			var d_mesh := BoxMesh.new()
+			d_mesh.size = Vector3(0.04, 0.16, 0.12)
+			divider.mesh = d_mesh
+			var d_mat := StandardMaterial3D.new()
+			d_mat.albedo_color = Color(0.05, 0.05, 0.05, 1.0)
+			divider.set_surface_override_material(0, d_mat)
+			divider.position = Vector3(-bar_w * 0.5 + frac * bar_w, 0.0, 0.01)
+			_hp_bar.add_child(divider)
+
+	# Reload progress bar — thinner whitegrey strip below the HP bar.
+	# Updated from CombatComponent._fire_cooldown via _update_reload_bar.
+	_reload_bar_bg = MeshInstance3D.new()
+	var rl_bg_mesh := BoxMesh.new()
+	rl_bg_mesh.size = Vector3(2.0, 0.06, 0.06)
+	_reload_bar_bg.mesh = rl_bg_mesh
+	var rl_bg_mat := StandardMaterial3D.new()
+	rl_bg_mat.albedo_color = Color(0.08, 0.08, 0.08, 0.7)
+	rl_bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_reload_bar_bg.set_surface_override_material(0, rl_bg_mat)
+	_reload_bar_bg.position = Vector3(0, -0.16, 0)
+	_hp_bar.add_child(_reload_bar_bg)
+	_reload_bar_fill = MeshInstance3D.new()
+	var rl_fill_mesh := BoxMesh.new()
+	rl_fill_mesh.size = Vector3(1.0, 0.08, 0.07)
+	_reload_bar_fill.mesh = rl_fill_mesh
+	var rl_fill_mat := StandardMaterial3D.new()
+	rl_fill_mat.albedo_color = Color(0.85, 0.85, 0.88, 0.9)
+	rl_fill_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	rl_fill_mat.emission_enabled = true
+	rl_fill_mat.emission = Color(0.7, 0.7, 0.75, 1.0)
+	rl_fill_mat.emission_energy_multiplier = 0.3
+	_reload_bar_fill.set_surface_override_material(0, rl_fill_mat)
+	_reload_bar_fill.position = Vector3(-1.0, -0.16, 0.01)
+	_reload_bar_fill.scale.x = 0.01
+	_hp_bar.add_child(_reload_bar_fill)
+
 	# Top-level so it doesn't inherit unit rotation (prevents jitter)
 	add_child(_hp_bar)
 	_hp_bar.top_level = true
@@ -5060,6 +5112,42 @@ func _update_hp_bar() -> void:
 		var g: float = pct
 		fill_mat.albedo_color = Color(r, g, 0.1, 0.9)
 		fill_mat.emission = Color(r, g, 0.1, 1.0)
+
+	_update_reload_bar()
+
+
+func _update_reload_bar() -> void:
+	## Whitegrey reload bar under the HP bar. Reads the combat component's
+	## _fire_cooldown vs the primary weapon's rof_seconds — fills from
+	## empty (just fired) toward full (ready to fire). Hidden when the
+	## unit has no primary weapon or the cooldown is already done.
+	if not _reload_bar_fill:
+		return
+	var combat: Node = get_combat()
+	if not combat or not stats or not stats.primary_weapon:
+		_reload_bar_fill.visible = false
+		if _reload_bar_bg:
+			_reload_bar_bg.visible = false
+		return
+	var rof: float = stats.primary_weapon.resolved_rof_seconds() if stats.primary_weapon.has_method("resolved_rof_seconds") else stats.primary_weapon.rof_seconds
+	if rof <= 0.0:
+		_reload_bar_fill.visible = false
+		if _reload_bar_bg:
+			_reload_bar_bg.visible = false
+		return
+	var cd: float = (combat.get("_fire_cooldown") as float) if "_fire_cooldown" in combat else 0.0
+	# pct = how full the bar is. Just fired → cd = rof → bar empty (0).
+	# Cooldown ticked down → cd lower → bar fuller. cd = 0 → bar full.
+	var pct: float = clampf(1.0 - (cd / rof), 0.0, 1.0)
+	var bar_width: float = 2.0
+	_reload_bar_fill.scale.x = maxf(pct * bar_width, 0.01)
+	_reload_bar_fill.position.x = -bar_width / 2.0 * (1.0 - pct)
+	# When fully reloaded, hide the bar so the squad's HP bar isn't
+	# visually cluttered by a constant whitegrey stripe at full.
+	var ready: bool = pct >= 0.999
+	_reload_bar_fill.visible = not ready
+	if _reload_bar_bg:
+		_reload_bar_bg.visible = not ready
 
 
 func _mech_total_height() -> float:

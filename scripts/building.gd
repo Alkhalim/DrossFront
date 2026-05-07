@@ -3150,6 +3150,22 @@ const _BUILDING_ANIM_CULL_DIST_SQ: float = 110.0 * 110.0
 var _bldg_camera_cached: Camera3D = null
 
 
+## True when the building's owner is the local player or an allied
+## team member, false for enemies. Used to hide the construction +
+## production progress bars on enemy buildings so the player can't
+## read intel directly off the world.
+func _is_visible_to_local_player() -> bool:
+	if owner_id == 0:
+		return true
+	var scene: Node = get_tree().current_scene if get_tree() else null
+	if scene == null:
+		return false
+	var registry: Node = scene.get_node_or_null("PlayerRegistry")
+	if registry and registry.has_method("are_allied"):
+		return registry.call("are_allied", owner_id, 0) as bool
+	return false
+
+
 func _evacuate_foundation_blockers() -> void:
 	## Walks any friendly / allied unit standing inside the
 	## construction footprint and commands it to move just outside
@@ -3341,6 +3357,11 @@ func _kick_units_out_of_footprint() -> void:
 
 func _create_progress_bar() -> void:
 	if _progress_bar:
+		return
+	# Don't show construction/production bars on enemy buildings —
+	# revealing the foundation already tells the player there's a build
+	# happening; the exact progress is intel they shouldn't get for free.
+	if not _is_visible_to_local_player():
 		return
 
 	_bar_width = stats.footprint_size.x
@@ -4908,6 +4929,10 @@ func _build_selection_bars() -> void:
 
 func _build_production_bar(bar_w: float, prod_y: float) -> void:
 	if _sel_prod_bg and is_instance_valid(_sel_prod_bg):
+		return
+	# Hide enemy production from the player — revealing what's queued
+	# at an enemy building is intel they shouldn't get from sight alone.
+	if not _is_visible_to_local_player():
 		return
 	_sel_prod_bg = MeshInstance3D.new()
 	var pb_bg_mesh := BoxMesh.new()
