@@ -4011,12 +4011,19 @@ func _resolve_biome_texture(key: String) -> Texture2D:
 
 
 func _build_soft_blob_mesh(base_radius: float, x_scale: float, z_scale: float) -> ArrayMesh:
-	# Triangle-fan disc with `BLOB_VERTS` perimeter vertices. Each perimeter
-	# vertex gets a small radial noise offset so the silhouette is
-	# irregular (slightly off-circle). Center vertex has alpha = 1.0,
-	# perimeter vertices have alpha = 0.0 — the rasteriser interpolates
-	# between them, producing the soft fade.
+	# Two-ring fan. Earlier version was a single triangle fan (center +
+	# perimeter), which meant alpha=1.0 lived at exactly one point and
+	# fell to 0 everywhere else — the average effective alpha across the
+	# blob area was ~33%, so darker biome tints (scorched, mud) blended
+	# invisibly into the ground and the user only saw the highest-
+	# contrast biome (snow / sand) per map. Adding an inner ring at
+	# INNER_FRAC of the radius — also at alpha=1.0 — gives every patch a
+	# solid, fully tinted/textured "core" disc, with the soft fade
+	# pushed out to the outer band only. The silhouette stays organic
+	# (perimeter still has the radial jitter) but each biome now reads
+	# as a real distinct surface.
 	const BLOB_VERTS: int = 24
+	const INNER_FRAC: float = 0.55
 	var verts := PackedVector3Array()
 	var colors := PackedColorArray()
 	var uvs := PackedVector2Array()
@@ -4024,6 +4031,20 @@ func _build_soft_blob_mesh(base_radius: float, x_scale: float, z_scale: float) -
 	verts.append(Vector3.ZERO)
 	colors.append(Color(1, 1, 1, 1))
 	uvs.append(Vector2(0.5, 0.5))
+	# Inner ring — full alpha. This forms the fully tinted/textured core.
+	for i: int in BLOB_VERTS:
+		var ang: float = float(i) / float(BLOB_VERTS) * TAU
+		var rx: float = cos(ang) * base_radius * x_scale * INNER_FRAC
+		var rz: float = sin(ang) * base_radius * z_scale * INNER_FRAC
+		verts.append(Vector3(rx, 0.0, rz))
+		colors.append(Color(1, 1, 1, 1))
+		uvs.append(Vector2(
+			0.5 + cos(ang) * 0.5 * INNER_FRAC,
+			0.5 + sin(ang) * 0.5 * INNER_FRAC,
+		))
+	# Outer ring — alpha 0, irregular radial jitter for the organic
+	# silhouette. Indices below pair this against the inner ring as a
+	# fade band.
 	for i: int in BLOB_VERTS:
 		var ang: float = float(i) / float(BLOB_VERTS) * TAU
 		var radius_jitter: float = randf_range(0.85, 1.18)
@@ -4035,14 +4056,28 @@ func _build_soft_blob_mesh(base_radius: float, x_scale: float, z_scale: float) -
 		# texture sampled on the blob a natural radial layout (centered
 		# detail, perimeter is the texture's edge).
 		uvs.append(Vector2(0.5 + cos(ang) * 0.5, 0.5 + sin(ang) * 0.5))
-	# Indices — fan connecting center (0) to each perimeter pair.
 	var indices := PackedInt32Array()
+	# Inner fan: solid disc from center to inner ring (full alpha).
 	for i: int in BLOB_VERTS:
 		var a: int = 1 + i
 		var b: int = 1 + ((i + 1) % BLOB_VERTS)
 		indices.append(0)
 		indices.append(b)
 		indices.append(a)
+	# Outer band: each pair of inner+outer ring vertices forms a quad,
+	# split into two triangles. Winding mirrors the inner fan so all
+	# faces get +Y normals.
+	for i: int in BLOB_VERTS:
+		var a_in: int = 1 + i
+		var b_in: int = 1 + ((i + 1) % BLOB_VERTS)
+		var a_out: int = 1 + BLOB_VERTS + i
+		var b_out: int = 1 + BLOB_VERTS + ((i + 1) % BLOB_VERTS)
+		indices.append(a_in)
+		indices.append(b_in)
+		indices.append(b_out)
+		indices.append(a_in)
+		indices.append(b_out)
+		indices.append(a_out)
 
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
