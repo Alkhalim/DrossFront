@@ -145,6 +145,12 @@ var attack_move_target: Vector3 = Vector3.INF
 ## retaliation resolves.
 const RETALIATION_LOST_SIGHT_SEC: float = 7.0
 var _retaliation_lost_sight_timer: float = 0.0
+# Engagement-range hysteresis: true once we've stopped to fire on the
+# current target. Stays true until the target is clearly out of range
+# (>110% weapon range) or lost. Prevents the chase/stop oscillation
+# that made fighting units "slide" by a few units each time the enemy
+# moved a fraction past the exact range boundary.
+var _was_in_range: bool = false
 
 
 func _ready() -> void:
@@ -320,6 +326,7 @@ func _physics_process(delta: float) -> void:
 		_current_target = forced_target
 	elif _current_target and not _is_valid_target(_current_target):
 		_current_target = null
+		_was_in_range = false
 		# Unguarded: the elif condition guarantees _current_target was non-null
 		combat_ended.emit()
 
@@ -421,10 +428,20 @@ func _physics_process(delta: float) -> void:
 		_unit.command_move(_chase_position(_current_target, primary_range), false)
 		return
 
-	if dist <= primary_range:
-		# In range: halt the unit, then fire. The user's design: units never
-		# fire while moving (rare special-unit exceptions aside). stop() also
-		# clears has_move_order so subsequent ticks see the unit as idle.
+	# Hysteresis: once we've stopped to engage, treat the unit as in range
+	# while the enemy stays within primary_range × 1.10. Without this, the
+	# unit re-enters chase the moment the enemy moves slightly past the
+	# exact range edge, drifts forward a fraction, and re-stops — visible
+	# as a small "slide" during fights. The 10% margin absorbs that jitter
+	# without compromising real out-of-range detection.
+	var engage_threshold: float = primary_range
+	if _was_in_range:
+		engage_threshold = primary_range * 1.10
+	if dist <= engage_threshold:
+		_was_in_range = true
+		# Halt the unit, then fire. Firing only happens within the actual
+		# weapon range (not the hysteresis margin). Inside the margin but
+		# outside the weapon range, the unit just stands still waiting.
 		_unit.stop()
 
 		_face_target()
@@ -437,7 +454,7 @@ func _physics_process(delta: float) -> void:
 		# autocannon ignores aircraft.
 		var target_is_air: bool = _current_target.is_in_group("aircraft")
 
-		if primary and _fire_cooldown <= 0.0 and _silence_remaining <= 0.0:
+		if dist <= primary_range and primary and _fire_cooldown <= 0.0 and _silence_remaining <= 0.0:
 			if not target_is_air or primary.engages_air():
 				_fire_weapon(primary, true)
 
@@ -458,6 +475,7 @@ func _physics_process(delta: float) -> void:
 				if not target_is_air or stats.secondary_weapon.engages_air():
 					_fire_weapon(stats.secondary_weapon, false)
 	else:
+		_was_in_range = false
 		# Out of range — chase if we have a forced target (player-set, retaliated,
 		# or auto-engaged on sight). Pass `clear_combat=false` so command_move
 		# doesn't wipe the very target we're chasing; that bug used to make
@@ -491,6 +509,7 @@ func clear_target() -> void:
 	forced_target = null
 	_current_target = null
 	attack_move_target = Vector3.INF
+	_was_in_range = false
 	if was_engaged:
 		combat_ended.emit()
 
@@ -500,6 +519,7 @@ func command_attack_move(pos: Vector3) -> void:
 	attack_move_target = pos
 	forced_target = null
 	_current_target = null
+	_was_in_range = false
 	if was_engaged:
 		combat_ended.emit()
 	_unit.has_move_order = true
