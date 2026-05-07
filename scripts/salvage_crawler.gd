@@ -98,7 +98,11 @@ const ANCHOR_DEPLOY_TIME: float = 5.0
 const ANCHOR_ARMOR_BONUS: float = 0.5      # +50% damage reduction multiplier
 const ANCHOR_WORKER_BONUS: float = 0.25    # +25% effective workers (we add a worker slot)
 const ANCHOR_RANGE_BONUS: float = 0.30     # +30% harvest radius while deployed
-const _BASE_MAX_WORKERS: int = 4
+## Doubled (was 4). Same reasoning as salvage_yard_component:
+## halved per-worker harvest rate × twice the worker count keeps
+## per-crawler throughput similar but raids on the gatherer pool
+## bite harder (more time to retrain replacements).
+const _BASE_MAX_WORKERS: int = 8
 const _BASE_HARVEST_RADIUS: float = HARVEST_RADIUS
 
 var anchor_state: int = AnchorState.OFF
@@ -200,7 +204,7 @@ func _ready() -> void:
 	if script:
 		_yard_component = script.new()
 		_yard_component.name = "SalvageYardComponent"
-		_yard_component.set("max_workers", 4)
+		_yard_component.set("max_workers", 8)
 		_yard_component.set("harvest_radius", HARVEST_RADIUS)
 		_yard_component.set("worker_spawn_interval", 18.0)
 		_yard_component.set("self_trickle_per_sec", 1.0)

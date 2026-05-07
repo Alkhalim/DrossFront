@@ -10,7 +10,11 @@ const COLLECTION_RADIUS: float = 30.0
 const SELF_TRICKLE_PER_SEC: float = 0.5
 
 ## Worker pool size — defaults to the Yard spec (2). Crawlers raise this to 4.
-@export var max_workers: int = 2
+## Doubled (was 2). Combined with HARVEST_RATE halved, the per-yard
+## throughput stays similar but the standing worker count is twice as
+## high, so a raid that picks off 2 workers takes longer to recover
+## from (population matters more, training-back-to-full is meaningful).
+@export var max_workers: int = 4
 ## Worker harvest radius. Defaults to Yard spec (30); Crawlers override to 45.
 @export var harvest_radius: float = COLLECTION_RADIUS
 ## Worker spawn cadence. Defaults to Yard spec (24s); Crawlers override to 18s.

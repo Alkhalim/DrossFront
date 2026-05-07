@@ -8,7 +8,10 @@ extends CharacterBody3D
 enum State { IDLE, MOVING_TO_WRECK, HARVESTING, RETURNING, UNSTUCKING }
 
 const MOVE_SPEED: float = 6.0
-const HARVEST_RATE: float = 15.0
+# Halved (was 15) per balance pass — workers harvest slower so a
+# wreck patch lasts longer and raids on workers feel more meaningful
+# (it takes real time to recover lost gathering throughput).
+const HARVEST_RATE: float = 7.5
 const CARRY_CAPACITY: int = 30
 const ARRIVE_THRESHOLD: float = 1.5
 ## Dropoff radius at the home crawler. Wider than ARRIVE_THRESHOLD
@@ -16,8 +19,13 @@ const ARRIVE_THRESHOLD: float = 1.5
 ## physically touching the side of the crawler and still be 2.5u
 ## from its CENTRE, which the strict 1.5u arrive check rejected.
 ## Bumping to 3.0u so a worker that's bumped up against the chassis
-## counts as 'docked' for the deposit.
-const DROPOFF_RADIUS: float = 3.0
+## counts as 'docked' for the deposit. Bumped 3 → 5 because the
+## salvage_yard footprint (4.5×4.5) plus the bake's agent_radius shrink
+## kept the navmesh edge ~3.9u from the yard's center — gm.goto_world
+## couldn't bring the worker any closer than that, so DROPOFF_RADIUS=3
+## was unreachable and full workers stalled next to a yard with cargo
+## undelivered. 5u clears the carved buffer for every yard size we ship.
+const DROPOFF_RADIUS: float = 5.0
 const MAX_HP: int = 100
 
 const PLAYER_COLOR := Color(0.08, 0.25, 0.85, 1.0)

@@ -1754,6 +1754,14 @@ func _hide_yard_range(building: Building) -> void:
 
 
 func _set_rally_point_visual(pos: Vector3) -> void:
+	# Guard against non-finite positions (RALLY_UNSET = Vector3.INF, or
+	# a raycast miss returning INF). Without this, global_position write
+	# below logs "instance_set_transform: !v.is_finite() is true" every
+	# time selection touches a building with an unset rally.
+	if not (is_finite(pos.x) and is_finite(pos.y) and is_finite(pos.z)):
+		if _rally_marker:
+			_rally_marker.visible = false
+		return
 	if not _rally_marker:
 		_rally_marker = MeshInstance3D.new()
 		var cyl := CylinderMesh.new()
