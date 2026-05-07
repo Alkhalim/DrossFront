@@ -167,6 +167,7 @@ const FLASH_DURATION: float = 0.12
 ## Navigation.
 var _nav_agent: NavigationAgent3D = null
 var _stuck_timer: float = 0.0
+var _settled_frames: int = 0
 ## Throttle (msec timestamp) for the zero-movement repath in
 ## _physics_process. Prevents spamming NavigationServer with a
 ## new target_position every physics frame while the unit is
@@ -6037,10 +6038,13 @@ func _per_frame_bookkeeping(delta: float) -> void:
 	# permanently disables CombatComponent.can_auto_target and stops idle
 	# units from engaging nearby enemies.
 	#
-	# Velocity gate: in cohesive squad mode the slot tracks the unit while
-	# moving, so distance-to-target < arrival_radius even mid-move. Requiring
-	# low velocity ensures we only consider the unit "arrived" once it has
-	# actually settled, not when it's keeping pace with a moving slot.
+	# We require sustained settled state (low velocity AND within arrival_radius
+	# AND no path progress for ~30 frames) before clearing. A unit briefly
+	# blocked while a formation reshuffles hits velocity≈0 and may be inside
+	# arrival_radius of its slot for one frame — without the sustain window
+	# that single frame would clear has_move_order, the squad would never
+	# re-set it, and auto-acquire would pull the unit out of formation.
+	const SETTLE_FRAMES: int = 30  # ~0.5s at 60fps
 	if has_move_order:
 		var mc_arr: Node = get_node_or_null("MovementComponent")
 		if mc_arr != null and mc_arr is MovementComponent:
@@ -6048,12 +6052,20 @@ func _per_frame_bookkeeping(delta: float) -> void:
 			if not mc_typed.has_target():
 				has_move_order = false
 				move_target = Vector3.INF
+				_settled_frames = 0
 			else:
 				var d: float = global_position.distance_to(mc_typed.target)
 				var v_xz_sq: float = velocity.x * velocity.x + velocity.z * velocity.z
 				if d <= mc_typed.arrival_radius and v_xz_sq < 0.25:  # < 0.5 m/s
-					has_move_order = false
-					move_target = Vector3.INF
+					_settled_frames += 1
+					if _settled_frames >= SETTLE_FRAMES:
+						has_move_order = false
+						move_target = Vector3.INF
+						_settled_frames = 0
+				else:
+					_settled_frames = 0
+	else:
+		_settled_frames = 0
 
 	# Damage flash countdown (cheap — runs every frame).
 	if _flash_timer > 0.0:
