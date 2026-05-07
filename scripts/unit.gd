@@ -168,6 +168,11 @@ const FLASH_DURATION: float = 0.12
 var _nav_agent: NavigationAgent3D = null
 var _stuck_timer: float = 0.0
 var _settled_frames: int = 0
+## Set when a squad member dies while the squad is standing still.
+## Triggers a one-shot _rebalance_formation on the next command_move
+## so the surviving members close ranks as part of the next motion
+## instead of teleport-shuffling at rest.
+var _rebalance_pending: bool = false
 ## Throttle (msec timestamp) for the zero-movement repath in
 ## _physics_process. Prevents spamming NavigationServer with a
 ## new target_position every physics frame while the unit is
@@ -5093,8 +5098,15 @@ func _remove_member_visual(index: int) -> void:
 			_spawn_member_wreck(member.global_position)
 	# Reform the surviving members into the formation slots for the
 	# new alive_count so the squad keeps a balanced shape around its
-	# centre instead of leaving holes where the dead used to stand.
-	_rebalance_formation()
+	# centre. Only rebalance immediately if the squad is currently
+	# moving — a stationary squad shouldn't visibly shuffle around
+	# every time a member dies. Defer the reform to the next move
+	# command so the player sees a clean reformation in motion
+	# instead of teleport-corrections at rest.
+	if has_move_order:
+		_rebalance_formation()
+	else:
+		_rebalance_pending = true
 
 
 func _rebalance_formation() -> void:
@@ -5182,6 +5194,12 @@ func command_move(target: Vector3, clear_combat: bool = true) -> void:
 	move_target.y = global_position.y
 	has_move_order = true
 	_stuck_timer = 0.0
+	# If members died while the squad was stationary, the formation
+	# reform was deferred. Now that we're moving, run it once so the
+	# survivors close ranks as part of the journey.
+	if _rebalance_pending:
+		_rebalance_pending = false
+		_rebalance_formation()
 	var _mc: Node = get_node_or_null("MovementComponent")
 	if _mc != null and _mc is GroundMovement:
 		(_mc as GroundMovement).goto_world(move_target)

@@ -223,7 +223,14 @@ func _ready() -> void:
 	# Round-robin phase for the half-frame stagger in `_process`.
 	_process_phase = int(get_instance_id() & 1)
 	if stats:
-		current_hp = stats.hp
+		# Foundations start at 20% of the final HP and fill toward
+		# stats.hp as construction progresses (see advance_construction).
+		# Already-constructed buildings (scenario-seeded HQs etc.) skip
+		# this and start at full.
+		if is_constructed:
+			current_hp = stats.hp
+		else:
+			current_hp = maxi(int(float(stats.hp) * 0.2), 1)
 		# rally_point intentionally stays at RALLY_UNSET at
 		# construction. The previous default placed an auto-rally
 		# just outside the building's footprint, which felt
@@ -3049,6 +3056,18 @@ func advance_construction(amount: float, builder: Node = null) -> void:
 			scaled = amount * (_builders_this_tick[builder_id] as float)
 	_construction_progress += scaled
 	_build_amount_this_tick += scaled
+	# Scale current_hp from 20% (placement) up to stats.hp as
+	# construction progresses. Construction completion sets it to full
+	# in _finish_construction; this gives the under-construction
+	# building a smoothly increasing HP bar instead of a step at the
+	# end. Damage taken during construction stays applied — we lerp
+	# the floor (20% start) toward the cap (stats.hp), and clamp
+	# current_hp so a hit during the build doesn't get healed away.
+	if stats and stats.build_time > 0.0:
+		var p: float = clampf(_construction_progress / stats.build_time, 0.0, 1.0)
+		var target_hp: int = maxi(int(float(stats.hp) * (0.2 + 0.8 * p)), 1)
+		if target_hp > current_hp:
+			current_hp = target_hp
 	_update_progress_bar()
 	_update_construction_rise()
 	if _construction_progress >= stats.build_time:
@@ -3198,6 +3217,11 @@ func get_construction_percent() -> float:
 func _finish_construction() -> void:
 	is_constructed = true
 	_construction_progress = stats.build_time
+	# Top up to full HP on completion. Damage taken during construction
+	# stays applied, but a clean build with no interference finishes
+	# at stats.hp instead of slightly under from the 20%→100% lerp.
+	if stats:
+		current_hp = stats.hp
 	construction_complete.emit()
 	_apply_placeholder_shape()
 	_remove_progress_bar()

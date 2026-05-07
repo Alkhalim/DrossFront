@@ -1113,7 +1113,10 @@ func _update_resource_display() -> void:
 	var consumed: int = _resource_manager.power_consumption
 	var has_deficit: bool = consumed > produced
 	var efficiency: float = _resource_manager.get_power_efficiency()
-	_power_label.text = "%d / %d" % [produced, consumed]
+	# Display order: consumption / production (X / Y where X is what
+	# you USE and Y is what you HAVE). Reads as "I'm using 8 of my 12,"
+	# matching how players think about power budget.
+	_power_label.text = "%d / %d" % [consumed, produced]
 	_power_label.add_theme_color_override("font_color", COLOR_POWER)
 	if _power_pct_label:
 		var pct: int = int(round(efficiency * 100.0))
