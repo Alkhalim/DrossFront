@@ -5222,13 +5222,16 @@ func stop() -> void:
 	move_queue.clear()
 	velocity = Vector3.ZERO
 	has_move_order = false
-	# New-system units: also clear the MovementComponent's target so
-	# GroundMovement doesn't keep driving the body past the halt point.
-	# Without this, combat's "stop and fire when in range" call leaves
-	# gm.target pointing at the enemy and the unit drifts past.
+	# New-system units: clear the MovementComponent's target AND zero its
+	# internal _velocity. Without zeroing _velocity, the body's velocity
+	# is overwritten next physics tick from MC's last frame value, so the
+	# unit decelerates from full chase speed via inertia and overshoots
+	# past weapon range into melee before settling.
 	var mc: Node = get_node_or_null("MovementComponent")
 	if mc != null and mc is MovementComponent:
-		(mc as MovementComponent).clear_target()
+		var mc_typed: MovementComponent = mc as MovementComponent
+		mc_typed.clear_target()
+		mc_typed._velocity = Vector3.ZERO
 
 
 func _in_active_combat() -> bool:

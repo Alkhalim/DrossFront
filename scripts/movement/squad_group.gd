@@ -271,9 +271,14 @@ func _update_member_targets() -> void:
 				# keeps whatever target it had — slot from before combat,
 				# OR a fresh target from a player command_move issued
 				# during combat (clearing it would silently override the
-				# player). Just uncap speed so post-combat sprint works.
-				gm.effective_max_speed_cap = INF
-				gm.effective_max_turn_rate_cap = INF
+				# player). Cap speed at the squad's convoy pace so the
+				# unit closes into weapon range at the squad's speed
+				# instead of sprinting ahead and arriving at point-blank.
+				# Post-combat sprint still works: once combat_engaged
+				# flips false, the else branch's _speed_cap_for returns
+				# INF when the unit is far from its slot.
+				gm.effective_max_speed_cap = _convoy_speed_cap
+				gm.effective_max_turn_rate_cap = _convoy_turn_rate_cap
 			else:
 				var slot_world: Vector3 = _slot_world(m)
 				if gm.has_method("set_slot_target"):

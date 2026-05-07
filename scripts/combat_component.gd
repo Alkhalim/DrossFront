@@ -184,6 +184,26 @@ func _is_movement_priority_active() -> bool:
 	return until_ms > Time.get_ticks_msec()
 
 
+## Returns a chase destination at firing range from `target`, on the
+## unit's side. Used so the unit's seek arrival_radius decelerates as
+## it approaches weapon range instead of decelerating at the enemy's
+## position (which would mean the unit hits firing range at full speed
+## and overshoots into melee). 95% of primary_range so the unit lands
+## just inside firing range, not exactly on the boundary.
+func _chase_position(target: Node3D, primary_range: float) -> Vector3:
+	var enemy_pos: Vector3 = target.global_position
+	if primary_range <= 0.0:
+		return enemy_pos
+	var unit_pos: Vector3 = _unit.global_position
+	var to_unit: Vector3 = unit_pos - enemy_pos
+	to_unit.y = 0.0
+	var d: float = to_unit.length()
+	if d < 0.001:
+		return enemy_pos
+	to_unit /= d
+	return enemy_pos + to_unit * (primary_range * 0.95)
+
+
 func apply_damage_buff(multiplier: float, duration: float) -> void:
 	## Called by friendly damage-aura abilities (Forgemaster Reactor
 	## Surge). Stacks by MAX on both axes so re-casting an aura
@@ -398,7 +418,7 @@ func _physics_process(delta: float) -> void:
 		if _fow_cached and _fow_cached.has_method("is_visible_world"):
 			team_can_see = _fow_cached.call("is_visible_world", _current_target.global_position)
 	if dist > sight_r and not team_can_see:
-		_unit.command_move(_current_target.global_position, false)
+		_unit.command_move(_chase_position(_current_target, primary_range), false)
 		return
 
 	if dist <= primary_range:
@@ -443,7 +463,7 @@ func _physics_process(delta: float) -> void:
 		# doesn't wipe the very target we're chasing; that bug used to make
 		# units walk all the way into melee before re-acquiring and firing.
 		if forced_target:
-			_unit.command_move(_current_target.global_position, false)
+			_unit.command_move(_chase_position(_current_target, primary_range), false)
 
 
 func set_target(target: Node3D) -> void:
