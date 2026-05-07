@@ -218,33 +218,28 @@ func _build_apex_landmark(base_color: Color, accent_color: Color, max_extent: fl
 	glow.position = Vector3(ember.position.x, wreck_size.y * 0.9, ember.position.z)
 	add_child(glow)
 
-	# Scorch field — cluster of overlapping cylinder patches at
-	# random offsets + sizes so the outline reads as organic
-	# scorched ground rather than a single flat rectangle. Mirrors
-	# the satellite-crater pattern used elsewhere; uses opaque
-	# cylinders (no transparency) so the dim overlay applied by
-	# FogOfWar can't catch the edges and produce the flicker the
-	# old TRANSPARENCY_ALPHA QuadMesh suffered from.
+	# Scorch field — cluster of overlapping flat patches at random
+	# offsets + sizes so the outline reads as organic scorched
+	# ground rather than a single flat rectangle. Patches use a
+	# PlaneMesh + scorched-blob texture (radial-alpha-baked) so the
+	# perimeter fades softly into the surrounding terrain instead
+	# of the hard cylinder edge the old code produced. Y stays
+	# below the fog overlay plane (y=0.10) so FogOfWar still dims
+	# the patches in shrouded cells.
 	var ring_extent: float = max_extent * 1.6
 	var patch_count: int = randi_range(7, 11)
 	for i: int in patch_count:
 		var patch := MeshInstance3D.new()
-		var p_cyl := CylinderMesh.new()
-		# Anchor patch dominates the silhouette; offshoots ring
-		# around the centre to break the outline.
+		patch.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var p_quad := PlaneMesh.new()
 		var radius: float = ring_extent * (0.95 if i == 0 else randf_range(0.32, 0.70))
-		p_cyl.top_radius = radius
-		p_cyl.bottom_radius = radius
-		# Slightly thicker than the satellite version so the patches
-		# clear nearby ground decoration and don't z-fight terrain.
-		p_cyl.height = randf_range(0.06, 0.10)
-		p_cyl.radial_segments = 18
-		patch.mesh = p_cyl
+		p_quad.size = Vector2(radius * 2.0, radius * 2.0)
+		patch.mesh = p_quad
 		var off_ang: float = randf_range(0.0, TAU)
 		var off_r: float = ring_extent * randf_range(0.0, 0.65) if i > 0 else 0.0
 		patch.position = Vector3(
 			cos(off_ang) * off_r,
-			0.04 + randf_range(0.0, 0.03),
+			0.05 + randf_range(0.0, 0.02),
 			sin(off_ang) * off_r,
 		)
 		patch.rotation.y = randf_range(0.0, TAU)
@@ -258,17 +253,73 @@ func _build_apex_landmark(base_color: Color, accent_color: Color, max_extent: fl
 	_scatter_apex_debris(max_extent)
 
 
+## Cached "scorched + radial alpha" texture shared by every wreck
+## patch. RGB sampled from the procedural scorched_ground generator,
+## alpha is a smooth radial gradient (solid centre, soft fade to 0
+## at the perimeter) so the patch silhouette blends into the
+## surrounding ground instead of leaving the hard cylinder edge
+## the user flagged as jarring against base terrain.
+static var _scorched_blob_tex: Texture2D = null
+
+
+static func _get_scorched_blob_texture() -> Texture2D:
+	if _scorched_blob_tex:
+		return _scorched_blob_tex
+	const SIZE: int = 256
+	var src: Texture2D = SharedTextures.get_scorched_ground_texture()
+	var src_img: Image = src.get_image() if src else null
+	if src_img and (src_img.get_width() != SIZE or src_img.get_height() != SIZE):
+		src_img = src_img.duplicate() as Image
+		src_img.resize(SIZE, SIZE, Image.INTERPOLATE_LANCZOS)
+	# Radial alpha — solid 35% core, smoothstep fade to 0 at the
+	# inscribed-circle radius. Boundary is jittered with a low-
+	# frequency noise so it's blotchy rather than a perfect circle,
+	# which reads as natural soot scatter when the patch overlaps
+	# the ground texture.
+	const SOLID_FRAC: float = 0.35
+	const PERTURB_AMP: float = 0.18
+	var noise := FastNoiseLite.new()
+	noise.seed = 9173
+	noise.noise_type = FastNoiseLite.TYPE_PERLIN
+	noise.frequency = 0.014
+	noise.fractal_octaves = 3
+	var center: float = float(SIZE) / 2.0
+	var img := Image.create(SIZE, SIZE, false, Image.FORMAT_RGBA8)
+	for y: int in SIZE:
+		for x: int in SIZE:
+			var dx: float = float(x) + 0.5 - center
+			var dy: float = float(y) + 0.5 - center
+			var d: float = sqrt(dx * dx + dy * dy) / center
+			var n: float = noise.get_noise_2d(float(x), float(y))
+			var d_eff: float = d + n * PERTURB_AMP
+			var a: float
+			if d_eff < SOLID_FRAC:
+				a = 1.0
+			elif d_eff < 1.0:
+				var t: float = (d_eff - SOLID_FRAC) / (1.0 - SOLID_FRAC)
+				a = 1.0 - smoothstep(0.0, 1.0, t)
+			else:
+				a = 0.0
+			var src_c: Color = (src_img.get_pixel(x, y) if src_img else Color(0.18, 0.14, 0.10, 1.0))
+			img.set_pixel(x, y, Color(src_c.r, src_c.g, src_c.b, a))
+	img.generate_mipmaps()
+	_scorched_blob_tex = ImageTexture.create_from_image(img)
+	return _scorched_blob_tex
+
+
 func _make_scorched_ground_mat(tint_mul: float = 1.0) -> StandardMaterial3D:
 	## Charred-ground material for wreck base patches. Uses the
-	## procedural scorched_ground texture so each patch reads as
-	## cracked + sooted soil instead of a flat painted disc. UV
-	## offset is randomised per call so neighbouring patches don't
-	## tile visibly identical patterns.
+	## scorched-blob texture (procedural scorched RGB + radial alpha
+	## gradient) so each patch fades softly into the surrounding
+	## ground at its perimeter instead of leaving a hard cylinder
+	## edge. Renders via TRANSPARENCY_ALPHA, with the patches lifted
+	## to y < fog_overlay y (0.10) elsewhere so the FogOfWar overlay
+	## still dims them in shrouded cells.
 	var m := StandardMaterial3D.new()
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	m.albedo_color = Color(tint_mul, tint_mul, tint_mul, 1.0)
-	m.albedo_texture = SharedTextures.get_scorched_ground_texture()
-	m.uv1_offset = Vector3(randf(), randf(), 0.0)
-	m.uv1_scale = Vector3(1.8, 1.8, 1.0)
+	m.albedo_texture = _get_scorched_blob_texture()
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	m.roughness = 1.0
 	m.metallic = 0.0
 	return m
@@ -405,33 +456,24 @@ func _build_satellite_crater(base_color: Color) -> void:
 	var patch_count: int = randi_range(6, 9)
 	for i: int in patch_count:
 		var patch := MeshInstance3D.new()
-		var p_cyl := CylinderMesh.new()
-		# Largest patch is the central anchor; the rest are smaller
-		# offshoots that overlap the centre to break the silhouette.
+		patch.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var p_quad := PlaneMesh.new()
 		var radius: float = max_extent * (0.85 if i == 0 else randf_range(0.30, 0.65))
-		p_cyl.top_radius = radius
-		p_cyl.bottom_radius = radius
-		p_cyl.height = randf_range(0.04, 0.08)
-		p_cyl.radial_segments = 20
-		patch.mesh = p_cyl
-		# Anchor patch sits at centre; offshoots ring around it.
+		p_quad.size = Vector2(radius * 2.0, radius * 2.0)
+		patch.mesh = p_quad
 		var off_ang: float = randf_range(0.0, TAU)
 		var off_r: float = max_extent * randf_range(0.0, 0.55) if i > 0 else 0.0
 		patch.position = Vector3(
 			cos(off_ang) * off_r,
-			0.025 + randf_range(0.0, 0.02),
+			0.05 + randf_range(0.0, 0.015),
 			sin(off_ang) * off_r,
 		)
-		# Slight per-patch rotation + non-uniform XZ scale so each disc
-		# isn't a perfect circle -- the silhouette gains organic edges.
 		patch.rotation.y = randf_range(0.0, TAU)
 		patch.scale = Vector3(randf_range(0.85, 1.15), 1.0, randf_range(0.85, 1.15))
-		# Procedural scorched-ground texture so each disc reads
-		# as cracked + sooted soil rather than a flat painted
-		# patch. Patches stay opaque (the previous transparent
-		# outer discs flickered under FogOfWar's dim overlay
-		# because the alpha sort kept switching against
-		# neighbouring debris each fog-recompute tick).
+		# Soft-edged scorched ground via the PlaneMesh + blob-alpha
+		# texture. Tint darkens the underlying scorched-RGB so each
+		# patch reads as a slightly different soot intensity, giving
+		# the cluster its 'sooted ground' feel rather than a flat disc.
 		var darken: float = randf_range(0.55, 0.85)
 		var tint: Color = base_color.darkened(darken)
 		var p_mat: StandardMaterial3D = _make_scorched_ground_mat()
