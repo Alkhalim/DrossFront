@@ -132,6 +132,11 @@ func get_collection_radius() -> float:
 ## productive. Cheap O(N) walk over the wrecks group; called only on
 ## selection change + the HUD's per-frame stats refresh on selected
 ## buildings, not per-frame for every yard.
+##
+## Anchored crawlers temporarily have a +30% radius bonus baked into
+## `harvest_radius` (see SalvageCrawler.AnchorState handler) — so a
+## deployed crawler's "Salvage in area" is intentionally larger than
+## an unanchored one's. That's per-design.
 func get_nearby_salvage() -> int:
 	if not _building or not is_instance_valid(_building):
 		return 0
@@ -148,9 +153,23 @@ func get_nearby_salvage() -> int:
 		var dz: float = w.global_position.z - origin.z
 		if dx * dx + dz * dz > r2:
 			continue
-		var sv: Variant = w.get("salvage_remaining") if "salvage_remaining" in w else 0
-		if sv is int:
-			total += sv as int
+		# Defensive cast: salvage_remaining is declared as int on Wreck
+		# but get() returns Variant. Skip non-int values silently —
+		# wrecks created by an old code path might have a nil here.
+		var sv_v: Variant = w.get("salvage_remaining") if "salvage_remaining" in w else 0
+		var sv_i: int = 0
+		if sv_v is int:
+			sv_i = sv_v as int
+		elif sv_v is float:
+			sv_i = int(sv_v as float)
+		# Sanity clamp: a runaway value (millions) would mask a real bug
+		# and isn't useful info. Cap per-wreck contribution at something
+		# sane. A typical wreck has 30-200 salvage; satellite piles cap
+		# around 300. 10000 is a generous ceiling that can never realistically
+		# be hit by legitimate game state but stops a corrupted wreck from
+		# producing the "way too high" total the user reported.
+		sv_i = clampi(sv_i, 0, 10000)
+		total += sv_i
 	return total
 
 
