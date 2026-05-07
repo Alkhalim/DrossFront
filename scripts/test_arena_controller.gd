@@ -3617,60 +3617,75 @@ func _spawn_plateau_ramp(plateau_center: Vector3, top_size: Vector2, height: flo
 	col.shape = hull
 	root.add_child(col)
 
-	# Side-flank navmesh carve: at the bottom of each side wall the slope's
-	# y is small enough that agent_max_climb counts it as a stairstep and
-	# the bake connects the slope cells (inside the wedge) to the ground
-	# cells (outside) across the side wall. Going DOWN works (gravity
-	# drops the unit off the small ledge) but going UP doesn't — the side
-	# wall is vertical and CharacterBody3D refuses to climb. Carve a 1u
-	# strip alongside each side wall so the ground navmesh next to the
-	# wall is gone and A* can't even find that path.
-	const SIDE_STRIP_WIDTH: float = 1.0
-	# Vertices CCW from above (looking +y → -y), matching building.gd's
-	# convention. Local coords; root is positioned at plateau_center.
-	var add_side_strip := func(p_min: Vector3, p_max: Vector3) -> void:
-		var ob := NavigationObstacle3D.new()
-		ob.vertices = PackedVector3Array([
-			Vector3(p_min.x, 0.0, p_min.z),
-			Vector3(p_min.x, 0.0, p_max.z),
-			Vector3(p_max.x, 0.0, p_max.z),
-			Vector3(p_max.x, 0.0, p_min.z),
-		])
-		ob.avoidance_enabled = false
-		if "affect_navigation_mesh" in ob:
-			ob.affect_navigation_mesh = true
-		if "carve_navigation_mesh" in ob:
-			ob.carve_navigation_mesh = true
-		root.add_child(ob)
+	# Plateau-extension side walls: tall solid walls at each side of the
+	# ramp, full plateau height, that visually and physically continue the
+	# plateau cliff around the ramp slot. With them, the ramp's side
+	# "flanks" are no longer separate triangular faces protruding into
+	# space (the source of the stairstep-bridging bug); they're flat
+	# vertical plateau cliffs, exactly like the rest of the plateau
+	# perimeter. Recast sees walls of full height (1.5-2u) along the
+	# ramp's sides, well above agent_max_climb, so no slope-to-ground
+	# bridging through the side bottoms — A* must use the front (foot)
+	# transition. Replaces the earlier NavigationObstacle3D carve strip.
+	const SIDE_WALL_THICKNESS: float = 0.5
+	var add_side_wall := func(p_min: Vector3, p_max: Vector3) -> void:
+		var w_root := StaticBody3D.new()
+		w_root.collision_layer = 4
+		w_root.collision_mask = 0
+		# Center the wall in its bounding region.
+		w_root.position = Vector3(
+			(p_min.x + p_max.x) * 0.5,
+			height * 0.5,
+			(p_min.z + p_max.z) * 0.5)
+		w_root.add_to_group("elevation")
+		w_root.add_to_group("terrain")
+		w_root.set_meta("_fow_skip_dim", true)
+		root.add_child(w_root)
+		var w_col := CollisionShape3D.new()
+		var w_box := BoxShape3D.new()
+		w_box.size = Vector3(
+			absf(p_max.x - p_min.x),
+			height,
+			absf(p_max.z - p_min.z))
+		w_col.shape = w_box
+		w_root.add_child(w_col)
+		# Visual mesh — same material as the plateau body so the wall reads
+		# as part of the plateau cliff face.
+		var w_mesh_inst := MeshInstance3D.new()
+		var w_box_mesh := BoxMesh.new()
+		w_box_mesh.size = w_box.size
+		w_mesh_inst.mesh = w_box_mesh
+		w_mesh_inst.material_override = share_mat
+		w_root.add_child(w_mesh_inst)
 	match side:
 		"N":  # ramp goes north (+z), side walls at x=±hw
-			add_side_strip.call(
-				Vector3(-hw - SIDE_STRIP_WIDTH, 0, hz),
+			add_side_wall.call(
+				Vector3(-hw - SIDE_WALL_THICKNESS, 0, hz),
 				Vector3(-hw, 0, hz + run))
-			add_side_strip.call(
+			add_side_wall.call(
 				Vector3(hw, 0, hz),
-				Vector3(hw + SIDE_STRIP_WIDTH, 0, hz + run))
+				Vector3(hw + SIDE_WALL_THICKNESS, 0, hz + run))
 		"S":  # ramp goes south (-z), side walls at x=±hw
-			add_side_strip.call(
-				Vector3(-hw - SIDE_STRIP_WIDTH, 0, -hz - run),
+			add_side_wall.call(
+				Vector3(-hw - SIDE_WALL_THICKNESS, 0, -hz - run),
 				Vector3(-hw, 0, -hz))
-			add_side_strip.call(
+			add_side_wall.call(
 				Vector3(hw, 0, -hz - run),
-				Vector3(hw + SIDE_STRIP_WIDTH, 0, -hz))
+				Vector3(hw + SIDE_WALL_THICKNESS, 0, -hz))
 		"E":  # ramp goes east (+x), side walls at z=±hw
-			add_side_strip.call(
-				Vector3(hx, 0, -hw - SIDE_STRIP_WIDTH),
+			add_side_wall.call(
+				Vector3(hx, 0, -hw - SIDE_WALL_THICKNESS),
 				Vector3(hx + run, 0, -hw))
-			add_side_strip.call(
+			add_side_wall.call(
 				Vector3(hx, 0, hw),
-				Vector3(hx + run, 0, hw + SIDE_STRIP_WIDTH))
+				Vector3(hx + run, 0, hw + SIDE_WALL_THICKNESS))
 		_:    # "W" — ramp goes west (-x), side walls at z=±hw
-			add_side_strip.call(
-				Vector3(-hx - run, 0, -hw - SIDE_STRIP_WIDTH),
+			add_side_wall.call(
+				Vector3(-hx - run, 0, -hw - SIDE_WALL_THICKNESS),
 				Vector3(-hx, 0, -hw))
-			add_side_strip.call(
+			add_side_wall.call(
 				Vector3(-hx - run, 0, hw),
-				Vector3(-hx, 0, hw + SIDE_STRIP_WIDTH))
+				Vector3(-hx, 0, hw + SIDE_WALL_THICKNESS))
 
 	# Navmesh — sloped walking surface as 2 tris in world space. Vertices
 	# tA/tB sit exactly on the plateau top edge so the path planner sees
