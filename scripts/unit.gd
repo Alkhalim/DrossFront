@@ -5221,6 +5221,13 @@ func stop() -> void:
 	move_queue.clear()
 	velocity = Vector3.ZERO
 	has_move_order = false
+	# New-system units: also clear the MovementComponent's target so
+	# GroundMovement doesn't keep driving the body past the halt point.
+	# Without this, combat's "stop and fire when in range" call leaves
+	# gm.target pointing at the enemy and the unit drifts past.
+	var mc: Node = get_node_or_null("MovementComponent")
+	if mc != null and mc is MovementComponent:
+		(mc as MovementComponent).clear_target()
 
 
 func _in_active_combat() -> bool:
@@ -6023,6 +6030,26 @@ func _physics_process(delta: float) -> void:
 ## new MovementComponent path landed (Plan B Phase 0) so flag-on units
 ## still get animations, HP bars, ability cooldowns, etc.
 func _per_frame_bookkeeping(delta: float) -> void:
+	# New-system arrival: legacy clears has_move_order inside
+	# _legacy_movement_step when the unit reaches its destination, but that
+	# path is skipped under MovementComponent. Without an equivalent here,
+	# has_move_order stays true forever after the first command_move, which
+	# permanently disables CombatComponent.can_auto_target and stops idle
+	# units from engaging nearby enemies.
+	if has_move_order:
+		var mc_arr: Node = get_node_or_null("MovementComponent")
+		if mc_arr != null and mc_arr is MovementComponent:
+			var mc_typed: MovementComponent = mc_arr as MovementComponent
+			if not mc_typed.has_target():
+				has_move_order = false
+				move_target = Vector3.INF
+			else:
+				var d: float = global_position.distance_to(mc_typed.target)
+				if d <= mc_typed.arrival_radius:
+					has_move_order = false
+					move_target = Vector3.INF
+					mc_typed.clear_target()
+
 	# Damage flash countdown (cheap — runs every frame).
 	if _flash_timer > 0.0:
 		_flash_timer -= delta
