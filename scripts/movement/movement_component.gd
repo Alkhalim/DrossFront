@@ -19,13 +19,6 @@ const REASON_GOAL_IN_OBSTACLE: int = 1
 const REASON_REPEATEDLY_STUCK: int = 2
 const REASON_AGENT_OFF_NAVMESH: int = 3
 
-## World boundary for the off-map safety check. SpatialIndex's
-## MAP_HALF is 200u; we use a slightly larger threshold so a unit
-## briefly overshooting the mesh edge isn't immediately panicked.
-## When a unit's global_position exceeds this on X or Z, the
-## component emits path_unreachable and halts.
-const OFF_MAP_THRESHOLD: float = 250.0
-
 # --- Configurable per-instance (set by owning unit on _ready) ---
 var max_speed: float = 8.0
 var max_accel: float = 30.0
@@ -45,7 +38,6 @@ var effective_max_turn_rate_cap: float = INF
 var _velocity: Vector3 = Vector3.ZERO
 var _body: Node3D = null                       # primary reference: position reads
 var _body_physics: CharacterBody3D = null      # set if parent is CharacterBody3D
-var _off_map_emitted: bool = false
 
 func _ready() -> void:
 	var p: Node = get_parent()
@@ -60,21 +52,6 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	if _body == null:
-		return
-
-	# Off-map safety net (Plan B hotfix; Plan C addresses root cause
-	# via slot projection per spec §9). If the unit has drifted
-	# outside sensible world bounds, stop and emit path_unreachable
-	# so AI / SquadGroup can drop it.
-	var pos_check: Vector3 = _body.global_position
-	if absf(pos_check.x) > OFF_MAP_THRESHOLD or absf(pos_check.z) > OFF_MAP_THRESHOLD:
-		_velocity = Vector3.ZERO
-		if _body_physics != null:
-			_body_physics.velocity = Vector3.ZERO
-		clear_target()
-		if not _off_map_emitted:
-			_off_map_emitted = true
-			path_unreachable.emit(REASON_AGENT_OFF_NAVMESH)
 		return
 
 	# EMP paralysis: zero velocity, skip steering. Mirrors the legacy
