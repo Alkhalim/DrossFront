@@ -25,12 +25,11 @@ const PAN_IN_SEC: float = 1.1
 const ZOOM_IN_SEC: float = 3.2
 const FADE_OUT_SEC: float = 0.6
 ## Default zoom factor (scale relative to the fitted resting size).
-## Bumped 2.4 -> 4.8 so the final framed view actually shows the
-## map's region recognisably (city-sized footprint) rather than
-## the whole north-half of Europe. Per-map overrides live in
-## MAP_TARGETS["zoom"] -- denser regions can ask for more, sparse
-## ones for less.
-const ZOOM_FACTOR: float = 4.8
+## 4.8 framed the regional shape but still felt distant; 6.5 lands
+## the camera close enough that the city + label are the dominant
+## read. Per-map overrides live in MAP_TARGETS["zoom"] -- denser
+## regions can ask for more, sparse ones for less.
+const ZOOM_FACTOR: float = 6.5
 ## Hard ceiling -- if for some reason the threaded load hangs we
 ## bail to a synchronous swap after this many seconds so the
 ## player isn't stuck on the loading screen.

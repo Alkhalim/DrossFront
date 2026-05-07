@@ -442,9 +442,13 @@ func _draw() -> void:
 	for s: Dictionary in SEA_LABELS:
 		var pos: Vector2 = (s["pos"] as Vector2) * MAP_SIZE
 		var lbl: String = s["label"] as String
-		var size_v: Vector2 = font.get_string_size(lbl, HORIZONTAL_ALIGNMENT_CENTER, -1.0, 13)
+		# Higher source font size keeps labels crisp under the loading-
+		# screen zoom (6.5×). The zoom magnifies the entire Control, so
+		# rendering at 13pt then scaling 6.5× gave fuzzy 85pt-ish text.
+		# 26pt rasterizes finer and stays readable when zoomed.
+		var size_v: Vector2 = font.get_string_size(lbl, HORIZONTAL_ALIGNMENT_CENTER, -1.0, 26)
 		draw_string(font, pos - size_v * 0.5, lbl,
-			HORIZONTAL_ALIGNMENT_CENTER, -1.0, 13, SEA_LABEL)
+			HORIZONTAL_ALIGNMENT_CENTER, -1.0, 26, SEA_LABEL)
 	# City dots + labels. Right-side cities label to the left so
 	# they don't bleed off the edge.
 	for c2: Dictionary in CITIES:
@@ -453,13 +457,15 @@ func _draw() -> void:
 		draw_arc(p3, 5.6, 0.0, TAU, 16, CITY_DOT, 1.0)
 		var lbl2: String = c2["label"] as String
 		var anchor_left: bool = p3.x < MAP_SIZE.x * 0.85
+		# Render at 24pt (was 12) so labels stay sharp under the loading-
+		# screen zoom-in. See sea-label comment above.
 		if anchor_left:
-			draw_string(font, p3 + Vector2(8.0, 4.0), lbl2,
-				HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12, CITY_LABEL)
+			draw_string(font, p3 + Vector2(8.0, 6.0), lbl2,
+				HORIZONTAL_ALIGNMENT_LEFT, -1.0, 24, CITY_LABEL)
 		else:
-			var ts: Vector2 = font.get_string_size(lbl2, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12)
-			draw_string(font, p3 + Vector2(-8.0 - ts.x, 4.0), lbl2,
-				HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12, CITY_LABEL)
+			var ts: Vector2 = font.get_string_size(lbl2, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 24)
+			draw_string(font, p3 + Vector2(-8.0 - ts.x, 6.0), lbl2,
+				HORIZONTAL_ALIGNMENT_LEFT, -1.0, 24, CITY_LABEL)
 	# Compass rose on the bottom-right corner.
 	_draw_compass(Vector2(MAP_SIZE.x - 70.0, MAP_SIZE.y - 70.0), 32.0)
 	# Outer frame.
@@ -523,8 +529,8 @@ func _draw_compass(centre: Vector2, radius: float) -> void:
 		draw_line(centre + dir * (radius * 0.6), centre + dir * radius, ACCENT, 1.4)
 	draw_line(centre + Vector2(0.0, -radius), centre + Vector2(0.0, -radius - 8.0), ACCENT, 2.0)
 	var font: Font = ThemeDB.fallback_font
-	draw_string(font, centre + Vector2(-4.0, -radius - 12.0), "N",
-		HORIZONTAL_ALIGNMENT_CENTER, -1.0, 12, ACCENT)
+	draw_string(font, centre + Vector2(-7.0, -radius - 14.0), "N",
+		HORIZONTAL_ALIGNMENT_CENTER, -1.0, 22, ACCENT)
 
 
 func get_marker_position(key: String) -> Vector2:
