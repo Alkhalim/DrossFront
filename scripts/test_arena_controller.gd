@@ -1721,45 +1721,57 @@ func _small_deposit_positions_2v2() -> Array[Vector3]:
 
 
 func _setup_off_map_backdrop() -> void:
-	## Large dark plane sitting just below the playable ground that
-	## extends well past the map's edge. Reads as a "terrain
-	## continues" backdrop with a green topographic contour-line
-	## pattern -- the player can see at a glance that the world is
-	## bigger than the playable area, but the map ends here.
-	##
-	## The plane sits BELOW the existing Ground node (Y=-0.05) and is
-	## significantly larger (1200x1200 vs the playable 320x320), so
-	## it only renders where the playable ground ends. A procedural
-	## ShaderMaterial samples noise to produce the contour-line
-	## bands without needing a baked texture.
+	## Large heightmapped plane around the playable area that reads
+	## as terrain continuing past the map edge. Vertex displacement
+	## driven by FBM noise gives real hill silhouettes (not just a
+	## painted-on contour pattern), and a smooth fade ramps the
+	## displacement up from the playable boundary so the seam where
+	## map meets backdrop is gradual instead of a hard rectangle.
+	## Base colour samples the playable ground's albedo so the
+	## off-map ridges match whatever palette the map sets up.
 	const BACKDROP_SIZE: float = 1200.0
 	const BACKDROP_Y: float = -0.05
+	const PLAYABLE_HALF: float = 160.0
+	const FADE_BAND: float = 60.0
+	# Subdivide enough that the noise-driven vertex displacement
+	# produces visible hill silhouettes rather than a couple of huge
+	# triangles. 120×120 = ~14k verts, cheap at this scale (drawn
+	# once per frame, no animation).
 	var backdrop := MeshInstance3D.new()
 	backdrop.name = "OffMapBackdrop"
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(BACKDROP_SIZE, BACKDROP_SIZE)
-	plane.subdivide_width = 1
-	plane.subdivide_depth = 1
+	plane.subdivide_width = 120
+	plane.subdivide_depth = 120
 	backdrop.mesh = plane
 	backdrop.position.y = BACKDROP_Y
 	backdrop.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	# Procedural shader: dark base + green topo bands. UV here is
-	# in [0..1] across the giant plane, so we scale by world distance
-	# from origin to get sensible contour spacing.
+	# Match base colour to whatever the .tscn-placed Ground node is
+	# tinting itself to. _setup_lighting() applies the per-map
+	# palette via gmat.albedo_color, so by the time we run we can
+	# read it back. Fall back to a neutral warm grey if the lookup
+	# fails (unit tests, non-test_arena scene, etc).
+	var ground_node: MeshInstance3D = get_node_or_null("Ground") as MeshInstance3D
+	var ground_tint: Color = Color(0.45, 0.42, 0.38, 1.0)
+	if ground_node:
+		var gmat: StandardMaterial3D = ground_node.get_surface_override_material(0) as StandardMaterial3D
+		if gmat:
+			ground_tint = gmat.albedo_color
+	# Sun direction copied from the .tscn DirectionalLight3D so the
+	# per-vertex shaded color matches the rest of the scene's
+	# lighting feel without sampling Godot's actual light pass.
 	var shader := Shader.new()
 	shader.code = """
 shader_type spatial;
-render_mode unshaded, depth_draw_opaque, cull_back;
+render_mode depth_draw_opaque, cull_back;
 
-uniform vec3 base_color : source_color = vec3(0.06, 0.07, 0.06);
-uniform vec3 line_color : source_color = vec3(0.20, 0.55, 0.30);
-uniform vec3 line_glow  : source_color = vec3(0.45, 0.85, 0.50);
-uniform float band_period = 12.0;
-uniform float band_thickness = 0.045;
-uniform float noise_strength = 12.0;
+uniform vec3 base_tint : source_color = vec3(0.45, 0.42, 0.38);
+uniform float playable_half = 160.0;  // half-extent of the map ground in world units
+uniform float fade_band = 60.0;       // distance over which displacement ramps from 0 to full
+uniform float hill_height = 14.0;     // max hill amplitude past the fade band
+uniform float hill_freq = 0.018;      // FBM base frequency
+uniform float ridge_freq = 0.045;     // higher-frequency ridge detail
 
-// Cheap value-noise approximation so the contour bands wobble
-// like real topography without uploading a texture.
 float hash21(vec2 p) {
 	p = fract(p * vec2(123.34, 456.21));
 	p += dot(p, p + 78.233);
@@ -1777,33 +1789,73 @@ float vnoise(vec2 p) {
 	return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
 }
 
+float fbm(vec2 p) {
+	float v = 0.0;
+	float amp = 0.5;
+	for (int i = 0; i < 4; i++) {
+		v += amp * vnoise(p);
+		p *= 2.0;
+		amp *= 0.5;
+	}
+	return v;
+}
+
+// Compute hill displacement at a world XZ, including the boundary
+// fade so the ridge silhouette lifts gradually outside the
+// playable area. Returns 0 inside the playable square.
+float terrain_height(vec2 world_xz) {
+	vec2 a = abs(world_xz);
+	float dist_outside = max(a.x, a.y) - playable_half;
+	float fade = clamp(dist_outside / fade_band, 0.0, 1.0);
+	fade = smoothstep(0.0, 1.0, fade);
+	float n = fbm(world_xz * hill_freq);
+	float r = fbm(world_xz * ridge_freq);
+	float h = (n - 0.5) * 2.0 + (r - 0.5) * 0.6;
+	return h * hill_height * fade;
+}
+
+void vertex() {
+	vec3 world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	float h = terrain_height(world_pos.xz);
+	VERTEX.y += h;
+	// Approximate normal via central differences on the height
+	// field — keeps Godot's lighting pass producing real hill
+	// shading instead of a flat-shaded slab.
+	float eps = 1.5;
+	float hL = terrain_height(world_pos.xz + vec2(-eps, 0.0));
+	float hR = terrain_height(world_pos.xz + vec2( eps, 0.0));
+	float hD = terrain_height(world_pos.xz + vec2(0.0, -eps));
+	float hU = terrain_height(world_pos.xz + vec2(0.0,  eps));
+	vec3 nrm = normalize(vec3(hL - hR, 2.0 * eps, hD - hU));
+	NORMAL = (MODEL_NORMAL_MATRIX * nrm);
+}
+
 void fragment() {
-	// World position so the bands stay anchored regardless of plane
-	// size. The plane is huge but bands should still feel scaled to
-	// the map.
 	vec3 world_pos = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
-	float n = vnoise(world_pos.xz * 0.012);
-	float h = n * noise_strength;
-	// Distance to nearest contour band -- the closer to a band
-	// boundary, the brighter the line.
-	float band = abs(fract(h) - 0.5);
-	float line_intensity = smoothstep(0.5, 0.5 - band_thickness, band);
-	vec3 col = base_color;
-	col = mix(col, line_color, line_intensity * 0.85);
-	// Bright accent at every Nth band for the major-contour pop.
-	float major_band = abs(fract(h * 0.25) - 0.5);
-	float major_intensity = smoothstep(0.5, 0.5 - band_thickness * 0.9, major_band);
-	col = mix(col, line_glow, major_intensity * 0.55);
+	// Mild colour variation along the height field so the ridges
+	// don't read as a flat tint — peaks lighten, valleys darken.
+	float h = fbm(world_pos.xz * hill_freq);
+	vec3 col = base_tint * mix(0.78, 1.18, h);
 	ALBEDO = col;
+	ROUGHNESS = 1.0;
+	METALLIC = 0.0;
 }
 """
 	var mat := ShaderMaterial.new()
 	mat.shader = shader
+	mat.set_shader_parameter("base_tint", Vector3(ground_tint.r, ground_tint.g, ground_tint.b))
+	mat.set_shader_parameter("playable_half", PLAYABLE_HALF)
+	mat.set_shader_parameter("fade_band", FADE_BAND)
 	backdrop.material_override = mat
 	add_child(backdrop)
-	# Render BEFORE the playable ground so the playable ground (Y=0)
-	# overpaints it where they overlap. We're already at Y=-0.05, so
-	# painters-order works without tweaking render priority.
+	# Custom AABB so the displaced hill peaks aren't culled when the
+	# camera tilts. Without this, Godot's frustum culler uses the
+	# undisplaced PlaneMesh AABB and pops the backdrop off-screen
+	# at oblique angles.
+	backdrop.custom_aabb = AABB(
+		Vector3(-BACKDROP_SIZE * 0.5, -2.0, -BACKDROP_SIZE * 0.5),
+		Vector3(BACKDROP_SIZE, 30.0, BACKDROP_SIZE),
+	)
 
 
 func _setup_terrain() -> void:
@@ -2279,11 +2331,13 @@ func _setup_terrain_schwarzwald() -> void:
 			)
 
 	# Tree field. Walk a jittered grid; drop a tree whenever the cell
-	# is OUTSIDE every corridor and clear of every HQ + ramp.
-	# Coarse forest-cell mask drives the navmesh carve (one big
-	# blocked rectangle per non-empty 20u tile, not one per tree).
-	const FOREST_CELL_SIZE: float = 20.0
-	var forest_cells: Dictionary = {}
+	# is OUTSIDE every corridor and clear of every HQ + ramp. The
+	# navmesh bake (NavigationRegion3D.bake_navigation_mesh in
+	# _setup_navigation) reads the trees' StaticBody3D collision via
+	# the "terrain" group directly — forest_tree's _ready adds itself
+	# to that group — so each trunk's collision shape carves itself
+	# out of the navmesh. No coarse-cell rectangle bookkeeping
+	# needed here.
 	# Salvage groves — small clearings the tree spawn loop must
 	# leave open so units can reach the wrecks inside, plus an
 	# access lane back to the nearest corridor centreline so the
@@ -2435,42 +2489,7 @@ func _setup_terrain_schwarzwald() -> void:
 			var tree: Node3D = tree_script.new() as Node3D
 			tree.position = pos
 			add_child(tree)
-			# Record the tree's grid cell so we can carve a coarse
-			# forest mask AFTER the spawn loop. Per-tree footprint
-			# carving (the previous attempt) doesn't scale: with
-			# ~4000 trees on Schwarzwald, each adding 4 nav cuts,
-			# the strip-decomposition explodes to millions of
-			# cells and the bake fails. Clustering trees into 20u
-			# tiles reduces it to ~150 large blocked rectangles
-			# the navmesh handles cleanly. Forest reads as a
-			# single contiguous wall to the path planner so units
-			# stay in the cleared corridors instead of trying to
-			# weave between trunks.
-			var fcx: int = int(floor(pos.x / FOREST_CELL_SIZE))
-			var fcz: int = int(floor(pos.z / FOREST_CELL_SIZE))
-			forest_cells[Vector2i(fcx, fcz)] = true
 		x += TREE_GRID_STEP
-
-	# Forest carve. One blocked rectangle per non-empty 20u tile —
-	# the path planner now sees the dense forest as a contiguous
-	# wall and routes units through corridors / cleared lanes
-	# instead of trying to weave between trunks. Trees inside each
-	# cell still have their own physical collision (forest_tree's
-	# StaticBody3D), so units that DO end up inside a cell (e.g.
-	# trees felled later, or units pushed in by knockback) bump
-	# off individual trunks normally.
-	for cell_key: Vector2i in forest_cells:
-		var c_min: Vector2 = Vector2(
-			float(cell_key.x) * FOREST_CELL_SIZE,
-			float(cell_key.y) * FOREST_CELL_SIZE,
-		)
-		var c_max: Vector2 = c_min + Vector2(FOREST_CELL_SIZE, FOREST_CELL_SIZE)
-		_pending_blocked_footprints.append(PackedVector2Array([
-			c_min,
-			Vector2(c_max.x, c_min.y),
-			c_max,
-			Vector2(c_min.x, c_max.y),
-		]))
 
 	# Salvage groves -- spawn the wrecks in each cleared cluster.
 	# GROVE_POSITIONS was lifted up before the tree loop so the

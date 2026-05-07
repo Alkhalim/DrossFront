@@ -196,6 +196,14 @@ static func _ensure_shared_assets() -> void:
 
 func _ready() -> void:
 	add_to_group("trees")
+	# ALSO in the "terrain" group so the NavigationRegion3D bake
+	# (which walks `terrain`-group collision shapes via
+	# SOURCE_GEOMETRY_GROUPS_WITH_CHILDREN) includes trunks as
+	# obstacles. Without this, the bake had no idea trees existed
+	# and emitted a navmesh that treated the entire forest as
+	# walkable — units pathed straight through trunks until the
+	# StaticBody3D collision physically stopped them.
+	add_to_group("terrain")
 	# Collision: layer 4 (terrain/obstacles) so units' mask 7
 	# physically bumps into the trunk just like a rock pile.
 	collision_layer = 4
