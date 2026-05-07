@@ -439,17 +439,15 @@ func _draw() -> void:
 		draw_polyline(pts, RIVER, 1.7)
 	# Sea labels.
 	var font: Font = ThemeDB.fallback_font
-	# Source rasterization sizes pushed well above the ~26/24pt the
-	# previous tuning landed on. The Control is bitmap-scaled by the
-	# loading screen (~6.5×), and the only way to fight the resulting
-	# blur without switching to MSDF/vector font (would need a TTF
-	# resource we don't ship) is to give the rasteriser more pixels
-	# per glyph in the source frame. 80pt/72pt is a compromise: text
-	# is bigger on the zoomed map than before, but each glyph carries
-	# 3× the source detail so the bitmap stretch reads sharper instead
-	# of mushy.
-	const SEA_FONT_SIZE: int = 80
-	const CITY_FONT_SIZE: int = 72
+	# These sizes are tuned for the *unzoomed* map; under the loading-
+	# screen ~6.5× zoom the bitmap-stretched text gets blurry. The
+	# proper fix would be an MSDF / vector font (FontFile with
+	# multichannel_signed_distance_field = true), but that requires
+	# shipping a TTF resource. With the system fallback font + Godot's
+	# default auto-oversampling, the apparent size has to live with
+	# some bitmap blur at high zoom levels.
+	const SEA_FONT_SIZE: int = 26
+	const CITY_FONT_SIZE: int = 24
 	for s: Dictionary in SEA_LABELS:
 		var pos: Vector2 = (s["pos"] as Vector2) * MAP_SIZE
 		var lbl: String = s["label"] as String
@@ -534,10 +532,8 @@ func _draw_compass(centre: Vector2, radius: float) -> void:
 		draw_line(centre + dir * (radius * 0.6), centre + dir * radius, ACCENT, 1.4)
 	draw_line(centre + Vector2(0.0, -radius), centre + Vector2(0.0, -radius - 8.0), ACCENT, 2.0)
 	var font: Font = ThemeDB.fallback_font
-	# Bumped from 22pt for the same reason the sea / city labels grew
-	# — keeps the compass legible after the loading-screen zoom.
-	draw_string(font, centre + Vector2(-22.0, -radius - 38.0), "N",
-		HORIZONTAL_ALIGNMENT_CENTER, -1.0, 64, ACCENT)
+	draw_string(font, centre + Vector2(-7.0, -radius - 14.0), "N",
+		HORIZONTAL_ALIGNMENT_CENTER, -1.0, 22, ACCENT)
 
 
 func get_marker_position(key: String) -> Vector2:
