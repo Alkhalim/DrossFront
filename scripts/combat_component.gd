@@ -272,18 +272,13 @@ func _physics_process(delta: float) -> void:
 
 	var unit_has_move_order: bool = _unit.get("has_move_order") as bool
 
-	# Movement-priority window (Plan C hotfix): when the player
-	# issued command_move(clear_combat=true) recently, suppress all
-	# combat acquisition so the retreat actually completes. Plan D
-	# replaces this with a proper stance system.
+	# Movement-priority window (Plan C hotfix): when the player issued
+	# command_move(clear_combat=true) recently, suppress chase + auto-acquire
+	# so the retreat actually completes — but keep retaliation and firing
+	# alive so the unit can defend itself while moving. Plan D replaces this
+	# with a proper stance system.
 	var move_priority_until: int = (_unit.get("_move_priority_until_ms") as int) if "_move_priority_until_ms" in _unit else 0
 	var move_priority_active: bool = move_priority_until > Time.get_ticks_msec()
-	if move_priority_active:
-		# Drop any retaliation/forced acquisition; the player's order wins.
-		forced_target = null
-		if _current_target != null:
-			_current_target = null
-			combat_ended.emit()
 
 	# Forced target wins. If it's gone or dead, drop it.
 	if forced_target and not _is_valid_target(forced_target):
@@ -409,12 +404,12 @@ func _physics_process(delta: float) -> void:
 		return
 
 	if dist <= primary_range:
-		# In range: stop and engage. We always stop here because the only way
-		# we reach this branch is when we have a target (forced or auto-acquired
-		# during attack-move) — the unit's current move order, if any, was
-		# either issued by us to chase, or part of an attack-move that should
-		# halt to fire. Plain player move orders never auto-acquire targets.
-		_unit.stop()
+		# In range: engage. Normally we halt the unit while firing, but during
+		# a movement-priority window (player just issued a retreat) we leave
+		# the unit moving toward its retreat point and fire on the move — the
+		# player's order wins on positioning, the combat layer just defends.
+		if not move_priority_active:
+			_unit.stop()
 
 		_face_target()
 
@@ -457,8 +452,11 @@ func _physics_process(delta: float) -> void:
 
 
 func set_target(target: Node3D) -> void:
-	if _is_movement_priority_active():
-		return  # cease-fire; retreat order is in effect
+	# Note: priority window does NOT block this — a player click on an enemy
+	# during a recent retreat is an explicit override and should land. The
+	# chase calls in _physics_process are still gated, so the unit won't run
+	# toward the new target during the window; it will fire if already in
+	# range and chase once the window expires.
 	# Defensive: never accept an allied (or self-owned) target. The
 	# selection_manager click-path already filters by PlayerRegistry, but
 	# this guard covers attack-move sweeps and any future command that
@@ -575,12 +573,10 @@ func _find_nearest_enemy(max_range: float) -> Node3D:
 
 
 func notify_attacked(attacker: Node3D) -> void:
-	## Called by Unit.take_damage when something shoots us. We respect the
-	## player's current task: while the unit is executing a plain move order
-	## (or a builder task, which also routes through has_move_order) we do
-	## not retaliate. Use attack-move if you want en-route engagement.
-	if _is_movement_priority_active():
-		return  # cease-fire; retreat order is in effect
+	## Called by Unit.take_damage when something shoots us. Sets a forced
+	## target so the unit fires back. The priority window (set by the player's
+	## last plain move) only gates *chase* — retaliation and firing remain
+	## live so a retreating unit defends itself while moving away.
 	if not attacker or not is_instance_valid(attacker):
 		return
 	if not _is_valid_target(attacker):
