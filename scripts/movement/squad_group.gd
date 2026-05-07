@@ -267,8 +267,12 @@ func _update_member_targets() -> void:
 			if gm.has_method("_is_combat_engaged"):
 				combat_engaged = gm._is_combat_engaged()
 			if combat_engaged:
-				gm.clear_target()                       # no SEEK; unit holds + fires
-				gm.effective_max_speed_cap = INF        # uncapped for post-combat sprint
+				# Relaxed: don't TOUCH target during combat. The unit
+				# keeps whatever target it had — slot from before combat,
+				# OR a fresh target from a player command_move issued
+				# during combat (clearing it would silently override the
+				# player). Just uncap speed so post-combat sprint works.
+				gm.effective_max_speed_cap = INF
 				gm.effective_max_turn_rate_cap = INF
 			else:
 				var slot_world: Vector3 = _slot_world(m)
