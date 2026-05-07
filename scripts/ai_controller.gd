@@ -771,6 +771,11 @@ func _process_economy() -> void:
 			_try_place("advanced_armory", "res://resources/buildings/advanced_armory.tres", _offset_for("advanced_armory", Vector3(-18, 0, -4)))
 			_try_place_salvage_yard("salvage_yard_3", _offset_for("salvage_yard_3", Vector3(12, 0, 28)))
 
+	# Dynamic AA escalation — once the strategy's static queue has
+	# placed its baseline SAM, push for extra SAM sites if the player
+	# is going air. See _maybe_build_extra_sam for the count formula.
+	_maybe_build_extra_sam()
+
 	# Dormant-attack safety net -- if we've had ANY combat units
 	# for too long without launching an attack, push out now.
 	if _force_attack_if_dormant():
@@ -778,6 +783,82 @@ func _process_economy() -> void:
 	if _state_timer >= ECONOMY_DURATION:
 		_state = AIState.ARMY
 		_state_timer = 0.0
+
+
+func _maybe_build_extra_sam() -> void:
+	## Per-tick check that scales the AI's SAM-site count with the
+	## player's air commitment. Default goal is 1 SAM (2 on HARD); the
+	## AI adds +1 when it's seen a player aerodrome and another +1
+	## (+2 on HARD) when it's seen the first enemy aircraft. Slots are
+	## placed via _try_place using a unique key per extra SAM so the
+	## blocker dedupe doesn't drop them.
+	var desired: int = 1
+	if _difficulty == Difficulty.HARD:
+		desired = 2
+	# Spotted player aerodrome → +1.
+	var player_has_aero: bool = false
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var b: Building = node as Building
+		if not b or not b.stats:
+			continue
+		if b.owner_id == owner_id:
+			continue
+		# Hostile only — allies' airfields don't trigger our SAM ramp.
+		if b.stats.building_id == &"aerodrome":
+			player_has_aero = true
+			break
+	if player_has_aero:
+		desired += 1
+	# Spotted enemy aircraft → +1 (+2 on HARD).
+	var player_has_aircraft: bool = false
+	for node: Node in get_tree().get_nodes_in_group("aircraft"):
+		if not is_instance_valid(node):
+			continue
+		var owner_v: Variant = node.get("owner_id") if "owner_id" in node else owner_id
+		if (owner_v as int) == owner_id:
+			continue
+		if "alive_count" in node and (node.get("alive_count") as int) <= 0:
+			continue
+		player_has_aircraft = true
+		break
+	if player_has_aircraft:
+		desired += 2 if _difficulty == Difficulty.HARD else 1
+
+	# Count what we already have (constructed + queued foundations
+	# both count — placing a third while two are 80% built would
+	# overshoot).
+	var owned_sams: int = 0
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var b: Building = node as Building
+		if not b or not b.stats:
+			continue
+		if b.owner_id != owner_id:
+			continue
+		if b.stats.building_id == &"sam_site":
+			owned_sams += 1
+	if owned_sams >= desired:
+		return
+
+	# Place the next SAM. Each escalation slot uses a unique key so the
+	# AI's _buildings_placed dedupe lets the second / third SAM through.
+	# Position offsets fan out around the HQ's defensive arc.
+	const SAM_OFFSETS: Array[Vector3] = [
+		Vector3(0, 0, -22),
+		Vector3(-18, 0, -18),
+		Vector3(18, 0, -18),
+		Vector3(-22, 0, -10),
+		Vector3(22, 0, -10),
+	]
+	var slot_idx: int = owned_sams
+	if slot_idx >= SAM_OFFSETS.size():
+		slot_idx = SAM_OFFSETS.size() - 1
+	var key: String = "sam_extra_%d" % owned_sams
+	_try_place(key, "res://resources/buildings/sam_site.tres",
+		_offset_for(key, SAM_OFFSETS[slot_idx]))
 
 
 func _process_army() -> void:

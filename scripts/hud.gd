@@ -1415,7 +1415,7 @@ func _update_crawler_panel(crawler: SalvageCrawler) -> void:
 		[
 			_stat_chip("Workers", "%d / %d" % [worker_count, max_workers], STAT_LABEL_COLOR_SQUAD),
 			_stat_chip("Harvest", "%dm" % int(harvest_radius), STAT_LABEL_COLOR_RANGE),
-			_stat_chip("Salvage", "%dS" % nearby_salvage, STAT_LABEL_COLOR_COST_S),
+			_stat_chip("Salvage", "%d" % nearby_salvage, STAT_LABEL_COLOR_COST_S),
 		],
 	])
 
@@ -1503,7 +1503,7 @@ func _update_building_panel(building: Building) -> void:
 		var nearby: int = 0
 		if yard.has_method("get_nearby_salvage"):
 			nearby = yard.call("get_nearby_salvage") as int
-		_queue_label.text = "Workers  %d / %d   |   Salvage in area  %dS" % [count, max_w, nearby]
+		_queue_label.text = "Workers  %d / %d   |   Salvage in area  %d" % [count, max_w, nearby]
 		if count < max_w:
 			_show_progress(yard.get_spawn_progress(), Color(0.55, 0.95, 0.55, 0.95))
 		else:
@@ -3079,7 +3079,7 @@ func _build_building_stat_sheet(building: Node3D, bstats: BuildingStatResource, 
 			nearby_s = yard.call("get_nearby_salvage") as int
 		var hr: float = float(yard.call("get_collection_radius"))
 		rows.append([
-			_stat_chip("Salvage", "%dS" % nearby_s, STAT_LABEL_COLOR_COST_S),
+			_stat_chip("Salvage", "%d" % nearby_s, STAT_LABEL_COLOR_COST_S),
 			_stat_chip("Harvest", "%dm" % int(hr), STAT_LABEL_COLOR_RANGE),
 		])
 	return _build_stat_sheet(rows)
