@@ -157,7 +157,7 @@ static func _is_inf(v: Vector3) -> bool:
 	return is_inf(v.x) or is_inf(v.y) or is_inf(v.z)
 
 # --- Stuck detector ---
-@export var stuck_progress_ratio_threshold: float = 0.10
+@export var stuck_progress_ratio_threshold: float = 0.05
 @export var stuck_window_frames: int = 30
 @export var stuck_repath_cooldown: float = 1.5
 @export var stuck_pushout_cooldown: float = 2.0
@@ -234,16 +234,19 @@ func _escalate() -> void:
 			_stuck_cooldown_remaining = stuck_drop_cooldown
 			_on_stuck_level_3_drop()
 		_:
-			# Level 4: terminal. Halt and emit; clamp _stuck_level so
-			# the signal isn't re-emitted every escalation tick.
-			_stuck_level = 4
-			_stuck_cooldown_remaining = stuck_drop_cooldown
-			_velocity = Vector3.ZERO
-			if _body_physics != null:
-				_body_physics.velocity = Vector3.ZERO
-			clear_target()
+			# Level 4 used to halt and clear_target — for blob movement
+			# that's too aggressive. A unit briefly tangled near a building
+			# corner could escalate through 1→2→3→4 (~10s of bad luck) and
+			# then lose its target permanently, looking like it "arrived"
+			# mid-route. Now: emit the signal (so listeners — AI, HUD —
+			# can react if they want) and reset back to level 0 so the
+			# unit retries the recovery cycle from scratch instead of
+			# giving up. The cooldown spaces retries out so we don't
+			# burn CPU on a genuinely unreachable target.
 			path_unreachable.emit(REASON_REPEATEDLY_STUCK)
 			_on_stuck_level_4_abandon()
+			_stuck_level = 0
+			_stuck_cooldown_remaining = stuck_drop_cooldown
 
 ## Subclass override — request a fresh path.
 func _on_stuck_level_1_repath() -> void:
