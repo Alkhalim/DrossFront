@@ -1815,6 +1815,11 @@ func _add_crawler_to_selection(crawler: SalvageCrawler, play_audio: bool = true)
 		return
 	_selected_crawlers.append(crawler)
 	crawler.select()
+	# Crawler also has a SalvageYardComponent — show its harvest ring
+	# when selected so the player can see the gathering footprint.
+	var yard: Node = crawler.get_node_or_null("SalvageYardComponent")
+	if yard and yard.has_method("show_range"):
+		yard.call("show_range")
 	if play_audio and _audio:
 		# Unit selections speak instead of chiming — voiceline only.
 		if _audio.has_method("play_voice_select"):
@@ -1825,12 +1830,18 @@ func _remove_crawler_from_selection(crawler: SalvageCrawler) -> void:
 	_selected_crawlers.erase(crawler)
 	if is_instance_valid(crawler):
 		crawler.deselect()
+		var yard: Node = crawler.get_node_or_null("SalvageYardComponent")
+		if yard and yard.has_method("hide_range"):
+			yard.call("hide_range")
 
 
 func _clear_crawler_selection() -> void:
 	for c: SalvageCrawler in _selected_crawlers:
 		if is_instance_valid(c):
 			c.deselect()
+			var yard: Node = c.get_node_or_null("SalvageYardComponent")
+			if yard and yard.has_method("hide_range"):
+				yard.call("hide_range")
 	_selected_crawlers.clear()
 
 

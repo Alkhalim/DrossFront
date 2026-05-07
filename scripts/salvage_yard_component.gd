@@ -126,16 +126,48 @@ func get_collection_radius() -> float:
 	return harvest_radius
 
 
+## Sum of `salvage_remaining` across every wreck in the harvest radius.
+## Used by the HUD to display "Salvage in area: X" on a selected yard /
+## crawler so the player can see at a glance whether the yard's still
+## productive. Cheap O(N) walk over the wrecks group; called only on
+## selection change + the HUD's per-frame stats refresh on selected
+## buildings, not per-frame for every yard.
+func get_nearby_salvage() -> int:
+	if not _building or not is_instance_valid(_building):
+		return 0
+	var origin: Vector3 = _building.global_position
+	var r2: float = harvest_radius * harvest_radius
+	var total: int = 0
+	for node: Node in get_tree().get_nodes_in_group("wrecks"):
+		if not is_instance_valid(node):
+			continue
+		var w: Node3D = node as Node3D
+		if not w:
+			continue
+		var dx: float = w.global_position.x - origin.x
+		var dz: float = w.global_position.z - origin.z
+		if dx * dx + dz * dz > r2:
+			continue
+		var sv: Variant = w.get("salvage_remaining") if "salvage_remaining" in w else 0
+		if sv is int:
+			total += sv as int
+	return total
+
+
 func show_range() -> void:
 	if _range_indicator:
 		_range_indicator.visible = true
 		return
 
 	_range_indicator = MeshInstance3D.new()
-	# Flat cylinder as range circle
+	# Flat cylinder as range circle. Use harvest_radius (the actual
+	# per-instance value — crawlers override it to 45u via salvage_crawler
+	# setup) instead of the COLLECTION_RADIUS constant; the constant only
+	# matched the default yard's value, so crawler ring previously drew
+	# at the wrong size.
 	var cyl := CylinderMesh.new()
-	cyl.top_radius = COLLECTION_RADIUS
-	cyl.bottom_radius = COLLECTION_RADIUS
+	cyl.top_radius = harvest_radius
+	cyl.bottom_radius = harvest_radius
 	cyl.height = 0.05
 	cyl.radial_segments = 48
 	_range_indicator.mesh = cyl

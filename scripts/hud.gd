@@ -1403,6 +1403,9 @@ func _update_crawler_panel(crawler: SalvageCrawler) -> void:
 		SalvageCrawler.AnchorState.DEPLOYING: state_label = "Deploying"
 		SalvageCrawler.AnchorState.ANCHORED: state_label = "Anchored (+50% armor)"
 		SalvageCrawler.AnchorState.UNDEPLOYING: state_label = "Undeploying"
+	var nearby_salvage: int = 0
+	if yard and yard.has_method("get_nearby_salvage"):
+		nearby_salvage = yard.call("get_nearby_salvage") as int
 	_stats_label.text = _build_stat_sheet([
 		[
 			_stat_chip("HP", "%d / %d" % [crawler.current_hp, max_hp], STAT_LABEL_COLOR_HP),
@@ -1412,6 +1415,7 @@ func _update_crawler_panel(crawler: SalvageCrawler) -> void:
 		[
 			_stat_chip("Workers", "%d / %d" % [worker_count, max_workers], STAT_LABEL_COLOR_SQUAD),
 			_stat_chip("Harvest", "%dm" % int(harvest_radius), STAT_LABEL_COLOR_RANGE),
+			_stat_chip("Salvage", "%dS" % nearby_salvage, STAT_LABEL_COLOR_COST_S),
 		],
 	])
 
@@ -1491,12 +1495,15 @@ func _update_building_panel(building: Building) -> void:
 	_name_label.text = building.stats.building_name
 	_stats_label.text = _build_building_stat_sheet(building, building.stats, building.current_hp)
 
-	# Salvage yard: show worker info + spawn progress
+	# Salvage yard: show worker info + spawn progress + salvage in area
 	var yard: Node = building.get_node_or_null("SalvageYardComponent")
 	if yard and yard.has_method("get_worker_count"):
 		var count: int = yard.get_worker_count()
 		var max_w: int = yard.get_max_workers()
-		_queue_label.text = "Workers  %d / %d" % [count, max_w]
+		var nearby: int = 0
+		if yard.has_method("get_nearby_salvage"):
+			nearby = yard.call("get_nearby_salvage") as int
+		_queue_label.text = "Workers  %d / %d   |   Salvage in area  %dS" % [count, max_w, nearby]
 		if count < max_w:
 			_show_progress(yard.get_spawn_progress(), Color(0.55, 0.95, 0.55, 0.95))
 		else:
