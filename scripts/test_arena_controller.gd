@@ -3809,6 +3809,28 @@ func _setup_ground_patches() -> void:
 			{"pos": Vector3(0.0, 0.025, 75.0), "size": 40.0, "tint": Color(0.62, 0.28, 0.14, 0.85), "rough": 0.95, "tex": "metal"},
 			{"pos": Vector3(0.0, 0.025, -75.0), "size": 40.0, "tint": Color(0.62, 0.28, 0.14, 0.85), "rough": 0.95, "tex": "metal"},
 		]
+	# DEBUG (TEMPORARY): drop an opaque magenta box and an opaque
+	# magenta soft-blob right next to the player's south HQ approach
+	# so we can confirm whether MeshInstance3D nodes added by this
+	# function actually render. If the box appears but the soft-blob
+	# doesn't, the issue is in the transparent/material path. If
+	# neither appears, _setup_ground_patches isn't running or its
+	# children get torn out later in setup. Remove once diagnosed.
+	print_debug("[debug] _setup_ground_patches called: biomes=%d" % biomes.size())
+	var dbg_box := MeshInstance3D.new()
+	var dbg_mesh := BoxMesh.new()
+	dbg_mesh.size = Vector3(8.0, 4.0, 8.0)
+	dbg_box.mesh = dbg_mesh
+	var dbg_mat := StandardMaterial3D.new()
+	dbg_mat.albedo_color = Color(1.0, 0.0, 1.0, 1.0)
+	dbg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	dbg_box.material_override = dbg_mat
+	dbg_box.position = Vector3(0.0, 2.0, 100.0)
+	add_child(dbg_box)
+	# Same position as a soft-blob biome patch (full alpha, magenta)
+	# so we can compare opaque-box vs transparent-blob rendering.
+	_spawn_soft_patch(Vector3(15.0, 0.10, 100.0), 12.0, Color(1.0, 0.0, 1.0, 1.0), 1.0, false, "")
+
 	for b: Dictionary in biomes:
 		_spawn_soft_patch(
 			b["pos"] as Vector3,
