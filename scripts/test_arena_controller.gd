@@ -732,15 +732,14 @@ func _setup_navigation() -> void:
 	nav_mesh.filter_ledge_spans = false
 	nav_mesh.filter_low_hanging_obstacles = false
 	nav_mesh.filter_walkable_low_height_spans = false
-	# agent_radius shrinks the walkable area by this distance from
-	# every obstacle edge. Iteratively lowered: 2.5 → 1.5 → 1.0 → 0.5.
-	# Each drop gave more ramp coverage. At 0.5 the slope navmesh nearly
-	# reaches the ramp's physical side walls and the bottom-corner pinch
-	# (where slope navmesh meets ground navmesh past the ramp foot) is
-	# small enough that edge_connection_margin bridges it cleanly.
-	# Building clearance loses a little inner cushion on each step, but
-	# 30% obstacle padding plus the runtime avoid force handles the rest.
-	nav_mesh.agent_radius = 0.5
+	# agent_radius shrinks the walkable area by this distance from every
+	# obstacle edge. 0.5 was too small — less than the default unit body
+	# radius (0.6u) of margin meant the bake's polygons included the
+	# ramp's unwalkable side flanks. 1.0 keeps the slope navmesh strip
+	# inside the ramp's actual safe walking area; the corner gap to the
+	# ground past the ramp foot is bridged by edge_connection_margin
+	# below instead of by aggressive shrinkage.
+	nav_mesh.agent_radius = 1.0
 	nav_mesh.agent_height = 2.0
 	# agent_max_climb caps the vertical distance Recast will treat as
 	# a "step" between two adjacent walkable cells. Plateaus are 1.5-2u
@@ -794,7 +793,7 @@ func _setup_navigation() -> void:
 	# every rebake -- harmless for pathing but floods the debugger.
 	var nav_map: RID = nav_region.get_navigation_map()
 	if nav_map.is_valid():
-		NavigationServer3D.map_set_edge_connection_margin(nav_map, 2.0)
+		NavigationServer3D.map_set_edge_connection_margin(nav_map, 2.5)
 		NavigationServer3D.map_set_cell_height(nav_map, 0.1)
 		NavigationServer3D.map_set_cell_size(nav_map, 0.5)
 
@@ -977,7 +976,7 @@ func _perform_navmesh_rebake() -> void:
 	# default (0.25/0.25), spamming a warning per rebake.
 	var nav_map: RID = _nav_region.get_navigation_map()
 	if nav_map.is_valid():
-		NavigationServer3D.map_set_edge_connection_margin(nav_map, 2.0)
+		NavigationServer3D.map_set_edge_connection_margin(nav_map, 2.5)
 		NavigationServer3D.map_set_cell_height(nav_map, 0.1)
 		NavigationServer3D.map_set_cell_size(nav_map, 0.5)
 
