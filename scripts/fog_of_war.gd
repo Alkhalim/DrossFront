@@ -39,7 +39,16 @@ const MAP_HALF_EXTENT: float = 200.0
 ## constant so the grid arrays can be sized at _ready.
 const GRID_SIZE: int = int((MAP_HALF_EXTENT * 2.0) / CELL_SIZE)
 
-const FOW_REFRESH_HZ: float = 5.0
+# 5 Hz produced ~6.9 ms recompute spikes that ate ~40% of a 16 ms
+# frame budget every fifth of a second — visible as periodic
+# stutter even on a low-load scene. Dropping to 3 Hz cuts the
+# recompute frequency by 40% with the trade-off of slightly laggier
+# vision updates (vision stays current to ~333 ms instead of
+# ~200 ms). Fast scouting flicker is the visible difference; it's
+# acceptable at RTS pacing because squads move at ~6 u/s and a
+# vision cell is 5u — the lag adds at most one cell of stale
+# memory before a unit is actually inside its new vision footprint.
+const FOW_REFRESH_HZ: float = 3.0
 
 ## Plateau-top elevation flag per cell. 1 = cell sits on top of a
 ## walkable plateau; 0 = ground / open. Set by the arena setup via

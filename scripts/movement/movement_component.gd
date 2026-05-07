@@ -70,12 +70,28 @@ func _physics_process(delta: float) -> void:
 			return
 
 	if not has_target():
-		# Decelerate to rest and idle
+		# Decelerate to rest and idle. Once a CharacterBody3D unit is
+		# (a) at rest, (b) on the floor, and (c) has nothing to do,
+		# move_and_slide is doing zero useful work but still costs an
+		# engine collide-and-slide pass per frame. The profile showed
+		# this is the bulk of MovementComponent._physics_process time
+		# (move_and_slide itself is engine-side and invisible to the
+		# script profiler, but per-call it's the most expensive thing
+		# in the loop). Skipping it once a unit has fully settled
+		# saves ~half the per-frame movement cost across an idle
+		# blob.
 		_velocity = Steering.inertia_step(
 			_velocity, Vector3.ZERO, max_accel, max_turn_rate_rad_s, delta)
 		if _body_physics != null:
 			_body_physics.velocity = _velocity
-			_body_physics.move_and_slide()
+			# IDLE_VEL_EPS chosen so a freshly-stopped unit (velocity
+			# very small but not zero from inertia rounding) still
+			# slides one extra frame to fully settle. After that the
+			# velocity is < eps and we skip the engine call entirely.
+			const IDLE_VEL_EPS_SQ: float = 0.04  # 0.2 u/s squared
+			var still_settling: bool = _velocity.length_squared() > IDLE_VEL_EPS_SQ
+			if still_settling or not _body_physics.is_on_floor():
+				_body_physics.move_and_slide()
 		else:
 			_body.global_position += _velocity * delta
 		_stuck_step(delta, _is_combat_engaged())
@@ -176,8 +192,9 @@ var _stuck_pushout_dir: Vector3 = Vector3.ZERO
 func _ensure_stuck_buffer() -> void:
 	if _stuck_buffer.size() != stuck_window_frames:
 		_stuck_buffer.resize(stuck_window_frames)
+		var phys_dt: float = 1.0 / float(maxi(Engine.physics_ticks_per_second, 1))
 		for i: int in stuck_window_frames:
-			_stuck_buffer[i] = max_speed * (1.0 / 60.0)  # seed as healthy
+			_stuck_buffer[i] = max_speed * phys_dt  # seed as healthy
 		_stuck_buffer_idx = 0
 
 func _stuck_step(delta: float, combat_engaged: bool) -> void:
@@ -208,7 +225,8 @@ func _stuck_step(delta: float, combat_engaged: bool) -> void:
 	for v: float in _stuck_buffer:
 		sum += v
 	var mean_disp: float = sum / float(_stuck_buffer.size())
-	var expected: float = max_speed * (1.0 / 60.0)
+	var phys_dt: float = 1.0 / float(maxi(Engine.physics_ticks_per_second, 1))
+	var expected: float = max_speed * phys_dt
 	if expected <= 0.0:
 		return
 	var ratio: float = mean_disp / expected

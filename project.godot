@@ -79,6 +79,19 @@ camera_zoom_out={
 ]
 }
 
+[physics]
+
+# RTS-scale physics. The default 60 Hz tick rate burned ~75% of a
+# 16 ms frame budget on movement scripts (profile showed
+# GroundMovement + MovementComponent dominating). Halving the tick
+# rate halves all per-frame movement / steering / move_and_slide
+# work; visual smoothness comes from rendering interpolation
+# enabled below. Anything that hardcoded `1.0/60.0` (stuck
+# detector) was switched to read Engine.physics_ticks_per_second
+# so the threshold stays correct after this change.
+common/physics_ticks_per_second=30
+common/physics_interpolation=true
+
 [rendering]
 
 anti_aliasing/quality/screen_space_aa=1
