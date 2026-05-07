@@ -3825,9 +3825,12 @@ func _setup_ground_patches() -> void:
 			# Dried-mud zones near the back-doors -- very dark loam.
 			{"pos": Vector3(70.0, 0.025, -75.0), "size": 70.0, "tint": Color(0.16, 0.12, 0.08, 0.90), "rough": 0.95, "tex": "mud"},
 			{"pos": Vector3(-70.0, 0.025, 75.0), "size": 70.0, "tint": Color(0.16, 0.12, 0.08, 0.90), "rough": 0.95, "tex": "mud"},
-			# Industrial rust stain -- saturated orange-rust.
-			{"pos": Vector3(0.0, 0.025, 75.0), "size": 55.0, "tint": Color(0.62, 0.28, 0.14, 0.85), "rough": 0.95, "tex": "metal"},
-			{"pos": Vector3(0.0, 0.025, -75.0), "size": 55.0, "tint": Color(0.62, 0.28, 0.14, 0.85), "rough": 0.95, "tex": "metal"},
+			# Industrial rust stain -- warm rust, dialled back from
+			# the previous (0.62, 0.28, 0.14, 0.85). Old version read
+			# as a vivid pure-orange disc; this is closer to weathered
+			# rust on dirt — warm but not eye-catching.
+			{"pos": Vector3(0.0, 0.025, 75.0), "size": 55.0, "tint": Color(0.45, 0.24, 0.15, 0.78), "rough": 0.95, "tex": "metal"},
+			{"pos": Vector3(0.0, 0.025, -75.0), "size": 55.0, "tint": Color(0.45, 0.24, 0.15, 0.78), "rough": 0.95, "tex": "metal"},
 		]
 	for b: Dictionary in biomes:
 		_spawn_soft_patch(
@@ -3995,10 +3998,13 @@ func _spawn_soft_patch(pos: Vector3, base_size: float, tint: Color, roughness: f
 		# UV scale 1.0 because the baked texture already maps the
 		# blob's UV (0,0)-(1,1) to the textured biome surface +
 		# radial alpha. No tiling — each blob shows the texture once.
+		# Brightener dialled back from 1.6× to 1.25×: the old factor
+		# pushed warm tints into vivid territory (saturated orange,
+		# bright cream) that read as too jarring against ground noise.
 		var bright_tint: Color = Color(
-			minf(tint.r * 1.6, 1.0),
-			minf(tint.g * 1.6, 1.0),
-			minf(tint.b * 1.6, 1.0),
+			minf(tint.r * 1.25, 1.0),
+			minf(tint.g * 1.25, 1.0),
+			minf(tint.b * 1.25, 1.0),
 			tint.a,
 		)
 		mat.albedo_color = bright_tint
@@ -4042,26 +4048,45 @@ static var _biome_blob_tex: Dictionary = {}
 const _BLOB_TEX_SIZE: int = 256
 
 
-func _build_radial_alpha_array(size: int) -> PackedFloat32Array:
-	## Returns a `size*size` row-major float buffer with alpha values
-	## for the radial blob mask. Solid core out to 65% of the radius,
-	## then a smooth (smoothstep) fade to alpha 0 at the perimeter.
-	## Pulled out so both the neutral mask and the per-biome bakes
-	## can share the gradient calculation without recomputing it.
+func _build_radial_alpha_array(size: int, noise_seed: int = 0) -> PackedFloat32Array:
+	## Radial alpha mask for the soft-blob patches. Inner SOLID_FRAC
+	## of the radius stays at alpha=1.0 ("real biome surface, ground
+	## not visible"), outer band fades smoothly to 0. The radial
+	## distance is perturbed by low-frequency FastNoiseLite so the
+	## boundary isn't a perfect circle — gives an organic, irregular
+	## blend into the surrounding terrain instead of the "stickered
+	## disc" look the user flagged. Per-biome seed lets each baked
+	## texture have its own unique boundary shape.
 	var out := PackedFloat32Array()
 	out.resize(size * size)
 	var center: float = float(size) / 2.0
-	const SOLID_FRAC: float = 0.65
+	# Inner solid core 40% of radius (down from 65%) so the fade
+	# band gets wider and the transition reads as a gentler blend.
+	const SOLID_FRAC: float = 0.40
+	# Boundary perturbation amplitude. 0.20 means the effective
+	# fade radius wobbles ±20% around the geometric circle; combined
+	# with the noise frequency below, this gives the blob outline
+	# blotchy lobes rather than a clean ring.
+	const PERTURB_AMP: float = 0.20
+	var noise := FastNoiseLite.new()
+	noise.seed = noise_seed
+	noise.noise_type = FastNoiseLite.TYPE_PERLIN
+	noise.frequency = 0.012
+	noise.fractal_octaves = 3
 	for y: int in size:
 		for x: int in size:
 			var dx: float = float(x) + 0.5 - center
 			var dy: float = float(y) + 0.5 - center
-			var d: float = sqrt(dx * dx + dy * dy) / center  # 0 at center, 1.0 at edge of inscribed circle
+			var d: float = sqrt(dx * dx + dy * dy) / center
+			# Sample noise around (x, y); -1..1 -> wobble the
+			# effective radial distance for blotchy fade.
+			var n: float = noise.get_noise_2d(float(x), float(y))
+			var d_eff: float = d + n * PERTURB_AMP
 			var a: float
-			if d < SOLID_FRAC:
+			if d_eff < SOLID_FRAC:
 				a = 1.0
-			elif d < 1.0:
-				var t: float = (d - SOLID_FRAC) / (1.0 - SOLID_FRAC)
+			elif d_eff < 1.0:
+				var t: float = (d_eff - SOLID_FRAC) / (1.0 - SOLID_FRAC)
 				a = 1.0 - smoothstep(0.0, 1.0, t)
 			else:
 				a = 0.0
@@ -4073,7 +4098,11 @@ func _get_blob_alpha_mask_texture() -> Texture2D:
 	if _blob_alpha_mask_tex:
 		return _blob_alpha_mask_tex
 	var size: int = _BLOB_TEX_SIZE
-	var alpha: PackedFloat32Array = _build_radial_alpha_array(size)
+	# Detail patches all share this mask — fixed seed so every detail
+	# patch gets the same blotchy boundary noise pattern. The patches
+	# spawn at random rotations, so the visual repetition isn't
+	# obvious at gameplay zoom.
+	var alpha: PackedFloat32Array = _build_radial_alpha_array(size, 1234)
 	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
 	for y: int in size:
 		for x: int in size:
@@ -4085,7 +4114,8 @@ func _get_blob_alpha_mask_texture() -> Texture2D:
 
 func _get_biome_blob_texture(key: String) -> Texture2D:
 	## Bakes a per-biome blob texture: RGB sampled from the procedural
-	## biome surface (sand / mud / etc.), alpha = radial gradient.
+	## biome surface (sand / mud / etc.), alpha = radial gradient with
+	## per-key noise so each biome zone has its own boundary shape.
 	## Cached per key.
 	if _biome_blob_tex.has(key):
 		return _biome_blob_tex[key] as Texture2D
@@ -4096,12 +4126,10 @@ func _get_biome_blob_texture(key: String) -> Texture2D:
 	if not src_img:
 		return _get_blob_alpha_mask_texture()
 	var size: int = _BLOB_TEX_SIZE
-	# Re-size if the source isn't already _BLOB_TEX_SIZE so the UV
-	# 1:1 mapping in the blob mesh works without further scaling.
 	if src_img.get_width() != size or src_img.get_height() != size:
 		src_img = src_img.duplicate() as Image
 		src_img.resize(size, size, Image.INTERPOLATE_LANCZOS)
-	var alpha: PackedFloat32Array = _build_radial_alpha_array(size)
+	var alpha: PackedFloat32Array = _build_radial_alpha_array(size, hash(key))
 	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
 	for y: int in size:
 		for x: int in size:
