@@ -312,6 +312,22 @@ func _physics_process(delta: float) -> void:
 		if ft_stats_v and ft_stats_v.is_stealth_capable and not ft_revealed:
 			forced_target = null
 			_was_in_range = false
+	# Patrol leash: neutral patrols (units with a home_position set) give
+	# up the chase if they've drifted too far from home. Without this, a
+	# player could pull patrols across half the map by kiting them. Once
+	# the leash trips, forced_target is dropped — the "no current target"
+	# branch then sends the unit back home via the existing patrol
+	# return-to-home logic.
+	const PATROL_LEASH_RADIUS: float = 30.0
+	if forced_target:
+		var leash_home_v: Variant = _unit.get("home_position")
+		if leash_home_v is Vector3 and (leash_home_v as Vector3) != Vector3.INF:
+			var leash_home: Vector3 = leash_home_v as Vector3
+			var d_from_home: float = _unit.global_position.distance_to(leash_home)
+			if d_from_home > PATROL_LEASH_RADIUS:
+				forced_target = null
+				_was_in_range = false
+				_retaliation_lost_sight_timer = 0.0
 	# Retaliation lost-sight watchdog -- when an AI-owned unit was
 	# pulled into combat by notify_attacked but its attacker has
 	# stayed out of sight for RETALIATION_LOST_SIGHT_SEC seconds,
@@ -362,13 +378,16 @@ func _physics_process(delta: float) -> void:
 		if attack_move_target != Vector3.INF:
 			var sight_r_acq: float = stats.resolved_sight_radius() if stats else weapon_range * 2.0
 			engage_radius = maxf(engage_radius, sight_r_acq)
-		# Patrol units (any unit with a `home_position` set) get a -20%
-		# aggro multiplier so a careful player can sneak past them
-		# without triggering a fight.
+		# Patrol units (any unit with a `home_position` set) get a -40%
+		# aggro multiplier so a careful player can route past them
+		# without triggering a fight, and they don't pre-aggro the
+		# moment a unit slips into their distant sight bubble. Combined
+		# with the patrol leash above, neutrals are now contained to
+		# their home area instead of chasing across the map.
 		var home: Variant = _unit.get("home_position")
 		var is_patrol: bool = (home is Vector3) and (home as Vector3) != Vector3.INF
 		if is_patrol:
-			engage_radius *= 0.8
+			engage_radius *= 0.6
 		var found: Node3D = _find_nearest_enemy(engage_radius)
 		if found:
 			# Promote to forced_target so the unit will close the distance even
