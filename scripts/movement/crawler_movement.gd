@@ -21,3 +21,9 @@ func _ready() -> void:
 	separate_min_distance = 5.0
 	avoid_min_distance = 10.0
 	avoid_repel = 36.0
+	# Default arrival_radius (2u) is smaller than the crawler's own
+	# agent radius (2.5u) — physically the chassis can't get within
+	# 2u of a target without overlapping it, so seek never reports
+	# arrival and the unit circles its goal endlessly. Bump to 4u so
+	# the chassis settles when its body is touching the target.
+	arrival_radius = 4.0

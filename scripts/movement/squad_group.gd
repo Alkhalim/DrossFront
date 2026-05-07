@@ -287,8 +287,11 @@ func _update_member_targets() -> void:
 				gm.effective_max_turn_rate_cap = _convoy_turn_rate_cap
 		else:
 			# Dispersed: each squad has its own goto from selection_manager.
-			gm.effective_max_speed_cap = INF
-			gm.effective_max_turn_rate_cap = INF
+			# Cap at convoy speed so far-apart members move at the squad's
+			# pace toward the destination instead of sprinting individually
+			# (the user's "2 far units always in chase speed" report).
+			gm.effective_max_speed_cap = _convoy_speed_cap
+			gm.effective_max_turn_rate_cap = _convoy_turn_rate_cap
 
 func _slot_world(m: Node) -> Vector3:
 	var cur_frame: int = Engine.get_process_frames()
@@ -306,13 +309,18 @@ func _slot_world(m: Node) -> Vector3:
 	_slot_world_cache[m] = projected
 	return projected
 
+## Speed bonus given to a member while catching up to its slot. 1.0 = no
+## bonus (move at convoy pace). The previous value was INF, which let
+## stragglers sprint at their full individual max_speed and felt excessive.
+const CATCHUP_SPEED_MULT: float = 1.5
+
 func _speed_cap_for(m: Node) -> float:
 	var gm: GroundMovement = _gm_for(m)
 	if gm == null: return _convoy_speed_cap
 	var slot_world: Vector3 = _slot_world(m)
 	var d: float = (m as Node3D).global_position.distance_to(slot_world)
 	if d > slot_proximity_threshold * formation_spacing:
-		return INF
+		return _convoy_speed_cap * CATCHUP_SPEED_MULT
 	return _convoy_speed_cap
 
 func _connect_combat_end_for(m: Node, _gm: GroundMovement) -> void:
