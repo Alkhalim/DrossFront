@@ -4599,6 +4599,17 @@ func _update_unit_panel(units: Array[Node3D]) -> void:
 		_last_building_id = -1
 		_showing_build_buttons = false
 
+		# PC-9: Connect path_unreachable on each newly-selected unit so the
+		# player sees feedback when a unit gives up on its path. Guard with
+		# is_connected to tolerate re-selections without double-connecting.
+		for u: Node3D in units:
+			if not is_instance_valid(u):
+				continue
+			var mc: Node = u.get_node_or_null("MovementComponent")
+			if mc != null and mc is MovementComponent:
+				if not mc.path_unreachable.is_connected(_on_selected_unit_path_unreachable):
+					mc.path_unreachable.connect(_on_selected_unit_path_unreachable.bind(u))
+
 		var has_builder: bool = false
 		for unit: Node3D in units:
 			# Defensive: SalvageWorker + any future "units" group entry
@@ -4670,6 +4681,19 @@ func _update_unit_panel(units: Array[Node3D]) -> void:
 		_stats_label.text = _build_stat_sheet([
 			[_stat_chip("Roster", "  •  ".join(parts), STAT_LABEL_COLOR_SQUAD)],
 		])
+
+
+## Visual feedback when a player-selected unit's pathfinding fails
+## (Plan C Level 4 stuck escalation). Shows the alert banner so the
+## player notices without needing to watch the unit closely.
+func _on_selected_unit_path_unreachable(_reason: int, unit: Node) -> void:
+	if not is_instance_valid(unit):
+		return
+	var unit_name: String = unit.name if unit.has_method("get_name") else "<unit>"
+	if _alert_label:
+		_on_alert("%s is stuck — cannot reach target" % unit_name, 1, Vector3.ZERO)
+	else:
+		print_debug("[HUD] path_unreachable on ", unit_name)
 
 
 func _rebuild_build_buttons() -> void:
