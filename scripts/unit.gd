@@ -6036,6 +6036,11 @@ func _per_frame_bookkeeping(delta: float) -> void:
 	# has_move_order stays true forever after the first command_move, which
 	# permanently disables CombatComponent.can_auto_target and stops idle
 	# units from engaging nearby enemies.
+	#
+	# Velocity gate: in cohesive squad mode the slot tracks the unit while
+	# moving, so distance-to-target < arrival_radius even mid-move. Requiring
+	# low velocity ensures we only consider the unit "arrived" once it has
+	# actually settled, not when it's keeping pace with a moving slot.
 	if has_move_order:
 		var mc_arr: Node = get_node_or_null("MovementComponent")
 		if mc_arr != null and mc_arr is MovementComponent:
@@ -6045,10 +6050,10 @@ func _per_frame_bookkeeping(delta: float) -> void:
 				move_target = Vector3.INF
 			else:
 				var d: float = global_position.distance_to(mc_typed.target)
-				if d <= mc_typed.arrival_radius:
+				var v_xz_sq: float = velocity.x * velocity.x + velocity.z * velocity.z
+				if d <= mc_typed.arrival_radius and v_xz_sq < 0.25:  # < 0.5 m/s
 					has_move_order = false
 					move_target = Vector3.INF
-					mc_typed.clear_target()
 
 	# Damage flash countdown (cheap — runs every frame).
 	if _flash_timer > 0.0:

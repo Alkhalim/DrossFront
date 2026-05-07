@@ -1148,24 +1148,27 @@ func command_attack_move_to_world(ground_pos: Vector3, queue: bool = false) -> v
 		_legacy_command_attack_move_to_world(ground_pos, queue)
 		return
 
-	# New system: same SquadGroup/aircraft dispatch as a normal move. Pass
-	# clear_combat=false so the movement-priority window is NOT opened and the
-	# combat target is NOT cleared — attack-move explicitly wants en-route
-	# engagement, so CombatComponent should stay active.
+	# New system: dispatch movement (clear_combat=false so an existing combat
+	# target survives — attack-move explicitly wants en-route engagement).
 	_new_system_dispatch_movables(ground_pos, false)
 
-	# Legacy fall-through for non-GroundMovement / non-AircraftMovement movables.
+	# Set attack_move_target on every unit's combat component. For new-system
+	# units this is what makes auto-acquire fire during the move and what tells
+	# notify_attacked to allow retaliation. command_attack_move detects the new
+	# system internally and skips the legacy move_target/_nav_agent writes.
 	for s: Node3D in _selected_units:
 		if not is_instance_valid(s):
 			continue
-		var mc_skip: Node = s.get_node_or_null("MovementComponent")
-		if mc_skip is GroundMovement or mc_skip is AircraftMovement:
-			continue  # already handled above
 		var combat: Node = s.get_combat() if s.has_method("get_combat") else null
 		if combat and combat.has_method("command_attack_move"):
 			combat.command_attack_move(ground_pos)
 		else:
-			s.command_move(ground_pos)
+			# No combat (e.g., builder-only units): plain move only if it's a
+			# legacy entity. New-system units already had their movement set
+			# by _new_system_dispatch_movables.
+			var mc_skip: Node = s.get_node_or_null("MovementComponent")
+			if not (mc_skip is GroundMovement or mc_skip is AircraftMovement):
+				s.command_move(ground_pos)
 
 
 func _legacy_command_attack_move_to_world(ground_pos: Vector3, _queue: bool = false) -> void:

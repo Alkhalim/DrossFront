@@ -272,14 +272,6 @@ func _physics_process(delta: float) -> void:
 
 	var unit_has_move_order: bool = _unit.get("has_move_order") as bool
 
-	# Movement-priority window (Plan C hotfix): when the player issued
-	# command_move(clear_combat=true) recently, suppress chase + auto-acquire
-	# so the retreat actually completes — but keep retaliation and firing
-	# alive so the unit can defend itself while moving. Plan D replaces this
-	# with a proper stance system.
-	var move_priority_until: int = (_unit.get("_move_priority_until_ms") as int) if "_move_priority_until_ms" in _unit else 0
-	var move_priority_active: bool = move_priority_until > Time.get_ticks_msec()
-
 	# Forced target wins. If it's gone or dead, drop it.
 	if forced_target and not _is_valid_target(forced_target):
 		forced_target = null
@@ -317,7 +309,7 @@ func _physics_process(delta: float) -> void:
 	# Stand-ground units skip this — they shoot what walks into actual
 	# range but don't hunt.
 	var holding: bool = bool(_unit.get("is_holding_position"))
-	var can_auto_target: bool = (not unit_has_move_order or attack_move_target != Vector3.INF) and not holding and not move_priority_active
+	var can_auto_target: bool = (not unit_has_move_order or attack_move_target != Vector3.INF) and not holding
 	if not _current_target and can_auto_target and _search_timer <= 0.0:
 		_search_timer = SEARCH_INTERVAL
 		var stats: UnitStatResource = _unit.get("stats") as UnitStatResource
@@ -398,18 +390,14 @@ func _physics_process(delta: float) -> void:
 		if _fow_cached and _fow_cached.has_method("is_visible_world"):
 			team_can_see = _fow_cached.call("is_visible_world", _current_target.global_position)
 	if dist > sight_r and not team_can_see:
-		# Don't override movement during a player-issued retreat.
-		if not _is_movement_priority_active():
-			_unit.command_move(_current_target.global_position, false)
+		_unit.command_move(_current_target.global_position, false)
 		return
 
 	if dist <= primary_range:
-		# In range: engage. Normally we halt the unit while firing, but during
-		# a movement-priority window (player just issued a retreat) we leave
-		# the unit moving toward its retreat point and fire on the move — the
-		# player's order wins on positioning, the combat layer just defends.
-		if not move_priority_active:
-			_unit.stop()
+		# In range: halt the unit, then fire. The user's design: units never
+		# fire while moving (rare special-unit exceptions aside). stop() also
+		# clears has_move_order so subsequent ticks see the unit as idle.
+		_unit.stop()
 
 		_face_target()
 
@@ -446,17 +434,13 @@ func _physics_process(delta: float) -> void:
 		# or auto-engaged on sight). Pass `clear_combat=false` so command_move
 		# doesn't wipe the very target we're chasing; that bug used to make
 		# units walk all the way into melee before re-acquiring and firing.
-		# Don't override movement during a player-issued retreat.
-		if forced_target and not _is_movement_priority_active():
+		if forced_target:
 			_unit.command_move(_current_target.global_position, false)
 
 
 func set_target(target: Node3D) -> void:
-	# Note: priority window does NOT block this — a player click on an enemy
-	# during a recent retreat is an explicit override and should land. The
-	# chase calls in _physics_process are still gated, so the unit won't run
-	# toward the new target during the window; it will fire if already in
-	# range and chase once the window expires.
+	# An explicit player click should always land, even mid-move — chasing
+	# the new target overrides whatever movement was in flight.
 	# Defensive: never accept an allied (or self-owned) target. The
 	# selection_manager click-path already filters by PlayerRegistry, but
 	# this guard covers attack-move sweeps and any future command that
@@ -490,10 +474,19 @@ func command_attack_move(pos: Vector3) -> void:
 	_current_target = null
 	if was_engaged:
 		combat_ended.emit()
-	# Move without clearing combat state (bypass command_move's clear_target)
+	_unit.has_move_order = true
+	# New-system units: MovementComponent owns the movement target and the
+	# selection_manager dispatch already called gm.goto_world(pos). Don't
+	# write _unit.move_target or _nav_agent target — those are legacy fields
+	# that the new system does not consult and writing them would just
+	# diverge state.
+	var mc: Node = _unit.get_node_or_null("MovementComponent")
+	if mc != null and mc is MovementComponent:
+		return
+	# Legacy path: write the unit's move_target and the nav agent so the
+	# legacy _legacy_movement_step has a destination to walk toward.
 	_unit.move_target = pos
 	_unit.move_target.y = _unit.global_position.y
-	_unit.has_move_order = true
 	if _unit.has_method("_nav_agent") or "_nav_agent" in _unit:
 		var nav: NavigationAgent3D = _unit.get("_nav_agent") as NavigationAgent3D
 		if nav:
@@ -573,10 +566,13 @@ func _find_nearest_enemy(max_range: float) -> Node3D:
 
 
 func notify_attacked(attacker: Node3D) -> void:
-	## Called by Unit.take_damage when something shoots us. Sets a forced
-	## target so the unit fires back. The priority window (set by the player's
-	## last plain move) only gates *chase* — retaliation and firing remain
-	## live so a retreating unit defends itself while moving away.
+	## Called by Unit.take_damage when something shoots us. Plain-move units
+	## ignore retaliation entirely — the player's positioning order wins.
+	## Attack-move units DO retaliate (that's the whole point of attack-move).
+	## Idle units retaliate.
+	var unit_has_move_order: bool = _unit.get("has_move_order") as bool
+	if unit_has_move_order and attack_move_target == Vector3.INF:
+		return  # plain move: ignore being shot at
 	if not attacker or not is_instance_valid(attacker):
 		return
 	if not _is_valid_target(attacker):
