@@ -36,8 +36,12 @@ const SATELLITE_CHIPS_MAX: int = 3
 const SPAWN_X_RANGE: float = 110.0
 const SPAWN_Z_RANGE: float = 110.0
 ## Keep-out radius from any HQ so satellites don't drop on top
-## of bases.
-const HQ_KEEPOUT: float = 40.0
+## of bases. 40 was close enough that the very-early initial
+## drops sometimes landed inside the player's expanding economic
+## footprint and felt like free starter resources for whichever
+## side the dice favored. 70 puts them outside the typical opening
+## build perimeter — the player has to scout/walk to claim them.
+const HQ_KEEPOUT: float = 70.0
 
 ## Lead time between the player getting an early-warning ping and
 ## the satellite actually impacting. 90s gives the player room to
@@ -140,9 +144,39 @@ func _schedule_next_spawn() -> void:
 
 
 func _initial_drop() -> void:
+	## Match-start piles. Distribute across map sectors so they don't
+	## cluster on one half (random sampling occasionally landed 2-3
+	## piles near a single base while the other side saw none — felt
+	## arbitrary). Divide the map into 4 quadrants and place one pile
+	## per quadrant up to count, then any extras go to a random
+	## quadrant. Each per-quadrant pick still passes through _is_clear
+	## (HQ keep-out, elevation skip, other-satellite spacing).
 	var count: int = randi_range(STARTING_PILES_MIN, STARTING_PILES_MAX)
+	# Quadrant order: NE, NW, SW, SE — shuffled so the same map seed
+	# doesn't always favor the same corner.
+	var quadrants: Array = [
+		Vector2(1, 1), Vector2(-1, 1),
+		Vector2(-1, -1), Vector2(1, -1),
+	]
+	quadrants.shuffle()
 	for i: int in count:
-		_drop_static_pile(_pick_spawn_pos())
+		var quad: Vector2 = quadrants[i % quadrants.size()]
+		var pos: Vector3 = _pick_spawn_pos_in_quadrant(quad)
+		if pos != Vector3.INF:
+			_drop_static_pile(pos)
+
+
+func _pick_spawn_pos_in_quadrant(quad: Vector2) -> Vector3:
+	## Same retry logic as _pick_spawn_pos but constrains x/z signs to
+	## the requested quadrant so the result lands in the intended
+	## sector of the map. quad is a unit Vector2 with x,z each ±1.
+	for attempt: int in 12:
+		var x_mag: float = randf_range(SPAWN_X_RANGE * 0.30, SPAWN_X_RANGE)
+		var z_mag: float = randf_range(SPAWN_Z_RANGE * 0.30, SPAWN_Z_RANGE)
+		var p: Vector3 = Vector3(x_mag * quad.x, 0.0, z_mag * quad.y)
+		if _is_clear(p):
+			return p
+	return Vector3.INF
 
 
 func _drop_static_pile(pos: Vector3) -> void:

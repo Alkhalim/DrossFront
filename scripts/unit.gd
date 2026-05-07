@@ -579,14 +579,15 @@ func _build_squad_visuals() -> void:
 		var member_info: Dictionary = _build_mech_member(i, offset, shape_data, team_color)
 		_member_meshes.append(member_info["root"])
 		_member_data.append(member_info)
-		# X-ray silhouette disabled -- the depth-texture sample in
-		# the previous shader was returning the near-plane value
-		# in Forward+, causing the silhouette to draw EVERYWHERE
-		# instead of only when occluded. Plain white capsules
-		# overlaid every unit. Reverted while a more reliable
-		# behind-buildings outline approach is designed (next_pass
-		# duplicate via the Building's transparent layer is the
-		# probable replacement).
+		# X-ray silhouette REMAINS DISABLED. A second attempt with a
+		# FRAGCOORD.z vs DEPTH_TEXTURE.r comparison (avoiding the
+		# INV_PROJECTION_MATRIX reconstruction) still drew the silhouette
+		# everywhere — units appeared as white orbs over their own
+		# meshes. The DEPTH_TEXTURE sample seems to return inconsistent
+		# values during the transparent pass in Forward+. Until a
+		# reliable approach is found (likely building-side: a
+		# next_pass material on the Building that draws unit
+		# silhouettes through itself), the feature stays off.
 
 	# Collision shape covers the squad footprint, sized to the actual mech bulk.
 	var torso_size: Vector3 = shape_data["torso"] as Vector3
