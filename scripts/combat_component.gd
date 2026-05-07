@@ -302,6 +302,16 @@ func _physics_process(delta: float) -> void:
 	if forced_target and not _is_valid_target(forced_target):
 		forced_target = null
 		_retaliation_lost_sight_timer = 0.0
+	# Forced target re-cloaked — drop it. Once a stealth unit returns to
+	# concealment we shouldn't keep firing through fog of war.
+	if forced_target and "stealth_revealed" in forced_target:
+		var ft_revealed: bool = forced_target.get("stealth_revealed") as bool
+		var ft_stats_v: UnitStatResource = null
+		if "stats" in forced_target:
+			ft_stats_v = forced_target.get("stats") as UnitStatResource
+		if ft_stats_v and ft_stats_v.is_stealth_capable and not ft_revealed:
+			forced_target = null
+			_was_in_range = false
 	# Retaliation lost-sight watchdog -- when an AI-owned unit was
 	# pulled into combat by notify_attacked but its attacker has
 	# stayed out of sight for RETALIATION_LOST_SIGHT_SEC seconds,
@@ -647,6 +657,15 @@ func notify_attacked(attacker: Node3D) -> void:
 		return
 	if not _is_valid_target(attacker):
 		return
+	# Attacker is stealthed and not currently revealed — we can't see who's
+	# shooting us, so we can't retaliate. (This is the whole point of
+	# stealth: fire-from-concealment immunity to retaliation.) Detection is
+	# the proper counter, not "they shot first so I see them now".
+	if "stealth_revealed" in attacker:
+		var atk_revealed: bool = (attacker.get("stealth_revealed") as bool)
+		var atk_stats: UnitStatResource = attacker.get("stats") as UnitStatResource if "stats" in attacker else null
+		if atk_stats and atk_stats.is_stealth_capable and not atk_revealed:
+			return
 
 	# Already engaging something — switch ONLY if the current target
 	# has run beyond practical engage range AND the new attacker is

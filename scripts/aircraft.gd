@@ -2376,15 +2376,39 @@ func _set_stealth_revealed(revealed: bool) -> void:
 
 
 func _apply_stealth_visual(concealed: bool) -> void:
-	var t: float = 0.7 if concealed else 0.0
-	_apply_transparency_recursive(self, t)
+	## Same alpha-based fade as Unit._apply_stealth_visual — see the comment
+	## there. GI3D.transparency was dithered and easy to miss; modifying
+	## StandardMaterial3D albedo alpha + transparency_mode gives a clean
+	## ghosty fade that reads at any distance.
+	var alpha: float = 0.35 if concealed else 1.0
+	var mode: int = (
+		StandardMaterial3D.TRANSPARENCY_ALPHA
+		if concealed
+		else StandardMaterial3D.TRANSPARENCY_DISABLED
+	)
+	_apply_transparency_recursive(self, alpha, mode)
 
 
-func _apply_transparency_recursive(node: Node, t: float) -> void:
-	if node is GeometryInstance3D:
-		(node as GeometryInstance3D).transparency = t
+func _apply_transparency_recursive(node: Node, alpha: float, mode: int) -> void:
+	if node is MeshInstance3D:
+		var mi: MeshInstance3D = node as MeshInstance3D
+		var override: Material = mi.material_override
+		if override is StandardMaterial3D:
+			_set_mat_alpha(override as StandardMaterial3D, alpha, mode)
+		var surf_count: int = mi.get_surface_override_material_count()
+		for s_idx: int in surf_count:
+			var sm: Material = mi.get_surface_override_material(s_idx)
+			if sm is StandardMaterial3D:
+				_set_mat_alpha(sm as StandardMaterial3D, alpha, mode)
 	for child: Node in node.get_children():
-		_apply_transparency_recursive(child, t)
+		_apply_transparency_recursive(child, alpha, mode)
+
+
+func _set_mat_alpha(mat: StandardMaterial3D, alpha: float, mode: int) -> void:
+	var c: Color = mat.albedo_color
+	c.a = alpha
+	mat.albedo_color = c
+	mat.transparency = mode
 
 
 ## --- Combat compatibility ---

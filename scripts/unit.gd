@@ -7490,23 +7490,45 @@ func _set_stealth_revealed(revealed: bool) -> void:
 
 
 func _apply_stealth_visual(concealed: bool) -> void:
-	## Fades the squad members' rendering so concealed units read as
-	## a faint shimmer. GeometryInstance3D.transparency in 0..1 is a
-	## per-instance fade — 0 = opaque, 1 = invisible. We use 0.7 so
-	## the silhouette is barely there but still distinguishable to
-	## the controlling player.
-	var t: float = 0.7 if concealed else 0.0
+	## Fades the squad members so concealed stealth units read as a clear
+	## ghosty silhouette. GeometryInstance3D.transparency (the previous
+	## approach) was dithered and not always obvious; modifying the
+	## StandardMaterial3D alpha + transparency_mode gives a proper
+	## alpha-blended fade that's visible at any distance. Materials are
+	## per-unit (created fresh in the build functions) so toggling them
+	## here doesn't bleed across squads.
+	var alpha: float = 0.35 if concealed else 1.0
+	var mode: int = (
+		StandardMaterial3D.TRANSPARENCY_ALPHA
+		if concealed
+		else StandardMaterial3D.TRANSPARENCY_DISABLED
+	)
 	for member: Node3D in _member_meshes:
 		if not is_instance_valid(member):
 			continue
-		_apply_transparency_recursive(member, t)
+		_apply_transparency_recursive(member, alpha, mode)
 
 
-func _apply_transparency_recursive(node: Node, t: float) -> void:
-	if node is GeometryInstance3D:
-		(node as GeometryInstance3D).transparency = t
+func _apply_transparency_recursive(node: Node, alpha: float, mode: int) -> void:
+	if node is MeshInstance3D:
+		var mi: MeshInstance3D = node as MeshInstance3D
+		var override: Material = mi.material_override
+		if override is StandardMaterial3D:
+			_set_mat_alpha(override as StandardMaterial3D, alpha, mode)
+		var surf_count: int = mi.get_surface_override_material_count()
+		for s_idx: int in surf_count:
+			var sm: Material = mi.get_surface_override_material(s_idx)
+			if sm is StandardMaterial3D:
+				_set_mat_alpha(sm as StandardMaterial3D, alpha, mode)
 	for child: Node in node.get_children():
-		_apply_transparency_recursive(child, t)
+		_apply_transparency_recursive(child, alpha, mode)
+
+
+func _set_mat_alpha(mat: StandardMaterial3D, alpha: float, mode: int) -> void:
+	var c: Color = mat.albedo_color
+	c.a = alpha
+	mat.albedo_color = c
+	mat.transparency = mode
 
 
 func _faction_id() -> int:
