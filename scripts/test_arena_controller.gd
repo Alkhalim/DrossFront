@@ -793,7 +793,7 @@ func _setup_navigation() -> void:
 	# every rebake -- harmless for pathing but floods the debugger.
 	var nav_map: RID = nav_region.get_navigation_map()
 	if nav_map.is_valid():
-		NavigationServer3D.map_set_edge_connection_margin(nav_map, 2.5)
+		NavigationServer3D.map_set_edge_connection_margin(nav_map, 1.0)
 		NavigationServer3D.map_set_cell_height(nav_map, 0.1)
 		NavigationServer3D.map_set_cell_size(nav_map, 0.5)
 
@@ -976,7 +976,7 @@ func _perform_navmesh_rebake() -> void:
 	# default (0.25/0.25), spamming a warning per rebake.
 	var nav_map: RID = _nav_region.get_navigation_map()
 	if nav_map.is_valid():
-		NavigationServer3D.map_set_edge_connection_margin(nav_map, 2.5)
+		NavigationServer3D.map_set_edge_connection_margin(nav_map, 1.0)
 		NavigationServer3D.map_set_cell_height(nav_map, 0.1)
 		NavigationServer3D.map_set_cell_size(nav_map, 0.5)
 
