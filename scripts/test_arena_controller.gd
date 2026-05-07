@@ -733,19 +733,14 @@ func _setup_navigation() -> void:
 	nav_mesh.filter_low_hanging_obstacles = false
 	nav_mesh.filter_walkable_low_height_spans = false
 	# agent_radius shrinks the walkable area by this distance from
-	# every obstacle edge. The narrower this is, the more of a ramp's
-	# slope the path planner can use — including the pinched corners
-	# at the foot where ramps meet ground. 2.5u left only ~2u walkable
-	# on 7u ramps; 1.5u gave 4u but still pinched the foot triangle so
-	# units drifted off the navmesh onto the unbaked-but-physical edges
-	# at exactly those corners. 1.0u widens the strip to 5u and the
-	# foot transitions enough to keep a default-radius unit on-mesh.
-	# Building clearance: obstacle padding (1.3× footprint) provides
-	# the lion's share of separation; agent_radius mostly affects the
-	# inner cushion. Dropping it from 1.5 to 1.0 narrows that cushion
-	# by 0.5u, which the runtime avoid force (avoid_min_distance=3u,
-	# avoid_repel=24) compensates for when units come close.
-	nav_mesh.agent_radius = 1.0
+	# every obstacle edge. Iteratively lowered: 2.5 → 1.5 → 1.0 → 0.5.
+	# Each drop gave more ramp coverage. At 0.5 the slope navmesh nearly
+	# reaches the ramp's physical side walls and the bottom-corner pinch
+	# (where slope navmesh meets ground navmesh past the ramp foot) is
+	# small enough that edge_connection_margin bridges it cleanly.
+	# Building clearance loses a little inner cushion on each step, but
+	# 30% obstacle padding plus the runtime avoid force handles the rest.
+	nav_mesh.agent_radius = 0.5
 	nav_mesh.agent_height = 2.0
 	# agent_max_climb caps the vertical distance Recast will treat as
 	# a "step" between two adjacent walkable cells. Plateaus are 1.5-2u
@@ -799,7 +794,7 @@ func _setup_navigation() -> void:
 	# every rebake -- harmless for pathing but floods the debugger.
 	var nav_map: RID = nav_region.get_navigation_map()
 	if nav_map.is_valid():
-		NavigationServer3D.map_set_edge_connection_margin(nav_map, 1.0)
+		NavigationServer3D.map_set_edge_connection_margin(nav_map, 2.0)
 		NavigationServer3D.map_set_cell_height(nav_map, 0.1)
 		NavigationServer3D.map_set_cell_size(nav_map, 0.5)
 
@@ -982,7 +977,7 @@ func _perform_navmesh_rebake() -> void:
 	# default (0.25/0.25), spamming a warning per rebake.
 	var nav_map: RID = _nav_region.get_navigation_map()
 	if nav_map.is_valid():
-		NavigationServer3D.map_set_edge_connection_margin(nav_map, 1.0)
+		NavigationServer3D.map_set_edge_connection_margin(nav_map, 2.0)
 		NavigationServer3D.map_set_cell_height(nav_map, 0.1)
 		NavigationServer3D.map_set_cell_size(nav_map, 0.5)
 
