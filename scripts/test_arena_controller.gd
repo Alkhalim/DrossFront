@@ -3753,53 +3753,61 @@ func _setup_ground_patches() -> void:
 		# under uneven snowpack. Each biome carries a distinct
 		# texture key so the wintry ground reads as several real
 		# surfaces (snow, asphalt scorch, iron stain, mud) instead
-		# of one flat shader.
+		# of one flat shader. Tints pushed toward strong contrast
+		# (very dark asphalt, saturated rust, near-black mud) so
+		# each zone reads unambiguously against the neutral-grey
+		# Iron Gate ground.
 		biomes = [
 			# Cleared road / vehicle-track zone -- exposed dark
 			# asphalt under trampled-down snow.
-			{"pos": Vector3(0.0, 0.025, 0.0), "size": 60.0, "tint": Color(0.30, 0.32, 0.34, 0.65), "rough": 1.0, "tex": "scorched"},
+			{"pos": Vector3(0.0, 0.025, 0.0), "size": 60.0, "tint": Color(0.10, 0.10, 0.13, 0.92), "rough": 1.0, "tex": "scorched"},
 			# Slush drift zones flanking the spawns -- packed snow.
-			{"pos": Vector3(0.0, 0.025, 80.0), "size": 80.0, "tint": Color(0.85, 0.88, 0.92, 0.65), "rough": 1.0, "tex": "snow"},
-			{"pos": Vector3(0.0, 0.025, -80.0), "size": 80.0, "tint": Color(0.85, 0.88, 0.92, 0.65), "rough": 1.0, "tex": "snow"},
+			{"pos": Vector3(0.0, 0.025, 80.0), "size": 80.0, "tint": Color(0.88, 0.92, 0.96, 0.85), "rough": 1.0, "tex": "snow"},
+			{"pos": Vector3(0.0, 0.025, -80.0), "size": 80.0, "tint": Color(0.88, 0.92, 0.96, 0.85), "rough": 1.0, "tex": "snow"},
 			# Iron-stained patches around the central ruins.
-			{"pos": Vector3(48.0, 0.025, 30.0), "size": 35.0, "tint": Color(0.45, 0.30, 0.22, 0.65), "rough": 1.0, "tex": "metal"},
-			{"pos": Vector3(-48.0, 0.025, -30.0), "size": 35.0, "tint": Color(0.45, 0.30, 0.22, 0.65), "rough": 1.0, "tex": "metal"},
+			{"pos": Vector3(48.0, 0.025, 30.0), "size": 35.0, "tint": Color(0.58, 0.26, 0.14, 0.88), "rough": 1.0, "tex": "metal"},
+			{"pos": Vector3(-48.0, 0.025, -30.0), "size": 35.0, "tint": Color(0.58, 0.26, 0.14, 0.88), "rough": 1.0, "tex": "metal"},
 			# Far-flank dirt-windswept zones where the snow's been
 			# scoured off entirely -- exposed mud.
-			{"pos": Vector3(95.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.36, 0.30, 0.22, 0.60), "rough": 1.0, "tex": "mud"},
-			{"pos": Vector3(-95.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.36, 0.30, 0.22, 0.60), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(95.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.20, 0.16, 0.10, 0.88), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(-95.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.20, 0.16, 0.10, 0.88), "rough": 1.0, "tex": "mud"},
 		]
 	elif _is_ashplains():
 		biomes = [
 			# Pale-ash drift zones -- sand-textured.
-			{"pos": Vector3(0.0, 0.025, 60.0), "size": 90.0, "tint": Color(0.65, 0.50, 0.30, 0.65), "rough": 1.0, "tex": "sand"},
-			{"pos": Vector3(0.0, 0.025, -60.0), "size": 90.0, "tint": Color(0.65, 0.50, 0.30, 0.65), "rough": 1.0, "tex": "sand"},
+			{"pos": Vector3(0.0, 0.025, 60.0), "size": 90.0, "tint": Color(0.78, 0.62, 0.36, 0.82), "rough": 1.0, "tex": "sand"},
+			{"pos": Vector3(0.0, 0.025, -60.0), "size": 90.0, "tint": Color(0.78, 0.62, 0.36, 0.82), "rough": 1.0, "tex": "sand"},
 			# Volcanic scar -- scorched-earth texture.
-			{"pos": Vector3(0.0, 0.025, 0.0), "size": 55.0, "tint": Color(0.18, 0.13, 0.10, 0.75), "rough": 1.0, "tex": "scorched"},
+			{"pos": Vector3(0.0, 0.025, 0.0), "size": 55.0, "tint": Color(0.10, 0.07, 0.05, 0.92), "rough": 1.0, "tex": "scorched"},
 			# Bleached bone-white salt-flat patches -- cracked mud
 			# texture in a pale tone.
-			{"pos": Vector3(50.0, 0.025, 95.0), "size": 38.0, "tint": Color(0.85, 0.80, 0.60, 0.55), "rough": 1.0, "tex": "mud"},
-			{"pos": Vector3(-50.0, 0.025, -95.0), "size": 38.0, "tint": Color(0.85, 0.80, 0.60, 0.55), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(50.0, 0.025, 95.0), "size": 38.0, "tint": Color(0.92, 0.85, 0.62, 0.85), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(-50.0, 0.025, -95.0), "size": 38.0, "tint": Color(0.92, 0.85, 0.62, 0.85), "rough": 1.0, "tex": "mud"},
 			# Cracked-earth dark zones -- ferrous rust on cracked mud.
-			{"pos": Vector3(70.0, 0.025, 30.0), "size": 42.0, "tint": Color(0.32, 0.20, 0.12, 0.70), "rough": 1.0, "tex": "mud"},
-			{"pos": Vector3(-70.0, 0.025, -30.0), "size": 42.0, "tint": Color(0.32, 0.20, 0.12, 0.70), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(70.0, 0.025, 30.0), "size": 42.0, "tint": Color(0.40, 0.18, 0.10, 0.88), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(-70.0, 0.025, -30.0), "size": 42.0, "tint": Color(0.40, 0.18, 0.10, 0.88), "rough": 1.0, "tex": "mud"},
 			# Far-flank dust patches -- fine sand drift.
-			{"pos": Vector3(115.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.58, 0.44, 0.26, 0.55), "rough": 1.0, "tex": "sand"},
-			{"pos": Vector3(-115.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.58, 0.44, 0.26, 0.55), "rough": 1.0, "tex": "sand"},
+			{"pos": Vector3(115.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.66, 0.50, 0.28, 0.78), "rough": 1.0, "tex": "sand"},
+			{"pos": Vector3(-115.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.66, 0.50, 0.28, 0.78), "rough": 1.0, "tex": "sand"},
 		]
 	else:
+		# Foundry Belt — brown noise ground. Biome tints chosen for
+		# strong contrast against the warm-brown base: very-dark soot
+		# scar, pale-cream sand drifts, near-black mud loam, vivid rust
+		# stain. Earlier values sat in the same warm-brown family as
+		# the ground and disappeared into the noise.
 		biomes = [
-			# Soot scar across the contested mid -- scorched ground.
-			{"pos": Vector3(0.0, 0.025, 0.0), "size": 70.0, "tint": Color(0.16, 0.14, 0.14, 0.65), "rough": 1.0, "tex": "scorched"},
-			# Sand drift on the east flank.
-			{"pos": Vector3(95.0, 0.025, 35.0), "size": 55.0, "tint": Color(0.40, 0.30, 0.20, 0.55), "rough": 0.95, "tex": "sand"},
-			{"pos": Vector3(-95.0, 0.025, -35.0), "size": 55.0, "tint": Color(0.38, 0.28, 0.18, 0.55), "rough": 0.95, "tex": "sand"},
-			# Dried-mud zones near the back-doors.
-			{"pos": Vector3(70.0, 0.025, -75.0), "size": 50.0, "tint": Color(0.30, 0.24, 0.18, 0.65), "rough": 0.95, "tex": "mud"},
-			{"pos": Vector3(-70.0, 0.025, 75.0), "size": 50.0, "tint": Color(0.30, 0.24, 0.18, 0.65), "rough": 0.95, "tex": "mud"},
-			# Industrial rust stain -- iron-tinged metal texture.
-			{"pos": Vector3(0.0, 0.025, 75.0), "size": 40.0, "tint": Color(0.42, 0.26, 0.18, 0.55), "rough": 0.95, "tex": "metal"},
-			{"pos": Vector3(0.0, 0.025, -75.0), "size": 40.0, "tint": Color(0.42, 0.26, 0.18, 0.55), "rough": 0.95, "tex": "metal"},
+			# Soot scar across the contested mid -- nearly black.
+			{"pos": Vector3(0.0, 0.025, 0.0), "size": 70.0, "tint": Color(0.07, 0.06, 0.07, 0.92), "rough": 1.0, "tex": "scorched"},
+			# Sand drift on the east flank -- pale cream / yellow-tan.
+			{"pos": Vector3(95.0, 0.025, 35.0), "size": 55.0, "tint": Color(0.78, 0.68, 0.42, 0.85), "rough": 0.95, "tex": "sand"},
+			{"pos": Vector3(-95.0, 0.025, -35.0), "size": 55.0, "tint": Color(0.76, 0.66, 0.40, 0.85), "rough": 0.95, "tex": "sand"},
+			# Dried-mud zones near the back-doors -- very dark loam.
+			{"pos": Vector3(70.0, 0.025, -75.0), "size": 50.0, "tint": Color(0.16, 0.12, 0.08, 0.90), "rough": 0.95, "tex": "mud"},
+			{"pos": Vector3(-70.0, 0.025, 75.0), "size": 50.0, "tint": Color(0.16, 0.12, 0.08, 0.90), "rough": 0.95, "tex": "mud"},
+			# Industrial rust stain -- saturated orange-rust.
+			{"pos": Vector3(0.0, 0.025, 75.0), "size": 40.0, "tint": Color(0.62, 0.28, 0.14, 0.85), "rough": 0.95, "tex": "metal"},
+			{"pos": Vector3(0.0, 0.025, -75.0), "size": 40.0, "tint": Color(0.62, 0.28, 0.14, 0.85), "rough": 0.95, "tex": "metal"},
 		]
 	for b: Dictionary in biomes:
 		_spawn_soft_patch(
