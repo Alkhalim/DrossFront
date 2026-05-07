@@ -3618,74 +3618,89 @@ func _spawn_plateau_ramp(plateau_center: Vector3, top_size: Vector2, height: flo
 	root.add_child(col)
 
 	# Plateau-extension side walls: tall solid walls at each side of the
-	# ramp, full plateau height, that visually and physically continue the
-	# plateau cliff around the ramp slot. With them, the ramp's side
-	# "flanks" are no longer separate triangular faces protruding into
-	# space (the source of the stairstep-bridging bug); they're flat
-	# vertical plateau cliffs, exactly like the rest of the plateau
-	# perimeter. Recast sees walls of full height (1.5-2u) along the
-	# ramp's sides, well above agent_max_climb, so no slope-to-ground
-	# bridging through the side bottoms — A* must use the front (foot)
-	# transition. Replaces the earlier NavigationObstacle3D carve strip.
+	# ramp that visually and physically continue the plateau cliff around
+	# the ramp slot. With them, the ramp's side "flanks" are no longer
+	# separate triangular faces protruding into space; they're flat
+	# vertical plateau cliffs. Recast sees walls of full height (1.5-2u)
+	# along the ramp sides — well above agent_max_climb — so no slope-to-
+	# ground bridging through the side bottoms.
+	#
+	# Railing taper: the front (foot) end of each wall drops to a lower
+	# "railing" height, signalling the ramp entrance instead of looking
+	# like a solid corridor that suddenly opens. The wall is built as two
+	# stacked boxes: 70% full-height at the back, 30% railing-height at
+	# the front (foot end).
 	const SIDE_WALL_THICKNESS: float = 0.5
-	var add_side_wall := func(p_min: Vector3, p_max: Vector3) -> void:
+	const RAILING_FRAC: float = 0.3
+	const RAILING_HEIGHT_FRAC: float = 0.35
+	var railing_height: float = maxf(0.4, height * RAILING_HEIGHT_FRAC)
+
+	var add_wall_block := func(x_min: float, x_max: float, z_min: float, z_max: float, y_max: float) -> void:
 		var w_root := StaticBody3D.new()
 		w_root.collision_layer = 4
 		w_root.collision_mask = 0
-		# Center the wall in its bounding region.
 		w_root.position = Vector3(
-			(p_min.x + p_max.x) * 0.5,
-			height * 0.5,
-			(p_min.z + p_max.z) * 0.5)
+			(x_min + x_max) * 0.5,
+			y_max * 0.5,
+			(z_min + z_max) * 0.5)
 		w_root.add_to_group("elevation")
 		w_root.add_to_group("terrain")
 		w_root.set_meta("_fow_skip_dim", true)
 		root.add_child(w_root)
 		var w_col := CollisionShape3D.new()
 		var w_box := BoxShape3D.new()
-		w_box.size = Vector3(
-			absf(p_max.x - p_min.x),
-			height,
-			absf(p_max.z - p_min.z))
+		w_box.size = Vector3(x_max - x_min, y_max, z_max - z_min)
 		w_col.shape = w_box
 		w_root.add_child(w_col)
-		# Visual mesh — same material as the plateau body so the wall reads
-		# as part of the plateau cliff face.
 		var w_mesh_inst := MeshInstance3D.new()
 		var w_box_mesh := BoxMesh.new()
 		w_box_mesh.size = w_box.size
 		w_mesh_inst.mesh = w_box_mesh
 		w_mesh_inst.material_override = share_mat
 		w_root.add_child(w_mesh_inst)
+
+	# add_railing_wall builds one side wall split along its run axis into
+	# a full-height back portion and a railing-height foot portion.
+	#   axis_min/axis_max: extents along the run axis (the ramp's length)
+	#   perp_min/perp_max: extents in the perpendicular axis (wall thickness)
+	#   axis_is_x:        true if the run axis is X (E/W ramps), false for Z (N/S)
+	#   foot_at_max:      true if the foot end is at the higher coord on the run axis
+	var add_railing_wall := func(axis_min: float, axis_max: float, perp_min: float, perp_max: float, axis_is_x: bool, foot_at_max: bool) -> void:
+		var split: float
+		if foot_at_max:
+			split = axis_min + (axis_max - axis_min) * (1.0 - RAILING_FRAC)
+			# Back portion: from axis_min to split, full height.
+			# Front railing: from split to axis_max, railing height.
+			if axis_is_x:
+				add_wall_block.call(axis_min, split, perp_min, perp_max, height)
+				add_wall_block.call(split, axis_max, perp_min, perp_max, railing_height)
+			else:
+				add_wall_block.call(perp_min, perp_max, axis_min, split, height)
+				add_wall_block.call(perp_min, perp_max, split, axis_max, railing_height)
+		else:
+			split = axis_min + (axis_max - axis_min) * RAILING_FRAC
+			# Front railing: from axis_min to split, railing height.
+			# Back portion: from split to axis_max, full height.
+			if axis_is_x:
+				add_wall_block.call(axis_min, split, perp_min, perp_max, railing_height)
+				add_wall_block.call(split, axis_max, perp_min, perp_max, height)
+			else:
+				add_wall_block.call(perp_min, perp_max, axis_min, split, railing_height)
+				add_wall_block.call(perp_min, perp_max, split, axis_max, height)
+
 	match side:
-		"N":  # ramp goes north (+z), side walls at x=±hw
-			add_side_wall.call(
-				Vector3(-hw - SIDE_WALL_THICKNESS, 0, hz),
-				Vector3(-hw, 0, hz + run))
-			add_side_wall.call(
-				Vector3(hw, 0, hz),
-				Vector3(hw + SIDE_WALL_THICKNESS, 0, hz + run))
-		"S":  # ramp goes south (-z), side walls at x=±hw
-			add_side_wall.call(
-				Vector3(-hw - SIDE_WALL_THICKNESS, 0, -hz - run),
-				Vector3(-hw, 0, -hz))
-			add_side_wall.call(
-				Vector3(hw, 0, -hz - run),
-				Vector3(hw + SIDE_WALL_THICKNESS, 0, -hz))
-		"E":  # ramp goes east (+x), side walls at z=±hw
-			add_side_wall.call(
-				Vector3(hx, 0, -hw - SIDE_WALL_THICKNESS),
-				Vector3(hx + run, 0, -hw))
-			add_side_wall.call(
-				Vector3(hx, 0, hw),
-				Vector3(hx + run, 0, hw + SIDE_WALL_THICKNESS))
-		_:    # "W" — ramp goes west (-x), side walls at z=±hw
-			add_side_wall.call(
-				Vector3(-hx - run, 0, -hw - SIDE_WALL_THICKNESS),
-				Vector3(-hx, 0, -hw))
-			add_side_wall.call(
-				Vector3(-hx - run, 0, hw),
-				Vector3(-hx, 0, hw + SIDE_WALL_THICKNESS))
+		"N":  # ramp goes north (+z), side walls at x=±hw, foot at z=hz+run (max z)
+			add_railing_wall.call(hz, hz + run, -hw - SIDE_WALL_THICKNESS, -hw, false, true)
+			add_railing_wall.call(hz, hz + run, hw, hw + SIDE_WALL_THICKNESS, false, true)
+		"S":  # ramp goes south (-z), side walls at x=±hw, foot at z=-hz-run (min z)
+			add_railing_wall.call(-hz - run, -hz, -hw - SIDE_WALL_THICKNESS, -hw, false, false)
+			add_railing_wall.call(-hz - run, -hz, hw, hw + SIDE_WALL_THICKNESS, false, false)
+		"E":  # ramp goes east (+x), side walls at z=±hw, foot at x=hx+run (max x)
+			add_railing_wall.call(hx, hx + run, -hw - SIDE_WALL_THICKNESS, -hw, true, true)
+			add_railing_wall.call(hx, hx + run, hw, hw + SIDE_WALL_THICKNESS, true, true)
+		_:    # "W" — foot at x=-hx-run (min x)
+			add_railing_wall.call(-hx - run, -hx, -hw - SIDE_WALL_THICKNESS, -hw, true, false)
+			add_railing_wall.call(-hx - run, -hx, hw, hw + SIDE_WALL_THICKNESS, true, false)
 
 	# Navmesh — sloped walking surface as 2 tris in world space. Vertices
 	# tA/tB sit exactly on the plateau top edge so the path planner sees
