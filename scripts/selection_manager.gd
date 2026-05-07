@@ -1058,14 +1058,21 @@ func _new_system_dispatch_movables(ground_pos: Vector3, clear_combat: bool = tru
 		grp.name = "SquadGroup_%d" % Time.get_ticks_msec()
 		get_tree().current_scene.add_child(grp)
 		grp.setup(ground_members, ground_pos)
-		# In dispersed mode each squad routes independently to its formation slot.
+		# Dispersed mode: members are too spread out for a meaningful formation,
+		# so each one paths independently to the destination. SquadGroup's
+		# _check_dispersed_promotion watches for them all to gather near the
+		# destination, then flips to cohesive mode and assigns formation slots
+		# from there. Sending them to _slot_world(m) here was the bug — that
+		# function returns _group_center + slot_offset, and _group_center is
+		# the starting centroid (which sits between scattered units, not at
+		# the click target), so everyone collapsed to the centroid instead.
 		if not grp._is_cohesive:
 			for m: Node3D in ground_members:
 				if clear_combat and m.has_method("command_move"):
-					m.command_move(grp._slot_world(m), true)
+					m.command_move(ground_pos, true)
 				else:
 					var gm2: GroundMovement = m.get_node("MovementComponent") as GroundMovement
-					gm2.goto_world(grp._slot_world(m))
+					gm2.goto_world(ground_pos)
 		elif clear_combat:
 			# Cohesive mode: SquadGroup drives targets per-frame via set_slot_target,
 			# but we still need to open the priority window and clear combat state
