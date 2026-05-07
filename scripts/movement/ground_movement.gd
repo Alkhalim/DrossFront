@@ -60,6 +60,18 @@ func set_slot_target(slot_world: Vector3) -> void:
 	path_waypoints = PackedVector3Array()
 	path_waypoint_idx = 0
 
+
+func clear_target() -> void:
+	## Override base clear_target to also wipe the path-waypoint cache.
+	## Without this, _physics_process reads the next path waypoint and
+	## overwrites `target` back to it on the very next physics tick —
+	## stop() becomes a no-op for path-routed units, so combat's "stop
+	## and fire" leaves the unit still walking. Now stop() actually
+	## halts the route as well as clearing the goal.
+	super.clear_target()
+	path_waypoints = PackedVector3Array()
+	path_waypoint_idx = 0
+
 ## Override of MovementComponent.arrival_target. When a path is active,
 ## return the path's final waypoint — the unit-level arrival poll uses
 ## this to avoid registering arrival at intermediate waypoints (where
