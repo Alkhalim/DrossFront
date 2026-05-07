@@ -5182,7 +5182,12 @@ func _update_selection_bars() -> void:
 		_sel_hp_mat.albedo_color = Color(r, g, 0.20, 0.95)
 		_sel_hp_mat.emission = Color(r, g, 0.20, 1.0)
 	# Production bar — visible iff something is queued, fill = current
-	# unit's progress / build_time.
+	# unit's progress / build_time. Skipped entirely for buildings
+	# whose production isn't visible to the local player (enemy /
+	# unallied) — the bg/fill nodes were never created for them
+	# and accessing .visible on the null refs would crash.
+	if _sel_prod_bg == null or _sel_prod_fill == null:
+		return
 	var producing: bool = is_constructed and not _build_queue.is_empty()
 	_sel_prod_bg.visible = producing
 	_sel_prod_fill.visible = producing
