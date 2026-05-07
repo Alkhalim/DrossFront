@@ -173,9 +173,16 @@ func show_range() -> void:
 	_range_indicator.mesh = cyl
 
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.8, 0.6, 0.1, 0.08)
+	# Brighter than the previous 0.08 alpha — the old value was nearly
+	# invisible in the crawler ring case, especially over green/teal
+	# ground. 0.22 reads as a clear amber footprint without obscuring
+	# the wrecks underneath.
+	mat.albedo_color = Color(0.95, 0.65, 0.15, 0.22)
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.emission_enabled = true
+	mat.emission = Color(0.95, 0.65, 0.15, 1.0)
+	mat.emission_energy_multiplier = 0.4
 	_range_indicator.set_surface_override_material(0, mat)
 
 	_range_indicator.position = Vector3(0, 0.1, 0)

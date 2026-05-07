@@ -36,7 +36,10 @@ const ARRIVE_THRESHOLD: float = 1.4
 ## 45u to 39.6u per balance request -- crawlers were reaching too far
 ## into the contested mid; the smaller leash forces the player to
 ## actually advance the crawler to push the front line.
-const HARVEST_RADIUS: float = 39.6
+## Crawler harvest radius — 1.5× the standard salvage yard's COLLECTION_RADIUS
+## (30u). Bumped from 39.6 (1.32×) to make the crawler a meaningfully wider
+## collector, which the crawler's chassis cost is meant to pay for.
+const HARVEST_RADIUS: float = 45.0
 ## Wrecks above this size are too tough to crush — Crawler bumps into them.
 const CRUSH_MAX_WRECK_SIZE: float = 1.3
 ## Salvage absorbed when crushing a wreck (per doc: 25%).

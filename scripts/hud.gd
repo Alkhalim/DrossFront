@@ -3066,6 +3066,22 @@ func _build_building_stat_sheet(building: Node3D, bstats: BuildingStatResource, 
 			_stat_chip("Produces", "%d unit type(s)" % bstats.producible_units.size(), STAT_LABEL_COLOR_RANGE),
 		]
 		rows.append(produces_row)
+
+	# Salvage yard: a stat-chip row showing nearby salvage + harvest
+	# range. Mirrors the crawler panel's "Salvage" chip so both yards
+	# have the same prominent readout (in addition to the queue line
+	# below). User feedback that the queue label was easy to overlook
+	# while scanning a yard's stats.
+	var yard: Node = building.get_node_or_null("SalvageYardComponent") if building else null
+	if yard and yard.has_method("get_collection_radius"):
+		var nearby_s: int = 0
+		if yard.has_method("get_nearby_salvage"):
+			nearby_s = yard.call("get_nearby_salvage") as int
+		var hr: float = float(yard.call("get_collection_radius"))
+		rows.append([
+			_stat_chip("Salvage", "%dS" % nearby_s, STAT_LABEL_COLOR_COST_S),
+			_stat_chip("Harvest", "%dm" % int(hr), STAT_LABEL_COLOR_RANGE),
+		])
 	return _build_stat_sheet(rows)
 
 

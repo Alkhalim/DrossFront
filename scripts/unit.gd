@@ -5117,12 +5117,11 @@ func _update_hp_bar() -> void:
 
 
 func _update_reload_bar() -> void:
-	## Whitegrey reload bar under the HP bar. Reads the combat component's
-	## _fire_cooldown vs _fire_cooldown_max (whatever the cooldown was
-	## set to on the most recent fire — burst weapons can set this to
-	## several × the base rof). Fills from empty (just fired) toward
-	## full (ready to fire). Hidden once ready so the silhouette stays
-	## clean.
+	## Whitegrey reload bar under the HP bar. Computes fill from real
+	## wall-clock time since the most recent fire (combat tick is
+	## staggered to 20Hz, so reading _fire_cooldown directly produced
+	## visible 50ms steps). Fills from empty (just fired) toward
+	## full (ready to fire). Hidden once ready.
 	if not _reload_bar_fill:
 		return
 	var combat: Node = get_combat()
@@ -5131,11 +5130,19 @@ func _update_reload_bar() -> void:
 		if _reload_bar_bg:
 			_reload_bar_bg.visible = false
 		return
-	var cd: float = (combat.get("_fire_cooldown") as float) if "_fire_cooldown" in combat else 0.0
 	var cd_max: float = (combat.get("_fire_cooldown_max") as float) if "_fire_cooldown_max" in combat else 1.0
 	if cd_max <= 0.0:
 		cd_max = 1.0
-	var pct: float = clampf(1.0 - (cd / cd_max), 0.0, 1.0)
+	var set_at: int = (combat.get("_fire_cooldown_set_at_msec") as int) if "_fire_cooldown_set_at_msec" in combat else 0
+	if set_at == 0:
+		# Never fired — bar full = ready, but hidden because no
+		# pending reload to show.
+		_reload_bar_fill.visible = false
+		if _reload_bar_bg:
+			_reload_bar_bg.visible = false
+		return
+	var elapsed_sec: float = float(Time.get_ticks_msec() - set_at) / 1000.0
+	var pct: float = clampf(elapsed_sec / cd_max, 0.0, 1.0)
 	var bar_width: float = 2.0
 	_reload_bar_fill.scale.x = maxf(pct * bar_width, 0.01)
 	_reload_bar_fill.position.x = -bar_width / 2.0 * (1.0 - pct)
@@ -6263,10 +6270,30 @@ func _per_frame_bookkeeping(delta: float) -> void:
 			_stealth_check_throttle = STEALTH_CHECK_INTERVAL
 			_tick_stealth()
 
+	# HP bar + reload bar follow the unit at full physics rate, BEFORE
+	# the 1-in-3 stagger gate below. Reposition is cheap (a single
+	# global_position assignment + visibility check) but visible
+	# smoothness matters: at 20 Hz the bar lagged the unit by up to
+	# 33 ms while moving, which read as jagged. The reload-bar fill
+	# also benefits — it now re-reads _fire_cooldown every frame so
+	# the wipe is smooth instead of jumping in 50 ms steps.
+	if _hp_bar and is_instance_valid(_hp_bar):
+		var smooth_damaged: bool = false
+		if stats:
+			smooth_damaged = get_total_hp() < stats.hp_total
+		var smooth_should_show: bool = is_selected or smooth_damaged or hp_bar_hovered
+		if _hp_bar.visible != smooth_should_show:
+			_hp_bar.visible = smooth_should_show
+		if smooth_should_show:
+			var smooth_h: float = (_cached_total_height if _cached_total_height > 0.0 else _mech_total_height()) + 0.4
+			_hp_bar.global_position = global_position + Vector3(0, smooth_h, 0)
+			_update_reload_bar()
+
 	# 1-in-3 frame stagger for heavy visual work — camera cull check,
-	# walk animation, recoil, build claw, and HP bar reposition only
-	# run every 3rd physics frame (~20Hz). The light ticks above
-	# (flash, cooldown, courier tracks, stealth) run every frame.
+	# walk animation, recoil, and build claw only run every 3rd
+	# physics frame (~20Hz). HP bar position + reload bar already
+	# updated above (full rate); the stagger here covers the heavy
+	# visual recompute (walk-bob, dust spawns, etc).
 	if (_physics_frame_counter % 3) != _walk_bob_phase:
 		return
 
@@ -6319,31 +6346,13 @@ func _per_frame_bookkeeping(delta: float) -> void:
 			_build_spark_timer = 0.16
 			_spawn_build_sparks()
 
-	# Position HP bar above unit (top_level so we set global_position).
-	# Visibility rule: shown when selected, when damaged, or when hovered. A
-	# healthy idle unit is invisible-bar so the battlefield isn't cluttered.
-	# When the bar is invisible we skip the position/rotation update entirely
-	# — that work is per-unit per-physics-frame, and at 80+ units it's the
-	# difference between 4ms and 0.4ms of HP-bar overhead.
-	if _hp_bar and is_instance_valid(_hp_bar):
-		var damaged: bool = false
-		if stats:
-			damaged = get_total_hp() < stats.hp_total
-		var should_show: bool = is_selected or damaged or hp_bar_hovered
-		if _hp_bar.visible != should_show:
-			_hp_bar.visible = should_show
-		# Skip the position / rotation update when off-camera (the bar
-		# is also invisible at that range so the math is wasted).
-		if should_show and not anim_culled:
-			# Use the cached total height (set in _ready). Falls back to
-			# the live computation if the cache wasn't populated for any
-			# reason — same answer, just one extra dict lookup.
-			var bar_height: float = (_cached_total_height if _cached_total_height > 0.0 else _mech_total_height()) + 0.4
-			_hp_bar.global_position = global_position + Vector3(0, bar_height, 0)
-			# Reuse the cached camera reference set above for the cull
-			# check — saves a get_viewport().get_camera_3d() per frame.
-			if _camera_cached:
-				_hp_bar.global_rotation = _camera_cached.global_rotation
+	# HP bar BILLBOARD rotation — keeps the bar facing the camera. Position
+	# update was moved out to per-frame above; the camera rotation barely
+	# changes between physics frames so 20 Hz is plenty here. anim_culled
+	# skip is preserved so off-camera units don't pay the rotation write.
+	if _hp_bar and is_instance_valid(_hp_bar) and _hp_bar.visible and not anim_culled:
+		if _camera_cached:
+			_hp_bar.global_rotation = _camera_cached.global_rotation
 
 
 ## Legacy movement integration: NavigationAgent3D pathfinding + direct-
