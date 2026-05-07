@@ -540,6 +540,29 @@ func select_idle_engineer() -> void:
 		return
 
 
+func _refund_demolished_building(building: Building) -> void:
+	## Returns part of the building's salvage/fuel cost to the player
+	## when they self-destruct it via Delete. Sized so the player isn't
+	## punished for clearing a misplaced foundation but doesn't get
+	## free recycling on a long-running structure.
+	if not building or not building.stats:
+		return
+	var rm: Node = get_tree().current_scene.get_node_or_null("ResourceManager")
+	if not rm:
+		return
+	var refund_frac: float = 0.5
+	if not building.is_constructed and building.stats.build_time > 0.0:
+		# Under-construction: extra refund proportional to remaining work.
+		var p: float = clampf(building._construction_progress / building.stats.build_time, 0.0, 1.0)
+		refund_frac = 0.5 + 0.3 * (1.0 - p)
+	var s_back: int = int(float(building.stats.cost_salvage) * refund_frac)
+	var f_back: int = int(float(building.stats.cost_fuel) * refund_frac)
+	if s_back > 0 and rm.has_method("add_salvage"):
+		rm.call("add_salvage", s_back)
+	if f_back > 0 and rm.has_method("add_fuel"):
+		rm.call("add_fuel", f_back)
+
+
 func _delete_selected_owned_entities() -> bool:
 	## Self-destructs every player-owned entity in the current selection.
 	## Units / Crawlers / buildings / foundations all route through their
@@ -572,6 +595,16 @@ func _delete_selected_owned_entities() -> bool:
 	if _selected_building and is_instance_valid(_selected_building):
 		var b_owner: int = (_selected_building.get("owner_id") as int) if "owner_id" in _selected_building else -1
 		if b_owner == 0 and _selected_building.has_method("take_damage"):
+			# Demolition refund: deliberate self-destruct returns half
+			# the cost, and unfinished foundations get an extra bonus
+			# scaled by construction progress (since the player hasn't
+			# benefited from a complete building yet). Full breakdown:
+			#   constructed: refund = 0.5 * cost
+			#   under construction: refund = (0.5 + 0.3 * (1 - p)) * cost
+			#     where p = construction_progress / build_time
+			# So a freshly-placed unfinished foundation refunds 80%; one
+			# nearly done refunds the same 50% as a finished building.
+			_refund_demolished_building(_selected_building)
 			_selected_building.call("take_damage", SELF_DESTRUCT, null)
 			killed_any = true
 	if killed_any:

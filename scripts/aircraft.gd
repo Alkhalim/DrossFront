@@ -2755,6 +2755,21 @@ func get_muzzle_positions() -> Array[Vector3]:
 
 
 func _die() -> void:
+	# Release population. Aircraft were leaking pop on death — this
+	# call mirrors Unit._die. Player-side units only (owner 0); the AI
+	# manages its own pop ledger separately.
+	if owner_id == 0:
+		var resource_mgr: Node = get_tree().current_scene.get_node_or_null("ResourceManager") if get_tree() else null
+		if resource_mgr and resource_mgr.has_method("remove_population") and stats:
+			resource_mgr.remove_population(stats.population)
+	# Free the selection ring eagerly. The ring is parented to the
+	# scene (not the aircraft) so it stays on the ground while the
+	# aircraft bobs — but that means queue_free on self DOESN'T cascade
+	# to the ring. Without this, the green selection ring kept hovering
+	# over a dead aircraft's last position forever.
+	if _select_ring and is_instance_valid(_select_ring):
+		_select_ring.queue_free()
+		_select_ring = null
 	# Simple destruction — drop straight down with a fade. A proper
 	# crash animation comes when the aircraft visual gets a real
 	# scene treatment per faction.
