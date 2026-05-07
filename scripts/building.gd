@@ -2636,8 +2636,12 @@ func _add_nav_obstacle() -> void:
 	# that the AI constructs after match start are invisible to the
 	# baked navmesh, and units path straight through them and oscillate
 	# against the collision wall — the "stuck on building" symptom.
+	# Property names vary across Godot 4.x minor versions — set whichever
+	# the current build exposes.
 	if "affect_navigation_mesh" in obstacle:
 		obstacle.affect_navigation_mesh = true
+	if "carve_navigation_mesh" in obstacle:
+		obstacle.carve_navigation_mesh = true
 	add_child(obstacle)
 
 
