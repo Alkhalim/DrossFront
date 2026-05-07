@@ -148,23 +148,29 @@ func _avoid_obstacles() -> Array:
 	return filtered
 
 func _on_stuck_level_1_repath() -> void:
-	## Re-query the path with the current target.
+	## Re-query the path toward the FINAL destination, not the current
+	## waypoint. _physics_process overwrites `target` with the live
+	## waypoint each frame, so using `target` here would query a path
+	## back to the waypoint we're already chasing — when the new path
+	## ends, the unit would stop at the waypoint instead of continuing
+	## to the original goal.
 	if not has_target():
 		return
 	var router: NavRouter = _get_nav_router()
 	if router == null:
 		return
+	var goal: Vector3 = arrival_target()
 	var result: PathResult = router.query_path(
-		_body.global_position, target, agent_profile)
+		_body.global_position, goal, agent_profile)
 	if result.valid:
 		path_waypoints = result.waypoints
 		path_waypoint_idx = 1
 
 func _on_stuck_level_3_drop() -> void:
-	## Squad has been at Level 2 (push-out) for stuck_drop_cooldown
-	## seconds without recovering. Drop from any current SquadGroup
-	## with NO_PROGRESS reason; retry with a wider goal-snap so that
-	## targets near (but not on) the navmesh become reachable.
+	## Drop from any current SquadGroup with NO_PROGRESS reason; retry the
+	## path with a wider goal-snap so targets near (but not on) the navmesh
+	## become reachable. Use the FINAL destination, not the live waypoint
+	## — same reasoning as _on_stuck_level_1_repath.
 	if squad_group_ref != null and is_instance_valid(squad_group_ref):
 		squad_group_ref.drop_member(get_parent(), SquadGroup.DropReason.NO_PROGRESS)
 		# drop_member nulls our squad_group_ref via SquadGroup logic
@@ -173,16 +179,20 @@ func _on_stuck_level_3_drop() -> void:
 	var router: NavRouter = _get_nav_router()
 	if router == null:
 		return
-	# Wider goal snap: ask the router to project our target up to
-	# stuck_goal_snap_radius units to find a valid cell.
-	var snapped_target: Vector3 = router.project_to_navmesh(
-		target, agent_profile, stuck_goal_snap_radius)
-	target = snapped_target
+	var goal: Vector3 = arrival_target()
+	var snapped_goal: Vector3 = router.project_to_navmesh(
+		goal, agent_profile, stuck_goal_snap_radius)
 	var result: PathResult = router.query_path(
-		_body.global_position, target, agent_profile)
+		_body.global_position, snapped_goal, agent_profile)
 	if result.valid:
 		path_waypoints = result.waypoints
 		path_waypoint_idx = 1
+	else:
+		# No path even to the snapped goal. Fall back to direct seek; the
+		# next stuck level will escalate further if still stuck.
+		target = snapped_goal
+		path_waypoints = PackedVector3Array()
+		path_waypoint_idx = 0
 
 func _is_combat_engaged() -> bool:
 	var owner_unit: Node = get_parent()
