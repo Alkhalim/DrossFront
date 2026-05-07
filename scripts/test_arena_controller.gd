@@ -337,18 +337,22 @@ func _spawn_volcanic_fissure(pos: Vector3, fissure_size: Vector3, rot_y: float) 
 	glow_mat.emission_energy_multiplier = 2.8
 	glow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	glow_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	# Outer mouth polygon — perimeter walks along the fissure length
-	# with width that bulges in the middle and tapers at the ends,
-	# plus a per-vertex jitter so the silhouette is jagged.
+	# Outer mouth polygon — sits ABOVE the ground plane so it's
+	# actually visible. The previous -0.04 / -0.18 placements put
+	# the polygons under the opaque ground (PlaneMesh at y=0) so
+	# the player only saw the orange OmniLight glow with no
+	# geometry. Both layers stay below the fog overlay (y=0.10) so
+	# FogOfWar still dims them in unexplored cells.
 	var mouth: MeshInstance3D = _build_fissure_polygon(
-		fissure_size.x, fissure_size.z, -0.04, 0.45, 12, crust_mat
+		fissure_size.x, fissure_size.z, 0.05, 0.45, 12, crust_mat
 	)
 	root.add_child(mouth)
-	# Inner glow polygon — narrower (~50%) and recessed deeper so it
-	# reads as magma seen down through the crack mouth, not a stripe
-	# painted on the surface.
+	# Inner glow polygon — narrower than the mouth and lifted
+	# slightly above it so the bright magma core renders on top of
+	# the dark crust, with the crust visible as a dark border
+	# around it.
 	var inner: MeshInstance3D = _build_fissure_polygon(
-		fissure_size.x * 0.65, fissure_size.z * 0.5, -0.18, 0.55, 10, glow_mat
+		fissure_size.x * 0.65, fissure_size.z * 0.5, 0.07, 0.55, 10, glow_mat
 	)
 	root.add_child(inner)
 
@@ -3777,10 +3781,10 @@ func _setup_ground_patches() -> void:
 		# (very dark asphalt, saturated rust, near-black mud) so
 		# each zone reads unambiguously against the neutral-grey
 		# Iron Gate ground.
-		# Iron Gate: tints toned down (snow no longer near-white,
-		# rust no longer saturated). Sizes bumped, positions shifted
-		# so neighbouring biomes overlap; the alpha-baked textures
-		# blend at the seam.
+		# Iron Gate: rust + mud tints desaturated further so they
+		# don't clash visually against the bright snow zones. The
+		# warm brownish-red at (0.42, 0.22, 0.14) read as a strong
+		# colour cast against the cool snow palette per user feedback.
 		biomes = [
 			# Cleared road / vehicle-track zone -- exposed dark
 			# asphalt under trampled-down snow.
@@ -3788,13 +3792,13 @@ func _setup_ground_patches() -> void:
 			# Slush drift zones flanking the spawns -- packed snow.
 			{"pos": Vector3(10.0, 0.025, 70.0), "size": 130.0, "tint": Color(0.72, 0.76, 0.82, 0.78), "rough": 1.0, "tex": "snow"},
 			{"pos": Vector3(-10.0, 0.025, -70.0), "size": 130.0, "tint": Color(0.72, 0.76, 0.82, 0.78), "rough": 1.0, "tex": "snow"},
-			# Iron-stained patches around the central ruins.
-			{"pos": Vector3(48.0, 0.025, 30.0), "size": 65.0, "tint": Color(0.42, 0.22, 0.14, 0.80), "rough": 1.0, "tex": "metal"},
-			{"pos": Vector3(-48.0, 0.025, -30.0), "size": 65.0, "tint": Color(0.42, 0.22, 0.14, 0.80), "rough": 1.0, "tex": "metal"},
-			# Far-flank dirt-windswept zones where the snow's been
-			# scoured off entirely -- exposed mud.
-			{"pos": Vector3(95.0, 0.025, 0.0), "size": 90.0, "tint": Color(0.22, 0.17, 0.12, 0.82), "rough": 1.0, "tex": "mud"},
-			{"pos": Vector3(-95.0, 0.025, 0.0), "size": 90.0, "tint": Color(0.22, 0.17, 0.12, 0.82), "rough": 1.0, "tex": "mud"},
+			# Iron-stained patches -- desaturated so the warm brown
+			# doesn't fight the cool palette.
+			{"pos": Vector3(48.0, 0.025, 30.0), "size": 65.0, "tint": Color(0.32, 0.24, 0.20, 0.78), "rough": 1.0, "tex": "metal"},
+			{"pos": Vector3(-48.0, 0.025, -30.0), "size": 65.0, "tint": Color(0.32, 0.24, 0.20, 0.78), "rough": 1.0, "tex": "metal"},
+			# Far-flank dirt-windswept zones -- desaturated mud.
+			{"pos": Vector3(95.0, 0.025, 0.0), "size": 90.0, "tint": Color(0.22, 0.20, 0.18, 0.80), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(-95.0, 0.025, 0.0), "size": 90.0, "tint": Color(0.22, 0.20, 0.18, 0.80), "rough": 1.0, "tex": "mud"},
 		]
 	elif _is_ashplains():
 		# Ashplains: dial down the bleached-white and bright-sand

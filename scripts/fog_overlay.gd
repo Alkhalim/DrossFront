@@ -98,27 +98,33 @@ func _make_overlay_material() -> ShaderMaterial:
 shader_type spatial;
 render_mode unshaded, blend_mix, depth_draw_never, cull_disabled;
 
-uniform sampler2D fog_texture : filter_nearest, repeat_disable;
+// LINEAR filter so the sampler smooths between adjacent cells —
+// without this, every cell is a hard square block and the
+// VISIBLE↔EXPLORED↔UNEXPLORED transitions show as stair-step
+// artefacts where the fog crosses a biome (especially the bright
+// Iron Gate snow zones, where dimmed cells produced a very
+// visible step pattern).
+uniform sampler2D fog_texture : filter_linear, repeat_disable;
 
 void fragment() {
-	// PlaneMesh ships unit UVs; the plane is centred on origin so
-	// UV.x = (x + half) / (2 * half) maps directly to texel index.
-	// R8 sample returns byte / 255; multiply back to get the raw
-	// cell-state byte value (0, 1, or 2).
-	int state = int(texture(fog_texture, UV).r * 255.0 + 0.5);
-	if (state == 0) {
-		// UNEXPLORED -- opaque black.
-		ALBEDO = vec3(0.0);
-		ALPHA = 1.0;
-	} else if (state == 1) {
-		// EXPLORED -- dim memory.
-		ALBEDO = vec3(0.0);
-		ALPHA = 0.55;
+	// R8 sample returns byte / 255 in [0,1] before scaling. With
+	// linear filtering, the sample is now a fractional value
+	// between adjacent cell states (0, 1/255, 2/255). Scale back
+	// up to the [0..2] state space and lerp the alpha across the
+	// float value so the dim transition is a smooth gradient
+	// rather than a stair-step boundary.
+	float state = clamp(texture(fog_texture, UV).r * 255.0, 0.0, 2.0);
+	// state 0 (UNEXPLORED) -> alpha 1.0
+	// state 1 (EXPLORED)   -> alpha 0.55
+	// state 2 (VISIBLE)    -> alpha 0.0
+	float alpha;
+	if (state < 1.0) {
+		alpha = mix(1.0, 0.55, state);
 	} else {
-		// VISIBLE -- pass through.
-		ALBEDO = vec3(0.0);
-		ALPHA = 0.0;
+		alpha = mix(0.55, 0.0, state - 1.0);
 	}
+	ALBEDO = vec3(0.0);
+	ALPHA = alpha;
 }
 """
 	var mat := ShaderMaterial.new()
