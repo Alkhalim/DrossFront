@@ -3809,13 +3809,15 @@ func _setup_ground_patches() -> void:
 			{"pos": Vector3(0.0, 0.025, 75.0), "size": 40.0, "tint": Color(0.62, 0.28, 0.14, 0.85), "rough": 0.95, "tex": "metal"},
 			{"pos": Vector3(0.0, 0.025, -75.0), "size": 40.0, "tint": Color(0.62, 0.28, 0.14, 0.85), "rough": 0.95, "tex": "metal"},
 		]
-	# DEBUG (TEMPORARY): drop an opaque magenta box and an opaque
-	# magenta soft-blob right next to the player's south HQ approach
-	# so we can confirm whether MeshInstance3D nodes added by this
-	# function actually render. If the box appears but the soft-blob
-	# doesn't, the issue is in the transparent/material path. If
-	# neither appears, _setup_ground_patches isn't running or its
-	# children get torn out later in setup. Remove once diagnosed.
+	# DEBUG (TEMPORARY): three markers near the south HQ approach so
+	# we can isolate the rendering bug.
+	#   - Opaque box (already visible per last run) — confirms the
+	#     scene tree wiring works.
+	#   - Opaque custom-mesh blob (CYAN at z=100) — uses our soft-blob
+	#     ArrayMesh but with NO transparency. If visible, the mesh is
+	#     fine and the bug is in the transparent-material path.
+	#   - Transparent custom-mesh blob (MAGENTA at z=110) — original
+	#     test, expected invisible based on last screenshot.
 	print_debug("[debug] _setup_ground_patches called: biomes=%d" % biomes.size())
 	var dbg_box := MeshInstance3D.new()
 	var dbg_mesh := BoxMesh.new()
@@ -3827,9 +3829,21 @@ func _setup_ground_patches() -> void:
 	dbg_box.material_override = dbg_mat
 	dbg_box.position = Vector3(0.0, 2.0, 100.0)
 	add_child(dbg_box)
-	# Same position as a soft-blob biome patch (full alpha, magenta)
-	# so we can compare opaque-box vs transparent-blob rendering.
-	_spawn_soft_patch(Vector3(15.0, 0.10, 100.0), 12.0, Color(1.0, 0.0, 1.0, 1.0), 1.0, false, "")
+	# Opaque custom-mesh blob — same ArrayMesh _spawn_soft_patch uses,
+	# but with TRANSPARENCY_DISABLED so we isolate whether the mesh
+	# itself renders.
+	var dbg_opaque_blob := MeshInstance3D.new()
+	dbg_opaque_blob.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	dbg_opaque_blob.mesh = _build_soft_blob_mesh(8.0, 1.0, 1.0)
+	var dbg_opaque_mat := StandardMaterial3D.new()
+	dbg_opaque_mat.albedo_color = Color(0.0, 1.0, 1.0, 1.0)
+	dbg_opaque_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	dbg_opaque_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	dbg_opaque_blob.material_override = dbg_opaque_mat
+	dbg_opaque_blob.position = Vector3(0.0, 2.0, 100.0)
+	add_child(dbg_opaque_blob)
+	# Transparent variant via the normal _spawn_soft_patch path.
+	_spawn_soft_patch(Vector3(15.0, 0.10, 110.0), 12.0, Color(1.0, 0.0, 1.0, 1.0), 1.0, false, "")
 
 	for b: Dictionary in biomes:
 		_spawn_soft_patch(
