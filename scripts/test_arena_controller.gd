@@ -3760,35 +3760,35 @@ func _setup_ground_patches() -> void:
 		biomes = [
 			# Cleared road / vehicle-track zone -- exposed dark
 			# asphalt under trampled-down snow.
-			{"pos": Vector3(0.0, 0.025, 0.0), "size": 60.0, "tint": Color(0.10, 0.10, 0.13, 0.92), "rough": 1.0, "tex": "scorched"},
+			{"pos": Vector3(0.0, 0.025, 0.0), "size": 80.0, "tint": Color(0.10, 0.10, 0.13, 0.92), "rough": 1.0, "tex": "scorched"},
 			# Slush drift zones flanking the spawns -- packed snow.
-			{"pos": Vector3(0.0, 0.025, 80.0), "size": 80.0, "tint": Color(0.88, 0.92, 0.96, 0.85), "rough": 1.0, "tex": "snow"},
-			{"pos": Vector3(0.0, 0.025, -80.0), "size": 80.0, "tint": Color(0.88, 0.92, 0.96, 0.85), "rough": 1.0, "tex": "snow"},
+			{"pos": Vector3(0.0, 0.025, 80.0), "size": 105.0, "tint": Color(0.88, 0.92, 0.96, 0.85), "rough": 1.0, "tex": "snow"},
+			{"pos": Vector3(0.0, 0.025, -80.0), "size": 105.0, "tint": Color(0.88, 0.92, 0.96, 0.85), "rough": 1.0, "tex": "snow"},
 			# Iron-stained patches around the central ruins.
-			{"pos": Vector3(48.0, 0.025, 30.0), "size": 35.0, "tint": Color(0.58, 0.26, 0.14, 0.88), "rough": 1.0, "tex": "metal"},
-			{"pos": Vector3(-48.0, 0.025, -30.0), "size": 35.0, "tint": Color(0.58, 0.26, 0.14, 0.88), "rough": 1.0, "tex": "metal"},
+			{"pos": Vector3(48.0, 0.025, 30.0), "size": 50.0, "tint": Color(0.58, 0.26, 0.14, 0.88), "rough": 1.0, "tex": "metal"},
+			{"pos": Vector3(-48.0, 0.025, -30.0), "size": 50.0, "tint": Color(0.58, 0.26, 0.14, 0.88), "rough": 1.0, "tex": "metal"},
 			# Far-flank dirt-windswept zones where the snow's been
 			# scoured off entirely -- exposed mud.
-			{"pos": Vector3(95.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.20, 0.16, 0.10, 0.88), "rough": 1.0, "tex": "mud"},
-			{"pos": Vector3(-95.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.20, 0.16, 0.10, 0.88), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(95.0, 0.025, 0.0), "size": 70.0, "tint": Color(0.20, 0.16, 0.10, 0.88), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(-95.0, 0.025, 0.0), "size": 70.0, "tint": Color(0.20, 0.16, 0.10, 0.88), "rough": 1.0, "tex": "mud"},
 		]
 	elif _is_ashplains():
 		biomes = [
 			# Pale-ash drift zones -- sand-textured.
-			{"pos": Vector3(0.0, 0.025, 60.0), "size": 90.0, "tint": Color(0.78, 0.62, 0.36, 0.82), "rough": 1.0, "tex": "sand"},
-			{"pos": Vector3(0.0, 0.025, -60.0), "size": 90.0, "tint": Color(0.78, 0.62, 0.36, 0.82), "rough": 1.0, "tex": "sand"},
+			{"pos": Vector3(0.0, 0.025, 60.0), "size": 115.0, "tint": Color(0.78, 0.62, 0.36, 0.82), "rough": 1.0, "tex": "sand"},
+			{"pos": Vector3(0.0, 0.025, -60.0), "size": 115.0, "tint": Color(0.78, 0.62, 0.36, 0.82), "rough": 1.0, "tex": "sand"},
 			# Volcanic scar -- scorched-earth texture.
-			{"pos": Vector3(0.0, 0.025, 0.0), "size": 55.0, "tint": Color(0.10, 0.07, 0.05, 0.92), "rough": 1.0, "tex": "scorched"},
+			{"pos": Vector3(0.0, 0.025, 0.0), "size": 75.0, "tint": Color(0.10, 0.07, 0.05, 0.92), "rough": 1.0, "tex": "scorched"},
 			# Bleached bone-white salt-flat patches -- cracked mud
 			# texture in a pale tone.
-			{"pos": Vector3(50.0, 0.025, 95.0), "size": 38.0, "tint": Color(0.92, 0.85, 0.62, 0.85), "rough": 1.0, "tex": "mud"},
-			{"pos": Vector3(-50.0, 0.025, -95.0), "size": 38.0, "tint": Color(0.92, 0.85, 0.62, 0.85), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(50.0, 0.025, 95.0), "size": 55.0, "tint": Color(0.92, 0.85, 0.62, 0.85), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(-50.0, 0.025, -95.0), "size": 55.0, "tint": Color(0.92, 0.85, 0.62, 0.85), "rough": 1.0, "tex": "mud"},
 			# Cracked-earth dark zones -- ferrous rust on cracked mud.
-			{"pos": Vector3(70.0, 0.025, 30.0), "size": 42.0, "tint": Color(0.40, 0.18, 0.10, 0.88), "rough": 1.0, "tex": "mud"},
-			{"pos": Vector3(-70.0, 0.025, -30.0), "size": 42.0, "tint": Color(0.40, 0.18, 0.10, 0.88), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(70.0, 0.025, 30.0), "size": 60.0, "tint": Color(0.40, 0.18, 0.10, 0.88), "rough": 1.0, "tex": "mud"},
+			{"pos": Vector3(-70.0, 0.025, -30.0), "size": 60.0, "tint": Color(0.40, 0.18, 0.10, 0.88), "rough": 1.0, "tex": "mud"},
 			# Far-flank dust patches -- fine sand drift.
-			{"pos": Vector3(115.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.66, 0.50, 0.28, 0.78), "rough": 1.0, "tex": "sand"},
-			{"pos": Vector3(-115.0, 0.025, 0.0), "size": 50.0, "tint": Color(0.66, 0.50, 0.28, 0.78), "rough": 1.0, "tex": "sand"},
+			{"pos": Vector3(115.0, 0.025, 0.0), "size": 70.0, "tint": Color(0.66, 0.50, 0.28, 0.78), "rough": 1.0, "tex": "sand"},
+			{"pos": Vector3(-115.0, 0.025, 0.0), "size": 70.0, "tint": Color(0.66, 0.50, 0.28, 0.78), "rough": 1.0, "tex": "sand"},
 		]
 	else:
 		# Foundry Belt — brown noise ground. Biome tints chosen for
@@ -3798,16 +3798,16 @@ func _setup_ground_patches() -> void:
 		# the ground and disappeared into the noise.
 		biomes = [
 			# Soot scar across the contested mid -- nearly black.
-			{"pos": Vector3(0.0, 0.025, 0.0), "size": 70.0, "tint": Color(0.07, 0.06, 0.07, 0.92), "rough": 1.0, "tex": "scorched"},
+			{"pos": Vector3(0.0, 0.025, 0.0), "size": 95.0, "tint": Color(0.07, 0.06, 0.07, 0.92), "rough": 1.0, "tex": "scorched"},
 			# Sand drift on the east flank -- pale cream / yellow-tan.
-			{"pos": Vector3(95.0, 0.025, 35.0), "size": 55.0, "tint": Color(0.78, 0.68, 0.42, 0.85), "rough": 0.95, "tex": "sand"},
-			{"pos": Vector3(-95.0, 0.025, -35.0), "size": 55.0, "tint": Color(0.76, 0.66, 0.40, 0.85), "rough": 0.95, "tex": "sand"},
+			{"pos": Vector3(95.0, 0.025, 35.0), "size": 75.0, "tint": Color(0.78, 0.68, 0.42, 0.85), "rough": 0.95, "tex": "sand"},
+			{"pos": Vector3(-95.0, 0.025, -35.0), "size": 75.0, "tint": Color(0.76, 0.66, 0.40, 0.85), "rough": 0.95, "tex": "sand"},
 			# Dried-mud zones near the back-doors -- very dark loam.
-			{"pos": Vector3(70.0, 0.025, -75.0), "size": 50.0, "tint": Color(0.16, 0.12, 0.08, 0.90), "rough": 0.95, "tex": "mud"},
-			{"pos": Vector3(-70.0, 0.025, 75.0), "size": 50.0, "tint": Color(0.16, 0.12, 0.08, 0.90), "rough": 0.95, "tex": "mud"},
+			{"pos": Vector3(70.0, 0.025, -75.0), "size": 70.0, "tint": Color(0.16, 0.12, 0.08, 0.90), "rough": 0.95, "tex": "mud"},
+			{"pos": Vector3(-70.0, 0.025, 75.0), "size": 70.0, "tint": Color(0.16, 0.12, 0.08, 0.90), "rough": 0.95, "tex": "mud"},
 			# Industrial rust stain -- saturated orange-rust.
-			{"pos": Vector3(0.0, 0.025, 75.0), "size": 40.0, "tint": Color(0.62, 0.28, 0.14, 0.85), "rough": 0.95, "tex": "metal"},
-			{"pos": Vector3(0.0, 0.025, -75.0), "size": 40.0, "tint": Color(0.62, 0.28, 0.14, 0.85), "rough": 0.95, "tex": "metal"},
+			{"pos": Vector3(0.0, 0.025, 75.0), "size": 55.0, "tint": Color(0.62, 0.28, 0.14, 0.85), "rough": 0.95, "tex": "metal"},
+			{"pos": Vector3(0.0, 0.025, -75.0), "size": 55.0, "tint": Color(0.62, 0.28, 0.14, 0.85), "rough": 0.95, "tex": "metal"},
 		]
 	for b: Dictionary in biomes:
 		_spawn_soft_patch(
@@ -3918,52 +3918,45 @@ func _setup_ground_patches() -> void:
 
 
 func _spawn_soft_patch(pos: Vector3, base_size: float, tint: Color, roughness: float, oil: bool, texture_key: String = "") -> void:
-	# Tinted ground patch with a soft fade-out edge. Two iterations of
-	# bugs got us here:
-	#   1. Original: TRANSPARENCY_ALPHA + vertex_color_use_as_albedo +
-	#      depth_draw_disabled produced fully-invisible patches even at
-	#      vertex alpha 1.0 on the user's renderer. (Diagnostic confirmed.)
-	#   2. Hard-edged fallback: visible but the boundary is too rough
-	#      and biomes don't blend into the surrounding terrain.
-	# This version uses TRANSPARENCY_ALPHA_HASH — pixel discard via a
-	# noise-dithered alpha threshold rather than alpha-blend. It goes
-	# through the OPAQUE depth path (no alpha sort issues) and DOES
-	# respect vertex_color_use_as_albedo, so the soft per-vertex alpha
-	# fade actually renders. Trade-off: the fade is a stippled / dotted
-	# transition rather than a smooth gradient, but the dithering is
-	# fine-grained enough at RTS camera distance that it reads as a
-	# soft edge to the eye.
+	# Tinted ground patch with a soft fade-out edge. Three iterations
+	# of bugs got us here:
+	#   1. TRANSPARENCY_ALPHA + vertex_color_use_as_albedo +
+	#      depth_draw_disabled = fully invisible patches on the user's
+	#      renderer (diagnosed via opaque-vs-transparent test markers).
+	#   2. Hard-edged fallback was visible but the silhouette read as
+	#      stickered ovals.
+	#   3. ALPHA_HASH + vertex-color fade restored the soft fade but
+	#      flickered when the camera moved (the dither is screen-space)
+	#      and rendered THROUGH the fog of war (same y as fog plane,
+	#      depth-test tied at 0.10 — fog overlay failed its own depth
+	#      test against patches and didn't dim them).
+	# This version: TRANSPARENCY_ALPHA + texture-baked radial alpha.
+	# The fade is in the texture's alpha channel — fully solid in the
+	# inner core, smooth gradient at the outer band. Result is
+	# camera-stable (no dither), genuinely smooth (no stippling), and
+	# the inner core is OPAQUE so the underlying ground texture is
+	# completely covered (the "this is a real biome surface" feel
+	# the user asked for). Patch y dropped to 0.05 (below the fog
+	# plane at y=0.10) so the fog overlay correctly dims biomes in
+	# explored / unexplored cells.
 	var patch := MeshInstance3D.new()
 	patch.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	# Reduced jitter (was 0.85-1.25). The aggressive variation produced
-	# the visibly jagged silhouette the user flagged; tightening the
-	# range gives a smoother organic shape that still isn't a perfect
-	# ellipse.
-	var x_scale: float = randf_range(0.94, 1.08)
-	var z_scale: float = randf_range(0.94, 1.08)
+	# Moderate perimeter jitter — the texture's alpha fade band rides
+	# on the mesh outer ring, so jitter on the outer ring creates an
+	# irregular silhouette without making the edge look jagged.
+	var x_scale: float = randf_range(0.85, 1.18)
+	var z_scale: float = randf_range(0.85, 1.18)
 	patch.mesh = _build_soft_blob_mesh(base_size * 0.5, x_scale, z_scale)
-	# Lift the patch a touch above the ground plane to clear depth
-	# precision z-fighting at typical RTS camera distances. The
-	# previous 0.025u offset disappeared into the ground at zoom-out
-	# because the perspective projection collapsed both planes onto
-	# the same depth value.
 	var lifted: Vector3 = pos
-	lifted.y = maxf(lifted.y, 0.10)
+	lifted.y = maxf(lifted.y, 0.05)
 	patch.position = lifted
 	patch.rotation.y = randf_range(0.0, TAU)
 
 	var mat := StandardMaterial3D.new()
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_HASH
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.albedo_color = tint
-	# Vertex-color alpha gradient (1 at center → 0 at perimeter) drives
-	# the dithered fade. The renderer broke this in TRANSPARENCY_ALPHA
-	# but ALPHA_HASH uses a different code path (opaque queue + discard)
-	# which respects it correctly.
-	mat.vertex_color_use_as_albedo = true
 	mat.roughness = roughness
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED if oil else BaseMaterial3D.SHADING_MODE_PER_PIXEL
-	# Double-sided so winding errors in the band quads can't invisible
-	# the patch. Cheap on flat horizontal discs.
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	if oil:
 		# Kept for backwards-compat (the recommended path is now
@@ -3972,35 +3965,27 @@ func _spawn_soft_patch(pos: Vector3, base_size: float, tint: Color, roughness: f
 		mat.emission = Color(0.18, 0.12, 0.22, 1.0)
 		mat.emission_energy_multiplier = 0.35
 
-	# Per-biome ground texture. The translucent vertex-color blob
-	# always carries the soft alpha falloff; layering a real albedo
-	# texture on top makes each biome read as a distinct surface
-	# (sand grain, dried mud cracks, scorched earth, packed snow)
-	# instead of every patch sharing one flat shader.
+	# Texture path. Biome zones get a baked combined texture (biome
+	# RGB + radial alpha). Detail patches (no texture key) get a
+	# plain radial alpha mask — RGB white, so the patch's tint shows
+	# through unmodulated. Either way, alpha comes from the texture's
+	# alpha channel, NOT from vertex colors (the broken path).
 	if texture_key != "":
-		var tex: Texture2D = _resolve_biome_texture(texture_key)
-		if tex:
-			mat.albedo_texture = tex
-			# UV scale dropped 4 -> 1.6 so a ~50u biome patch shows
-			# only ~1.5 tile reps, big enough that the texture
-			# detail (sand grain, cracked mud, snow speckle) is
-			# readable from RTS zoom. The previous 4x tiling
-			# packed the noise so densely it averaged out to a
-			# flat grey from the camera distance, which is why
-			# the player saw 'no extra terrain types'.
-			mat.uv1_scale = Vector3(1.6, 1.6, 1.0)
-			mat.uv1_offset = Vector3(randf(), randf(), 0.0)
-			# Brighten the tint so the multiplied albedo doesn't
-			# fully crush the texture under the (intentionally
-			# dark) biome colour. Final RGB ~= tint.rgb * 1.6 *
-			# texture_sample, capped to white.
-			var bright_tint: Color = Color(
-				minf(tint.r * 1.6, 1.0),
-				minf(tint.g * 1.6, 1.0),
-				minf(tint.b * 1.6, 1.0),
-				tint.a,
-			)
-			mat.albedo_color = bright_tint
+		mat.albedo_texture = _get_biome_blob_texture(texture_key)
+		# UV scale 1.0 because the baked texture already maps the
+		# blob's UV (0,0)-(1,1) to the textured biome surface +
+		# radial alpha. No tiling — each blob shows the texture once.
+		var bright_tint: Color = Color(
+			minf(tint.r * 1.6, 1.0),
+			minf(tint.g * 1.6, 1.0),
+			minf(tint.b * 1.6, 1.0),
+			tint.a,
+		)
+		mat.albedo_color = bright_tint
+	else:
+		# Plain radial alpha mask. Tint comes from albedo_color, alpha
+		# fade comes from the mask texture's alpha channel.
+		mat.albedo_texture = _get_blob_alpha_mask_texture()
 	patch.material_override = mat
 	add_child(patch)
 
@@ -4021,6 +4006,91 @@ func _resolve_biome_texture(key: String) -> Texture2D:
 		"metal":
 			return SharedTextures.get_metal_wear_texture()
 	return null
+
+
+## Cached "neutral" blob mask — RGB=white, alpha=radial gradient.
+## Used for non-textured detail patches: the patch's tint becomes the
+## final color, the mask carries the soft fade.
+static var _blob_alpha_mask_tex: Texture2D = null
+
+## Cached per-biome combined textures: RGB=biome procedural texture
+## (sand / mud / snow / etc.) sampled from the shared generators,
+## alpha=radial gradient identical to the neutral mask. Keyed by the
+## biome string. One bake per key per session.
+static var _biome_blob_tex: Dictionary = {}
+
+const _BLOB_TEX_SIZE: int = 256
+
+
+func _build_radial_alpha_array(size: int) -> PackedFloat32Array:
+	## Returns a `size*size` row-major float buffer with alpha values
+	## for the radial blob mask. Solid core out to 65% of the radius,
+	## then a smooth (smoothstep) fade to alpha 0 at the perimeter.
+	## Pulled out so both the neutral mask and the per-biome bakes
+	## can share the gradient calculation without recomputing it.
+	var out := PackedFloat32Array()
+	out.resize(size * size)
+	var center: float = float(size) / 2.0
+	const SOLID_FRAC: float = 0.65
+	for y: int in size:
+		for x: int in size:
+			var dx: float = float(x) + 0.5 - center
+			var dy: float = float(y) + 0.5 - center
+			var d: float = sqrt(dx * dx + dy * dy) / center  # 0 at center, 1.0 at edge of inscribed circle
+			var a: float
+			if d < SOLID_FRAC:
+				a = 1.0
+			elif d < 1.0:
+				var t: float = (d - SOLID_FRAC) / (1.0 - SOLID_FRAC)
+				a = 1.0 - smoothstep(0.0, 1.0, t)
+			else:
+				a = 0.0
+			out[y * size + x] = a
+	return out
+
+
+func _get_blob_alpha_mask_texture() -> Texture2D:
+	if _blob_alpha_mask_tex:
+		return _blob_alpha_mask_tex
+	var size: int = _BLOB_TEX_SIZE
+	var alpha: PackedFloat32Array = _build_radial_alpha_array(size)
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	for y: int in size:
+		for x: int in size:
+			img.set_pixel(x, y, Color(1.0, 1.0, 1.0, alpha[y * size + x]))
+	img.generate_mipmaps()
+	_blob_alpha_mask_tex = ImageTexture.create_from_image(img)
+	return _blob_alpha_mask_tex
+
+
+func _get_biome_blob_texture(key: String) -> Texture2D:
+	## Bakes a per-biome blob texture: RGB sampled from the procedural
+	## biome surface (sand / mud / etc.), alpha = radial gradient.
+	## Cached per key.
+	if _biome_blob_tex.has(key):
+		return _biome_blob_tex[key] as Texture2D
+	var src: Texture2D = _resolve_biome_texture(key)
+	if not src:
+		return _get_blob_alpha_mask_texture()
+	var src_img: Image = src.get_image()
+	if not src_img:
+		return _get_blob_alpha_mask_texture()
+	var size: int = _BLOB_TEX_SIZE
+	# Re-size if the source isn't already _BLOB_TEX_SIZE so the UV
+	# 1:1 mapping in the blob mesh works without further scaling.
+	if src_img.get_width() != size or src_img.get_height() != size:
+		src_img = src_img.duplicate() as Image
+		src_img.resize(size, size, Image.INTERPOLATE_LANCZOS)
+	var alpha: PackedFloat32Array = _build_radial_alpha_array(size)
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	for y: int in size:
+		for x: int in size:
+			var src_c: Color = src_img.get_pixel(x, y)
+			img.set_pixel(x, y, Color(src_c.r, src_c.g, src_c.b, alpha[y * size + x]))
+	img.generate_mipmaps()
+	var tex: Texture2D = ImageTexture.create_from_image(img)
+	_biome_blob_tex[key] = tex
+	return tex
 
 
 func _build_soft_blob_mesh(base_radius: float, x_scale: float, z_scale: float) -> ArrayMesh:

@@ -192,16 +192,16 @@ func show_range() -> void:
 	_range_indicator.mesh = cyl
 
 	var mat := StandardMaterial3D.new()
-	# Was 0.22 — readable but dominated the visible ground, hiding
-	# whatever biome / wreck variation sat under it. 0.14 keeps the
-	# amber footprint distinct (helped by the emission boost below)
-	# while letting the ground colors read through.
-	mat.albedo_color = Color(0.95, 0.65, 0.15, 0.14)
+	# Subtle amber wash — the ring's job is to mark the harvest
+	# footprint, not paint the ground orange. Most of the visual
+	# weight comes from the emission glow (which still reads at
+	# RTS zoom even with low albedo alpha).
+	mat.albedo_color = Color(0.95, 0.65, 0.15, 0.07)
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mat.emission_enabled = true
 	mat.emission = Color(0.95, 0.65, 0.15, 1.0)
-	mat.emission_energy_multiplier = 0.4
+	mat.emission_energy_multiplier = 0.55
 	_range_indicator.set_surface_override_material(0, mat)
 
 	_range_indicator.position = Vector3(0, 0.1, 0)
