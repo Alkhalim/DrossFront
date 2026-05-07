@@ -3848,49 +3848,46 @@ func _setup_ground_patches() -> void:
 			# variance in size makes the snowpack read as broken
 			# and lived-in rather than a flat sheet.
 			if roll < 0.28:
-				# Slush / packed dirty snow — grey wash with light
-				# alpha, soft-edged.
-				_spawn_soft_patch(pos, randf_range(3.5, 7.0), Color(0.40, 0.42, 0.44, randf_range(0.40, 0.60)), 1.0, false)
+				# Slush / packed dirty snow — grey wash, soft-edged.
+				_spawn_soft_patch(pos, randf_range(3.5, 7.0), Color(0.40, 0.42, 0.44, randf_range(0.65, 0.85)), 1.0, false)
 			elif roll < 0.50:
 				# Exposed asphalt / dark rock — high-contrast dark
 				# patch breaking up the pale ground.
-				_spawn_soft_patch(pos, randf_range(2.5, 5.5), Color(0.10, 0.10, 0.12, randf_range(0.55, 0.78)), 1.0, false)
+				_spawn_soft_patch(pos, randf_range(2.5, 5.5), Color(0.10, 0.10, 0.12, randf_range(0.78, 0.92)), 1.0, false)
 			elif roll < 0.68:
 				# Iron-stained rust spot — warm orange-brown,
 				# sparse so it reads as stains, not background.
-				_spawn_soft_patch(pos, randf_range(2.5, 5.0), Color(0.42, 0.22, 0.13, randf_range(0.45, 0.65)), 1.0, false)
+				_spawn_soft_patch(pos, randf_range(2.5, 5.0), Color(0.42, 0.22, 0.13, randf_range(0.70, 0.88)), 1.0, false)
 			elif roll < 0.82:
-				# Drift snow — slightly brighter than the base
-				# tint, low alpha so it reads as light surface
-				# texture.
-				_spawn_soft_patch(pos, randf_range(3.0, 6.0), Color(0.78, 0.80, 0.78, randf_range(0.30, 0.45)), 1.0, false)
+				# Drift snow — slightly brighter than base tint.
+				_spawn_soft_patch(pos, randf_range(3.0, 6.0), Color(0.78, 0.80, 0.78, randf_range(0.60, 0.78)), 1.0, false)
 			elif roll < 0.92:
 				# Frozen mud puddle — dark warm patch with a
 				# slightly cool blue undertone.
-				_spawn_soft_patch(pos, randf_range(2.5, 4.5), Color(0.18, 0.16, 0.14, randf_range(0.50, 0.72)), 1.0, false)
+				_spawn_soft_patch(pos, randf_range(2.5, 4.5), Color(0.18, 0.16, 0.14, randf_range(0.72, 0.88)), 1.0, false)
 			else:
 				# Sparse ice glaze — low-roughness reflective spot.
-				_spawn_soft_patch(pos, randf_range(2.0, 3.5), Color(0.80, 0.85, 0.92, randf_range(0.32, 0.48)), 0.40, false)
+				_spawn_soft_patch(pos, randf_range(2.0, 3.5), Color(0.80, 0.85, 0.92, randf_range(0.55, 0.72)), 0.40, false)
 		elif on_ash:
 			if roll < 0.24:
 				# Cracked-earth — dark warm patch with a slightly red
 				# undertone, reads as parched riverbed.
-				_spawn_soft_patch(pos, randf_range(4.0, 8.5), Color(0.22, 0.14, 0.09, randf_range(0.55, 0.78)), 1.0, false)
+				_spawn_soft_patch(pos, randf_range(4.0, 8.5), Color(0.22, 0.14, 0.09, randf_range(0.75, 0.92)), 1.0, false)
 			elif roll < 0.45:
 				# Bleached / salt-flat — pale tan-white wash.
-				_spawn_soft_patch(pos, randf_range(4.0, 9.0), Color(0.78, 0.72, 0.55, randf_range(0.40, 0.62)), 1.0, false)
+				_spawn_soft_patch(pos, randf_range(4.0, 9.0), Color(0.78, 0.72, 0.55, randf_range(0.65, 0.85)), 1.0, false)
 			elif roll < 0.66:
 				# Sand smear — warmer than the foundry version.
-				_spawn_soft_patch(pos, randf_range(4.5, 9.5), Color(0.50, 0.38, 0.22, randf_range(0.45, 0.7)), 0.95, false)
+				_spawn_soft_patch(pos, randf_range(4.5, 9.5), Color(0.50, 0.38, 0.22, randf_range(0.70, 0.88)), 0.95, false)
 			elif roll < 0.78:
 				# Dry-earth patch with reddish-clay tint.
-				_spawn_soft_patch(pos, randf_range(3.5, 7.5), Color(0.36, 0.20, 0.13, randf_range(0.50, 0.72)), 1.0, false)
+				_spawn_soft_patch(pos, randf_range(3.5, 7.5), Color(0.36, 0.20, 0.13, randf_range(0.72, 0.88)), 1.0, false)
 			elif roll < 0.86:
 				# Hardy moss — rare green patch where shade pools (small).
-				_spawn_soft_patch(pos, randf_range(2.5, 4.5), Color(0.20, 0.32, 0.16, randf_range(0.40, 0.62)), 1.0, false)
+				_spawn_soft_patch(pos, randf_range(2.5, 4.5), Color(0.20, 0.32, 0.16, randf_range(0.65, 0.82)), 1.0, false)
 			elif roll < 0.93:
 				# Volcanic-glass shard — small dark high-contrast spot.
-				_spawn_soft_patch(pos, randf_range(2.5, 5.0), Color(0.06, 0.04, 0.05, randf_range(0.65, 0.85)), 0.55, false)
+				_spawn_soft_patch(pos, randf_range(2.5, 5.0), Color(0.06, 0.04, 0.05, randf_range(0.82, 0.95)), 0.55, false)
 			else:
 				# Reflective oil spill — uncommon on the desert but
 				# they happen near old crash sites.
@@ -3898,43 +3895,52 @@ func _setup_ground_patches() -> void:
 		else:
 			if roll < 0.32:
 				# Soot blot.
-				_spawn_soft_patch(pos, randf_range(5.0, 10.0), Color(0.05, 0.05, 0.05, randf_range(0.55, 0.8)), 1.0, false)
+				_spawn_soft_patch(pos, randf_range(5.0, 10.0), Color(0.05, 0.05, 0.05, randf_range(0.78, 0.92)), 1.0, false)
 			elif roll < 0.55:
 				# Sand smear (cooler than the desert).
-				_spawn_soft_patch(pos, randf_range(4.5, 8.5), Color(0.34, 0.27, 0.18, randf_range(0.45, 0.7)), 0.95, false)
+				_spawn_soft_patch(pos, randf_range(4.5, 8.5), Color(0.34, 0.27, 0.18, randf_range(0.70, 0.88)), 0.95, false)
 			elif roll < 0.70:
 				# Dry-earth patch with cracking — reddish-brown.
-				_spawn_soft_patch(pos, randf_range(4.0, 8.0), Color(0.32, 0.22, 0.15, randf_range(0.50, 0.72)), 1.0, false)
+				_spawn_soft_patch(pos, randf_range(4.0, 8.0), Color(0.32, 0.22, 0.15, randf_range(0.72, 0.88)), 1.0, false)
 			elif roll < 0.82:
 				# Hardy moss / weed-grass tuft — cool green patch where
 				# the industrial belt has been left to itself for a while.
 				# Bigger range than the desert variant so it reads as
 				# actual green rather than a moss spot.
-				_spawn_soft_patch(pos, randf_range(3.5, 6.5), Color(0.22, 0.34, 0.18, randf_range(0.45, 0.65)), 1.0, false)
+				_spawn_soft_patch(pos, randf_range(3.5, 6.5), Color(0.22, 0.34, 0.18, randf_range(0.65, 0.82)), 1.0, false)
 			elif roll < 0.92:
 				# Reflective oil spill — multi-blob spawn for the puddle
 				# silhouette, low roughness for the wet-glint read.
 				_spawn_oil_spill(pos)
 			else:
 				# Slag-grey patch — cool industrial residue.
-				_spawn_soft_patch(pos, randf_range(3.5, 6.5), Color(0.22, 0.22, 0.24, randf_range(0.45, 0.65)), 0.95, false)
+				_spawn_soft_patch(pos, randf_range(3.5, 6.5), Color(0.22, 0.22, 0.24, randf_range(0.65, 0.82)), 0.95, false)
 
 
 func _spawn_soft_patch(pos: Vector3, base_size: float, tint: Color, roughness: float, oil: bool, texture_key: String = "") -> void:
-	# Tinted ground patch built from an irregular ArrayMesh disc. Earlier
-	# version relied on `vertex_color_use_as_albedo + TRANSPARENCY_ALPHA`
-	# for a soft per-vertex alpha fade, but that combo (with depth_draw
-	# disabled) produced invisible patches across the board on the
-	# user's renderer — diagnostic blobs at full vertex alpha never
-	# rendered. The opaque-with-tint path verified working via the same
-	# ArrayMesh, so we drop the vertex-color fade and use uniform alpha
-	# from `tint.a`. The mesh's perimeter still has random radial
-	# jitter, so silhouettes read organic rather than clean circles;
-	# we just lose the soft feathered edge.
+	# Tinted ground patch with a soft fade-out edge. Two iterations of
+	# bugs got us here:
+	#   1. Original: TRANSPARENCY_ALPHA + vertex_color_use_as_albedo +
+	#      depth_draw_disabled produced fully-invisible patches even at
+	#      vertex alpha 1.0 on the user's renderer. (Diagnostic confirmed.)
+	#   2. Hard-edged fallback: visible but the boundary is too rough
+	#      and biomes don't blend into the surrounding terrain.
+	# This version uses TRANSPARENCY_ALPHA_HASH — pixel discard via a
+	# noise-dithered alpha threshold rather than alpha-blend. It goes
+	# through the OPAQUE depth path (no alpha sort issues) and DOES
+	# respect vertex_color_use_as_albedo, so the soft per-vertex alpha
+	# fade actually renders. Trade-off: the fade is a stippled / dotted
+	# transition rather than a smooth gradient, but the dithering is
+	# fine-grained enough at RTS camera distance that it reads as a
+	# soft edge to the eye.
 	var patch := MeshInstance3D.new()
 	patch.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var x_scale: float = randf_range(0.85, 1.25)
-	var z_scale: float = randf_range(0.85, 1.25)
+	# Reduced jitter (was 0.85-1.25). The aggressive variation produced
+	# the visibly jagged silhouette the user flagged; tightening the
+	# range gives a smoother organic shape that still isn't a perfect
+	# ellipse.
+	var x_scale: float = randf_range(0.94, 1.08)
+	var z_scale: float = randf_range(0.94, 1.08)
 	patch.mesh = _build_soft_blob_mesh(base_size * 0.5, x_scale, z_scale)
 	# Lift the patch a touch above the ground plane to clear depth
 	# precision z-fighting at typical RTS camera distances. The
@@ -3947,17 +3953,18 @@ func _spawn_soft_patch(pos: Vector3, base_size: float, tint: Color, roughness: f
 	patch.rotation.y = randf_range(0.0, TAU)
 
 	var mat := StandardMaterial3D.new()
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_HASH
 	mat.albedo_color = tint
+	# Vertex-color alpha gradient (1 at center → 0 at perimeter) drives
+	# the dithered fade. The renderer broke this in TRANSPARENCY_ALPHA
+	# but ALPHA_HASH uses a different code path (opaque queue + discard)
+	# which respects it correctly.
+	mat.vertex_color_use_as_albedo = true
 	mat.roughness = roughness
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED if oil else BaseMaterial3D.SHADING_MODE_PER_PIXEL
 	# Double-sided so winding errors in the band quads can't invisible
 	# the patch. Cheap on flat horizontal discs.
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	# Bump render priority so the patch draws after the opaque ground
-	# in the transparency pass even when the renderer's depth sort
-	# tie-breaks the wrong way.
-	mat.render_priority = 2
 	if oil:
 		# Kept for backwards-compat (the recommended path is now
 		# `_spawn_oil_spill`). Subtle emission to fake the wet glint.

@@ -192,11 +192,11 @@ func show_range() -> void:
 	_range_indicator.mesh = cyl
 
 	var mat := StandardMaterial3D.new()
-	# Brighter than the previous 0.08 alpha — the old value was nearly
-	# invisible in the crawler ring case, especially over green/teal
-	# ground. 0.22 reads as a clear amber footprint without obscuring
-	# the wrecks underneath.
-	mat.albedo_color = Color(0.95, 0.65, 0.15, 0.22)
+	# Was 0.22 — readable but dominated the visible ground, hiding
+	# whatever biome / wreck variation sat under it. 0.14 keeps the
+	# amber footprint distinct (helped by the emission boost below)
+	# while letting the ground colors read through.
+	mat.albedo_color = Color(0.95, 0.65, 0.15, 0.14)
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mat.emission_enabled = true
