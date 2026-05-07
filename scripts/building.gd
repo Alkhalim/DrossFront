@@ -226,11 +226,15 @@ func _ready() -> void:
 		# Foundations start at 20% of the final HP and fill toward
 		# stats.hp as construction progresses (see advance_construction).
 		# Already-constructed buildings (scenario-seeded HQs etc.) skip
-		# this and start at full.
+		# this and start at full. _ready fires before parent setup code
+		# (test_arena_controller._setup_player) flips is_constructed
+		# for the .tscn-placed HQ, so we re-check via call_deferred so
+		# the HP is correct by the time the player can interact.
 		if is_constructed:
 			current_hp = stats.hp
 		else:
 			current_hp = maxi(int(float(stats.hp) * 0.2), 1)
+			call_deferred("_topup_hp_if_pre_constructed")
 		# rally_point intentionally stays at RALLY_UNSET at
 		# construction. The previous default placed an auto-rally
 		# just outside the building's footprint, which felt
@@ -3212,6 +3216,18 @@ func get_construction_percent() -> float:
 	if not stats or stats.build_time <= 0.0:
 		return 1.0
 	return clampf(_construction_progress / stats.build_time, 0.0, 1.0)
+
+
+## Deferred from _ready. Lets parent setup code that flips
+## is_constructed = true after our _ready (scenario-seeded HQs,
+## pre-built forward bases, etc.) catch up — if we're now flagged
+## as constructed but our HP is still at the 20% foundation start,
+## top it up to full so the player doesn't see a half-HP HQ.
+func _topup_hp_if_pre_constructed() -> void:
+	if not is_instance_valid(self):
+		return
+	if is_constructed and stats and current_hp < stats.hp:
+		current_hp = stats.hp
 
 
 func _finish_construction() -> void:
