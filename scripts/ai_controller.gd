@@ -792,9 +792,8 @@ func _maybe_build_extra_sam() -> void:
 	## (+2 on HARD) when it's seen the first enemy aircraft. Slots are
 	## placed via _try_place using a unique key per extra SAM so the
 	## blocker dedupe doesn't drop them.
-	var desired: int = 1
-	if _difficulty == Difficulty.HARD:
-		desired = 2
+	var hard: bool = _difficulty_is_hard()
+	var desired: int = 2 if hard else 1
 	# Spotted player aerodrome → +1.
 	var player_has_aero: bool = false
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
@@ -824,7 +823,7 @@ func _maybe_build_extra_sam() -> void:
 		player_has_aircraft = true
 		break
 	if player_has_aircraft:
-		desired += 2 if _difficulty == Difficulty.HARD else 1
+		desired += 2 if hard else 1
 
 	# Count what we already have (constructed + queued foundations
 	# both count — placing a third while two are 80% built would
