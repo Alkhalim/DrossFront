@@ -742,29 +742,15 @@ func _setup_navigation() -> void:
 	nav_mesh.agent_radius = 1.0
 	nav_mesh.agent_height = 2.0
 	# agent_max_climb caps the vertical distance Recast will treat as
-	# a "step" between two adjacent walkable cells.
-	#
-	# Plateaus are 1.5-2u tall — if max_climb >= plateau height, the
-	# bake creates a direct adjacency from the ground navmesh to the
-	# plateau-top navmesh along the ENTIRE plateau perimeter (not just
-	# at the ramp), and the path planner picks "walk off the cliff" as
-	# the shortest route.
-	#
-	# At 0.5u, the lower end of a ramp's side flank — where the slope
-	# y rises from 0 toward 0.5u over the first ~2.5 units of run — was
-	# being classified as a stairstep too. Recast connected the inside-
-	# wedge slope cells (y=0..0.5) to the outside-wedge ground cells
-	# (y=0) across the side wall, producing navmesh polygons that
-	# physically can't be walked UP (the side wall is a vertical
-	# obstacle, not a slope). Going down works because gravity drops
-	# the unit off; going up gets the unit stuck against the wall.
-	#
-	# Cap at 0.15u — just over the cell_height (0.1u) so legitimate
-	# single-voxel steps still connect, but the slope's y exceeds the
-	# threshold within a fraction of a unit from the foot, so the side
-	# walls disconnect from the ground navmesh almost immediately.
-	# Plateau direct-connection still blocked (1.5-2u >> 0.15u).
-	nav_mesh.agent_max_climb = 0.15
+	# a "step" between two adjacent walkable cells. Plateaus are 1.5-2u
+	# tall — if max_climb >= plateau height, the bake creates a direct
+	# adjacency from the ground navmesh to the plateau-top navmesh
+	# along the entire plateau perimeter, not just via the ramp, and
+	# the path planner picks "walk off the cliff." Cap at 0.5u so the
+	# only path up to a plateau is via a ramp's slope. The side-flank
+	# bridging that 0.5 used to allow is solved separately by carving
+	# a NavigationObstacle3D strip alongside each ramp (see ramp build).
+	nav_mesh.agent_max_climb = 0.5
 	nav_mesh.agent_max_slope = 30.0
 	# Pull source geometry from the "terrain" group + the ground
 	# collision (already in scene). The bake walks each shape, treats
@@ -3630,6 +3616,61 @@ func _spawn_plateau_ramp(plateau_center: Vector3, top_size: Vector2, height: flo
 	hull.points = PackedVector3Array([tA, tB, bA, bB, uA, uB])
 	col.shape = hull
 	root.add_child(col)
+
+	# Side-flank navmesh carve: at the bottom of each side wall the slope's
+	# y is small enough that agent_max_climb counts it as a stairstep and
+	# the bake connects the slope cells (inside the wedge) to the ground
+	# cells (outside) across the side wall. Going DOWN works (gravity
+	# drops the unit off the small ledge) but going UP doesn't — the side
+	# wall is vertical and CharacterBody3D refuses to climb. Carve a 1u
+	# strip alongside each side wall so the ground navmesh next to the
+	# wall is gone and A* can't even find that path.
+	const SIDE_STRIP_WIDTH: float = 1.0
+	# Vertices CCW from above (looking +y → -y), matching building.gd's
+	# convention. Local coords; root is positioned at plateau_center.
+	var add_side_strip := func(p_min: Vector3, p_max: Vector3) -> void:
+		var ob := NavigationObstacle3D.new()
+		ob.vertices = PackedVector3Array([
+			Vector3(p_min.x, 0.0, p_min.z),
+			Vector3(p_min.x, 0.0, p_max.z),
+			Vector3(p_max.x, 0.0, p_max.z),
+			Vector3(p_max.x, 0.0, p_min.z),
+		])
+		ob.avoidance_enabled = false
+		if "affect_navigation_mesh" in ob:
+			ob.affect_navigation_mesh = true
+		if "carve_navigation_mesh" in ob:
+			ob.carve_navigation_mesh = true
+		root.add_child(ob)
+	match side:
+		"N":  # ramp goes north (+z), side walls at x=±hw
+			add_side_strip.call(
+				Vector3(-hw - SIDE_STRIP_WIDTH, 0, hz),
+				Vector3(-hw, 0, hz + run))
+			add_side_strip.call(
+				Vector3(hw, 0, hz),
+				Vector3(hw + SIDE_STRIP_WIDTH, 0, hz + run))
+		"S":  # ramp goes south (-z), side walls at x=±hw
+			add_side_strip.call(
+				Vector3(-hw - SIDE_STRIP_WIDTH, 0, -hz - run),
+				Vector3(-hw, 0, -hz))
+			add_side_strip.call(
+				Vector3(hw, 0, -hz - run),
+				Vector3(hw + SIDE_STRIP_WIDTH, 0, -hz))
+		"E":  # ramp goes east (+x), side walls at z=±hw
+			add_side_strip.call(
+				Vector3(hx, 0, -hw - SIDE_STRIP_WIDTH),
+				Vector3(hx + run, 0, -hw))
+			add_side_strip.call(
+				Vector3(hx, 0, hw),
+				Vector3(hx + run, 0, hw + SIDE_STRIP_WIDTH))
+		_:    # "W" — ramp goes west (-x), side walls at z=±hw
+			add_side_strip.call(
+				Vector3(-hx - run, 0, -hw - SIDE_STRIP_WIDTH),
+				Vector3(-hx, 0, -hw))
+			add_side_strip.call(
+				Vector3(-hx - run, 0, hw),
+				Vector3(-hx, 0, hw + SIDE_STRIP_WIDTH))
 
 	# Navmesh — sloped walking surface as 2 tris in world space. Vertices
 	# tA/tB sit exactly on the plateau top edge so the path planner sees
