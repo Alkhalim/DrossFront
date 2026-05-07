@@ -183,10 +183,17 @@ func can_target_air() -> bool:
 ## doesn't break stealth (Specter can fire from concealment).
 @export var is_stealth_capable: bool = false
 ## Distance at which an enemy unit reveals stealth-capable targets.
-## Standard ground = 80, engineers = 100, Glitch Specter = 150,
-## Spotter Rook = 200. The unit also stays revealed for
-## `stealth_restore_time` after taking damage.
-@export var detection_radius: float = 80.0
+## Standard combat units = 6 (close-range "you see them when they're
+## right next to you"), engineers = 100, Glitch Specter = 150,
+## Spotter Rook = 200, Sensor Carrier = 150. The unit also stays
+## revealed for `stealth_restore_time` after taking damage.
+##
+## Default was 80u — that gave every unit on the field full-sight-
+## range detection and made stealth functionally useless. 6u keeps
+## stealth a real stealth tool: Specters can fire from their 17u
+## range without being seen, but get exposed when an enemy actually
+## pushes onto them, and dedicated detectors counter cleanly.
+@export var detection_radius: float = 6.0
 ## Seconds after the last damage before stealth re-applies.
 @export var stealth_restore_time: float = 4.0
 

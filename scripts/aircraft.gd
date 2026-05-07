@@ -2352,7 +2352,7 @@ func _process_stealth(delta: float) -> void:
 		else:
 			if other_owner == owner_id:
 				continue
-		var their_r: float = 80.0
+		var their_r: float = 6.0
 		if "stats" in node:
 			var their_stats: UnitStatResource = node.get("stats") as UnitStatResource
 			if their_stats:
@@ -2361,7 +2361,9 @@ func _process_stealth(delta: float) -> void:
 		var dx: float = (node as Node3D).global_position.x - global_position.x
 		var dz: float = (node as Node3D).global_position.z - global_position.z
 		var d2: float = dx * dx + dz * dz
-		if d2 <= their_r2 or d2 <= detect_r2:
+		# Reveal only by enemy detection. The stealth unit's OWN radius
+		# shouldn't reveal it (see unit.gd::_tick_stealth comment).
+		if d2 <= their_r2:
 			spotted = true
 			break
 	if spotted != stealth_revealed:

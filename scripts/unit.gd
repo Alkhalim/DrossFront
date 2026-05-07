@@ -7462,8 +7462,9 @@ func _tick_stealth() -> void:
 			if other_owner == owner_id:
 				continue
 		# Each unit's OWN detection_radius defines how far IT can see
-		# stealth — Engineer 100, Glitch 150, Spotter 200, others 80.
-		var their_r: float = 80.0
+		# stealth. Most combat units = 6 (close-range), engineers = 100,
+		# Spotter Rook = 200, Glitch / Sensor Carrier = 150.
+		var their_r: float = 6.0
 		if "stats" in node:
 			var their_stats: UnitStatResource = node.get("stats") as UnitStatResource
 			if their_stats:
@@ -7472,7 +7473,11 @@ func _tick_stealth() -> void:
 		var dx: float = (node as Node3D).global_position.x - global_position.x
 		var dz: float = (node as Node3D).global_position.z - global_position.z
 		var d2: float = dx * dx + dz * dz
-		if d2 <= their_r2 or d2 <= detect_r2:
+		# Reveal only by enemy detection. (Previously also OR'd against
+		# `detect_r2` — the stealth unit's OWN detection_radius — which
+		# made a Specter's 80u radius reveal itself. The stealth unit's
+		# own sensors shouldn't betray it.)
+		if d2 <= their_r2:
 			spotted = true
 			break
 	if spotted != stealth_revealed:
