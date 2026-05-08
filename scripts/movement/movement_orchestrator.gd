@@ -92,45 +92,54 @@ func unregister(mc: Object) -> void:
 
 func _physics_process(delta: float) -> void:
 	_frame_counter += 1
-	# Phase index lets components self-select whether THIS frame
-	# is their "heavy" tick. Each component derives a stable
-	# phase index in [0..STAGGER_PERIOD-1] from its instance_id
-	# so the load spreads evenly across that many frames. Match
-	# MovementComponent.STAGGER_PERIOD; using 3 here splits the
-	# population into thirds and runs heavy work every 3rd tick
-	# per unit.
 	var frame_phase: int = _frame_counter % 3
-	# Walk in reverse so a unregister mid-iteration (e.g., a
-	# component freed during another component's tick) doesn't
-	# corrupt the index. is_instance_valid filters freed handles.
+
+	# PF-A: dual-path orchestration. Flag-on agents are driven by the
+	# C++ SteeringKernel; flag-off agents run the legacy GDScript
+	# tick_movement path. Both populations share this orchestrator's
+	# _components array — `kernel_handle != 0` distinguishes them.
+	var flowfield_on: bool = MovementFlags.use_flowfield()
+	var kernel: Object = null
+	if flowfield_on:
+		kernel = (load("res://scripts/movement/movement_native_bootstrap.gd")
+				  .call("get_kernel", get_tree().current_scene))
+
+	# Phase 1: mirror positions into kernel SoA, then run kernel.tick once.
+	if kernel != null:
+		var i_a: int = _components.size() - 1
+		while i_a >= 0:
+			var mc_v: Variant = _components[i_a]
+			if not is_instance_valid(mc_v):
+				_components.remove_at(i_a)
+				i_a -= 1
+				continue
+			var mc: MovementComponent = mc_v as MovementComponent
+			if mc != null and mc.kernel_handle != 0:
+				kernel.call("set_agent_pos", mc.kernel_handle, mc._body.global_position)
+			i_a -= 1
+		kernel.call("tick", delta)
+
+	# Phase 2: walk components. Flag-on units get velocity from the kernel
+	# and apply via move_and_slide. Flag-off units run tick_movement.
 	var i: int = _components.size() - 1
 	while i >= 0:
-		# Variant typing (untyped local) so reading a freed-instance
-		# slot doesn't itself throw "Trying to assign invalid
-		# previously freed instance" before our is_instance_valid
-		# check can intercept. The typed `var mc: Object = ...` form
-		# was triggering that error when a unit was queue_freed but
-		# its component was still in our array.
 		var mc_v: Variant = _components[i]
 		if not is_instance_valid(mc_v):
 			_components.remove_at(i)
 			i -= 1
 			continue
-		# Typed cast — `register` only accepts MovementComponent
-		# subclasses, so the cast always succeeds. Drops the per-call
-		# `has_method("tick_movement")` string-keyed lookup that the
-		# previous defensive build paid 200×/tick. tick_movement is
-		# a real method on MovementComponent so the dispatch is a
-		# direct vtable call rather than a Variant-typed indirection.
 		var mc: MovementComponent = mc_v as MovementComponent
 		if mc != null:
-			# needs_tick gate — skip the tick_movement call for fully
-			# parked components (no target, near-zero velocity, no
-			# active stuck-pushout). With ~50% of units typically idle
-			# in an RTS, halves the orchestrator's per-tick load.
-			# needs_tick is a tiny field-only check; the savings come
-			# from not paying the idle-path inertia / move_and_slide /
-			# stuck_step overhead on parked units.
-			if mc.needs_tick():
-				mc.tick_movement(delta, frame_phase)
+			if mc.kernel_handle != 0 and flowfield_on and kernel != null:
+				# Flag-on path: kernel computed velocity; just apply + slide.
+				var v: Vector3 = kernel.call("get_velocity", mc.kernel_handle) as Vector3
+				if mc._body_physics != null:
+					mc._body_physics.velocity = v
+					mc._body_physics.move_and_slide()
+				else:
+					mc._body.global_position += v * delta
+			else:
+				# Flag-off path: existing GDScript steering.
+				if mc.needs_tick():
+					mc.tick_movement(delta, frame_phase)
 		i -= 1
