@@ -20,10 +20,32 @@ var last_group_ref: SquadGroup = null
 var last_drop_reason: int = -1                    # SquadGroup.DropReason or -1
 var last_order_destination: Vector3 = Vector3.INF
 
+## PF-A — ad-hoc kernel field id for solo (non-GroupAura) moves under
+## flag-on. When goto_world is called from outside the player's selection
+## dispatch (combat reactions via unit.command_move, AI orders, etc.)
+## the kernel needs a current target — without one it keeps the previous
+## field, and the unit walks toward a stale goal. We build a per-unit
+## field here, release it on the next goto_world or _exit_tree.
+## 0 = no owned field.
+var _kernel_field_id: int = 0
+
 func _ready() -> void:
 	super._ready()
 	if agent_profile == null:
 		agent_profile = AgentProfile.new(0.6, 0.5, 35.0, &"squad_default")
+
+
+func _exit_tree() -> void:
+	# PF-A: release our ad-hoc kernel field if we own one. Otherwise
+	# FieldEntry leaks in FlowFieldServer.fields_ map.
+	if _kernel_field_id != 0:
+		var scene: Node = get_tree().current_scene if get_tree() else null
+		if scene != null:
+			var server: Object = MovementNativeBootstrap.get_server(scene)
+			if server != null:
+				server.call("release_field", _kernel_field_id)
+		_kernel_field_id = 0
+	super._exit_tree()
 
 const WAYPOINT_REACH_DIST: float = 1.5
 const GRAVITY: float = 18.0  # matches scripts/unit.gd legacy value (PB-3)
@@ -38,6 +60,30 @@ func goto_world(world_pos: Vector3) -> void:
 	## "best effort" behavior — leaving the unit idle would mask
 	## navmesh setup problems during early development.
 	target = world_pos
+
+	# PF-A: under flag-on, also push the new target into the kernel via
+	# an ad-hoc per-unit field. selection_manager's _dispatch_via_group_aura
+	# path skips goto_world for player-issued multi-squad orders, but
+	# unit.command_move (combat reactions, AI orders, etc.) routes through
+	# this function — without this hook, the kernel keeps the previous
+	# target and the unit follows a stale field into walls.
+	if MovementFlags.use_flowfield() and kernel_handle != 0:
+		var scene: Node = get_tree().current_scene if get_tree() else null
+		if scene != null:
+			var server: Object = MovementNativeBootstrap.get_server(scene)
+			var kernel: Object = MovementNativeBootstrap.get_kernel(scene)
+			if server != null and kernel != null:
+				# Release the previously-owned ad-hoc field so we don't leak.
+				if _kernel_field_id != 0:
+					server.call("release_field", _kernel_field_id)
+					_kernel_field_id = 0
+				var fid: int = server.call("build_field", world_pos, _agent_class_for_self())
+				if fid != 0:
+					_kernel_field_id = fid
+					# group_id 0 = solo (cohesion only against peers with the
+					# same group_id, which a fresh ad-hoc move won't have).
+					kernel.call("set_agent_target", kernel_handle, 0, fid, 0)
+
 	var router: NavRouter = _get_nav_router()
 	if router == null:
 		path_waypoints = PackedVector3Array()
