@@ -161,19 +161,31 @@ static func inertia_step(current_velocity: Vector3,
 	else:
 		var cur_dir: Vector3 = current_velocity / cur_speed
 		var des_dir: Vector3 = desired_velocity / des_speed
-		var max_step_rad: float = max_turn_rate_rad_s * dt
-		# Angle between them (XZ plane)
-		var cur_dir_xz: Vector2 = Vector2(cur_dir.x, cur_dir.z)
-		var des_dir_xz: Vector2 = Vector2(des_dir.x, des_dir.z)
-		var ang_to: float = cur_dir_xz.angle_to(des_dir_xz)
-		var ang_step: float = clampf(ang_to, -max_step_rad, max_step_rad)
-		var rot_xz: Vector2 = cur_dir_xz.rotated(ang_step)
-		new_dir = Vector3(rot_xz.x, 0.0, rot_xz.y)
-		# Turn-priority: slow down while turning so units don't draw wide
-		# arcs through the world. At full alignment (0°): factor=1.0.
-		# At 180° (target behind): factor=0.15. Scales linearly.
-		var abs_ang: float = absf(ang_to)
-		alignment_factor = lerpf(1.0, 0.15, clampf(abs_ang / PI, 0.0, 1.0))
+		# Fast path — when current and desired headings are already
+		# aligned within ~3° we can skip the Vector2 conversion +
+		# angle_to + rotated chain entirely. Dot product gives the
+		# cosine of the angle directly. For units in steady transit
+		# (most common case) this hits ~every tick and avoids the
+		# atan2 / sin / cos work below. Typical RTS movement has
+		# units running mostly straight between waypoints.
+		var cos_ang: float = cur_dir.x * des_dir.x + cur_dir.z * des_dir.z
+		if cos_ang > 0.9986:  # cos(3°) ≈ 0.9986
+			new_dir = des_dir
+			# alignment_factor stays 1.0 — already at full speed.
+		else:
+			var max_step_rad: float = max_turn_rate_rad_s * dt
+			# Angle between them (XZ plane)
+			var cur_dir_xz: Vector2 = Vector2(cur_dir.x, cur_dir.z)
+			var des_dir_xz: Vector2 = Vector2(des_dir.x, des_dir.z)
+			var ang_to: float = cur_dir_xz.angle_to(des_dir_xz)
+			var ang_step: float = clampf(ang_to, -max_step_rad, max_step_rad)
+			var rot_xz: Vector2 = cur_dir_xz.rotated(ang_step)
+			new_dir = Vector3(rot_xz.x, 0.0, rot_xz.y)
+			# Turn-priority: slow down while turning so units don't draw wide
+			# arcs through the world. At full alignment (0°): factor=1.0.
+			# At 180° (target behind): factor=0.15. Scales linearly.
+			var abs_ang: float = absf(ang_to)
+			alignment_factor = lerpf(1.0, 0.15, clampf(abs_ang / PI, 0.0, 1.0))
 
 	# Magnitude change (rate-limited)
 	var max_speed_step: float = max_accel * dt

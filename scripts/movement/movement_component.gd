@@ -174,15 +174,27 @@ func tick_movement(delta: float, frame_phase: int) -> void:
 		# in the loop). Skipping it once a unit has fully settled
 		# saves ~half the per-frame movement cost across an idle
 		# blob.
-		_velocity = Steering.inertia_step(
-			_velocity, Vector3.ZERO, max_accel, max_turn_rate_rad_s, delta)
+		const IDLE_VEL_EPS_SQ: float = 0.04  # 0.2 u/s squared
+		var v_sq: float = _velocity.length_squared()
+		# Skip the inertia step entirely when the unit is already at
+		# rest. inertia_step is the largest leaf-cost in the script
+		# profile (76 s session in profile 534) and an idle unit was
+		# calling it every tick just to lerp 0 toward 0. The fast-path
+		# branches inside inertia_step still ran and returned zero —
+		# now we don't even invoke them. Gain scales with the idle
+		# fraction of the population (typically ~50% of units at any
+		# moment in an RTS).
+		if v_sq < IDLE_VEL_EPS_SQ:
+			_velocity = Vector3.ZERO
+		else:
+			_velocity = Steering.inertia_step(
+				_velocity, Vector3.ZERO, max_accel, max_turn_rate_rad_s, delta)
 		if _body_physics != null:
 			_body_physics.velocity = _velocity
 			# IDLE_VEL_EPS chosen so a freshly-stopped unit (velocity
 			# very small but not zero from inertia rounding) still
 			# slides one extra frame to fully settle. After that the
 			# velocity is < eps and we skip the engine call entirely.
-			const IDLE_VEL_EPS_SQ: float = 0.04  # 0.2 u/s squared
 			var still_settling: bool = _velocity.length_squared() > IDLE_VEL_EPS_SQ
 			if still_settling or not _body_physics.is_on_floor():
 				_body_physics.move_and_slide()
