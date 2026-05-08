@@ -39,16 +39,31 @@ const MAP_HALF_EXTENT: float = 200.0
 ## constant so the grid arrays can be sized at _ready.
 const GRID_SIZE: int = int((MAP_HALF_EXTENT * 2.0) / CELL_SIZE)
 
-# Recompute is still ~100 ms per spike frame (the per-call cost
-# is the bottleneck, not call frequency — each stamp does ~318
-# Bresenham LOS walks against 4000 occluder cells). Lower the
-# rate to 1 Hz so we get at most one spike per second instead of
-# two. Vision lag goes up to ~1 s — at RTS pace (units move
-# ~6 u/s, vision cell is 5 u), memory is stale by at most one
-# cell. Acceptable while we figure out whether to invest in a
-# real algorithmic fix (shadowcasting replaces the per-cell
-# Bresenham with one octant pass — 5-10× faster per stamp).
-const FOW_REFRESH_HZ: float = 1.0
+## Octant multipliers for recursive shadowcasting. Each row is
+## (xx, xy, yx, yy) — transforms octant-local (dx, dy) (where dy
+## is "outward distance" from the observer, dx is the lateral
+## offset within that row) into grid coords:
+##   world_x = origin_x + dx*xx + dy*xy
+##   world_y = origin_y + dx*yx + dy*yy
+## 8 octants cover the full circle. Algorithm reference:
+## Björn Bergström — https://www.albertford.com/shadowcasting/
+const _OCTANT_MULTIPLIERS: Array[PackedInt32Array] = [
+	PackedInt32Array([ 1,  0,  0,  1]),
+	PackedInt32Array([ 0,  1,  1,  0]),
+	PackedInt32Array([ 0, -1,  1,  0]),
+	PackedInt32Array([-1,  0,  0,  1]),
+	PackedInt32Array([-1,  0,  0, -1]),
+	PackedInt32Array([ 0, -1, -1,  0]),
+	PackedInt32Array([ 0,  1, -1,  0]),
+	PackedInt32Array([ 1,  0,  0, -1]),
+]
+
+# Refresh rate. Was dropped to 1 Hz when per-stamp cost was the
+# bottleneck (per-cell Bresenham LOS). Shadowcasting replaced
+# that path with O(R²) octant sweeps; per-stamp cost should fall
+# 5-10×, so we can return to a more responsive 2 Hz without the
+# spike-frame symptoms.
+const FOW_REFRESH_HZ: float = 2.0
 
 ## Plateau-top elevation flag per cell. 1 = cell sits on top of a
 ## walkable plateau; 0 = ground / open. Set by the arena setup via
@@ -930,87 +945,80 @@ func _prune_observer_cache() -> void:
 
 
 func _stamp_visibility(world_pos: Vector3, radius: float, observer_elevated: bool = false, observer_aircraft: bool = false, collect_cells: bool = false) -> PackedInt32Array:
-	# Compute the cell-bounding box of the radius and walk every
-	# cell inside it, marking those whose centre falls inside the
-	# circle as VISIBLE. Square -> circle filter is cheap because
-	# the bounding-box loop is small (sight radius capped well
-	# below the map size).
+	# Marks every cell visible to an observer at world_pos within
+	# radius. Two paths:
 	#
-	# Plateau LOS: ground-level observers can't reveal cells that
-	# sit on top of a plateau -- the elevation breaks line of
-	# sight from below. Aircraft and observers already standing on
-	# a plateau bypass the gate. Temporary reveals (sat crash
-	# flares, ping pong) reveal regardless because they represent
-	# events, not unit vision.
+	# (a) `honour_occluders` (ground observer + map has occluders):
+	#     recursive shadowcasting (Björn Bergström algorithm) — one
+	#     pass per octant, slope-tracked shadow intervals from
+	#     occluder cells. Replaces the previous "iterate bounding
+	#     box, Bresenham per cell" loop. Profile showed that loop
+	#     calling _line_of_sight_clear ~318 times per observer
+	#     (~67 ms per spike frame across 70 stamps); shadowcasting
+	#     scans the same cells in O(R²) total per octant instead of
+	#     O(R²·R) per-cell-Bresenham.
+	#
+	# (b) Aircraft / elevated observer / no-occluder map: simple
+	#     bounding-box loop — no LOS gating needed.
+	#
+	# Plateau handling (skip cells on top of plateaus for ground
+	# observers) is preserved in both paths.
 	var has_plateau_data: bool = _plateau_cells.size() == _cells.size()
 	var skip_plateau_cells: bool = has_plateau_data and not observer_elevated and not observer_aircraft
-	# Aircraft see straight over forests / rock spines, so LOS
-	# occlusion only gates ground observers. Plateau-top observers
-	# are typically firing DOWN into rocks/trees so they also bypass
-	# the gate; keeps the elevation tradeoff consistent with the
-	# 'high ground sees more' rule.
-	# Skip the entire Bresenham line-walk path when the map has no
-	# registered occluders. On Foundry Belt / Ashplains / Iron Gate
-	# without any LOS-blocking terrain registered, this saves
-	# ~14 cell reads per stamped cell -- the dominant per-recompute
-	# cost on dense observer counts.
 	var has_occluder_data: bool = _occluder_cells.size() == _cells.size() and _has_any_occluders
 	var honour_occluders: bool = has_occluder_data and not observer_aircraft and not observer_elevated
 	var origin_cell: Vector2i = _world_to_cell(world_pos)
-
-	# Snapshot of cell indices we marked VISIBLE this stamp -- used by
-	# _stamp_visibility_cached so subsequent recomputes can re-mark
-	# the same cells without re-running the bounding-box-with-LOS
-	# walk. Only allocated when the caller actually wants the list.
 	var collected: PackedInt32Array = PackedInt32Array()
 	var cell_radius: int = int(ceil(radius / CELL_SIZE))
+	# Bounding-box bounds — used by the simple branch (else below)
+	# and by the multi-cell occluder ring expansion post-pass.
+	# Declared once here so both code paths can read them.
 	var x0: int = maxi(origin_cell.x - cell_radius, 0)
 	var x1: int = mini(origin_cell.x + cell_radius, GRID_SIZE - 1)
 	var z0: int = maxi(origin_cell.y - cell_radius, 0)
 	var z1: int = mini(origin_cell.y + cell_radius, GRID_SIZE - 1)
-	var radius_sq: float = radius * radius
-	for cz: int in range(z0, z1 + 1):
-		for cx: int in range(x0, x1 + 1):
-			var cell_centre := Vector3(
-				float(cx) * CELL_SIZE - MAP_HALF_EXTENT,
-				world_pos.y,
-				float(cz) * CELL_SIZE - MAP_HALF_EXTENT,
-			)
-			if cell_centre.distance_squared_to(world_pos) > radius_sq:
-				continue
-			var idx: int = _cell_index(cx, cz)
-			if skip_plateau_cells and _plateau_cells[idx] == 1:
-				# Ground observer near a plateau -- can't see what's
-				# on top, but absolutely *knows* the plateau exists.
-				# Promote the cell from UNEXPLORED to EXPLORED so the
-				# plateau geometry renders (dimmed) instead of leaving
-				# a solid-black hole where the ground is cut and the
-				# StaticBody3D stays hidden via t3d.visible = false.
-				# Aircraft / plateau-top observers still drive the
-				# full VISIBLE promotion below.
-				if _cells[idx] == CellState.UNEXPLORED:
-					_cells[idx] = CellState.EXPLORED
-				continue
-			# LOS occluder gate: walk the cell-grid line from the
-			# observer's cell to (cx, cz) and stop at the first
-			# occluder cell along the way. The observer's own cell
-			# never blocks; same for the destination so a unit
-			# standing inside a forest still reveals that cell.
-			# Skip the Bresenham walk entirely for cells within
-			# Manhattan distance 2 — at that range there's no room
-			# for an occluder cell to lie strictly between origin
-			# and target on the line walk (the line skips over the
-			# 1-cell ring; the line walker excludes endpoints).
-			# Profile showed FoW spending 67 ms / 20k LOS calls per
-			# spike frame; the inner ring is ~30% of those calls.
-			if honour_occluders:
-				var dx_los: int = absi(cx - origin_cell.x)
-				var dz_los: int = absi(cz - origin_cell.y)
-				if dx_los + dz_los > 2 and not _line_of_sight_clear(origin_cell.x, origin_cell.y, cx, cz):
-					continue
-			_cells[idx] = CellState.VISIBLE
+
+	if honour_occluders:
+		# Mark observer's own cell (shadowcasting only walks distance >= 1).
+		var origin_idx: int = _cell_index(origin_cell.x, origin_cell.y)
+		if not (skip_plateau_cells and _plateau_cells[origin_idx] == 1):
+			_cells[origin_idx] = CellState.VISIBLE
 			if collect_cells:
-				collected.append(idx)
+				collected.append(origin_idx)
+		var radius_sq_int: int = cell_radius * cell_radius
+		# 8 octants. Multipliers transform octant-local (dx, dy) to
+		# grid coords: world_x = origin_x + dx*xx + dy*xy, same for y.
+		for oct: PackedInt32Array in _OCTANT_MULTIPLIERS:
+			_cast_light_recursive(
+				origin_cell.x, origin_cell.y,
+				1, 1.0, 0.0,
+				cell_radius, radius_sq_int,
+				oct[0], oct[1], oct[2], oct[3],
+				skip_plateau_cells, collect_cells, collected,
+			)
+	else:
+		# Simple bounding-box loop (no LOS work). Used by aircraft,
+		# plateau-top observers, and maps with no registered
+		# occluders.
+		var radius_sq: float = radius * radius
+		for cz: int in range(z0, z1 + 1):
+			for cx: int in range(x0, x1 + 1):
+				var cell_centre := Vector3(
+					float(cx) * CELL_SIZE - MAP_HALF_EXTENT,
+					world_pos.y,
+					float(cz) * CELL_SIZE - MAP_HALF_EXTENT,
+				)
+				if cell_centre.distance_squared_to(world_pos) > radius_sq:
+					continue
+				var idx: int = _cell_index(cx, cz)
+				if skip_plateau_cells and _plateau_cells[idx] == 1:
+					if _cells[idx] == CellState.UNEXPLORED:
+						_cells[idx] = CellState.EXPLORED
+					continue
+				_cells[idx] = CellState.VISIBLE
+				if collect_cells:
+					collected.append(idx)
+
 	# Multi-cell occluder fix: a 2x2 (or thicker) rock has interior
 	# cells that the LOS walk can't reach (the rock's near edge
 	# blocks the walk to the far edge), leaving black slivers on
@@ -1048,6 +1056,81 @@ func _stamp_visibility(world_pos: Vector3, radius: float, observer_elevated: boo
 			if collect_cells:
 				collected.append(nidx2)
 	return collected
+
+
+func _cast_light_recursive(
+		origin_cx: int, origin_cy: int,
+		row: int,
+		start_slope: float, end_slope: float,
+		radius_cells: int, radius_sq_cells: int,
+		xx: int, xy: int, yx: int, yy: int,
+		skip_plateau: bool,
+		collect: bool,
+		collected: PackedInt32Array) -> void:
+	## One octant pass of recursive shadowcasting. Walks rows
+	## outward from the observer; tracks the current visibility
+	## wedge by start_slope (steepest visible) and end_slope
+	## (shallowest visible). Slopes shrink as occluder cells are
+	## encountered — the recurse covers the wedge above each
+	## occluder run, while the iterative loop continues below.
+	## Per-cell work is O(1) (slope compare + bounds + occluder
+	## flag read), so total work per stamp is O(R²) instead of the
+	## previous O(R²·R) (R cells × R-step Bresenham per cell).
+	if start_slope < end_slope:
+		return
+	var current_start: float = start_slope
+	var new_start: float = current_start
+	for distance: int in range(row, radius_cells + 1):
+		var dy: int = -distance
+		var blocked: bool = false
+		var dx: int = -distance
+		while dx <= 0:
+			var current_x: int = origin_cx + dx * xx + dy * xy
+			var current_y: int = origin_cy + dx * yx + dy * yy
+			var l_slope: float = (float(dx) - 0.5) / (float(dy) + 0.5)
+			var r_slope: float = (float(dx) + 0.5) / (float(dy) - 0.5)
+			if current_start < r_slope:
+				dx += 1
+				continue
+			elif end_slope > l_slope:
+				break
+			# In wedge; bounds + radius check before marking.
+			if current_x >= 0 and current_x < GRID_SIZE \
+					and current_y >= 0 and current_y < GRID_SIZE \
+					and dx * dx + dy * dy <= radius_sq_cells:
+				var idx: int = _cell_index(current_x, current_y)
+				if skip_plateau and _plateau_cells[idx] == 1:
+					if _cells[idx] == CellState.UNEXPLORED:
+						_cells[idx] = CellState.EXPLORED
+				else:
+					_cells[idx] = CellState.VISIBLE
+					if collect:
+						collected.append(idx)
+				# Occluder handling: cells beyond an occluder in this
+				# row's slope range are skipped; recurse into the
+				# wedge above the occluder run with the existing
+				# start_slope...l_slope.
+				var is_occluder: bool = _occluder_cells[idx] == 1
+				if blocked:
+					if is_occluder:
+						new_start = r_slope
+					else:
+						blocked = false
+						current_start = new_start
+				else:
+					if is_occluder and distance < radius_cells:
+						blocked = true
+						_cast_light_recursive(
+							origin_cx, origin_cy,
+							distance + 1, current_start, l_slope,
+							radius_cells, radius_sq_cells,
+							xx, xy, yx, yy,
+							skip_plateau, collect, collected,
+						)
+						new_start = r_slope
+			dx += 1
+		if blocked:
+			break
 
 
 func _line_of_sight_clear(x0: int, y0: int, x1: int, y1: int) -> bool:
