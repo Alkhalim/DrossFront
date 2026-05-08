@@ -1,0 +1,13 @@
+[configuration]
+
+entry_symbol = "movement_native_init"
+compatibility_minimum = "4.6"
+
+[libraries]
+
+windows.debug.x86_64   = "res://addons/movement_native/bin/libmovement_native.windows.template_debug.x86_64.dll"
+windows.release.x86_64 = "res://addons/movement_native/bin/libmovement_native.windows.template_release.x86_64.dll"
+linux.debug.x86_64     = "res://addons/movement_native/bin/libmovement_native.linux.template_debug.x86_64.so"
+linux.release.x86_64   = "res://addons/movement_native/bin/libmovement_native.linux.template_release.x86_64.so"
+macos.debug            = "res://addons/movement_native/bin/libmovement_native.macos.template_debug.framework"
+macos.release          = "res://addons/movement_native/bin/libmovement_native.macos.template_release.framework"
