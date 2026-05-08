@@ -307,8 +307,21 @@ func _process(delta: float) -> void:
 	# bobs around the target altitude on a sin curve so single-body
 	# craft (gunships, interceptors) read as airborne the same way the
 	# swarm drones do via their per-drone bob.
+	#
+	# CRITICAL: this block ONLY runs on the legacy movement path. When
+	# AircraftMovement is active, IT owns Y position (pulls toward
+	# base_altitude every physics tick). Running this _process bob in
+	# parallel made BOTH systems fight over Y at different rates: the
+	# render-frame bob lerps Y toward `flight_altitude + sin(...)`,
+	# the physics tick pulls Y back to base_altitude, and the result
+	# is the rapid up/down oscillation the user reported (visible
+	# even out of combat). With the new system the aircraft hovers
+	# stably; visual bob can be re-added inside AircraftMovement
+	# later if needed.
 	_altitude_anim_time += delta
-	if stats:
+	var _alt_mc: Node = get_node_or_null("MovementComponent")
+	var _aircraft_mc_active: bool = _alt_mc != null and _alt_mc is AircraftMovement
+	if stats and not _aircraft_mc_active:
 		var hover: float = sin(_altitude_anim_time * ALTITUDE_BOB_FREQ + _bob_phase) * ALTITUDE_BOB_AMP
 		var target_y: float = stats.flight_altitude + hover
 		global_position.y = lerp(global_position.y, target_y, clampf(delta * 4.0, 0.0, 1.0))

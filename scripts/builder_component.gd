@@ -429,18 +429,35 @@ func _approach_point() -> Vector3:
 func _spot_has_other_engineer(spot: Vector3, radius: float) -> bool:
 	## True if another player-allied unit with a BuilderComponent is
 	## within `radius` of `spot` (excluding self).
+	## Profile 532 flagged this at 36.4 ms / call (and _approach_point
+	## that calls it at the same magnitude) — the previous build walked
+	## the FULL units group (~200 entities) per call and ran a
+	## has_method + get_builder dynamic call on every one. With many
+	## engineers competing for build spots during heavy combat that
+	## was the dominant cost on the entire script board (60 s of session
+	## time on this function chain). Switched to the same SpatialIndex
+	## narrow-phase pattern we use elsewhere — typical bucket return
+	## is 5-15 candidates instead of 200.
 	var r2: float = radius * radius
-	for node: Node in get_tree().get_nodes_in_group("units"):
-		if not is_instance_valid(node) or node == _unit:
+	var idx: SpatialIndex = SpatialIndex.get_instance(get_tree().current_scene)
+	if idx == null:
+		return false
+	# Untyped iteration: spatial-index buckets can carry stale Object
+	# references for entities freed since the last rebuild tick.
+	for raw in idx.nearby(spot, radius):
+		if raw == null or not is_instance_valid(raw):
+			continue
+		var node: Node = raw as Node
+		if not node or node == _unit:
+			continue
+		# Cheap check: only candidates that have a builder.
+		if not node.has_method("get_builder"):
+			continue
+		var builder: Node = node.get_builder()
+		if not builder:
 			continue
 		var n3: Node3D = node as Node3D
 		if not n3:
-			continue
-		# Cheap check: only candidates that have a builder.
-		if not n3.has_method("get_builder"):
-			continue
-		var builder: Node = n3.get_builder() if n3.has_method("get_builder") else null
-		if not builder:
 			continue
 		var dx: float = n3.global_position.x - spot.x
 		var dz: float = n3.global_position.z - spot.z
