@@ -1838,6 +1838,62 @@ func _build_scenarios_panel() -> void:
 		launch.pressed.connect(_on_scenario_pressed.bind(sid))
 		card_vbox.add_child(launch)
 
+	# Pathfinding Tests subsection — separate from the proving-ground
+	# scenarios because path tests bypass the standard arena flow and
+	# launch a dedicated test scene directly. PF-A ships one entry; PF-C
+	# adds the dedicated-map suite (blob-through-choke, obstacle add/destroy,
+	# attack-move line, etc.).
+	var path_section_spacer := Control.new()
+	path_section_spacer.custom_minimum_size = Vector2(0, 16)
+	_scenarios_panel.add_child(path_section_spacer)
+
+	var path_heading := Label.new()
+	path_heading.text = "Pathfinding Tests"
+	path_heading.add_theme_font_size_override("font_size", 18)
+	path_heading.add_theme_color_override("font_color", COLOR_SUBTITLE)
+	path_heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_scenarios_panel.add_child(path_heading)
+
+	var path_subtitle := Label.new()
+	path_subtitle.text = "Movement-system smoke tests (developer)"
+	path_subtitle.add_theme_font_size_override("font_size", 12)
+	path_subtitle.add_theme_color_override("font_color", COLOR_HINT)
+	path_subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_scenarios_panel.add_child(path_subtitle)
+
+	var path_test_defs: Array[Dictionary] = [
+		{
+			"id": MatchSettingsClass.Scenario.PATH_TEST_FLOWFIELD_SMOKE,
+			"title": "Flow-Field Smoke (Hound Pilot)",
+			"blurb": "PF-A pilot. Three Anvil Hound squads spawn at (-30, ±5)\nand move-order to (30, 0). Toggle drossfront/movement/\nuse_flowfield in project.godot to compare paths.",
+			"scene": "res://scenes/test_arenas/path_test_flowfield_smoke.tscn",
+		},
+	]
+	for pdef: Dictionary in path_test_defs:
+		var pcard := PanelContainer.new()
+		pcard.custom_minimum_size = Vector2(420, 100)
+		_scenarios_panel.add_child(pcard)
+		var pcard_vbox := VBoxContainer.new()
+		pcard_vbox.add_theme_constant_override("separation", 4)
+		pcard.add_child(pcard_vbox)
+		var pt := Label.new()
+		pt.text = pdef["title"] as String
+		pt.add_theme_font_size_override("font_size", 18)
+		pt.add_theme_color_override("font_color", COLOR_TITLE)
+		pcard_vbox.add_child(pt)
+		var pb := Label.new()
+		pb.text = pdef["blurb"] as String
+		pb.add_theme_font_size_override("font_size", 13)
+		pb.add_theme_color_override("font_color", Color(0.8, 0.85, 0.9, 1.0))
+		pcard_vbox.add_child(pb)
+		var plaunch := Button.new()
+		plaunch.text = "Run"
+		plaunch.custom_minimum_size = Vector2(140, 32)
+		var p_sid: int = pdef["id"] as int
+		var p_scene: String = pdef["scene"] as String
+		plaunch.pressed.connect(_on_path_test_pressed.bind(p_sid, p_scene))
+		pcard_vbox.add_child(plaunch)
+
 	var back := Button.new()
 	back.text = "BACK"
 	back.custom_minimum_size = Vector2(140, 38)
@@ -1880,3 +1936,19 @@ func _on_scenario_pressed(scenario_id: int) -> void:
 			MatchSettings.difficulty = MatchSettingsClass.Difficulty.HARD
 			MatchSettings.map_id = MatchSettingsClass.MapId.IRON_GATE_CROSSING
 	_start_match()
+
+
+func _on_path_test_pressed(scenario_id: int, scene_path: String) -> void:
+	## Pathfinding test launch path — bypasses the standard arena flow and
+	## loads the test scene directly. The standard flow would route through
+	## the loading screen and instantiate the production arena, which isn't
+	## what these dev-only smoke scenes want. disable_match_end is set so
+	## tests that involve combat (arriving in PF-C) don't auto-end on HQ
+	## loss, since most of these scenes have no HQ at all.
+	MatchSettings.tutorial_mode = false
+	MatchSettings.ai_personalities = {}
+	MatchSettings.ai_difficulties = {}
+	MatchSettings.ai_factions = {}
+	MatchSettings.scenario = scenario_id as MatchSettingsClass.Scenario
+	MatchSettings.disable_match_end = true
+	get_tree().change_scene_to_file(scene_path)

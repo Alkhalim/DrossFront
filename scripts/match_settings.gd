@@ -40,12 +40,29 @@ enum Scenario {
 	SPECOPS_SABLE_PROVING,
 	SPECOPS_ANVIL_PROVING,
 	SPECOPS_STRESS_TEST,
+	## Pathfinding test arenas (PF-A onwards). These bypass the standard
+	## loading-screen → arena flow; main_menu launches their dedicated
+	## scenes directly. disable_match_end is set by these to suppress
+	## auto-defeat on HQ loss (some tests involve combat without an HQ).
+	PATH_TEST_FLOWFIELD_SMOKE,
 }
 var scenario: Scenario = Scenario.NONE
+
+## When true, match_manager skips its HQ-loss-equals-defeat rule.
+## Set by path-test scenarios so combat-driven test arenas don't
+## auto-end the run when an HQ is destroyed (or never had one).
+var disable_match_end: bool = false
 
 
 func is_scenario() -> bool:
 	return scenario != Scenario.NONE
+
+
+## True if the active scenario is a pathfinding-test arena. main_menu
+## checks this before _start_match so it can dispatch to the test
+## scene directly instead of the standard loading-screen flow.
+func is_path_test() -> bool:
+	return scenario == Scenario.PATH_TEST_FLOWFIELD_SMOKE
 
 ## Picked on the main menu before launching a match.
 var difficulty: Difficulty = Difficulty.NORMAL

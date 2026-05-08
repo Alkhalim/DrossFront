@@ -137,6 +137,12 @@ func _on_hq_destroyed(destroyed_node: Node) -> void:
 		var settings: Node = get_node_or_null("/root/MatchSettings")
 		if settings and settings.get("tutorial_mode"):
 			return
+		# Pathfinding test scenarios (Special Operations → Pathfinding
+		# Tests) suppress match end too — the dev-only smoke scenes
+		# don't have HQs and any combat in future tests shouldn't
+		# auto-defeat the player just because a probe gets killed.
+		if settings and settings.get("disable_match_end"):
+			return
 		_end_match(false)
 		return
 
