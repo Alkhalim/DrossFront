@@ -21,17 +21,43 @@ extends Node
 ## mirroring the SpatialIndex / NavRouter pattern, so existing
 ## scenes don't need wiring updates.
 
+## Holds the just-created orchestrator while its add_child is in
+## the deferred queue. Without this, every MovementComponent that
+## calls get_instance during the same scene-setup frame would
+## create its own orchestrator (none of them yet visible via
+## get_node_or_null) and queue a duplicate add_child. We'd end
+## up with several orphan orchestrators colliding in the scene
+## tree on the next idle frame. Cleared once the deferred add
+## resolves and the orch is reachable via get_node_or_null.
+static var _pending_instance: MovementOrchestrator = null
+
+
 static func get_instance(scene_root: Node) -> MovementOrchestrator:
 	## Returns the singleton MovementOrchestrator under the scene
-	## root, creating it lazily if missing.
+	## root, creating it lazily if missing. Uses
+	## add_child.call_deferred so we don't trip the
+	## "Parent node is busy setting up children" guard when
+	## components get created during scene init.
 	if not scene_root:
 		return null
 	var existing: Node = scene_root.get_node_or_null("MovementOrchestrator")
 	if existing and existing is MovementOrchestrator:
+		if _pending_instance == existing:
+			_pending_instance = null
 		return existing as MovementOrchestrator
+	# Reuse the in-flight pending instance if it's still alive
+	# (cleared on scene reload via is_instance_valid).
+	if _pending_instance != null and is_instance_valid(_pending_instance):
+		return _pending_instance
 	var orch := MovementOrchestrator.new()
 	orch.name = "MovementOrchestrator"
-	scene_root.add_child(orch)
+	_pending_instance = orch
+	# Deferred add — safe even if scene_root is mid-setup. The
+	# orchestrator's _physics_process won't fire until it actually
+	# lands in the tree on the next idle frame, but components
+	# can still register against it immediately because
+	# register() only mutates the _components array.
+	scene_root.add_child.call_deferred(orch)
 	return orch
 
 
