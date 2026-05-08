@@ -1,0 +1,9 @@
+#!/usr/bin/env python
+import os
+
+env = Environment()
+env.Append(CPPPATH=["../src/", "../godot-cpp/include/", "../godot-cpp/gen/include/", "../godot-cpp/gdextension/"])
+env.Append(CXXFLAGS=["/std:c++17"] if env["PLATFORM"] == "win32" else ["-std=c++17"])
+
+sources = ["test_main.cpp", "test_cost_grid.cpp", "../src/cost_grid.cpp"]
+env.Program(target="run_tests", source=sources)

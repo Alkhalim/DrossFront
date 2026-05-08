@@ -10,8 +10,11 @@ CostGrid::CostGrid(int width, int height, float cell_size, float origin_x, float
       cells_(static_cast<size_t>(width * height), COST_OPEN) {}
 
 int CostGrid::cell_of(float world_x, float world_z) const {
-    int cx = static_cast<int>((world_x - origin_x_) / cell_size_);
-    int cz = static_cast<int>((world_z - origin_z_) / cell_size_);
+    // floor() (not int truncation) so negative world coordinates map to negative
+    // cells — int truncation rounds toward zero, leaving e.g. world_x=-0.5
+    // mapped to cx=0 which falsely passes the in-bounds check.
+    int cx = static_cast<int>(std::floor((world_x - origin_x_) / cell_size_));
+    int cz = static_cast<int>(std::floor((world_z - origin_z_) / cell_size_));
     if (cx < 0 || cx >= width_ || cz < 0 || cz >= height_) return -1;
     return cz * width_ + cx;
 }
@@ -21,10 +24,13 @@ void CostGrid::mark_obstacle(godot::AABB aabb, float dilation_radius, bool block
     float min_z = aabb.position.z - dilation_radius;
     float max_x = aabb.position.x + aabb.size.x + dilation_radius;
     float max_z = aabb.position.z + aabb.size.z + dilation_radius;
-    int x0 = std::max(0, static_cast<int>((min_x - origin_x_) / cell_size_));
-    int x1 = std::min(width_  - 1, static_cast<int>((max_x - origin_x_) / cell_size_));
-    int z0 = std::max(0, static_cast<int>((min_z - origin_z_) / cell_size_));
-    int z1 = std::min(height_ - 1, static_cast<int>((max_z - origin_z_) / cell_size_));
+    // floor() for the lower bound (so partial overlap on a cell still includes
+    // it) and ceil() - 1 for the upper bound (so an AABB whose right edge falls
+    // exactly on a cell boundary does NOT include that next cell).
+    int x0 = std::max(0,            static_cast<int>(std::floor((min_x - origin_x_) / cell_size_)));
+    int x1 = std::min(width_  - 1,  static_cast<int>(std::ceil ((max_x - origin_x_) / cell_size_)) - 1);
+    int z0 = std::max(0,            static_cast<int>(std::floor((min_z - origin_z_) / cell_size_)));
+    int z1 = std::min(height_ - 1,  static_cast<int>(std::ceil ((max_z - origin_z_) / cell_size_)) - 1);
     uint8_t v = blocked ? COST_BLOCKED : COST_OPEN;
     for (int cz = z0; cz <= z1; ++cz) {
         for (int cx = x0; cx <= x1; ++cx) {
@@ -39,10 +45,10 @@ void CostGrid::mark_soft_cost(godot::AABB aabb, float dilation_radius, uint8_t c
     float min_z = aabb.position.z - dilation_radius;
     float max_x = aabb.position.x + aabb.size.x + dilation_radius;
     float max_z = aabb.position.z + aabb.size.z + dilation_radius;
-    int x0 = std::max(0, static_cast<int>((min_x - origin_x_) / cell_size_));
-    int x1 = std::min(width_  - 1, static_cast<int>((max_x - origin_x_) / cell_size_));
-    int z0 = std::max(0, static_cast<int>((min_z - origin_z_) / cell_size_));
-    int z1 = std::min(height_ - 1, static_cast<int>((max_z - origin_z_) / cell_size_));
+    int x0 = std::max(0,            static_cast<int>(std::floor((min_x - origin_x_) / cell_size_)));
+    int x1 = std::min(width_  - 1,  static_cast<int>(std::ceil ((max_x - origin_x_) / cell_size_)) - 1);
+    int z0 = std::max(0,            static_cast<int>(std::floor((min_z - origin_z_) / cell_size_)));
+    int z1 = std::min(height_ - 1,  static_cast<int>(std::ceil ((max_z - origin_z_) / cell_size_)) - 1);
     for (int cz = z0; cz <= z1; ++cz) {
         for (int cx = x0; cx <= x1; ++cx) {
             // Soft cost only applies to currently-open cells.
