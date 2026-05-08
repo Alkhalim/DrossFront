@@ -118,6 +118,21 @@ void SteeringKernel::tick(float delta) {
         godot::Vector2 flow = server_->sample(agents_.field_id[i], pos);
         godot::Vector3 seek(flow.x * max_speed, 0.0f, flow.y * max_speed);
 
+        // Arrival (or unreachable goal): the field returns (0,0) flow at
+        // the goal cell itself AND at any cell that's disconnected from
+        // the goal. In both cases the agent should stop trying to drive
+        // toward the goal — no SEEK, no COHESION pulling toward the
+        // group centroid (which would cause stutter-step at the
+        // destination). Keep SEPARATE so peers maintain spacing instead
+        // of stacking on a single point. With seek=0 and coh=0, sep
+        // decays to zero once peers are at SEPARATE_DISTANCE apart, and
+        // inertia takes velocity to zero. Final state: units settle in
+        // a small cluster around the goal, standing still.
+        bool at_goal_or_unreachable = (flow.length_squared() < 0.0001f);
+        if (at_goal_or_unreachable) {
+            seek = godot::Vector3();
+        }
+
         // SEPARATE pass — pairwise O(N^2). Acceptable at PF-A scale (one
         // squad type pilot, < 50 agents). PF-C swaps in SpatialIndex via a
         // GDScript-callable bridge.
@@ -134,22 +149,25 @@ void SteeringKernel::tick(float delta) {
 
         // COHESION — toward same-group centroid (computed on the fly here;
         // GroupAura caches it later when wired up via group_id lookup tables).
-        godot::Vector3 centroid = {};
-        int peers = 0;
-        for (int j = 0; j < N; ++j) {
-            if (j == i || !agents_.alive[j]) continue;
-            if (agents_.group_id[j] != agents_.group_id[i]) continue;
-            centroid += agents_.pos[j];
-            ++peers;
-        }
+        // Skipped on arrival so it doesn't fight SEPARATE at the destination.
         godot::Vector3 coh = {};
-        if (peers > 0) {
-            centroid /= static_cast<float>(peers);
-            coh = centroid - pos;
-            coh.y = 0.0f;
-            float clen = coh.length();
-            if (clen > COHESION_MAX_MAGNITUDE) {
-                coh *= (COHESION_MAX_MAGNITUDE / clen);
+        if (!at_goal_or_unreachable) {
+            godot::Vector3 centroid = {};
+            int peers = 0;
+            for (int j = 0; j < N; ++j) {
+                if (j == i || !agents_.alive[j]) continue;
+                if (agents_.group_id[j] != agents_.group_id[i]) continue;
+                centroid += agents_.pos[j];
+                ++peers;
+            }
+            if (peers > 0) {
+                centroid /= static_cast<float>(peers);
+                coh = centroid - pos;
+                coh.y = 0.0f;
+                float clen = coh.length();
+                if (clen > COHESION_MAX_MAGNITUDE) {
+                    coh *= (COHESION_MAX_MAGNITUDE / clen);
+                }
             }
         }
 
