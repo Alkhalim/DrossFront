@@ -203,6 +203,24 @@ func _is_movement_priority_active() -> bool:
 ## position (which would mean the unit hits firing range at full speed
 ## and overshoots into melee). 95% of primary_range so the unit lands
 ## just inside firing range, not exactly on the boundary.
+## Engagement distance metric. Aircraft use 2D (XZ-plane) distance
+## because their altitude (typically 12 u) would otherwise consume
+## most of the weapon's effective range — a 12 u-altitude aircraft
+## directly over a ground target reports 12 u of 3D distance, leaving
+## only sqrt(weapon_range^2 - 144) of horizontal play. With most
+## weapon ranges in the 10-15 u band that horizontal slack is zero or
+## imaginary, so aircraft never satisfy `dist <= weapon_range` and
+## stay stuck in the "chase forever" branch — visible as: no fire, no
+## rotation, frozen-near-target, plus pathological per-tick steering
+## cost (the unit never drops to the cheaper idle path).
+func _engagement_distance(unit_pos: Vector3, target_pos: Vector3, shooter_is_air: bool) -> float:
+	if shooter_is_air:
+		var dx: float = unit_pos.x - target_pos.x
+		var dz: float = unit_pos.z - target_pos.z
+		return sqrt(dx * dx + dz * dz)
+	return unit_pos.distance_to(target_pos)
+
+
 func _chase_position(target: Node3D, primary_range: float) -> Vector3:
 	var enemy_pos: Vector3 = target.global_position
 	if primary_range <= 0.0:
@@ -434,7 +452,8 @@ func _physics_process(delta: float) -> void:
 						_unit.command_move(home_pos, false)
 		return
 
-	var dist: float = _unit.global_position.distance_to(_current_target.global_position)
+	var shooter_is_air: bool = _unit.is_in_group("aircraft")
+	var dist: float = _engagement_distance(_unit.global_position, _current_target.global_position, shooter_is_air)
 	var stats: UnitStatResource = _unit.get("stats") as UnitStatResource
 	var primary: WeaponResource = stats.primary_weapon
 	var primary_range: float = primary.resolved_range() if primary else 10.0
@@ -608,6 +627,13 @@ func _find_nearest_enemy(max_range: float) -> Node3D:
 
 	var my_owner: int = _unit.get("owner_id")
 	var my_pos: Vector3 = _unit.global_position
+	# Aircraft acquire targets by 2D distance — same reason as the
+	# main engagement gate (see _engagement_distance). Without this,
+	# an aircraft over a ground target would read the altitude into
+	# the candidate's distance and reject targets just past the
+	# horizontal weapon range even though the aircraft could reach
+	# them by descending into firing range.
+	var shooter_is_air: bool = _unit.is_in_group("aircraft")
 
 	var nearest: Node3D = null
 	var nearest_dist: float = INF
@@ -663,7 +689,7 @@ func _find_nearest_enemy(max_range: float) -> Node3D:
 			var their_stats: UnitStatResource = node.get("stats") as UnitStatResource
 			if their_stats and their_stats.is_stealth_capable:
 				continue
-		var d: float = my_pos.distance_to((node as Node3D).global_position)
+		var d: float = _engagement_distance(my_pos, (node as Node3D).global_position, shooter_is_air)
 		if d <= max_range and d < nearest_dist:
 			nearest_dist = d
 			nearest = node as Node3D
@@ -1011,7 +1037,13 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	# shot is impossible AND no shot is guaranteed for non-elite
 	# weapons. Misses spawn dust + ricochet sound, no damage.
 	var weapon_range: float = weapon.resolved_range()
-	var dist_to_target: float = _unit.global_position.distance_to(_current_target.global_position)
+	# Use 2D distance for aircraft so the range-band accuracy bands
+	# (point-blank / mid / far) stay consistent with the engagement
+	# gate above — without it an aircraft directly over a ground
+	# target would always score in the "far" band and pay the -10%
+	# accuracy penalty just because of altitude.
+	var acc_shooter_is_air: bool = _unit.is_in_group("aircraft")
+	var dist_to_target: float = _engagement_distance(_unit.global_position, _current_target.global_position, acc_shooter_is_air)
 	var range_t: float = clampf(dist_to_target / maxf(weapon_range, 0.01), 0.0, 1.0)
 	# Range band: point-blank shots get a small accuracy bonus, mid
 	# range is baseline, the far third of the weapon's reach drops
