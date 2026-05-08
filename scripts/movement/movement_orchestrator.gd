@@ -101,8 +101,7 @@ func _physics_process(delta: float) -> void:
 	var flowfield_on: bool = MovementFlags.use_flowfield()
 	var kernel: Object = null
 	if flowfield_on:
-		kernel = (load("res://scripts/movement/movement_native_bootstrap.gd")
-				  .call("get_kernel", get_tree().current_scene))
+		kernel = MovementNativeBootstrap.get_kernel(get_tree().current_scene)
 
 	# Phase 1: mirror positions into kernel SoA, then run kernel.tick once.
 	if kernel != null:

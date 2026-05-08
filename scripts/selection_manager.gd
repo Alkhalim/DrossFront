@@ -2477,15 +2477,17 @@ func _confirm_build_placement(screen_pos: Vector2, keep_placing: bool = false) -
 		pass
 
 func _unit_is_pf_a_migrated(u: Node) -> bool:
-	## PF-A: only Anvil Hound is migrated. Read the unit's stat ID.
+	## PF-A: only Anvil Hound is migrated. UnitStatResource has no `id`
+	## field; identify by the resource path (anvil_hound.tres) which the
+	## file naming convention pins for this unit type.
 	if u == null or not is_instance_valid(u):
 		return false
 	if not "stats" in u:
 		return false
-	var stats: Variant = u.get("stats")
-	if stats == null or not "id" in stats:
+	var stats_res: Resource = u.get("stats") as Resource
+	if stats_res == null:
 		return false
-	return (stats.id as String) == "anvil_hound"
+	return stats_res.resource_path.ends_with("/anvil_hound.tres")
 
 
 func _dispatch_via_group_aura(ground_pos: Vector3) -> void:
@@ -2496,4 +2498,3 @@ func _dispatch_via_group_aura(ground_pos: Vector3) -> void:
 	aura.name = "GroupAura_%d" % Time.get_ticks_msec()
 	get_tree().current_scene.add_child(aura)
 	aura.setup(_selected_units.duplicate(), ground_pos, 0)
-

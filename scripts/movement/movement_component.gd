@@ -112,10 +112,13 @@ func _ready() -> void:
 		if orch:
 			orch.register(self)
 		# PF-A: when use_flowfield is on, register with the steering kernel.
-		# Flag-off path is unchanged.
+		# Flag-off path is unchanged. Use the class-name directly (not
+		# load().call()) — Script.call() doesn't reliably invoke static
+		# methods on GDScript resources, and was returning null silently,
+		# leaving kernel_handle = 0 and the orchestrator's flag-on path
+		# inactive.
 		if MovementFlags.use_flowfield():
-			var kernel: Object = (load("res://scripts/movement/movement_native_bootstrap.gd")
-								  .call("get_kernel", scene))
+			var kernel: Object = MovementNativeBootstrap.get_kernel(scene)
 			if kernel != null:
 				kernel_handle = kernel.call("register_agent",
 					int(get_instance_id()),
@@ -139,8 +142,7 @@ func _exit_tree() -> void:
 	# PF-A: unregister from the steering kernel if we were registered.
 	if kernel_handle != 0:
 		if scene:
-			var kernel: Object = (load("res://scripts/movement/movement_native_bootstrap.gd")
-								  .call("get_kernel", scene))
+			var kernel: Object = MovementNativeBootstrap.get_kernel(scene)
 			if kernel != null:
 				kernel.call("unregister_agent", kernel_handle)
 		kernel_handle = 0

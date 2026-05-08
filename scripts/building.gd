@@ -3273,8 +3273,7 @@ func _finish_construction() -> void:
 	# fields invalidate. This is additive to the navmesh rebake — the legacy
 	# path still uses NavigationServer3D for unit-tests/aircraft/workers.
 	if MovementFlags.use_flowfield():
-		var server: Object = (load("res://scripts/movement/movement_native_bootstrap.gd")
-							  .call("get_server", arena))
+		var server: Object = MovementNativeBootstrap.get_server(arena)
 		if server != null:
 			var fp_pf: Vector3 = stats.footprint_size
 			var aabb_pf: AABB = AABB(global_position - Vector3(fp_pf.x * 0.5, 0.0, fp_pf.z * 0.5), fp_pf)
