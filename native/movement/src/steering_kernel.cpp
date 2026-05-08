@@ -34,7 +34,13 @@ void SteeringKernel::_bind_methods() {
                          &SteeringKernel::get_velocity);
     ClassDB::bind_method(D_METHOD("tick", "delta"),
                          &SteeringKernel::tick);
+    ClassDB::bind_method(D_METHOD("set_flow_field_server", "server"),
+                         &SteeringKernel::set_flow_field_server);
 #endif
+}
+
+void SteeringKernel::set_flow_field_server(godot::Object *server_obj) {
+    server_ = godot::Object::cast_to<FlowFieldServer>(server_obj);
 }
 
 SteeringKernel::SteeringKernel() {}

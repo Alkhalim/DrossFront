@@ -18,7 +18,11 @@ public:
     SteeringKernel();
     ~SteeringKernel();
 
-    void set_flow_field_server(FlowFieldServer *server) { server_ = server; }
+    // Accepts a godot::Object* so this can be GDScript-bound; we cast_to
+    // FlowFieldServer internally. Exposing the typed pointer to GDScript
+    // would require Godot to know how to marshal FlowFieldServer*, which
+    // it can't (no Variant conversion); Object* is the universal handle.
+    void set_flow_field_server(godot::Object *server_obj);
 
     AgentHandle register_agent(int unit_id, int agent_class, float radius,
                                 float max_speed, float max_accel, float max_turn_rate);
