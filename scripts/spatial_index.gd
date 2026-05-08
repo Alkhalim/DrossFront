@@ -24,10 +24,33 @@ extends Node
 const CELL_SIZE: float = 16.0
 const MAP_HALF: float = 200.0
 const GRID_DIM: int = int((MAP_HALF * 2.0) / CELL_SIZE)
-const REBUILD_INTERVAL_MS: int = 250
+## Cumulative profile (1831-frame session) showed SpatialIndex.nearby
+## at 6.65 ms per call inclusive — the cost is the periodic rebuild
+## walking every unit + building. At 250ms intervals that's 4
+## rebuilds/sec × ~250 entities = 1000 walks/sec. Bumping to 500ms
+## halves that. Trade-off: combat queries see up to 500ms of stale
+## position data — a unit moving into firing range takes up to 0.5s
+## to be "seen" by an attacker who isn't already locked on. RTS
+## pacing easily absorbs that latency.
+const REBUILD_INTERVAL_MS: int = 500
 
-var _cells: Dictionary = {}      # int cell-index -> Array[Node3D]
+## Flat array of GRID_DIM² cells, each cell an Array[Node3D] of
+## entities currently bucketed there. Replaces the previous
+## Dictionary[int -> Array]: array indexing is faster than dict
+## lookup, no need for has-check branches in the hot rebuild loop
+## or the nearby scan. Pre-sized at _ready so we don't allocate
+## per-rebuild.
+var _cells: Array = []
 var _last_rebuild_ms: int = -REBUILD_INTERVAL_MS  # force first build
+
+
+func _ready() -> void:
+	# One-time: pre-allocate the flat cell grid. Each entry stays
+	# as an Array reference for the lifetime of the SpatialIndex —
+	# rebuilds clear the entries in place rather than re-allocating.
+	_cells.resize(GRID_DIM * GRID_DIM)
+	for i: int in _cells.size():
+		_cells[i] = []
 
 
 static func get_instance(scene_root: Node) -> SpatialIndex:
@@ -58,7 +81,11 @@ func _ensure_fresh() -> void:
 	if (now - _last_rebuild_ms) < REBUILD_INTERVAL_MS:
 		return
 	_last_rebuild_ms = now
-	_cells.clear()
+	# Clear in place — each cell's Array is reused across rebuilds.
+	# Avoids re-allocating GRID_DIM² Arrays per rebuild (was
+	# implicitly happening via the Dictionary clear+rebuild).
+	for i: int in _cells.size():
+		(_cells[i] as Array).clear()
 	# Bucket every alive unit + every constructed building. Untyped
 	# iteration -- get_nodes_in_group can return freed handles that
 	# haven't dropped from the group yet, and a typed for-loop
@@ -75,10 +102,7 @@ func _ensure_fresh() -> void:
 		var n3: Node3D = node as Node3D
 		if not n3:
 			continue
-		var idx: int = _cell_of(n3.global_position)
-		if not _cells.has(idx):
-			_cells[idx] = []
-		(_cells[idx] as Array).append(n3)
+		(_cells[_cell_of(n3.global_position)] as Array).append(n3)
 	for raw2 in get_tree().get_nodes_in_group("buildings"):
 		if raw2 == null or not is_instance_valid(raw2):
 			continue
@@ -88,10 +112,7 @@ func _ensure_fresh() -> void:
 		var n3b: Node3D = node2 as Node3D
 		if not n3b:
 			continue
-		var idx2: int = _cell_of(n3b.global_position)
-		if not _cells.has(idx2):
-			_cells[idx2] = []
-		(_cells[idx2] as Array).append(n3b)
+		(_cells[_cell_of(n3b.global_position)] as Array).append(n3b)
 
 
 func nearby(world_pos: Vector3, radius: float) -> Array:
@@ -108,9 +129,12 @@ func nearby(world_pos: Vector3, radius: float) -> Array:
 	var z0: int = maxi(origin_cz - cell_radius, 0)
 	var z1: int = mini(origin_cz + cell_radius, GRID_DIM - 1)
 	for cz: int in range(z0, z1 + 1):
+		var row_base: int = cz * GRID_DIM
 		for cx: int in range(x0, x1 + 1):
-			var key: int = cz * GRID_DIM + cx
-			var bucket: Array = _cells.get(key, []) as Array
+			# Direct array index (no dict has-check needed since
+			# every cell is pre-allocated as an empty Array at
+			# _ready). Empty cells are cheap.
+			var bucket: Array = _cells[row_base + cx] as Array
 			if not bucket.is_empty():
 				out.append_array(bucket)
 	return out
