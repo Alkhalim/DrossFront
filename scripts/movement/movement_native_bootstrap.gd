@@ -19,7 +19,40 @@ static func get_server(scene_root: Node) -> Object:
 		_server.call("set_agent_radius", 0, 0.6)  # small
 		_server.call("set_agent_radius", 1, 1.0)  # medium
 		_server.call("set_agent_radius", 2, 2.0)  # large
+		# Sweep buildings already in the scene tree into the cost grid so the
+		# first flow field built after server creation routes around them.
+		# Newly-constructed buildings are picked up by the mark_obstacle call
+		# in building.gd's _on_constructed hook (T20). This sweep covers the
+		# arena's pre-placed structures (HQ, starting yards, etc.) which never
+		# transition through _on_constructed.
+		_mark_existing_buildings(scene_root)
 	return _server
+
+
+static func _mark_existing_buildings(scene_root: Node) -> void:
+	if scene_root == null:
+		return
+	var tree: SceneTree = scene_root.get_tree()
+	if tree == null:
+		return
+	for b: Node in tree.get_nodes_in_group("buildings"):
+		if not is_instance_valid(b):
+			continue
+		if not (b is Node3D):
+			continue
+		var b3d: Node3D = b as Node3D
+		# Default footprint if the building lacks stats; covers the small
+		# fraction of buildings (e.g. wreck-style props) that don't have
+		# a UnitStatResource-equivalent.
+		var fp_size: Vector3 = Vector3(4, 2, 4)
+		if "stats" in b:
+			var bstats: Resource = b.get("stats") as Resource
+			if bstats != null and "footprint_size" in bstats:
+				fp_size = bstats.footprint_size as Vector3
+		var aabb: AABB = AABB(
+			b3d.global_position - Vector3(fp_size.x * 0.5, 0.0, fp_size.z * 0.5),
+			fp_size)
+		_server.call("mark_obstacle", aabb, true)
 
 static func get_kernel(scene_root: Node) -> Object:
 	if _kernel == null:
