@@ -1,0 +1,8 @@
+bin/
+gen/
+*.os
+*.obj
+*.o
+*.pyc
+__pycache__/
+.sconsign.dblite
