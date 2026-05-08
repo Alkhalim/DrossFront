@@ -159,6 +159,19 @@ func _separate_neighbors(prefetched: Array = []) -> Array:
 
 func _avoid_obstacles(prefetched: Array = []) -> Array:
 	# Same prefetched-raw-list contract as _separate_neighbors.
+	# DEAD-CODE FIX: the previous build added a wrecks check via
+	# `(n as Node).is_in_group("wrecks")` for every candidate — but
+	# Wreck nodes are only registered in the "wrecks" group, not
+	# "units" or "buildings", which are the only groups the
+	# SpatialIndex buckets. So `n` (which came from the index) was
+	# never in "wrecks" and the string-keyed group lookup always
+	# returned false. Profile 536 flagged this at 55 s session time
+	# / 1.45 ms / call — by far the worst per-call cost on the board
+	# and pure waste. Wreck avoidance via physics collision still
+	# works (Wreck is a StaticBody3D on layer 8). If proper steering
+	# avoidance is wanted, the right fix is to add wrecks to
+	# SpatialIndex's tracked groups, not to chase them via a string
+	# lookup against the wrong bucket contents.
 	var raw: Array = prefetched
 	if raw.is_empty():
 		var idx: SpatialIndex = _get_spatial_idx()
@@ -169,7 +182,7 @@ func _avoid_obstacles(prefetched: Array = []) -> Array:
 	for n: Variant in raw:
 		if not is_instance_valid(n) or not (n is Node3D):
 			continue
-		if n is Building or (n as Node).is_in_group("wrecks"):
+		if n is Building:
 			filtered.append(n)
 	return filtered
 
