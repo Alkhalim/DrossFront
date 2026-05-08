@@ -82,7 +82,7 @@ func arrival_target() -> Vector3:
 		return path_waypoints[path_waypoints.size() - 1]
 	return target
 
-func _physics_process(delta: float) -> void:
+func tick_movement(delta: float, frame_phase: int) -> void:
 	# Advance waypoint if we have a path and have reached the current one
 	if path_waypoints.size() > 1 and path_waypoint_idx < path_waypoints.size():
 		var wp: Vector3 = path_waypoints[path_waypoint_idx]
@@ -93,7 +93,7 @@ func _physics_process(delta: float) -> void:
 		if path_waypoint_idx < path_waypoints.size():
 			target = path_waypoints[path_waypoint_idx]
 		# else: target remains the final goal already set by goto_world
-	super._physics_process(delta)
+	super.tick_movement(delta, frame_phase)
 
 	# Body facing — rotate to face velocity direction at most
 	# max_turn_rate_rad_s per second. Aircraft handles its own rotation

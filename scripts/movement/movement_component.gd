@@ -38,6 +38,14 @@ var effective_max_turn_rate_cap: float = INF
 var _velocity: Vector3 = Vector3.ZERO
 var _body: Node3D = null                       # primary reference: position reads
 var _body_physics: CharacterBody3D = null      # set if parent is CharacterBody3D
+## Cached separate+avoid force from the last heavy tick. Rebuilt
+## every other tick (alternating per-component phase) and re-used
+## on the off-tick so neighbor queries (SpatialIndex.nearby × 2)
+## happen at half the rate. SEEK runs every tick on top of this
+## so the unit still reacts to a moving target without the cost
+## of full recomputation.
+var _cached_neighbor_force: Vector3 = Vector3.ZERO
+var _phase_bit: int = 0
 
 func _ready() -> void:
 	var p: Node = get_parent()
@@ -49,8 +57,50 @@ func _ready() -> void:
 	if p is CharacterBody3D:
 		_body_physics = p as CharacterBody3D
 	_stuck_last_pos = _body.global_position
+	# Stable per-instance phase so half the components hit
+	# their heavy tick on phase 0 and half on phase 1. Avoids
+	# all-units-stampede on the same frame.
+	_phase_bit = int(get_instance_id() & 1)
+	# Register with the central MovementOrchestrator so we get
+	# driven from one physics callback per tick instead of one
+	# per component. The orchestrator disables our _physics_process
+	# on registration; if no orchestrator exists yet (unit-test
+	# scenes, headless boot) the fallback _physics_process below
+	# runs as before.
+	var scene: Node = get_tree().current_scene if get_tree() else null
+	if scene:
+		var orch: MovementOrchestrator = MovementOrchestrator.get_instance(scene)
+		if orch:
+			orch.register(self)
+
+
+func _exit_tree() -> void:
+	# Drop ourselves from the orchestrator so it doesn't keep
+	# walking a freed handle. is_instance_valid in the orchestrator
+	# loop handles late frees too, but explicit unregister keeps
+	# the array tight.
+	var scene: Node = get_tree().current_scene if get_tree() else null
+	if scene:
+		var orch_node: Node = scene.get_node_or_null("MovementOrchestrator")
+		if orch_node and orch_node is MovementOrchestrator:
+			(orch_node as MovementOrchestrator).unregister(self)
+
 
 func _physics_process(delta: float) -> void:
+	## Fallback path. The orchestrator disables this on register
+	## so it only fires when no orchestrator is in the scene
+	## (unit tests, isolated bench scenes).
+	tick_movement(delta, 0)
+
+
+## Per-physics-tick movement work. Called by MovementOrchestrator
+## once per registered component per tick. `frame_phase` is 0 or 1
+## and lets implementations stagger heavy work across alternating
+## ticks (heavy work on the tick whose phase matches the
+## component's own instance-id-derived phase, light integration on
+## both). Subclasses override this and call super.tick_movement
+## for the base steering / inertia / move_and_slide logic.
+func tick_movement(delta: float, frame_phase: int) -> void:
 	if _body == null:
 		return
 
@@ -99,22 +149,24 @@ func _physics_process(delta: float) -> void:
 
 	var pos: Vector3 = _body.global_position
 	var cap: float = _capped_speed()
-	# NOTE: a previous Plan B fix tried to zero SEEK during combat
-	# (_is_combat_engaged()) to stop "moves while firing" cosmetic
-	# circling. That regressed attack-move (units froze before
-	# reaching range) and ignored new move commands during the frame
-	# combat was clearing. Reverted. Plan C will add a proper stance
-	# system that distinguishes "acquired target out of range" (keep
-	# moving) from "actively firing in range" (hold position).
+	# Stagger: only re-query neighbors and rebuild the
+	# separate+avoid force on the tick that matches our phase.
+	# Cached force is re-used the off-tick so SpatialIndex queries
+	# happen at half the previous rate. SEEK is recomputed every
+	# tick (cheap) so the unit still tracks a moving target
+	# between cache refreshes.
+	if frame_phase == _phase_bit:
+		var sep_force: Vector3 = Steering.separate(pos,
+				_separate_neighbors(),
+				separate_min_distance,
+				separate_repel)
+		var avoid_force: Vector3 = Steering.avoid_static(pos,
+				_avoid_obstacles(),
+				avoid_min_distance,
+				avoid_repel)
+		_cached_neighbor_force = sep_force + avoid_force
 	var desired: Vector3 = Steering.seek(pos, target, cap, arrival_radius)
-	desired += Steering.separate(pos,
-								  _separate_neighbors(),
-								  separate_min_distance,
-								  separate_repel)
-	desired += Steering.avoid_static(pos,
-									  _avoid_obstacles(),
-									  avoid_min_distance,
-									  avoid_repel)
+	desired += _cached_neighbor_force
 	if _stuck_pushout_frames_left > 0:
 		desired += _stuck_pushout_dir * max_speed
 		_stuck_pushout_frames_left -= 1

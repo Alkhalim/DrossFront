@@ -21,8 +21,8 @@ func goto_world(world_pos: Vector3) -> void:
 	## to base_altitude so the unit doesn't try to dive into the ground.
 	target = Vector3(world_pos.x, base_altitude, world_pos.z)
 
-func _physics_process(delta: float) -> void:
-	super._physics_process(delta)
+func tick_movement(delta: float, frame_phase: int) -> void:
+	super.tick_movement(delta, frame_phase)
 	# Altitude maintenance: pull Y toward base_altitude. Aircraft don't
 	# have gravity (GroundMovement applies gravity; AircraftMovement
 	# explicitly does not).
