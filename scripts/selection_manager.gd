@@ -1051,7 +1051,7 @@ func _new_system_dispatch_movables(ground_pos: Vector3, clear_combat: bool = tru
 				all_migrated = false
 				break
 		if all_migrated and not _selected_units.is_empty():
-			_dispatch_via_group_aura(ground_pos)
+			_dispatch_via_group_aura(ground_pos, clear_combat)
 			return
 
 	for s: Node in _selected_units:
@@ -2490,10 +2490,25 @@ func _unit_is_pf_a_migrated(u: Node) -> bool:
 	return stats_res.resource_path.ends_with("/anvil_hound.tres")
 
 
-func _dispatch_via_group_aura(ground_pos: Vector3) -> void:
+func _dispatch_via_group_aura(ground_pos: Vector3, clear_combat: bool = true) -> void:
 	## Build a GroupAura node for the current selection, anchored under the
 	## scene root. The aura owns its FieldIds for its lifetime; freeing it
 	## releases the fields.
+	##
+	## Before handing the kernel target to the GroupAura's shared field,
+	## route through unit.command_move so combat state is cleared (when
+	## clear_combat is true) — without this, a unit that's currently
+	## auto-engaging an enemy will, on the next tick, call goto_world
+	## toward the enemy and override our shared field with its own per-unit
+	## ad-hoc field. The move-out-of-range player order would silently lose.
+	## The per-unit ad-hoc fields built by command_move's goto_world path
+	## are immediately overridden by GroupAura.setup below; they leak until
+	## the next goto_world on each unit, which is acceptable for PF-A.
+	for s: Node in _selected_units:
+		if not is_instance_valid(s):
+			continue
+		if clear_combat and s.has_method("command_move"):
+			s.command_move(ground_pos, true)
 	var aura: GroupAura = GroupAura.new()
 	aura.name = "GroupAura_%d" % Time.get_ticks_msec()
 	get_tree().current_scene.add_child(aura)
