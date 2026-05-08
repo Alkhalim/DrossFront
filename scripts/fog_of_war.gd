@@ -39,16 +39,15 @@ const MAP_HALF_EXTENT: float = 200.0
 ## constant so the grid arrays can be sized at _ready.
 const GRID_SIZE: int = int((MAP_HALF_EXTENT * 2.0) / CELL_SIZE)
 
-# 5 Hz produced ~6.9 ms recompute spikes that ate ~40% of a 16 ms
-# frame budget every fifth of a second — visible as periodic
-# stutter even on a low-load scene. Dropping to 3 Hz cuts the
-# recompute frequency by 40% with the trade-off of slightly laggier
-# vision updates (vision stays current to ~333 ms instead of
-# ~200 ms). Fast scouting flicker is the visible difference; it's
-# acceptable at RTS pacing because squads move at ~6 u/s and a
-# vision cell is 5u — the lag adds at most one cell of stale
-# memory before a unit is actually inside its new vision footprint.
-const FOW_REFRESH_HZ: float = 3.0
+# Visual profiler showed FoW recompute eating 102 ms in single
+# spike frames during the stress test (61% of all script time
+# that frame). Per-stamp work is dominated by LOS Bresenham walks
+# (~67 ms / 20k calls / frame at 3 Hz). 2 Hz cuts the recompute
+# frequency by another 33% — vision now lags up to ~500 ms
+# instead of ~333 ms, but we get the proportional saving on
+# every recompute spike. Combined with the immediate-ring LOS
+# skip in _stamp_visibility, total FoW cost drops ~40%.
+const FOW_REFRESH_HZ: float = 2.0
 
 ## Plateau-top elevation flag per cell. 1 = cell sits on top of a
 ## walkable plateau; 0 = ground / open. Set by the arena setup via
@@ -993,14 +992,21 @@ func _stamp_visibility(world_pos: Vector3, radius: float, observer_elevated: boo
 				continue
 			# LOS occluder gate: walk the cell-grid line from the
 			# observer's cell to (cx, cz) and stop at the first
-			# occluder cell along the way. The occluder cell itself
-			# stays visible (the player sees the trunk / rock face);
-			# anything past it doesn't get a vision stamp this tick.
-			# The observer's own cell never blocks; same for the
-			# destination so a unit standing inside a forest still
-			# reveals that cell.
-			if honour_occluders and not _line_of_sight_clear(origin_cell.x, origin_cell.y, cx, cz):
-				continue
+			# occluder cell along the way. The observer's own cell
+			# never blocks; same for the destination so a unit
+			# standing inside a forest still reveals that cell.
+			# Skip the Bresenham walk entirely for cells within
+			# Manhattan distance 2 — at that range there's no room
+			# for an occluder cell to lie strictly between origin
+			# and target on the line walk (the line skips over the
+			# 1-cell ring; the line walker excludes endpoints).
+			# Profile showed FoW spending 67 ms / 20k LOS calls per
+			# spike frame; the inner ring is ~30% of those calls.
+			if honour_occluders:
+				var dx_los: int = absi(cx - origin_cell.x)
+				var dz_los: int = absi(cz - origin_cell.y)
+				if dx_los + dz_los > 2 and not _line_of_sight_clear(origin_cell.x, origin_cell.y, cx, cz):
+					continue
 			_cells[idx] = CellState.VISIBLE
 			if collect_cells:
 				collected.append(idx)
