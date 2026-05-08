@@ -972,7 +972,24 @@ func _perform_navmesh_rebake() -> void:
 	if not _nav_region:
 		return
 	_navmesh_rebake_last_time = float(Time.get_ticks_msec()) / 1000.0
-	_nav_region.bake_navigation_mesh(false)
+	# Threaded rebake. The initial bake in _setup_navigation stays
+	# synchronous so units spawning at match start have a navmesh
+	# to plan against, but rebakes triggered by buildings completing
+	# / dying during gameplay can run on a worker thread without
+	# blocking the main thread for ~88 ms (visual profiler showed
+	# this single call dominating spike frames in the stress test).
+	# Units mid-path keep their existing waypoints; fresh path
+	# queries pick up the new navmesh as soon as the worker thread
+	# finishes (typically same or next frame). The cell-size sync
+	# below has to wait until the bake completes — schedule it via
+	# the next frame instead of running it before the bake lands.
+	_nav_region.bake_navigation_mesh(true)
+	call_deferred("_post_navmesh_rebake_sync")
+
+
+func _post_navmesh_rebake_sync() -> void:
+	if not _nav_region:
+		return
 	# Refresh the edge-connection margin + cell sizes since some
 	# bakes reset them. Without the cell-size sync the navmesh
 	# (0.5 cell, 0.1 height) mismatches the NavigationServer's
