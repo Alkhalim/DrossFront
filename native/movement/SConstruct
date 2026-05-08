@@ -11,7 +11,7 @@ sources = Glob("src/*.cpp")
 output_dir = "../../addons/movement_native/bin/"
 
 # Library name is platform-specific; godot-cpp's env knows the suffix.
-library_name = "movement_native{}{}".format(env["suffix"], env["SHLIBSUFFIX"])
+library_name = "libmovement_native{}{}".format(env["suffix"], env["SHLIBSUFFIX"])
 
 library = env.SharedLibrary(
     target=output_dir + library_name,
