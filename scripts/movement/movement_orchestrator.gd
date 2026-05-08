@@ -102,11 +102,18 @@ func _physics_process(delta: float) -> void:
 	# corrupt the index. is_instance_valid filters freed handles.
 	var i: int = _components.size() - 1
 	while i >= 0:
-		var mc: Object = _components[i]
-		if not is_instance_valid(mc):
+		# Variant typing (untyped local) so reading a freed-instance
+		# slot doesn't itself throw "Trying to assign invalid
+		# previously freed instance" before our is_instance_valid
+		# check can intercept. The typed `var mc: Object = ...` form
+		# was triggering that error when a unit was queue_freed but
+		# its component was still in our array.
+		var mc_v: Variant = _components[i]
+		if not is_instance_valid(mc_v):
 			_components.remove_at(i)
 			i -= 1
 			continue
-		if mc.has_method("tick_movement"):
+		var mc: Object = mc_v as Object
+		if mc != null and mc.has_method("tick_movement"):
 			mc.tick_movement(delta, frame_phase)
 		i -= 1
