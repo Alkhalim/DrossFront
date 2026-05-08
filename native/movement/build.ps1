@@ -5,6 +5,7 @@
 #   pwsh -File native/movement/build.ps1 -WorkDir native/movement/tests  # build tests
 #   pwsh -File native/movement/build.ps1 -c                              # clean
 
+[CmdletBinding(PositionalBinding=$false)]
 param(
     [string]$WorkDir = $null,
     [Parameter(ValueFromRemainingArguments=$true)][string[]]$SconsArgs
