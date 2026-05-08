@@ -89,7 +89,7 @@ camera_zoom_out={
 # below this, target acquisition and click responsiveness feel
 # laggy. Anything that hardcoded 1.0/60.0 (stuck detector) reads
 # Engine.physics_ticks_per_second so the threshold scales.
-common/physics_ticks_per_second=20
+common/physics_ticks_per_second=15
 
 [rendering]
 
