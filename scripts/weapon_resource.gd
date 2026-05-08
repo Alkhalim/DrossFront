@@ -248,11 +248,36 @@ func resolved_rof_seconds() -> float:
 	return CombatTables.get_rof(rof_tier)
 
 
+## Per-(armor_class) cache for get_role_mult_for. The function does
+## a match statement + multiple Resource property reads + potentially
+## a CombatTables.get_role_modifier dictionary lookup. Simple per
+## call — but profile 539 had it at 141 ms / call × 779 calls =
+## 109 s session, the dominant cost on the entire script board (the
+## per-call number is wildly inflated by GDScript profiler overhead
+## on hot static-resource paths, but the call frequency is real:
+## TurretComponent._fire_one_shot, CombatComponent._fire_weapon, and
+## AIController._best_counter_in_roster all funnel through this).
+## Only ~7 armor classes exist, and the answer is constant for a
+## given WeaponResource (the V2 fields are .tres values; not
+## normally mutated at runtime), so a Dictionary cache keyed by
+## armor_class collapses the match + property reads to a single
+## dict lookup after the first call.
+var _role_mult_cache: Dictionary = {}
+
+
 func get_role_mult_for(armor_class: StringName) -> float:
 	## Resolution order: post-refactor _v2 field → legacy override
 	## field → CombatTables role-vs-armor table. HUD displays + combat
 	## damage paths funnel through this so the displayed multiplier
 	## always matches what the gun actually does.
+	if _role_mult_cache.has(armor_class):
+		return _role_mult_cache[armor_class] as float
+	var v: float = _compute_role_mult_for(armor_class)
+	_role_mult_cache[armor_class] = v
+	return v
+
+
+func _compute_role_mult_for(armor_class: StringName) -> float:
 	match armor_class:
 		&"unarmored":
 			if mult_vs_unarmored_v2 >= 0.0:

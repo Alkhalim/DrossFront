@@ -338,32 +338,34 @@ func _fire_one_shot(damage: int) -> void:
 	var observable: bool = _firing_observable()
 	if not observable:
 		return
-	var proj_script: GDScript = load("res://scripts/projectile.gd") as GDScript
-	if proj_script:
-		var fire_origin: Vector3 = _building.global_position + Vector3(0.0, 2.0, 0.0)
-		var pivot_n3d: Node3D = _resolve_pivot()
-		if pivot_n3d and is_instance_valid(pivot_n3d):
-			fire_origin = pivot_n3d.global_position
-		# Prefer a 'Muzzle' Marker3D child of the pivot if the building
-		# detail layer placed one (HQ MG nests, gun emplacement barrels)
-		# so tracers leave from the barrel tip instead of the pivot
-		# centre. Falls through to the pivot's own world position.
-		if pivot_n3d:
-			var muzzle: Node3D = pivot_n3d.get_node_or_null("Muzzle") as Node3D
-			if muzzle:
-				fire_origin = muzzle.global_position
-		var building_faction: int = 0
-		if _building and _building.has_method("_resolve_faction_id"):
-			building_faction = _building.call("_resolve_faction_id") as int
-		var proj: Node3D = proj_script.create(
-			fire_origin,
-			_target.global_position,
-			get_role(),
-			&"moderate",
-			&"",
-			building_faction,
-		)
-		get_tree().current_scene.add_child(proj)
+	# Projectile is class_name'd — no need to load() the script per
+	# shot. The previous build did `load("res://scripts/projectile.gd")`
+	# every fire which is a dictionary lookup against the resource
+	# cache; same fix as CombatComponent received in commit 6abf579.
+	var fire_origin: Vector3 = _building.global_position + Vector3(0.0, 2.0, 0.0)
+	var pivot_n3d: Node3D = _resolve_pivot()
+	if pivot_n3d and is_instance_valid(pivot_n3d):
+		fire_origin = pivot_n3d.global_position
+	# Prefer a 'Muzzle' Marker3D child of the pivot if the building
+	# detail layer placed one (HQ MG nests, gun emplacement barrels)
+	# so tracers leave from the barrel tip instead of the pivot
+	# centre. Falls through to the pivot's own world position.
+	if pivot_n3d:
+		var muzzle: Node3D = pivot_n3d.get_node_or_null("Muzzle") as Node3D
+		if muzzle:
+			fire_origin = muzzle.global_position
+	var building_faction: int = 0
+	if _building and _building.has_method("_resolve_faction_id"):
+		building_faction = _building.call("_resolve_faction_id") as int
+	var proj: Node3D = Projectile.create(
+		fire_origin,
+		_target.global_position,
+		get_role(),
+		&"moderate",
+		&"",
+		building_faction,
+	)
+	get_tree().current_scene.add_child(proj)
 	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
 	if audio and audio.has_method("play_weapon_fire"):
 		var sfx_pos: Vector3 = _building.global_position
