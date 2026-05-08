@@ -81,19 +81,15 @@ camera_zoom_out={
 
 [physics]
 
-# RTS-scale physics. The default 60 Hz tick rate burned ~75% of a
-# 16 ms frame budget on movement scripts (profile showed
-# GroundMovement + MovementComponent dominating). Halving the tick
-# rate halves all per-frame movement / steering / move_and_slide
-# work. physics_interpolation was tried as the smoothness
-# compensation but produced 'swap_chain_resize: ERR_CANT_CREATE'
-# Vulkan errors firing ~15× per second on Windows + RTX driver,
-# which itself crushed framerate. Pulled it for now — motion at
-# 30 Hz is slightly choppier than 60 Hz but no longer trapped in
-# the swap-chain error loop. Anything that hardcoded `1.0/60.0`
-# (stuck detector) reads Engine.physics_ticks_per_second so the
-# threshold scales with the tick rate.
-common/physics_ticks_per_second=30
+# RTS-scale physics. The default 60 Hz burned ~75% of a 16 ms frame
+# budget on movement scripts. Tried physics_interpolation for visual
+# smoothness compensation but it produced swap_chain_resize errors
+# on Windows + RTX driver. Currently at 25 Hz — another 17% off all
+# per-frame movement / combat / projectile cost vs 30. Visible
+# trade-off: motion is slightly more "RTS-like-step" than smooth.
+# Anything that hardcoded 1.0/60.0 (stuck detector) reads
+# Engine.physics_ticks_per_second so the threshold scales.
+common/physics_ticks_per_second=25
 
 [rendering]
 
