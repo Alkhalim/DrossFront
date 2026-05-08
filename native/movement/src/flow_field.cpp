@@ -30,6 +30,12 @@ bool FlowField::build_from(int goal_cell) {
     static constexpr int neighbor_dx[N_NEIGHBORS] = {-1, 0, 1, -1, 1, -1, 0, 1};
     static constexpr int neighbor_dz[N_NEIGHBORS] = {-1,-1,-1, 0, 0, 1, 1, 1};
     static constexpr uint32_t neighbor_cost[N_NEIGHBORS] = {14, 10, 14, 10, 10, 14, 10, 14};
+    // Maximum Y delta between adjacent cells before we reject the
+    // neighbor expansion as "non-traversable in 3D" (cliff). A 45° ramp
+    // at 2m cells produces ~2m Y delta per cell, so a threshold of 1.5m
+    // would block ramps; 3.0m blocks vertical cliffs but allows ramps.
+    // Pure-flat maps stay at Y=0 everywhere and never trip this check.
+    constexpr float MAX_Y_DELTA = 3.0f;
 
     while (!pq.empty()) {
         auto [cur_cost, cur_idx] = pq.top();
@@ -37,6 +43,7 @@ bool FlowField::build_from(int goal_cell) {
         if (cur_cost > integration_[cur_idx]) continue;
         int cx = cur_idx % W;
         int cz = cur_idx / W;
+        float cur_y = grid_.get_cell_y(cur_idx);
         for (int n = 0; n < N_NEIGHBORS; ++n) {
             int nx = cx + neighbor_dx[n];
             int nz = cz + neighbor_dz[n];
@@ -44,6 +51,12 @@ bool FlowField::build_from(int goal_cell) {
             int nidx = nz * W + nx;
             uint8_t cell_cost = grid_.get(nidx);
             if (cell_cost == CostGrid::COST_BLOCKED) continue;
+            // Y-aware traversability: don't expand across large elevation
+            // gaps. A plateau cell at Y=2 next to a ground cell at Y=0
+            // shouldn't be reachable in one step (no climbable geometry);
+            // ramp cells differ by smaller deltas and stay traversable.
+            float n_y = grid_.get_cell_y(nidx);
+            if (std::abs(n_y - cur_y) > MAX_Y_DELTA) continue;
             // Step cost = neighbor base step + soft cost from grid (scaled down).
             uint32_t step = neighbor_cost[n] + cell_cost;
             uint32_t new_cost = cur_cost + step;

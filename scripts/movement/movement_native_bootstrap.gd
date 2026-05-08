@@ -32,9 +32,18 @@ static func get_server(scene_root: Node) -> Object:
 		# Default 320x320m map @ 2m cells, centered at world origin. Per-map
 		# override: call configure_map again from arena setup.
 		_server.call("configure_map", GRID_W, GRID_H, CELL_SIZE, ORIGIN_X, ORIGIN_Z)
-		_server.call("set_agent_radius", 0, 0.6)  # small
-		_server.call("set_agent_radius", 1, 1.0)  # medium
-		_server.call("set_agent_radius", 2, 2.0)  # large
+		# Bumped from 0.6/1.0/2.0 — the per-class agent_radius drives how
+		# far building obstacles dilate in the cost grid, which in turn
+		# determines how early flow redirects a unit away from a wall.
+		# At 0.6m a hound's CharacterBody3D collision shape would reach
+		# the wall before the field redirected sideways, leading to
+		# inertia-vs-flow oscillation on frontal approach. Wider dilation
+		# gives the flow a sharper sideways gradient earlier and lets
+		# inertia turn before move_and_slide hits the wall. Trade-off:
+		# tighter corridors get rejected as impassable.
+		_server.call("set_agent_radius", 0, 1.0)  # small
+		_server.call("set_agent_radius", 1, 1.4)  # medium
+		_server.call("set_agent_radius", 2, 2.4)  # large
 		# Sweep buildings already in the scene tree into the cost grid so the
 		# first flow field built after server creation routes around them.
 		# Newly-constructed buildings are picked up by the mark_obstacle call
@@ -92,8 +101,10 @@ static func _try_terrain_sweep(scene_root: Node) -> void:
 
 
 ## Walks the cost grid; marks cells whose XZ center is too far from the
-## nearest navmesh point as blocked. Catches cliffs, voids, untraversable
-## terrain, and obstacles like rocks that aren't in the "buildings" group.
+## nearest navmesh point as blocked, AND records each on-mesh cell's
+## navmesh Y elevation so the C++ Dijkstra can reject neighbor expansion
+## across cliffs. Catches cliffs, voids, untraversable terrain, and
+## obstacles (like rocks) that aren't in the "buildings" group.
 ## Cost: GRID_W * GRID_H navmesh queries (~25k at default size). Runs once
 ## per scene load; ~50–200 ms hitch acceptable at scene start.
 static func _mark_terrain_off_navmesh(map_rid: RID) -> void:
@@ -115,6 +126,10 @@ static func _mark_terrain_off_navmesh(map_rid: RID) -> void:
 					Vector3(CELL_SIZE * 0.8, 1.0, CELL_SIZE * 0.8))
 				_server.call("mark_obstacle", aabb, true)
 				marked_count += 1
+			else:
+				# Cell is on-mesh — record the navmesh's Y elevation here so
+				# Dijkstra can use it to reject cliff transitions later.
+				_server.call("set_cell_y_at", Vector3(wx, closest.y, wz), closest.y)
 	var total_cells: int = GRID_W * GRID_H
 	var pct: float = 100.0 * float(marked_count) / float(total_cells)
 	print_debug("[MovementNativeBootstrap] terrain sweep: marked %d / %d cells off-navmesh (%.1f%%) — threshold=%.2fm" %

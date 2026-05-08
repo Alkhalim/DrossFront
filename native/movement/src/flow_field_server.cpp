@@ -26,6 +26,8 @@ void FlowFieldServer::_bind_methods() {
                          &FlowFieldServer::mark_obstacle);
     ClassDB::bind_method(D_METHOD("mark_soft_cost", "aabb", "cost"),
                          &FlowFieldServer::mark_soft_cost);
+    ClassDB::bind_method(D_METHOD("set_cell_y_at", "world_pos", "y"),
+                         &FlowFieldServer::set_cell_y_at);
 #endif
 }
 
@@ -111,6 +113,21 @@ void FlowFieldServer::rebuild_field(FieldEntry &entry) {
     entry.field = std::make_unique<FlowField>(*cost_grids_[entry.agent_class]);
     entry.field->build_from(entry.goal_cell);
     entry.dirty = false;
+}
+
+void FlowFieldServer::set_cell_y_at(godot::Vector3 world_pos, float y) {
+    // Write the elevation into every per-class grid. Y is a property of
+    // the terrain, not of the agent class, so all grids share it.
+    for (int c = 0; c < AGENT_CLASS_COUNT; ++c) {
+        if (!cost_grids_[c]) continue;
+        int idx = cost_grids_[c]->cell_of(world_pos.x, world_pos.z);
+        if (idx >= 0) {
+            cost_grids_[c]->set_cell_y(idx, y);
+        }
+    }
+    // Y is part of the cost surface — flag fields dirty so subsequent
+    // samples rebuild against the updated elevation.
+    for (auto &kv : fields_) kv.second.dirty = true;
 }
 
 } // namespace drossfront

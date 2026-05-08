@@ -7,7 +7,8 @@ namespace drossfront {
 CostGrid::CostGrid(int width, int height, float cell_size, float origin_x, float origin_z)
     : width_(width), height_(height), cell_size_(cell_size),
       origin_x_(origin_x), origin_z_(origin_z),
-      cells_(static_cast<size_t>(width * height), COST_OPEN) {}
+      cells_(static_cast<size_t>(width * height), COST_OPEN),
+      cell_y_(static_cast<size_t>(width * height), 0.0f) {}
 
 int CostGrid::cell_of(float world_x, float world_z) const {
     // floor() (not int truncation) so negative world coordinates map to negative

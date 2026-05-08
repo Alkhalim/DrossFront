@@ -26,6 +26,16 @@ public:
     uint8_t get_xy(int cx, int cz) const { return cells_[cz * width_ + cx]; }
     void set(int idx, uint8_t value) { cells_[idx] = value; }
 
+    // Per-cell navmesh Y elevation. Populated by GDScript at server init
+    // from NavigationServer3D.map_get_closest_point queries. FlowField's
+    // Dijkstra uses this to reject neighbor expansion across large Y
+    // deltas (cliffs) while allowing gradual transitions (ramps). Cells
+    // whose Y is unset stay at 0.0f, which is fine for flat maps and
+    // benign on terrain because ramps still produce small inter-cell
+    // deltas that fall under the threshold.
+    void set_cell_y(int idx, float y) { cell_y_[idx] = y; }
+    float get_cell_y(int idx) const { return cell_y_[idx]; }
+
     // Mark all cells whose (dilated) center falls inside the AABB. dilation_radius
     // is added to the AABB's XZ extents so the unit's footprint is accounted for.
     void mark_obstacle(godot::AABB aabb, float dilation_radius, bool blocked);
@@ -44,6 +54,7 @@ private:
     float origin_x_;
     float origin_z_;
     std::vector<uint8_t> cells_;
+    std::vector<float>   cell_y_;  // per-cell navmesh elevation
 };
 
 } // namespace drossfront

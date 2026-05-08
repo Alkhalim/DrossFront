@@ -35,6 +35,14 @@ public:
     void mark_obstacle(godot::AABB aabb, bool blocked);
     void mark_soft_cost(godot::AABB aabb, int cost);
 
+    // Y-aware Dijkstra support: writes a per-cell navmesh elevation into
+    // every per-class CostGrid (terrain Y is shared across agent classes)
+    // so the field's neighbor expansion can reject cliffs while allowing
+    // ramps. Caller (GDScript bootstrap) populates this once per scene
+    // start by sweeping NavigationServer3D.map_get_closest_point per
+    // cell and feeding the closest-point Y back here.
+    void set_cell_y_at(godot::Vector3 world_pos, float y);
+
     // Diagnostics.
     int field_count() const { return static_cast<int>(fields_.size()); }
     bool field_exists(FieldId id) const { return fields_.count(id) > 0; }
