@@ -1167,13 +1167,35 @@ func _try_hard_target_composition() -> void:
 	## archetype plan placed. Runs every AI tick; each individual
 	## _try_place call early-outs on already-placed keys so the
 	## cost is a few group walks when targets are met.
+	##
+	## Profile 538 found this function at 59.6 ms / call × 687 calls =
+	## 40.9 s session — the dominant cost on the entire script board.
+	## The previous build called _count_constructed_owned four times
+	## in a row, each one walking the full buildings group (~80
+	## nodes) + re-running owner+stats checks. Collapsed to ONE walk
+	## that tallies everything we need into a Dictionary keyed by
+	## building_id; the four group walks become four dict lookups.
+	## ~4× per-call speedup.
 	if not is_instance_valid(_hq):
 		return
-	var prod_count: int = _count_constructed_owned([&"basic_foundry", &"advanced_foundry", &"aerodrome"])
-	var basic_gen_count: int = _count_constructed_owned([&"basic_generator"])
-	var reactor_count: int = _count_constructed_owned([&"advanced_generator"])
+	var counts: Dictionary = {}
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var b: Building = node as Building
+		if not b or not b.stats:
+			continue
+		if b.owner_id != owner_id:
+			continue
+		var bid: StringName = b.stats.building_id
+		counts[bid] = (counts.get(bid, 0) as int) + 1
+	var prod_count: int = (counts.get(&"basic_foundry", 0) as int) \
+		+ (counts.get(&"advanced_foundry", 0) as int) \
+		+ (counts.get(&"aerodrome", 0) as int)
+	var basic_gen_count: int = counts.get(&"basic_generator", 0) as int
+	var reactor_count: int = counts.get(&"advanced_generator", 0) as int
 	var energy_count: int = basic_gen_count + reactor_count
-	var has_basic_armory: bool = _count_constructed_owned([&"basic_armory"]) > 0
+	var has_basic_armory: bool = (counts.get(&"basic_armory", 0) as int) > 0
 	var late_game: bool = _match_clock_sec >= HARD_LATE_GAME_CLOCK_SEC and _wave_count >= 1
 
 	# --- Mid-game minimums (always applied on Hard) ---
