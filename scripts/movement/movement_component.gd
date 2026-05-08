@@ -257,6 +257,27 @@ func tick_movement(delta: float, frame_phase: int) -> void:
 func has_target() -> bool:
 	return not _is_inf(target)
 
+
+## Whether this component still has work to do this tick. The
+## orchestrator skips dispatching tick_movement when this returns
+## false — saves the per-tick dispatch + idle-path overhead for
+## fully parked units (no target, near-zero velocity, no active
+## stuck-pushout). With ~50% of units typically idle in an RTS,
+## halves the orchestrator's per-tick cost. Wake-up is automatic:
+## the orchestrator iterates every component each tick and re-asks
+## this method, so setting target / clearing target / taking damage
+## that nudges velocity all transition the unit back to active on
+## the very next physics tick.
+func needs_tick() -> bool:
+	if has_target():
+		return true
+	if _stuck_pushout_frames_left > 0:
+		return true
+	# 0.04 = 0.2 u/s squared — same epsilon used by the idle path's
+	# settle check below.
+	return _velocity.length_squared() > 0.04
+
+
 func clear_target() -> void:
 	target = Vector3.INF
 

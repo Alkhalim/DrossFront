@@ -124,5 +124,13 @@ func _physics_process(delta: float) -> void:
 		# direct vtable call rather than a Variant-typed indirection.
 		var mc: MovementComponent = mc_v as MovementComponent
 		if mc != null:
-			mc.tick_movement(delta, frame_phase)
+			# needs_tick gate — skip the tick_movement call for fully
+			# parked components (no target, near-zero velocity, no
+			# active stuck-pushout). With ~50% of units typically idle
+			# in an RTS, halves the orchestrator's per-tick load.
+			# needs_tick is a tiny field-only check; the savings come
+			# from not paying the idle-path inertia / move_and_slide /
+			# stuck_step overhead on parked units.
+			if mc.needs_tick():
+				mc.tick_movement(delta, frame_phase)
 		i -= 1
