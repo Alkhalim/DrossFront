@@ -3,7 +3,22 @@ import os
 
 env = Environment()
 env.Append(CPPPATH=["../src/", "../godot-cpp/include/", "../godot-cpp/gen/include/", "../godot-cpp/gdextension/"])
-env.Append(CXXFLAGS=["/std:c++17"] if env["PLATFORM"] == "win32" else ["-std=c++17"])
+if env["PLATFORM"] == "win32":
+    # /std:c++17 — language standard. /EHsc — synchronous C++ exceptions
+    # (required by doctest's REQUIRE / CHECK_FALSE which throw to halt
+    # a TEST_CASE on a fatal failure). Without /EHsc, doctest's static
+    # assertion fires at compile time.
+    env.Append(CXXFLAGS=["/std:c++17", "/EHsc"])
+else:
+    env.Append(CXXFLAGS=["-std=c++17"])
 
-sources = ["test_main.cpp", "test_cost_grid.cpp", "../src/cost_grid.cpp"]
+# Link godot-cpp's static library so non-inline godot::Vector2 / AABB
+# / String / etc. methods (e.g. Vector2::length, Vector2::normalized)
+# resolve. Built once by the main GDExtension SConstruct; if missing,
+# build the main extension first via build.ps1.
+env.Append(LIBPATH=["../godot-cpp/bin/"])
+env.Append(LIBS=["libgodot-cpp.windows.template_debug.x86_64"])
+
+sources = ["test_main.cpp", "test_cost_grid.cpp", "test_flow_field.cpp",
+           "../src/cost_grid.cpp", "../src/flow_field.cpp"]
 env.Program(target="run_tests", source=sources)
