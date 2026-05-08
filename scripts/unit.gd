@@ -672,12 +672,36 @@ func _build_squad_visuals() -> void:
 		bay.position = Vector3(0.0, total_h + 0.3, -torso_size.z * 0.5)
 		add_child(bay)
 
+	# MultiMesh refactor — Pass 1 verification probe. Bake the first
+	# squad member's visual hierarchy via MeshCombiner once per
+	# unit_name and print the stat dump. Lets us sanity-check that
+	# the combine is producing sensible vert / surface counts before
+	# Pass 2 actually swaps Rook visuals to use a baked mesh. Runs
+	# once per unit type per session (gated on _bake_stats_seen);
+	# zero cost after that. Remove this whole block once the real
+	# bake-and-share path is in production.
+	if stats and _member_meshes.size() > 0:
+		var key: String = stats.unit_name
+		if not _bake_stats_seen.has(key):
+			_bake_stats_seen[key] = true
+			var member_root: Node3D = _member_meshes[0] as Node3D
+			if member_root != null and is_instance_valid(member_root):
+				var bake: Dictionary = MeshCombiner.bake_stats(member_root)
+				print_debug("[mesh-bake] %s -> %s" % [key, str(bake)])
+
 
 ## Cached x-ray shader instance -- one ShaderMaterial parent that
 ## every silhouette mesh inherits via `next_pass`. Each member
 ## clones the material so it can carry its own team-colour
 ## uniform without back-propagating to the parent.
 static var _xray_shader: Shader = null
+## Diagnostic for the MultiMesh refactor (Pass 1 verification).
+## Tracks unit_names already printed to the console so we only
+## bake-stat each unit type once per session. Remove once the
+## actual MultiMesh migration lands; until then the print gives
+## us a snapshot of how many MeshInstance3D each unit type
+## composes and what a baked combine would look like.
+static var _bake_stats_seen: Dictionary = {}
 
 
 func _attach_xray_silhouette(member: Node3D, shape: Dictionary, team_color: Color) -> void:
