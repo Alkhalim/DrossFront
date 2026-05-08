@@ -108,6 +108,16 @@ var _physics_frame_counter: int = 0
 ## every tick. Set in `_ready` (or stays null for combat-less engineers).
 var _combat_cached: Node = null
 
+## Cache the MovementComponent reference. _physics_process did
+## `get_node_or_null("MovementComponent")` per tick to decide between
+## the new and legacy movement paths, AND _per_frame_bookkeeping did
+## another lookup inside the has_move_order branch. With combat
+## constantly issuing chase commands, has_move_order stays true
+## indefinitely — so the bookkeeping branch's lookup fires at full
+## tick rate per unit. Caching once on _ready collapses both into
+## a typed field access.
+var _movement_cached: MovementComponent = null
+
 ## `_mech_total_height` is constant per unit (depends only on stats), so
 ## the HP-bar repositioning block can read this cached value instead of
 ## doing a CLASS_SHAPES dict lookup every frame.
@@ -443,6 +453,7 @@ func _ready() -> void:
 		gm.max_turn_rate_rad_s = TAU * 1.0  # TODO(PA-21): per-class turn rate via UnitStatResource (default ≈ 1 rotation/sec)
 		gm.agent_profile = AgentProfile.new(0.6, 0.5, 35.0, &"squad_default")  # TODO(PA-21): per-class agent profile (radius/climb/slope)
 		add_child(gm)
+		_movement_cached = gm
 	else:
 		# Legacy NavigationAgent3D path
 		_nav_agent = NavigationAgent3D.new()
@@ -6187,7 +6198,12 @@ func _physics_process(delta: float) -> void:
 			return
 
 	_per_frame_bookkeeping(delta)
-	if get_node_or_null("MovementComponent") is GroundMovement:
+	# Cached MovementComponent — was a get_node_or_null lookup per
+	# tick. Profile 531 found Unit._physics_process at 5.81 ms / call
+	# under heavy combat (vs 0.075 ms baseline); the per-tick string
+	# lookup combined with the bookkeeping branch's second lookup was
+	# the suspect. Cached field collapses both into a typed access.
+	if _movement_cached is GroundMovement:
 		return  # New movement system owns velocity + move_and_slide
 	_legacy_movement_step(delta)
 
@@ -6217,9 +6233,13 @@ func _per_frame_bookkeeping(delta: float) -> void:
 	# necessary. ~0.5 s of settled state at any tick rate.
 	var SETTLE_FRAMES: int = maxi(int(0.5 * float(Engine.physics_ticks_per_second)), 4)
 	if has_move_order:
-		var mc_arr: Node = get_node_or_null("MovementComponent")
-		if mc_arr != null and mc_arr is MovementComponent:
-			var mc_typed: MovementComponent = mc_arr as MovementComponent
+		# _movement_cached is set during construction (or remains null
+		# for legacy units). Avoids the per-tick get_node_or_null
+		# lookup that was firing every frame on every unit with an
+		# active move order — i.e. every unit currently being
+		# chased / chasing during combat.
+		var mc_typed: MovementComponent = _movement_cached
+		if mc_typed != null and is_instance_valid(mc_typed):
 			if not mc_typed.has_target():
 				has_move_order = false
 				move_target = Vector3.INF
@@ -6735,6 +6755,13 @@ func _turn_toward(face_dir: Vector3, delta: float) -> void:
 ## when no acceleration delta is present.
 var _tank_chassis_pitch: float = 0.0
 var _tank_prev_speed_signed: float = 0.0
+## Last value written to member_root.rotation.x. When the new pitch
+## hasn't drifted from this since the previous tick, the per-member
+## rotation write loop is a no-op — skip it. A stationary tank under
+## fire has zero longitudinal acceleration; target_pitch decays to 0;
+## _tank_chassis_pitch decays to 0; without this guard the loop fires
+## every tick to write the same 0 to every member root.
+var _tank_chassis_pitch_applied: float = 0.0
 
 
 func _apply_tank_chassis_tilt(delta: float) -> void:
@@ -6772,6 +6799,16 @@ func _apply_tank_chassis_tilt(delta: float) -> void:
 		_tank_chassis_pitch = target_pitch
 	else:
 		_tank_chassis_pitch += step * signf(diff)
+	# Skip the per-member rotation write when the chassis pitch hasn't
+	# meaningfully changed since the last frame we wrote it. Stationary
+	# tanks under fire have zero longitudinal acceleration, so target
+	# pitch is 0 and _tank_chassis_pitch settles at 0 — every tick was
+	# writing the same rotation back. With multiple tanks in a base
+	# under aircraft fire that's N_tanks × N_members per tick of pure
+	# overhead. 0.0005 rad ≈ 0.029° — well below visual perception.
+	if absf(_tank_chassis_pitch - _tank_chassis_pitch_applied) < 0.0005:
+		return
+	_tank_chassis_pitch_applied = _tank_chassis_pitch
 	# Apply to every member's local rotation.x. Members are the
 	# chassis roots (one per squad seat); tilting them rocks the
 	# whole tank without disturbing the squad's world position.
