@@ -8,9 +8,12 @@ if env["PLATFORM"] == "win32":
     # (required by doctest's REQUIRE / CHECK_FALSE which throw to halt
     # a TEST_CASE on a fatal failure). Without /EHsc, doctest's static
     # assertion fires at compile time.
-    env.Append(CXXFLAGS=["/std:c++17", "/EHsc"])
+    # /DMOVEMENT_NATIVE_TESTS — stubs out the godot-cpp method-bind
+    # machinery in _bind_methods() bodies; the test binary doesn't
+    # have the loaded-extension runtime that bind_method needs.
+    env.Append(CXXFLAGS=["/std:c++17", "/EHsc", "/DMOVEMENT_NATIVE_TESTS"])
 else:
-    env.Append(CXXFLAGS=["-std=c++17"])
+    env.Append(CXXFLAGS=["-std=c++17", "-DMOVEMENT_NATIVE_TESTS"])
 
 # Link godot-cpp's static library so non-inline godot::Vector2 / AABB
 # / String / etc. methods (e.g. Vector2::length, Vector2::normalized)
@@ -21,4 +24,11 @@ env.Append(LIBS=["libgodot-cpp.windows.template_debug.x86_64"])
 
 sources = ["test_main.cpp", "test_cost_grid.cpp", "test_flow_field.cpp",
            "../src/cost_grid.cpp", "../src/flow_field.cpp"]
+# NOTE: SteeringKernel and FlowFieldServer tests deferred to PF-B.
+# Both classes derive from godot::Object, whose constructor SIGSEGVs
+# without a loaded Godot runtime. The proper fix is to refactor them
+# into Impl classes (plain C++) wrapped by thin Object façades —
+# tests would link the Impl classes only. Plan PF-A T14 spec covers
+# this fallback; we punt the refactor to PF-B alongside the broader
+# entity migration so this PR stays scoped.
 env.Program(target="run_tests", source=sources)

@@ -15,6 +15,9 @@ namespace {
 namespace drossfront {
 
 void SteeringKernel::_bind_methods() {
+#ifndef MOVEMENT_NATIVE_TESTS
+    // See FlowFieldServer::_bind_methods for the rationale on the
+    // MOVEMENT_NATIVE_TESTS guard. Tests call C++ methods directly.
     using namespace godot;
     ClassDB::bind_method(D_METHOD("register_agent", "unit_id", "agent_class", "radius",
                                   "max_speed", "max_accel", "max_turn_rate"),
@@ -31,6 +34,7 @@ void SteeringKernel::_bind_methods() {
                          &SteeringKernel::get_velocity);
     ClassDB::bind_method(D_METHOD("tick", "delta"),
                          &SteeringKernel::tick);
+#endif
 }
 
 SteeringKernel::SteeringKernel() {}

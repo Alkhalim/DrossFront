@@ -4,6 +4,12 @@
 namespace drossfront {
 
 void FlowFieldServer::_bind_methods() {
+#ifndef MOVEMENT_NATIVE_TESTS
+    // Method binding requires the loaded-extension Godot runtime; in the
+    // standalone doctest binary the binding machinery isn't initialized
+    // and `bind_method` template instantiation fails to compile against
+    // godot::_gde_UnexistingClass. The unit tests don't exercise the
+    // GDScript dispatch path anyway — they call C++ methods directly.
     using namespace godot;
     ClassDB::bind_method(D_METHOD("configure_map", "grid_w", "grid_h",
                                   "cell_size", "origin_x", "origin_z"),
@@ -20,6 +26,7 @@ void FlowFieldServer::_bind_methods() {
                          &FlowFieldServer::mark_obstacle);
     ClassDB::bind_method(D_METHOD("mark_soft_cost", "aabb", "cost"),
                          &FlowFieldServer::mark_soft_cost);
+#endif
 }
 
 FlowFieldServer::FlowFieldServer() {}
