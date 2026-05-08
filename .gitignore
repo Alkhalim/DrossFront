@@ -30,3 +30,9 @@ desktop.ini
 export/
 *.pck
 *.zip
+
+# MSVC sidecars from GDExtension builds (lib import file, exports table,
+# debug symbols). The .dll itself is tracked; these aren't.
+addons/movement_native/bin/*.lib
+addons/movement_native/bin/*.exp
+addons/movement_native/bin/*.pdb
