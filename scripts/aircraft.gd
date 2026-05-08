@@ -276,14 +276,19 @@ func _process(delta: float) -> void:
 	# the aircraft while moving. Bar is hidden at full HP, so the
 	# only cost when undamaged is one visibility check.
 	_update_hp_bar()
+	# Shadow blob + selection ring follow the aircraft's XZ every
+	# frame so they don't stutter when the body moves at 30 Hz
+	# (via AircraftMovement.tick_movement) while the visual updates
+	# below were gated to ~10 Hz by the 1-in-3 stagger. Three
+	# Vector3 assignments per frame; cheap.
+	if _shadow_blob and is_instance_valid(_shadow_blob):
+		_shadow_blob.global_position = Vector3(global_position.x, 0.06, global_position.z)
+	if _select_ring and is_instance_valid(_select_ring):
+		_select_ring.global_position = Vector3(global_position.x, 0.08, global_position.z)
 	_ac_phys_frame += 1
 	# Third-frame stagger (was half-frame) -- matches the
-	# CombatComponent + SalvageWorker pattern. Aircraft._process
-	# was the dominant cost in the latest 250-pop stress test
-	# (~27s of session time / 31k calls); cutting the heavy-tick
-	# rate from ~30 Hz to ~20 Hz drops a third of that without
-	# visible flight-feel changes (off-frames still integrate
-	# position so motion stays smooth).
+	# CombatComponent + SalvageWorker pattern. Off-frames still
+	# get the visual updates above so motion looks smooth.
 	if (_ac_phys_frame % 3) != int(get_instance_id() % 3):
 		# New system owns position — skip legacy integration on off-frames too.
 		if get_node_or_null("MovementComponent") is AircraftMovement:
@@ -308,12 +313,10 @@ func _process(delta: float) -> void:
 		var target_y: float = stats.flight_altitude + hover
 		global_position.y = lerp(global_position.y, target_y, clampf(delta * 4.0, 0.0, 1.0))
 
-	# Track the shadow blob to the aircraft's XZ. Y is pinned to ~ground
-	# (a small lift above 0 so it isn't z-fighting with the terrain).
-	if _shadow_blob and is_instance_valid(_shadow_blob):
-		_shadow_blob.global_position = Vector3(global_position.x, 0.06, global_position.z)
-	if _select_ring and is_instance_valid(_select_ring):
-		_select_ring.global_position = Vector3(global_position.x, 0.08, global_position.z)
+	# Shadow + select ring update was moved out of the heavy-tick
+	# block to the top of _process so they track every frame
+	# (otherwise they stuttered at 1-in-3 frames behind the body's
+	# 30 Hz physics-tick movement).
 
 	# Spin Anvil's main + tail rotors. Speed is constant — the
 	# rotor reads as "engine running" all the time.
@@ -2831,6 +2834,15 @@ func stop() -> void:
 	move_queue.clear()
 	velocity = Vector3.ZERO
 	has_move_order = false
+	# Also clear the AircraftMovement target so the new-system path
+	# actually halts. Without this, _unit.stop() (called by combat
+	# when entering firing range) only zeroed the legacy velocity
+	# field while AircraftMovement.target stayed set; SEEK kept
+	# pulling the aircraft toward the old chase position, producing
+	# the "drifts past target / freezes near old chase pos" symptom.
+	var mc: Node = get_node_or_null("MovementComponent")
+	if mc != null and mc.has_method("clear_target"):
+		mc.call("clear_target")
 
 
 ## --- HP bar (mirrors Unit._build_hp_bar / _update_hp_bar) -----------------

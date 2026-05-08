@@ -46,6 +46,14 @@ var _body_physics: CharacterBody3D = null      # set if parent is CharacterBody3
 ## of full recomputation.
 var _cached_neighbor_force: Vector3 = Vector3.ZERO
 var _phase_bit: int = 0
+## When true, neighbor queries (separate / avoid) run only on the
+## tick whose phase matches _phase_bit; cached force re-used on
+## the off-tick. Subclasses with fast-moving / sparse populations
+## (AircraftMovement) override to false because stale neighbor
+## force visibly oscillates them. Ground / crawler / worker
+## movement keeps stagger on; the cost saving is worth the
+## sub-tick lag for slow ground units.
+var _stagger_enabled: bool = true
 
 func _ready() -> void:
 	var p: Node = get_parent()
@@ -155,7 +163,7 @@ func tick_movement(delta: float, frame_phase: int) -> void:
 	# happen at half the previous rate. SEEK is recomputed every
 	# tick (cheap) so the unit still tracks a moving target
 	# between cache refreshes.
-	if frame_phase == _phase_bit:
+	if (not _stagger_enabled) or frame_phase == _phase_bit:
 		var sep_force: Vector3 = Steering.separate(pos,
 				_separate_neighbors(),
 				separate_min_distance,

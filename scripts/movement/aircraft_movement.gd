@@ -16,6 +16,28 @@ extends MovementComponent
 var _bank_angle_current: float = 0.0
 var _last_heading_xz: Vector2 = Vector2.ZERO
 
+
+func _ready() -> void:
+	super._ready()
+	# Aircraft fly fast (12-18 u/s) and pull tight separation
+	# circles when in formation. With the base-class stagger, the
+	# cached separate force was a tick stale — for slow ground
+	# units that's invisible, but for aircraft it produced a
+	# visible tremble (cached force pointed at a neighbor's old
+	# position, then suddenly snapped to the fresh one on the next
+	# heavy tick). Disable stagger; aircraft recompute neighbors
+	# every tick. Aircraft populations are sparse enough that the
+	# extra SpatialIndex query is cheap.
+	_stagger_enabled = false
+	# Wider arrival_radius than the base 3.0 default. With flight
+	# speed 12-18 u/s and max_accel 30, deceleration distance is
+	# ~5.4 u; a 3 u arrival zone meant SEEK kept oscillating between
+	# decel and overshoot near the destination, producing trembling
+	# in place when the aircraft "arrived". 6 u gives the inertia
+	# step room to converge cleanly.
+	arrival_radius = 6.0
+
+
 func goto_world(world_pos: Vector3) -> void:
 	## Aircraft don't navmesh-route; just set the target. Y is overridden
 	## to base_altitude so the unit doesn't try to dive into the ground.
