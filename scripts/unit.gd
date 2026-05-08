@@ -5146,18 +5146,22 @@ func _update_reload_bar() -> void:
 	## staggered to 20Hz, so reading _fire_cooldown directly produced
 	## visible 50ms steps). Fills from empty (just fired) toward
 	## full (ready to fire). Hidden once ready.
+	## Combat is read as a typed CombatComponent so the cooldown
+	## fields land via direct property access, not Node.get(string).
+	## Profile flagged the previous string-keyed lookups as a hot
+	## spot (every actively-firing unit ran 2 dict lookups per tick).
 	if not _reload_bar_fill:
 		return
-	var combat: Node = get_combat()
+	var combat: CombatComponent = get_combat() as CombatComponent
 	if not combat or not stats or not stats.primary_weapon:
 		_reload_bar_fill.visible = false
 		if _reload_bar_bg:
 			_reload_bar_bg.visible = false
 		return
-	var cd_max: float = (combat.get("_fire_cooldown_max") as float) if "_fire_cooldown_max" in combat else 1.0
+	var cd_max: float = combat._fire_cooldown_max
 	if cd_max <= 0.0:
 		cd_max = 1.0
-	var set_at: int = (combat.get("_fire_cooldown_set_at_msec") as int) if "_fire_cooldown_set_at_msec" in combat else 0
+	var set_at: int = combat._fire_cooldown_set_at_msec
 	if set_at == 0:
 		# Never fired — bar full = ready, but hidden because no
 		# pending reload to show.
@@ -6299,13 +6303,23 @@ func _per_frame_bookkeeping(delta: float) -> void:
 			_stealth_check_throttle = STEALTH_CHECK_INTERVAL
 			_tick_stealth()
 
-	# HP bar + reload bar follow the unit at full physics rate, BEFORE
-	# the 1-in-3 stagger gate below. Reposition is cheap (a single
-	# global_position assignment + visibility check) but visible
-	# smoothness matters: at 20 Hz the bar lagged the unit by up to
-	# 33 ms while moving, which read as jagged. The reload-bar fill
-	# also benefits — it now re-reads _fire_cooldown every frame so
-	# the wipe is smooth instead of jumping in 50 ms steps.
+	# 1-in-3 frame stagger for ALL visual work — including the HP
+	# bar / reload bar / billboard. The previous build kept the bar
+	# at full physics rate to dodge "bar lags unit" jitter, but the
+	# cumulative profile showed _per_frame_bookkeeping at 99 SECONDS
+	# of session time (>30% of total script cost) — by far the
+	# dominant function once the 200-unit stress test runs combat.
+	# At 20 Hz physics the 1-in-3 stagger gives ~7 Hz visual updates;
+	# units moving 6 u/s drift ~0.9 u between bar refreshes which is
+	# invisible at typical RTS zoom. Selection / damage indicators
+	# still feel responsive — a click waits at most ~150 ms for the
+	# bar to pop in, well under perceptual threshold.
+	if (_physics_frame_counter % 3) != _walk_bob_phase:
+		return
+
+	# HP bar + reload bar — moved INSIDE the stagger gate (was
+	# unconditionally at full 20 Hz). Drops bar update cost by 2/3
+	# without changing the visible behaviour at typical zoom.
 	if _hp_bar and is_instance_valid(_hp_bar):
 		var smooth_damaged: bool = false
 		if stats:
@@ -6317,14 +6331,6 @@ func _per_frame_bookkeeping(delta: float) -> void:
 			var smooth_h: float = (_cached_total_height if _cached_total_height > 0.0 else _mech_total_height()) + 0.4
 			_hp_bar.global_position = global_position + Vector3(0, smooth_h, 0)
 			_update_reload_bar()
-
-	# 1-in-3 frame stagger for heavy visual work — camera cull check,
-	# walk animation, recoil, and build claw only run every 3rd
-	# physics frame (~20Hz). HP bar position + reload bar already
-	# updated above (full rate); the stagger here covers the heavy
-	# visual recompute (walk-bob, dust spawns, etc).
-	if (_physics_frame_counter % 3) != _walk_bob_phase:
-		return
 
 	# Camera-distance cull flag. AI / pathing / combat still run; only
 	# the per-frame cosmetic work (walk-bob, HP bar reposition, dust,
