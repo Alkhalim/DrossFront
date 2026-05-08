@@ -34,7 +34,10 @@
       "Bash(godot --headless --check-only --script scripts/selection_manager.gd)",
       "Bash(python *)",
       "Bash(py --version)",
-      "Bash(dir \"D:\\\\\\\\Programme\")"
+      "Bash(dir \"D:\\\\\\\\Programme\")",
+      "Bash(godot --headless --quit)",
+      "Bash(where godot *)",
+      "Bash(\"C:\\\\Program Files\\\\Godot\\\\Godot_v4.6.1.exe\" --headless --quit --path \"D:\\\\Dokumente\\\\Gamedesign\\\\DrossFront\\\\DrossFront\" --check-only)"
     ]
   }
 }
