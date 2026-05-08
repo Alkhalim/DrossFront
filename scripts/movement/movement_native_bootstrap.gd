@@ -15,10 +15,13 @@ const CELL_SIZE: float = 2.0
 const ORIGIN_X: float = -160.0
 const ORIGIN_Z: float = -160.0
 # A cell whose center is more than this far from the nearest navmesh point
-# is treated as off-mesh (cliff, void, untraversable terrain). Tuned to be
-# slightly larger than CELL_SIZE * 0.5 so cells that just barely overlap a
-# navmesh polygon edge stay traversable.
-const OFF_MESH_DIST_THRESHOLD: float = 1.5
+# is treated as off-mesh (cliff, void, untraversable terrain). Loosened
+# from 1.5 to 2.5 (= ~1.25 cells) so plateau-edge cells whose centers are
+# just past the navmesh polygon edge stay open. Too tight a threshold
+# blocked legitimate plateau cells; too loose lets cliff overhangs leak
+# in as traversable. 2.5 is the conservative-loose end of the tuning
+# range; tighten if cliff edges become walkable in practice.
+const OFF_MESH_DIST_THRESHOLD: float = 2.5
 
 static func get_server(scene_root: Node) -> Object:
 	if _server == null:
@@ -112,7 +115,10 @@ static func _mark_terrain_off_navmesh(map_rid: RID) -> void:
 					Vector3(CELL_SIZE * 0.8, 1.0, CELL_SIZE * 0.8))
 				_server.call("mark_obstacle", aabb, true)
 				marked_count += 1
-	print_debug("[MovementNativeBootstrap] terrain sweep: marked %d off-navmesh cells" % marked_count)
+	var total_cells: int = GRID_W * GRID_H
+	var pct: float = 100.0 * float(marked_count) / float(total_cells)
+	print_debug("[MovementNativeBootstrap] terrain sweep: marked %d / %d cells off-navmesh (%.1f%%) — threshold=%.2fm" %
+		[marked_count, total_cells, pct, OFF_MESH_DIST_THRESHOLD])
 
 
 static func _mark_existing_buildings(scene_root: Node) -> void:
