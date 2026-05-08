@@ -87,7 +87,13 @@ static func _material_signature(mat: Material) -> String:
 		var alb_tex_id: int = sm.albedo_texture.get_instance_id() if sm.albedo_texture != null else 0
 		var nrm_tex_id: int = sm.normal_texture.get_instance_id() if sm.normal_texture != null else 0
 		var em_tex_id: int = sm.emission_texture.get_instance_id() if sm.emission_texture != null else 0
-		return "S|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d" % [
+		# 14 placeholders for 14 values. The earlier version had only
+		# 13 %d in the format, which caused the % operator to fail
+		# silently and return the SAME error string for every
+		# material — collapsing all materials to one surface and
+		# producing the misleading "1 surface, draw_call_reduction
+		# = source-1" output. Fixed by adding the 14th %d.
+		return "S|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d" % [
 			int(ac.r * 1000.0),
 			int(ac.g * 1000.0),
 			int(ac.b * 1000.0),
@@ -101,7 +107,7 @@ static func _material_signature(mat: Material) -> String:
 			int(sm.transparency),
 			int(sm.cull_mode),
 			alb_tex_id,
-			nrm_tex_id + em_tex_id,  # combined into one slot to keep field count tight
+			nrm_tex_id + em_tex_id,
 		]
 	# Anything else (ShaderMaterial, custom subclass) — group by
 	# instance identity so we don't accidentally merge two distinct
