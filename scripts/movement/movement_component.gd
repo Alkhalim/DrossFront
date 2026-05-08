@@ -70,6 +70,8 @@ var _combat_engaged_cached: bool = false
 ## movement keeps stagger on; the cost saving is worth the
 ## sub-tick lag for slow ground units.
 var _stagger_enabled: bool = true
+## PF-A — kernel registration handle. 0 means not registered (flag-off path).
+var kernel_handle: int = 0
 ## Cached SpatialIndex reference (moved from GroundMovement so
 ## both ground and aircraft paths can share it). The base
 ## tick_movement does ONE nearby query per heavy tick and feeds
@@ -109,6 +111,19 @@ func _ready() -> void:
 		var orch: MovementOrchestrator = MovementOrchestrator.get_instance(scene)
 		if orch:
 			orch.register(self)
+		# PF-A: when use_flowfield is on, register with the steering kernel.
+		# Flag-off path is unchanged.
+		if MovementFlags.use_flowfield():
+			var kernel: Object = (load("res://scripts/movement/movement_native_bootstrap.gd")
+								  .call("get_kernel", scene))
+			if kernel != null:
+				kernel_handle = kernel.call("register_agent",
+					int(get_instance_id()),
+					_agent_class_for_self(),
+					_radius_for_self(),
+					max_speed,
+					max_accel,
+					max_turn_rate_rad_s) as int
 
 
 func _exit_tree() -> void:
@@ -121,6 +136,14 @@ func _exit_tree() -> void:
 		var orch_node: Node = scene.get_node_or_null("MovementOrchestrator")
 		if orch_node and orch_node is MovementOrchestrator:
 			(orch_node as MovementOrchestrator).unregister(self)
+	# PF-A: unregister from the steering kernel if we were registered.
+	if kernel_handle != 0:
+		if scene:
+			var kernel: Object = (load("res://scripts/movement/movement_native_bootstrap.gd")
+								  .call("get_kernel", scene))
+			if kernel != null:
+				kernel.call("unregister_agent", kernel_handle)
+		kernel_handle = 0
 
 
 func _physics_process(delta: float) -> void:
@@ -139,6 +162,12 @@ func _physics_process(delta: float) -> void:
 ## for the base steering / inertia / move_and_slide logic.
 func tick_movement(delta: float, frame_phase: int) -> void:
 	if _body == null:
+		return
+
+	# PF-A: when use_flowfield is on, the kernel drives velocity. The
+	# orchestrator reads kernel.get_velocity and applies it via
+	# move_and_slide; we skip our own GDScript steering entirely.
+	if kernel_handle != 0 and MovementFlags.use_flowfield():
 		return
 
 	# EMP paralysis: zero velocity, skip steering. Mirrors the legacy
@@ -471,3 +500,14 @@ func _compute_pushout_dir() -> Vector3:
 ## combat (suppresses stuck detection per spec §11).
 func _is_combat_engaged() -> bool:
 	return false
+
+
+## PF-A — agent class lookup for the steering kernel. Subclasses override
+## (GroundMovement keeps default small; Aircraft sets aircraft flag in PF-B;
+## Crawler returns large in PF-B).
+func _agent_class_for_self() -> int:
+	return 0  # AGENT_CLASS_SMALL
+
+
+func _radius_for_self() -> float:
+	return 0.6  # default small radius
