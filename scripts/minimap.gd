@@ -250,12 +250,15 @@ var _redraw_timer: float = 0.0
 ## ~15 Hz to ~6 Hz roughly halves the cost without any noticeable
 ## glance-readability loss (unit dot positions slosh by at most a
 ## couple of pixels between repaints at typical mech speed).
-const REDRAW_INTERVAL: float = 0.16
+const REDRAW_INTERVAL: float = 0.33
 
 func _process(delta: float) -> void:
-	# Throttle minimap repaint to ~15 Hz. At 360+ units the per-frame
-	# `_draw` was eating ~2 ms; capping the rate cuts that to ~0.5 ms
-	# without any noticeable lag in unit dot positions.
+	# Cumulative profile flagged Minimap._draw at 3.81 ms per call —
+	# at the previous 6 Hz cadence it was eating ~23 ms/sec just to
+	# repaint dots that hardly moved between frames. Dropping to
+	# ~3 Hz halves that without making the minimap feel laggy
+	# (units move ~6u/sec; a 0.33s gap = ~2u of position drift,
+	# well under one minimap pixel at typical map zoom).
 	_redraw_timer += delta
 	if _redraw_timer < REDRAW_INTERVAL:
 		return

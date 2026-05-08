@@ -45,6 +45,57 @@ var pending_splash_damage: int = 0
 ## hostile so the round still does damage.
 var pending_shooter_owner_id: int = -1
 
+## Static caches for reusable Mesh + Material resources. Each
+## projectile creation used to call `Mesh.new()` + `Material.new()`
+## per shot (5 allocations per bullet, more for missiles). Cumulative
+## profile showed CombatComponent._fire_weapon at 0.66 ms / call ×
+## 425 calls = 282 ms session total, plus Projectile._spawn_impact
+## at 0.15 ms × 995. Caching the geometry resources (one shared
+## Mesh per style) and the materials (one per style+color tuple)
+## drops most of that allocation overhead.
+##
+## set_glow_boost still wants per-projectile mutation (one shot
+## glows brighter than its neighbors), so it duplicates the cached
+## material before mutating — keeps the cache clean.
+static var _cached_meshes: Dictionary = {}      # style:String -> Mesh
+static var _cached_materials: Dictionary = {}   # "style|RRGGBBAA" -> StandardMaterial3D
+
+
+static func _get_cached_bullet_mesh() -> CylinderMesh:
+	if _cached_meshes.has("bullet"):
+		return _cached_meshes["bullet"] as CylinderMesh
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.04
+	cyl.bottom_radius = 0.05
+	cyl.height = 0.34
+	_cached_meshes["bullet"] = cyl
+	return cyl
+
+
+static func _color_key(prefix: String, color: Color) -> String:
+	# Quantise to 0..255 ints for a stable hash key. Color.to_html
+	# would work too but ints are faster to format.
+	return "%s|%d|%d|%d|%d" % [
+		prefix,
+		int(color.r * 255.0),
+		int(color.g * 255.0),
+		int(color.b * 255.0),
+		int(color.a * 255.0),
+	]
+
+
+static func _get_cached_bullet_mat(color: Color) -> StandardMaterial3D:
+	var key: String = _color_key("bullet", color)
+	if _cached_materials.has(key):
+		return _cached_materials[key] as StandardMaterial3D
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	mat.emission_enabled = true
+	mat.emission = color
+	mat.emission_energy_multiplier = 3.0
+	_cached_materials[key] = mat
+	return mat
+
 
 func set_damage_payload(damage: int, target: Node3D, shooter: Node3D, splash_radius: float, splash_damage: int) -> void:
 	pending_damage = damage
@@ -207,23 +258,17 @@ static func create(from: Vector3, to: Vector3, role_tag: StringName, rof_tier: S
 func _create_bullet_mesh(color: Color) -> void:
 	# Slim slug shape rather than a round ball — a thin cylinder oriented
 	# along the travel direction reads as a tracer round, not a cannonball.
+	# Mesh + material both cached statically — one CylinderMesh and one
+	# StandardMaterial3D per (faction-tinted) color shared across every
+	# bullet ever fired this session. The MeshInstance3D wrapper is still
+	# per-projectile because each bullet has its own transform.
 	_mesh = MeshInstance3D.new()
 	_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var cyl := CylinderMesh.new()
-	cyl.top_radius = 0.04
-	cyl.bottom_radius = 0.05
-	cyl.height = 0.34
-	_mesh.mesh = cyl
+	_mesh.mesh = _get_cached_bullet_mesh()
 	# Cylinder default axis is Y; rotate so the long axis aligns with the
 	# projectile's local -Z (which look_at orients toward the target).
 	_mesh.rotation.x = -PI / 2
-
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = color
-	mat.emission_enabled = true
-	mat.emission = color
-	mat.emission_energy_multiplier = 3.0
-	_mesh.set_surface_override_material(0, mat)
+	_mesh.set_surface_override_material(0, _get_cached_bullet_mat(color))
 	add_child(_mesh)
 
 
@@ -274,17 +319,21 @@ func set_glow_boost(mult: float, tint: Color = Color(1.0, 0.78, 0.20, 1.0)) -> v
 	## Brightens this projectile's mesh emission and shifts its
 	## albedo toward the supplied tint. Used by ability paths
 	## (Heavy Volley) to make a buffed shot read as glowing
-	## pellets at zoom. Safe to call on any style -- if there's no
-	## _mesh yet (called pre-_ready) the next physics frame's
-	## render still picks up the override material.
+	## pellets at zoom. Clones the surface material first because
+	## the default path now points at a STATIC CACHED material —
+	## mutating that would tint every bullet of the same base
+	## color across the whole session. The clone is per-projectile
+	## and gets freed when the projectile dies normally.
 	if not _mesh or not is_instance_valid(_mesh):
 		return
 	var mat: StandardMaterial3D = _mesh.get_surface_override_material(0) as StandardMaterial3D
 	if not mat:
 		return
-	mat.albedo_color = mat.albedo_color.lerp(tint, 0.7)
-	mat.emission = tint
-	mat.emission_energy_multiplier = mat.emission_energy_multiplier * maxf(mult, 1.0)
+	var owned: StandardMaterial3D = mat.duplicate() as StandardMaterial3D
+	owned.albedo_color = mat.albedo_color.lerp(tint, 0.7)
+	owned.emission = tint
+	owned.emission_energy_multiplier = mat.emission_energy_multiplier * maxf(mult, 1.0)
+	_mesh.set_surface_override_material(0, owned)
 
 
 func _create_bomb_mesh(_color: Color) -> void:
