@@ -116,7 +116,13 @@ func _physics_process(delta: float) -> void:
 			_components.remove_at(i)
 			i -= 1
 			continue
-		var mc: Object = mc_v as Object
-		if mc != null and mc.has_method("tick_movement"):
+		# Typed cast — `register` only accepts MovementComponent
+		# subclasses, so the cast always succeeds. Drops the per-call
+		# `has_method("tick_movement")` string-keyed lookup that the
+		# previous defensive build paid 200×/tick. tick_movement is
+		# a real method on MovementComponent so the dispatch is a
+		# direct vtable call rather than a Variant-typed indirection.
+		var mc: MovementComponent = mc_v as MovementComponent
+		if mc != null:
 			mc.tick_movement(delta, frame_phase)
 		i -= 1
