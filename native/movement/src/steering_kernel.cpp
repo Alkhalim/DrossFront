@@ -91,7 +91,14 @@ void SteeringKernel::tick(float delta) {
         if (!agents_.alive[i]) continue;
         uint8_t f = agents_.flags[i];
         if (!(f & AGENT_FLAG_HAS_TARGET)) continue;
-        if (f & (AGENT_FLAG_PARALYZED | AGENT_FLAG_HALTED)) continue;
+        if (f & (AGENT_FLAG_PARALYZED | AGENT_FLAG_HALTED)) {
+            // Spec §6: halt zeroes velocity. Otherwise the orchestrator's
+            // get_velocity() call would keep applying the agent's last
+            // computed velocity via move_and_slide, drifting forever
+            // until something else cleared the flag.
+            agents_.vel[i] = {};
+            continue;
+        }
 
         godot::Vector3 pos = agents_.pos[i];
         float max_speed = agents_.max_speed[i];
