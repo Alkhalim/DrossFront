@@ -29,35 +29,84 @@ static func combine(root: Node3D) -> ArrayMesh:
 	## Returns a single ArrayMesh combining every MeshInstance3D
 	## descendant of `root`, with vertices transformed into root's
 	## local space. The returned mesh has one surface per unique
-	## material across the source tree.
+	## material *signature* across the source tree — visually
+	## identical StandardMaterial3D instances (same albedo, same
+	## roughness, etc.) merge into the same surface even when the
+	## underlying procedural unit-build code spawned a fresh
+	## Material instance per MeshInstance3D. Without signature
+	## grouping the bake produced one surface per source mesh
+	## instance (defeating the point of MultiMesh batching).
 	var entries: Array = []
 	_collect_recursive(root, Transform3D.IDENTITY, entries, root)
 
-	# Group entries by material — one surface per unique material
-	# in the output mesh. Material === null entries are grouped
-	# together under a single null key.
-	var groups: Dictionary = {}
-	# Preserve insertion order so the output's surface order is
-	# deterministic across runs (helpful for debugging and for
-	# making override-material assignments stable).
-	var group_order: Array = []
+	# Group entries by signature. Each group also remembers the
+	# first Material instance it saw so the output ArrayMesh can
+	# carry that material on the merged surface.
+	var groups: Dictionary = {}      # sig -> { material, entries }
+	var group_order: Array = []      # preserved insertion order for deterministic output
 	for entry: Dictionary in entries:
-		var mat: Material = entry.get("material", null)
-		if not groups.has(mat):
-			groups[mat] = []
-			group_order.append(mat)
-		(groups[mat] as Array).append(entry)
+		var mat: Material = entry.get("material", null) as Material
+		var sig: String = _material_signature(mat)
+		if not groups.has(sig):
+			groups[sig] = {"material": mat, "entries": []}
+			group_order.append(sig)
+		((groups[sig] as Dictionary)["entries"] as Array).append(entry)
 
 	var combined := ArrayMesh.new()
-	for mat: Material in group_order:
-		var arrays: Array = _build_combined_surface(groups[mat] as Array)
+	for sig: String in group_order:
+		var grp: Dictionary = groups[sig] as Dictionary
+		var arrays: Array = _build_combined_surface(grp["entries"] as Array)
 		if arrays.is_empty():
 			continue
 		combined.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-		if mat != null:
+		var rep_mat: Material = grp["material"] as Material
+		if rep_mat != null:
 			var surf_idx: int = combined.get_surface_count() - 1
-			combined.surface_set_material(surf_idx, mat)
+			combined.surface_set_material(surf_idx, rep_mat)
 	return combined
+
+
+static func _material_signature(mat: Material) -> String:
+	## Stable key for grouping visually equivalent materials. For
+	## StandardMaterial3D we hash the rendering-relevant properties
+	## (albedo, metallic, roughness, emission, transparency, cull,
+	## texture references). For other Material types we fall back
+	## to instance identity — ShaderMaterials with the same shader
+	## and uniforms COULD be merged, but extracting their parameter
+	## values is finicky enough that it's not worth the bug
+	## surface for the unit-bake use case.
+	if mat == null:
+		return "<null>"
+	if mat is StandardMaterial3D:
+		var sm: StandardMaterial3D = mat as StandardMaterial3D
+		# Color components quantised to keep float-jitter in the
+		# procedural unit-build palette from splitting groups.
+		# 0.001 quantum is well below visual perception.
+		var ac: Color = sm.albedo_color
+		var em: Color = sm.emission
+		var alb_tex_id: int = sm.albedo_texture.get_instance_id() if sm.albedo_texture != null else 0
+		var nrm_tex_id: int = sm.normal_texture.get_instance_id() if sm.normal_texture != null else 0
+		var em_tex_id: int = sm.emission_texture.get_instance_id() if sm.emission_texture != null else 0
+		return "S|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d" % [
+			int(ac.r * 1000.0),
+			int(ac.g * 1000.0),
+			int(ac.b * 1000.0),
+			int(ac.a * 1000.0),
+			int(sm.metallic * 1000.0),
+			int(sm.roughness * 1000.0),
+			int(em.r * 1000.0) if sm.emission_enabled else 0,
+			int(em.g * 1000.0) if sm.emission_enabled else 0,
+			int(em.b * 1000.0) if sm.emission_enabled else 0,
+			int(sm.emission_energy_multiplier * 1000.0) if sm.emission_enabled else 0,
+			int(sm.transparency),
+			int(sm.cull_mode),
+			alb_tex_id,
+			nrm_tex_id + em_tex_id,  # combined into one slot to keep field count tight
+		]
+	# Anything else (ShaderMaterial, custom subclass) — group by
+	# instance identity so we don't accidentally merge two distinct
+	# shaders.
+	return "I|" + str(mat.get_instance_id())
 
 
 static func _collect_recursive(
