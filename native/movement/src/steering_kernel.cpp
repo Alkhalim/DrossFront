@@ -2,6 +2,16 @@
 #include "flow_field_server.h"
 #include <godot_cpp/core/class_db.hpp>
 
+namespace {
+    // Tunables — match spec §12.
+    constexpr float SEPARATE_DISTANCE      = 2.5f;
+    constexpr float SEPARATE_REPEL         = 6.0f;
+    constexpr float AVOID_DISTANCE         = 3.0f;     // unused in PF-A (no buildings list yet)
+    constexpr float AVOID_REPEL            = 24.0f;
+    constexpr float COHESION_MAX_MAGNITUDE = 2.0f;
+    constexpr float COHESION_QUERY_RADIUS  = 16.0f;    // unused in PF-A (no group centroid yet)
+}
+
 namespace drossfront {
 
 void SteeringKernel::_bind_methods() {
@@ -73,8 +83,74 @@ godot::Vector3 SteeringKernel::get_velocity(AgentHandle handle) {
     return agents_.vel[idx];
 }
 
-void SteeringKernel::tick(float /*delta*/) {
-    // Implemented in PF-A-13.
+void SteeringKernel::tick(float delta) {
+    if (!server_) return;
+    const int N = agents_.count;
+
+    for (int i = 0; i < N; ++i) {
+        if (!agents_.alive[i]) continue;
+        uint8_t f = agents_.flags[i];
+        if (!(f & AGENT_FLAG_HAS_TARGET)) continue;
+        if (f & (AGENT_FLAG_PARALYZED | AGENT_FLAG_HALTED)) continue;
+
+        godot::Vector3 pos = agents_.pos[i];
+        float max_speed = agents_.max_speed[i];
+
+        // SEEK from flow field (or aircraft direct seek; PF-A: ground only,
+        // so we always sample). Aircraft branch lands in PF-B.
+        godot::Vector2 flow = server_->sample(agents_.field_id[i], pos);
+        godot::Vector3 seek(flow.x * max_speed, 0.0f, flow.y * max_speed);
+
+        // SEPARATE pass — pairwise O(N^2). Acceptable at PF-A scale (one
+        // squad type pilot, < 50 agents). PF-C swaps in SpatialIndex via a
+        // GDScript-callable bridge.
+        godot::Vector3 sep = {};
+        for (int j = 0; j < N; ++j) {
+            if (j == i || !agents_.alive[j]) continue;
+            godot::Vector3 dp = pos - agents_.pos[j];
+            dp.y = 0.0f;
+            float d = dp.length();
+            if (d <= 0.001f || d > SEPARATE_DISTANCE) continue;
+            float strength = SEPARATE_REPEL * (1.0f - d / SEPARATE_DISTANCE);
+            sep += dp.normalized() * strength;
+        }
+
+        // COHESION — toward same-group centroid (computed on the fly here;
+        // GroupAura caches it later when wired up via group_id lookup tables).
+        godot::Vector3 centroid = {};
+        int peers = 0;
+        for (int j = 0; j < N; ++j) {
+            if (j == i || !agents_.alive[j]) continue;
+            if (agents_.group_id[j] != agents_.group_id[i]) continue;
+            centroid += agents_.pos[j];
+            ++peers;
+        }
+        godot::Vector3 coh = {};
+        if (peers > 0) {
+            centroid /= static_cast<float>(peers);
+            coh = centroid - pos;
+            coh.y = 0.0f;
+            float clen = coh.length();
+            if (clen > COHESION_MAX_MAGNITUDE) {
+                coh *= (COHESION_MAX_MAGNITUDE / clen);
+            }
+        }
+
+        // Compose; clamp to max_speed.
+        godot::Vector3 desired = seek + sep + coh;
+        desired.y = 0.0f;
+        float dlen = desired.length();
+        if (dlen > max_speed) desired *= (max_speed / dlen);
+
+        // Inertia: linear interpolation toward desired bounded by max_accel.
+        godot::Vector3 v = agents_.vel[i];
+        godot::Vector3 dv = desired - v;
+        float dvlen = dv.length();
+        float max_dv = agents_.max_accel[i] * delta;
+        if (dvlen > max_dv) dv *= (max_dv / dvlen);
+        v += dv;
+        agents_.vel[i] = v;
+    }
 }
 
 } // namespace drossfront
