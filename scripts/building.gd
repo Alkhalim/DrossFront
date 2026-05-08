@@ -3269,6 +3269,16 @@ func _finish_construction() -> void:
 			router.update_obstacle_tile(aabb)
 	elif arena and arena.has_method("request_navmesh_rebake"):
 		arena.request_navmesh_rebake()
+	# PF-A: additionally mark the obstacle on the FlowFieldServer so flag-on
+	# fields invalidate. This is additive to the navmesh rebake — the legacy
+	# path still uses NavigationServer3D for unit-tests/aircraft/workers.
+	if MovementFlags.use_flowfield():
+		var server: Object = (load("res://scripts/movement/movement_native_bootstrap.gd")
+							  .call("get_server", arena))
+		if server != null:
+			var fp_pf: Vector3 = stats.footprint_size
+			var aabb_pf: AABB = AABB(global_position - Vector3(fp_pf.x * 0.5, 0.0, fp_pf.z * 0.5), fp_pf)
+			server.call("mark_obstacle", aabb_pf, true)
 	# Belt-and-suspenders: even though _is_foundation_clear gates progress,
 	# fast-moving units can slip into the footprint between frames. Push any
 	# stragglers out before the collision shape activates.
