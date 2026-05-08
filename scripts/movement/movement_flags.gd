@@ -12,3 +12,12 @@ extends RefCounted
 ## and this accessor.
 static func use_new_system() -> bool:
 	return ProjectSettings.get_setting("drossfront/movement/use_new_system", false) as bool
+
+
+## Returns true if the flow-field rewrite (PF-A) should drive movement
+## instead of the Plan A/B/C SquadGroup + GDScript steering path.
+## Independent of use_new_system: flag-on use_flowfield supersedes it
+## for entity types that have been migrated. PF-A migrates anvil_hound
+## only; PF-B widens the migration; PF-C deletes both legacy paths.
+static func use_flowfield() -> bool:
+	return ProjectSettings.get_setting("drossfront/movement/use_flowfield", false) as bool
