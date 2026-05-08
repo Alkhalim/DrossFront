@@ -39,15 +39,16 @@ const MAP_HALF_EXTENT: float = 200.0
 ## constant so the grid arrays can be sized at _ready.
 const GRID_SIZE: int = int((MAP_HALF_EXTENT * 2.0) / CELL_SIZE)
 
-# Visual profiler showed FoW recompute eating 102 ms in single
-# spike frames during the stress test (61% of all script time
-# that frame). Per-stamp work is dominated by LOS Bresenham walks
-# (~67 ms / 20k calls / frame at 3 Hz). 2 Hz cuts the recompute
-# frequency by another 33% — vision now lags up to ~500 ms
-# instead of ~333 ms, but we get the proportional saving on
-# every recompute spike. Combined with the immediate-ring LOS
-# skip in _stamp_visibility, total FoW cost drops ~40%.
-const FOW_REFRESH_HZ: float = 2.0
+# Recompute is still ~100 ms per spike frame (the per-call cost
+# is the bottleneck, not call frequency — each stamp does ~318
+# Bresenham LOS walks against 4000 occluder cells). Lower the
+# rate to 1 Hz so we get at most one spike per second instead of
+# two. Vision lag goes up to ~1 s — at RTS pace (units move
+# ~6 u/s, vision cell is 5 u), memory is stale by at most one
+# cell. Acceptable while we figure out whether to invest in a
+# real algorithmic fix (shadowcasting replaces the per-cell
+# Bresenham with one octant pass — 5-10× faster per stamp).
+const FOW_REFRESH_HZ: float = 1.0
 
 ## Plateau-top elevation flag per cell. 1 = cell sits on top of a
 ## walkable plateau; 0 = ground / open. Set by the arena setup via
