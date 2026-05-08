@@ -343,7 +343,19 @@ var _was_omniscient_last_tick: bool = false
 var _registry: PlayerRegistry = null
 
 var _refresh_accum: float = 0.0
-const _REFRESH_INTERVAL: float = 1.0 / FOW_REFRESH_HZ
+## 2× the player-visible refresh rate so the work splits across two
+## physics frames per cycle (see _recompute_visibility). Internal
+## fire rate is 4 Hz; full reveal cycle still completes at 2 Hz.
+const _REFRESH_INTERVAL: float = 0.5 / FOW_REFRESH_HZ
+## Two-phase split state for _recompute_visibility. Phase 0 demotes
+## previous-visible cells + stamps the first half of friendly units.
+## Phase 1 stamps the second half + buildings + temp reveals + applies
+## entity visibility + bumps revision. Halves the per-call spike (was
+## 11.88 ms / call uncontested-peak in profile 524) without changing
+## the player-visible 2 Hz reveal rate.
+var _refresh_phase: int = 0
+var _phase_friendlies: Array[Node3D] = []
+var _phase_tracker_positions: Array[Vector3] = []
 
 ## Bumped every recompute so consumers (overlay shader, minimap)
 ## know whether they need to re-upload the grid texture.
@@ -463,6 +475,8 @@ func reveal_area(pos: Vector3, radius: float, duration_sec: float) -> void:
 func _recompute_visibility() -> void:
 	# Cheat: skip the normal vision pass and stamp every cell as
 	# VISIBLE. Bump revision so the overlay + minimap pick it up.
+	# Reset the phase counter so the next non-cheat call resumes from
+	# a clean phase-0 setup.
 	if omniscient_local:
 		for i: int in _cells.size():
 			_cells[i] = CellState.VISIBLE
@@ -476,28 +490,45 @@ func _recompute_visibility() -> void:
 		_was_omniscient_last_tick = true
 		revision += 1
 		_apply_entity_visibility()
+		_refresh_phase = 0
+		_phase_friendlies.clear()
+		_phase_tracker_positions.clear()
 		return
 
+	# Two-phase split. Profile 524 measured _recompute_visibility at
+	# 11.88 ms / call inclusive — by far the spikiest single per-call
+	# cost on the board. The work splits naturally:
+	#   phase 0 — prune + demote + collect friendlies + stamp first half
+	#   phase 1 — stamp second half + buildings + temp + apply + bump
+	# Each phase is roughly half the previous monolithic cost. Internal
+	# fire rate is doubled (_REFRESH_INTERVAL halved) so a complete
+	# reveal cycle still completes at FOW_REFRESH_HZ (2 Hz) — only the
+	# spike is split. Revision is bumped only at end of phase 1 so
+	# overlay/minimap don't repaint on a half-built grid.
+	if _refresh_phase == 0:
+		_recompute_phase_0()
+		_refresh_phase = 1
+	else:
+		_recompute_phase_1()
+		_refresh_phase = 0
+
+
+func _recompute_phase_0() -> void:
 	# Periodically drop cache entries for freed observers so the
-	# stamp cache doesn't accumulate dead instance_ids. Every ~4
-	# seconds at 5 Hz refresh -- frequent enough to bound memory,
-	# rare enough that the prune walk doesn't show up in profiling.
+	# stamp cache doesn't accumulate dead instance_ids. The prune
+	# is on the phase-0 cycle so it fires once per full reveal
+	# cycle (was once per call -- same effective frequency).
 	_recompute_tick += 1
 	if (_recompute_tick % 20) == 0:
 		_prune_observer_cache()
 	# Reset the per-tick signature dedup. Squad-mates / co-located
-	# observers will repopulate this within the loop below; entries
-	# don't persist across recomputes (the underlying _cells state
-	# is wiped each tick).
+	# observers will repopulate this across phase 0 + phase 1;
+	# entries don't persist across full recomputes.
 	_stamp_signature_cache.clear()
 
-	# Demote last tick's VISIBLE cells to EXPLORED. New vision will
-	# bump them back up below; cells that were visible last tick but
-	# aren't this tick stay EXPLORED so the player can still see
-	# terrain features but not live enemy positions. Walking the
-	# previously-visible set instead of the full 40000-cell grid
-	# was the biggest single win on _recompute_visibility -- the
-	# typical visible set is 1-5% of the grid.
+	# Demote last cycle's VISIBLE cells to EXPLORED. New vision will
+	# bump them back up across phase 0 + phase 1; cells that were
+	# visible last cycle but aren't this cycle stay EXPLORED.
 	if _was_omniscient_last_tick:
 		# Cheat just toggled off -- the entire grid was VISIBLE last
 		# tick, so do one full-grid demote to clear it before
@@ -514,13 +545,11 @@ func _recompute_visibility() -> void:
 				_cells[pi] = CellState.EXPLORED
 	_visible_cells_last_tick = PackedInt32Array()
 
-	# Pre-collect friendly alive units once so the tracker scan and
-	# the stamp loop below don't both walk the full units group +
-	# re-run _is_friendly / alive_count checks. Profiling showed
-	# both passes hitting the registry-allied path for every entry,
-	# which adds up at high unit counts.
-	var friendly_units: Array[Node3D] = []
-	var tracker_positions: Array[Vector3] = []
+	# Pre-collect friendly alive units once. Saved to _phase_friendlies
+	# / _phase_tracker_positions so phase 1 can stamp the second half
+	# without walking the units group again.
+	_phase_friendlies.clear()
+	_phase_tracker_positions.clear()
 	for node: Node in get_tree().get_nodes_in_group("units"):
 		if not is_instance_valid(node):
 			continue
@@ -531,47 +560,32 @@ func _recompute_visibility() -> void:
 		var n3d: Node3D = node as Node3D
 		if not n3d:
 			continue
-		friendly_units.append(n3d)
+		_phase_friendlies.append(n3d)
 		var ts: UnitStatResource = (node.get("stats") as UnitStatResource) if "stats" in node else null
 		if ts and ts.unit_name.findn("Tracker") >= 0:
-			tracker_positions.append(n3d.global_position)
+			_phase_tracker_positions.append(n3d.global_position)
 
-	# Walk every unit + building owned by the local player or any
-	# ally and stamp visible cells around them.
-	for node3d: Node3D in friendly_units:
-		var node: Node = node3d as Node
-		var radius: float = _unit_sight_radius(node)
-		var is_air: bool = node.is_in_group("aircraft")
-		var is_elevated: bool = is_air or node3d.global_position.y >= ELEVATED_OBSERVER_Y
-		# +30% radius for elevated observers (plateau-top units +
-		# aircraft) so high ground actually translates to a longer
-		# spotting range.
-		if is_elevated and not is_air:
-			radius *= ELEVATED_SIGHT_BONUS
-		# Tracker aura: any friendly unit within TRACKER_AURA_RADIUS
-		# of a Hound Tracker gains +15% sight. Trackers themselves
-		# also benefit when stacked. The aura is cheap-passive (no
-		# resource cost, no UI) -- the Tracker's recon-support role
-		# is its identity.
-		if not tracker_positions.is_empty():
-			for tp: Vector3 in tracker_positions:
-				if node3d.global_position.distance_to(tp) <= TRACKER_AURA_RADIUS:
-					radius *= TRACKER_AURA_BONUS
-					break
-		# Sees-over-buildings flag (Spotter / Apex / Harbinger-tier
-		# tall mechs) bypasses the LOS occluder gate the same way
-		# elevated / aircraft observers do. Routed through the
-		# `observer_elevated` arg so _stamp_visibility's existing
-		# bypass branch picks it up without a second arg.
-		var unit_stats: UnitStatResource = (node.get("stats") as UnitStatResource) if "stats" in node else null
-		var sees_over: bool = unit_stats != null and unit_stats.sees_over_buildings
-		_stamp_visibility_cached(
-			node.get_instance_id(),
-			node3d.global_position,
-			radius,
-			is_elevated or sees_over,
-			is_air,
-		)
+	# Stamp first half of friendlies. Integer split point biases the
+	# heavier work onto phase 0 when the count is odd (rounding up
+	# here, rounding down there) — keeps the two phases balanced.
+	var half: int = _phase_friendlies.size() / 2
+	for i: int in half:
+		_stamp_friendly(_phase_friendlies[i])
+
+
+func _recompute_phase_1() -> void:
+	# Stamp second half of friendlies (from the saved _phase_friendlies
+	# array). is_instance_valid guards in case a unit died between
+	# phase 0 and phase 1 (250ms window).
+	var half: int = _phase_friendlies.size() / 2
+	var n: int = _phase_friendlies.size()
+	for i: int in range(half, n):
+		var n3d: Node3D = _phase_friendlies[i]
+		if not is_instance_valid(n3d):
+			continue
+		_stamp_friendly(n3d)
+	_phase_friendlies.clear()
+	_phase_tracker_positions.clear()
 
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(node):
@@ -618,6 +632,42 @@ func _recompute_visibility() -> void:
 	# neutral entities stay always-visible; enemies hide unless
 	# their cell is currently VISIBLE.
 	_apply_entity_visibility()
+
+
+func _stamp_friendly(node3d: Node3D) -> void:
+	## Stamp visibility for a single friendly unit. Extracted from the
+	## monolithic recompute so phase 0 and phase 1 can call it on
+	## their respective halves of the friendly list.
+	var node: Node = node3d as Node
+	var radius: float = _unit_sight_radius(node)
+	var is_air: bool = node.is_in_group("aircraft")
+	var is_elevated: bool = is_air or node3d.global_position.y >= ELEVATED_OBSERVER_Y
+	# +30% radius for elevated observers (plateau-top units +
+	# aircraft) so high ground actually translates to a longer
+	# spotting range.
+	if is_elevated and not is_air:
+		radius *= ELEVATED_SIGHT_BONUS
+	# Tracker aura: any friendly unit within TRACKER_AURA_RADIUS
+	# of a Hound Tracker gains +15% sight. The tracker_positions
+	# array was collected once in phase 0 and reused across both
+	# phases.
+	if not _phase_tracker_positions.is_empty():
+		for tp: Vector3 in _phase_tracker_positions:
+			if node3d.global_position.distance_to(tp) <= TRACKER_AURA_RADIUS:
+				radius *= TRACKER_AURA_BONUS
+				break
+	# Sees-over-buildings flag (Spotter / Apex / Harbinger-tier
+	# tall mechs) bypasses the LOS occluder gate the same way
+	# elevated / aircraft observers do.
+	var unit_stats: UnitStatResource = (node.get("stats") as UnitStatResource) if "stats" in node else null
+	var sees_over: bool = unit_stats != null and unit_stats.sees_over_buildings
+	_stamp_visibility_cached(
+		node.get_instance_id(),
+		node3d.global_position,
+		radius,
+		is_elevated or sees_over,
+		is_air,
+	)
 
 
 ## Per-entity visibility cache. Keyed by instance_id; value is a

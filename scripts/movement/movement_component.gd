@@ -54,6 +54,14 @@ var _body_physics: CharacterBody3D = null      # set if parent is CharacterBody3
 const STAGGER_PERIOD: int = 3
 var _cached_neighbor_force: Vector3 = Vector3.ZERO
 var _phase_bit: int = 0
+## Cached output of _is_combat_engaged. Recomputed on heavy-tick
+## frames; reused on intervening ticks. The previous build called
+## the virtual method (which itself does a string-keyed has_method
+## lookup + dynamic dispatch + a Node.get(string) inside the unit's
+## _in_active_combat) every physics tick on every unit -- 200 × 20 Hz
+## = 4000 calls/sec just to gate _stuck_step. Combat state changes
+## on the order of seconds; tracking it at 7 Hz is plenty.
+var _combat_engaged_cached: bool = false
 ## When true, neighbor queries (separate / avoid) run only on the
 ## tick whose phase matches _phase_bit modulo STAGGER_PERIOD.
 ## Subclasses with fast-moving / sparse populations
@@ -148,6 +156,13 @@ func tick_movement(delta: float, frame_phase: int) -> void:
 				_body_physics.move_and_slide()
 			return
 
+	# Heavy-tick gate also drives the combat-engaged + stuck-analysis
+	# refresh below. Hoisted up here so it's one bool we can pass
+	# down rather than re-evaluating the same boolean three times.
+	var is_heavy_tick: bool = (not _stagger_enabled) or frame_phase == _phase_bit
+	if is_heavy_tick:
+		_combat_engaged_cached = _is_combat_engaged()
+
 	if not has_target():
 		# Decelerate to rest and idle. Once a CharacterBody3D unit is
 		# (a) at rest, (b) on the floor, and (c) has nothing to do,
@@ -173,7 +188,7 @@ func tick_movement(delta: float, frame_phase: int) -> void:
 				_body_physics.move_and_slide()
 		else:
 			_body.global_position += _velocity * delta
-		_stuck_step(delta, _is_combat_engaged())
+		_stuck_step(delta, _combat_engaged_cached, is_heavy_tick)
 		return
 
 	var pos: Vector3 = _body.global_position
@@ -184,7 +199,7 @@ func tick_movement(delta: float, frame_phase: int) -> void:
 	# happen at half the previous rate. SEEK is recomputed every
 	# tick (cheap) so the unit still tracks a moving target
 	# between cache refreshes.
-	if (not _stagger_enabled) or frame_phase == _phase_bit:
+	if is_heavy_tick:
 		# ONE SpatialIndex.nearby query per heavy tick instead of
 		# two (one in _separate_neighbors, one in _avoid_obstacles).
 		# The query radius is the larger of the two needs; subclass
@@ -225,7 +240,7 @@ func tick_movement(delta: float, frame_phase: int) -> void:
 		_body_physics.move_and_slide()
 	else:
 		_body.global_position += _velocity * delta
-	_stuck_step(delta, _is_combat_engaged())
+	_stuck_step(delta, _combat_engaged_cached, is_heavy_tick)
 
 func has_target() -> bool:
 	return not _is_inf(target)
@@ -293,7 +308,7 @@ func _ensure_stuck_buffer() -> void:
 			_stuck_buffer[i] = max_speed * phys_dt  # seed as healthy
 		_stuck_buffer_idx = 0
 
-func _stuck_step(delta: float, combat_engaged: bool) -> void:
+func _stuck_step(delta: float, combat_engaged: bool, is_heavy_tick: bool) -> void:
 	# Cheap early-out for idle units (no active move target).
 	# The stuck detector only matters while travelling; running
 	# the displacement bookkeeping every tick on idle units was
@@ -313,6 +328,14 @@ func _stuck_step(delta: float, combat_engaged: bool) -> void:
 	_stuck_buffer[_stuck_buffer_idx] = disp
 	_stuck_buffer_idx = (_stuck_buffer_idx + 1) % _stuck_buffer.size()
 
+	# Stuck analysis (sum loop + ratio check + escalate) only fires
+	# on heavy-tick frames. The displacement record above stays
+	# per-tick so the 30-frame buffer keeps a continuous fine-grained
+	# trace; the analysis just samples it at 1-in-3 rate (~7 Hz) since
+	# stuck escalation works on the order of seconds anyway. Saves
+	# the 30-iteration sum loop on 2/3 of all travel-path ticks.
+	if not is_heavy_tick:
+		return
 	if combat_engaged:
 		return
 	if _stuck_cooldown_remaining > 0.0:
