@@ -1,5 +1,10 @@
 # Godot 4 specific ignores
-.godot/
+.godot/*
+# Exception: extension_list.cfg must be tracked so headless runs find
+# the movement_native GDExtension without an editor pass. Pattern uses
+# .godot/* (not .godot/) so this re-include works — git can't re-include
+# files from a fully-excluded parent directory.
+!.godot/extension_list.cfg
 
 # Imported resources
 .import/
