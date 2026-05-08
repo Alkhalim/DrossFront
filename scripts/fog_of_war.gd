@@ -47,15 +47,21 @@ const GRID_SIZE: int = int((MAP_HALF_EXTENT * 2.0) / CELL_SIZE)
 ##   world_y = origin_y + dx*yx + dy*yy
 ## 8 octants cover the full circle. Algorithm reference:
 ## Björn Bergström — https://www.albertford.com/shadowcasting/
-const _OCTANT_MULTIPLIERS: Array[PackedInt32Array] = [
-	PackedInt32Array([ 1,  0,  0,  1]),
-	PackedInt32Array([ 0,  1,  1,  0]),
-	PackedInt32Array([ 0, -1,  1,  0]),
-	PackedInt32Array([-1,  0,  0,  1]),
-	PackedInt32Array([-1,  0,  0, -1]),
-	PackedInt32Array([ 0, -1, -1,  0]),
-	PackedInt32Array([ 0,  1, -1,  0]),
-	PackedInt32Array([ 1,  0,  0, -1]),
+##
+## Plain Array of Array (not PackedInt32Array(...)) because
+## GDScript's compile-time const evaluator rejects constructor
+## calls inside literals — same trap the Wreck class hit with
+## Vector3() in packed arrays. Inner array element access via
+## oct[0]..oct[3] still works fine.
+const _OCTANT_MULTIPLIERS: Array = [
+	[ 1,  0,  0,  1],
+	[ 0,  1,  1,  0],
+	[ 0, -1,  1,  0],
+	[-1,  0,  0,  1],
+	[-1,  0,  0, -1],
+	[ 0, -1, -1,  0],
+	[ 0,  1, -1,  0],
+	[ 1,  0,  0, -1],
 ]
 
 # Refresh rate. Was dropped to 1 Hz when per-stamp cost was the
@@ -988,7 +994,7 @@ func _stamp_visibility(world_pos: Vector3, radius: float, observer_elevated: boo
 		var radius_sq_int: int = cell_radius * cell_radius
 		# 8 octants. Multipliers transform octant-local (dx, dy) to
 		# grid coords: world_x = origin_x + dx*xx + dy*xy, same for y.
-		for oct: PackedInt32Array in _OCTANT_MULTIPLIERS:
+		for oct: Array in _OCTANT_MULTIPLIERS:
 			_cast_light_recursive(
 				origin_cell.x, origin_cell.y,
 				1, 1.0, 0.0,
