@@ -2,7 +2,6 @@
 #include <algorithm>
 #include <queue>
 #include <utility>
-#include <godot_cpp/variant/utility_functions.hpp>
 
 namespace drossfront {
 
@@ -42,8 +41,6 @@ bool FlowField::build_from(int goal_cell) {
     // threshold height, lower it.
     constexpr float MAX_Y_DELTA = 1.5f;
 
-    int y_rejected_count = 0;
-    int y_max_observed_ms = 0; // largest delta observed (mm * 100) for diagnostic
     while (!pq.empty()) {
         auto [cur_cost, cur_idx] = pq.top();
         pq.pop();
@@ -63,13 +60,7 @@ bool FlowField::build_from(int goal_cell) {
             // shouldn't be reachable in one step (no climbable geometry);
             // ramp cells differ by smaller deltas and stay traversable.
             float n_y = grid_.get_cell_y(nidx);
-            float dy = std::abs(n_y - cur_y);
-            int dy_cs = static_cast<int>(dy * 100.0f);
-            if (dy_cs > y_max_observed_ms) y_max_observed_ms = dy_cs;
-            if (dy > MAX_Y_DELTA) {
-                ++y_rejected_count;
-                continue;
-            }
+            if (std::abs(n_y - cur_y) > MAX_Y_DELTA) continue;
             // Step cost = neighbor base step + soft cost from grid (scaled down).
             uint32_t step = neighbor_cost[n] + cell_cost;
             uint32_t new_cost = cur_cost + step;
@@ -79,14 +70,6 @@ bool FlowField::build_from(int goal_cell) {
             }
         }
     }
-    // Diagnostic: how many cell-pair expansions did the Y-delta check
-    // reject? If 0 on a map with cliffs, terrain Y data isn't reaching
-    // build_from (or all cells share Y, or threshold is too lenient).
-    // y_max_observed (in cm) shows the steepest delta seen.
-    godot::UtilityFunctions::print("[FlowField] build_from goal=", goal_cell,
-                                   " y_rejected=", y_rejected_count,
-                                   " y_max_seen_cm=", y_max_observed_ms,
-                                   " threshold=", MAX_Y_DELTA);
 
     compute_flow_directions();
     return true;

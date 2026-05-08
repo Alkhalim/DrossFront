@@ -28,6 +28,16 @@ var last_order_destination: Vector3 = Vector3.INF
 ## field here, release it on the next goto_world or _exit_tree.
 ## 0 = no owned field.
 var _kernel_field_id: int = 0
+## Last world position we built a kernel field for. Used to skip
+## rebuild when goto_world is called repeatedly with essentially the
+## same target — combat AI re-issues `unit.command_move(enemy_pos)`
+## every tick on engaged units, which without idempotency rebuilds
+## a fresh ~25k-cell Dijkstra each call. The kernel target shifts
+## per-tick, the unit's flow direction never stabilizes, and what
+## should have been a smooth approach degrades into oscillation
+## against walls/obstacles. Tracked as a Vector3; comparisons use
+## squared distance against a one-cell threshold.
+var _kernel_field_target: Vector3 = Vector3.INF
 
 func _ready() -> void:
 	super._ready()
@@ -67,22 +77,36 @@ func goto_world(world_pos: Vector3) -> void:
 	# unit.command_move (combat reactions, AI orders, etc.) routes through
 	# this function — without this hook, the kernel keeps the previous
 	# target and the unit follows a stale field into walls.
+	#
+	# Idempotency: combat AI calls unit.command_move every tick on engaged
+	# units (re-issuing the enemy position). Each call WAS rebuilding a
+	# ~25k-cell Dijkstra and swapping the kernel target, causing the unit's
+	# flow direction to thrash and never stabilize. Skip when the new
+	# target is within one cell of the existing one — close enough that a
+	# rebuilt field would point essentially the same way.
 	if MovementFlags.use_flowfield() and kernel_handle != 0:
-		var scene: Node = get_tree().current_scene if get_tree() else null
-		if scene != null:
-			var server: Object = MovementNativeBootstrap.get_server(scene)
-			var kernel: Object = MovementNativeBootstrap.get_kernel(scene)
-			if server != null and kernel != null:
-				# Release the previously-owned ad-hoc field so we don't leak.
-				if _kernel_field_id != 0:
-					server.call("release_field", _kernel_field_id)
-					_kernel_field_id = 0
-				var fid: int = server.call("build_field", world_pos, _agent_class_for_self())
-				if fid != 0:
-					_kernel_field_id = fid
-					# group_id 0 = solo (cohesion only against peers with the
-					# same group_id, which a fresh ad-hoc move won't have).
-					kernel.call("set_agent_target", kernel_handle, 0, fid, 0)
+		const SAME_TARGET_THRESHOLD_SQ: float = 4.0  # (2m cell)^2
+		if _kernel_field_id != 0 and \
+		   _kernel_field_target.distance_squared_to(world_pos) < SAME_TARGET_THRESHOLD_SQ:
+			# Same target as last build — kernel still has it, no rebuild.
+			pass
+		else:
+			var scene: Node = get_tree().current_scene if get_tree() else null
+			if scene != null:
+				var server: Object = MovementNativeBootstrap.get_server(scene)
+				var kernel: Object = MovementNativeBootstrap.get_kernel(scene)
+				if server != null and kernel != null:
+					# Release the previously-owned ad-hoc field so we don't leak.
+					if _kernel_field_id != 0:
+						server.call("release_field", _kernel_field_id)
+						_kernel_field_id = 0
+					var fid: int = server.call("build_field", world_pos, _agent_class_for_self())
+					if fid != 0:
+						_kernel_field_id = fid
+						_kernel_field_target = world_pos
+						# group_id 0 = solo (cohesion only against peers with the
+						# same group_id, which a fresh ad-hoc move won't have).
+						kernel.call("set_agent_target", kernel_handle, 0, fid, 0)
 
 	var router: NavRouter = _get_nav_router()
 	if router == null:
