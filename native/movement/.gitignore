@@ -6,3 +6,9 @@ gen/
 *.pyc
 __pycache__/
 .sconsign.dblite
+
+# Test binary built by tests/SConstruct — not tracked.
+tests/run_tests.exe
+tests/run_tests
+tests/*.pdb
+tests/*.ilk
