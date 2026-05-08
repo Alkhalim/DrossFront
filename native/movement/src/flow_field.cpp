@@ -1,0 +1,105 @@
+#include "flow_field.h"
+#include <algorithm>
+#include <queue>
+#include <utility>
+
+namespace drossfront {
+
+FlowField::FlowField(const CostGrid &grid)
+    : grid_(grid),
+      flow_(grid.cell_count(), godot::Vector2()),
+      integration_(grid.cell_count(), INTEGRATION_INF),
+      goal_cell_(-1) {}
+
+bool FlowField::build_from(int goal_cell) {
+    if (goal_cell < 0 || goal_cell >= grid_.cell_count()) return false;
+    if (grid_.get(goal_cell) == CostGrid::COST_BLOCKED) return false;
+
+    goal_cell_ = goal_cell;
+    std::fill(integration_.begin(), integration_.end(), INTEGRATION_INF);
+    integration_[goal_cell] = 0;
+
+    // Dijkstra with min-heap. Cell cost is grid cost + 1 base step.
+    using Entry = std::pair<uint32_t, int>; // (cumulative_cost, cell_idx)
+    std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> pq;
+    pq.emplace(0, goal_cell);
+
+    const int W = grid_.width();
+    const int H = grid_.height();
+    constexpr int N_NEIGHBORS = 8;
+    static constexpr int neighbor_dx[N_NEIGHBORS] = {-1, 0, 1, -1, 1, -1, 0, 1};
+    static constexpr int neighbor_dz[N_NEIGHBORS] = {-1,-1,-1, 0, 0, 1, 1, 1};
+    static constexpr uint32_t neighbor_cost[N_NEIGHBORS] = {14, 10, 14, 10, 10, 14, 10, 14};
+
+    while (!pq.empty()) {
+        auto [cur_cost, cur_idx] = pq.top();
+        pq.pop();
+        if (cur_cost > integration_[cur_idx]) continue;
+        int cx = cur_idx % W;
+        int cz = cur_idx / W;
+        for (int n = 0; n < N_NEIGHBORS; ++n) {
+            int nx = cx + neighbor_dx[n];
+            int nz = cz + neighbor_dz[n];
+            if (nx < 0 || nx >= W || nz < 0 || nz >= H) continue;
+            int nidx = nz * W + nx;
+            uint8_t cell_cost = grid_.get(nidx);
+            if (cell_cost == CostGrid::COST_BLOCKED) continue;
+            // Step cost = neighbor base step + soft cost from grid (scaled down).
+            uint32_t step = neighbor_cost[n] + cell_cost;
+            uint32_t new_cost = cur_cost + step;
+            if (new_cost < integration_[nidx]) {
+                integration_[nidx] = static_cast<uint16_t>(std::min<uint32_t>(new_cost, INTEGRATION_INF - 1));
+                pq.emplace(new_cost, nidx);
+            }
+        }
+    }
+
+    compute_flow_directions();
+    return true;
+}
+
+void FlowField::compute_flow_directions() {
+    const int W = grid_.width();
+    const int H = grid_.height();
+    constexpr int N_NEIGHBORS = 8;
+    static constexpr int neighbor_dx[N_NEIGHBORS] = {-1, 0, 1, -1, 1, -1, 0, 1};
+    static constexpr int neighbor_dz[N_NEIGHBORS] = {-1,-1,-1, 0, 0, 1, 1, 1};
+
+    for (int cz = 0; cz < H; ++cz) {
+        for (int cx = 0; cx < W; ++cx) {
+            int idx = cz * W + cx;
+            if (integration_[idx] == INTEGRATION_INF) {
+                flow_[idx] = godot::Vector2(); // unreachable
+                continue;
+            }
+            // Pick the neighbor with the lowest integration cost.
+            uint16_t best = integration_[idx];
+            int best_dx = 0, best_dz = 0;
+            for (int n = 0; n < N_NEIGHBORS; ++n) {
+                int nx = cx + neighbor_dx[n];
+                int nz = cz + neighbor_dz[n];
+                if (nx < 0 || nx >= W || nz < 0 || nz >= H) continue;
+                int nidx = nz * W + nx;
+                if (integration_[nidx] < best) {
+                    best = integration_[nidx];
+                    best_dx = neighbor_dx[n];
+                    best_dz = neighbor_dz[n];
+                }
+            }
+            if (best_dx == 0 && best_dz == 0) {
+                flow_[idx] = godot::Vector2(); // local minimum (or goal)
+            } else {
+                godot::Vector2 dir(static_cast<float>(best_dx), static_cast<float>(best_dz));
+                flow_[idx] = dir.normalized();
+            }
+        }
+    }
+}
+
+godot::Vector2 FlowField::sample(float world_x, float world_z) const {
+    int idx = grid_.cell_of(world_x, world_z);
+    if (idx < 0) return godot::Vector2();
+    return flow_[idx];
+}
+
+} // namespace drossfront
