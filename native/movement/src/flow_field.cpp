@@ -31,11 +31,15 @@ bool FlowField::build_from(int goal_cell) {
     static constexpr int neighbor_dz[N_NEIGHBORS] = {-1,-1,-1, 0, 0, 1, 1, 1};
     static constexpr uint32_t neighbor_cost[N_NEIGHBORS] = {14, 10, 14, 10, 10, 14, 10, 14};
     // Maximum Y delta between adjacent cells before we reject the
-    // neighbor expansion as "non-traversable in 3D" (cliff). A 45° ramp
-    // at 2m cells produces ~2m Y delta per cell, so a threshold of 1.5m
-    // would block ramps; 3.0m blocks vertical cliffs but allows ramps.
-    // Pure-flat maps stay at Y=0 everywhere and never trip this check.
-    constexpr float MAX_Y_DELTA = 3.0f;
+    // neighbor expansion as "non-traversable in 3D" (cliff). At 2m
+    // cells, a 30° ramp produces ~1.15m Y/cell, a 45° ramp ~2m/cell.
+    // A 2m-tall plateau cliff has 2m Y/cell at the edge.
+    //
+    // 1.5m allows ramps up to ~37° (1.5m rise per 2m run) while
+    // blocking cliffs of 2m+ height. If the user's map has ramps
+    // steeper than that, raise this. If cliffs are exactly at the
+    // threshold height, lower it.
+    constexpr float MAX_Y_DELTA = 1.5f;
 
     while (!pq.empty()) {
         auto [cur_cost, cur_idx] = pq.top();

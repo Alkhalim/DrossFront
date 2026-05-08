@@ -44,6 +44,7 @@ static func get_server(scene_root: Node) -> Object:
 		_server.call("set_agent_radius", 0, 1.0)  # small
 		_server.call("set_agent_radius", 1, 1.4)  # medium
 		_server.call("set_agent_radius", 2, 2.4)  # large
+		print_debug("[MovementNativeBootstrap] server configured: %dx%d cells @ %.1fm, agent radii small=1.0 / medium=1.4 / large=2.4" % [GRID_W, GRID_H, CELL_SIZE])
 		# Sweep buildings already in the scene tree into the cost grid so the
 		# first flow field built after server creation routes around them.
 		# Newly-constructed buildings are picked up by the mark_obstacle call
@@ -132,8 +133,22 @@ static func _mark_terrain_off_navmesh(map_rid: RID) -> void:
 				_server.call("set_cell_y_at", Vector3(wx, closest.y, wz), closest.y)
 	var total_cells: int = GRID_W * GRID_H
 	var pct: float = 100.0 * float(marked_count) / float(total_cells)
-	print_debug("[MovementNativeBootstrap] terrain sweep: marked %d / %d cells off-navmesh (%.1f%%) — threshold=%.2fm" %
-		[marked_count, total_cells, pct, OFF_MESH_DIST_THRESHOLD])
+	# Diagnostic Y-range survey — quick sanity that the navmesh actually
+	# has elevation. If min/max are both ~0, terrain ingestion isn't
+	# providing meaningful Y deltas to the Dijkstra and cliff detection
+	# can't fire. If min/max span the map's actual height range, Y data
+	# is healthy.
+	var y_min: float = INF
+	var y_max: float = -INF
+	for cz: int in GRID_H:
+		var wz: float = ORIGIN_Z + (cz + 0.5) * CELL_SIZE
+		for cx: int in GRID_W:
+			var wx: float = ORIGIN_X + (cx + 0.5) * CELL_SIZE
+			var closest: Vector3 = NavigationServer3D.map_get_closest_point(map_rid, Vector3(wx, 0.0, wz))
+			y_min = minf(y_min, closest.y)
+			y_max = maxf(y_max, closest.y)
+	print_debug("[MovementNativeBootstrap] terrain sweep: marked %d / %d cells off-navmesh (%.1f%%) — threshold=%.2fm, Y range navmesh: %.2f .. %.2f" %
+		[marked_count, total_cells, pct, OFF_MESH_DIST_THRESHOLD, y_min, y_max])
 
 
 static func _mark_existing_buildings(scene_root: Node) -> void:
@@ -142,6 +157,7 @@ static func _mark_existing_buildings(scene_root: Node) -> void:
 	var tree: SceneTree = scene_root.get_tree()
 	if tree == null:
 		return
+	var building_count: int = 0
 	for b: Node in tree.get_nodes_in_group("buildings"):
 		if not is_instance_valid(b):
 			continue
@@ -160,6 +176,8 @@ static func _mark_existing_buildings(scene_root: Node) -> void:
 			b3d.global_position - Vector3(fp_size.x * 0.5, 0.0, fp_size.z * 0.5),
 			fp_size)
 		_server.call("mark_obstacle", aabb, true)
+		building_count += 1
+	print_debug("[MovementNativeBootstrap] marked %d pre-placed buildings" % building_count)
 
 static func get_kernel(scene_root: Node) -> Object:
 	if _kernel == null:
