@@ -27,6 +27,12 @@ FlowFieldServer::~FlowFieldServer() {}
 
 void FlowFieldServer::configure_map(int grid_w, int grid_h, float cell_size,
                                      float origin_x, float origin_z) {
+    // Drop any live fields BEFORE replacing the cost grids: each FlowField
+    // holds a `const CostGrid&` to its source grid; replacing the grid
+    // without clearing the fields would leave dangling references that
+    // would UB on the next sample(). configure_map is intended to be
+    // called once at scene start, but this guard makes a re-config safe.
+    fields_.clear();
     grid_w_ = grid_w;
     grid_h_ = grid_h;
     cell_size_ = cell_size;
