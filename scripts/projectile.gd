@@ -97,6 +97,190 @@ static func _get_cached_bullet_mat(color: Color) -> StandardMaterial3D:
 	return mat
 
 
+static func _get_cached_missile_mesh() -> CylinderMesh:
+	if _cached_meshes.has("missile"):
+		return _cached_meshes["missile"] as CylinderMesh
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.04
+	cyl.bottom_radius = 0.1
+	cyl.height = 0.4
+	_cached_meshes["missile"] = cyl
+	return cyl
+
+
+static func _get_cached_missile_mat(color: Color) -> StandardMaterial3D:
+	var key: String = _color_key("missile", color)
+	if _cached_materials.has(key):
+		return _cached_materials[key] as StandardMaterial3D
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	mat.emission_enabled = true
+	mat.emission = color
+	mat.emission_energy_multiplier = 2.5
+	_cached_materials[key] = mat
+	return mat
+
+
+static func _get_cached_shell_body_mesh() -> CylinderMesh:
+	if _cached_meshes.has("shell_body"):
+		return _cached_meshes["shell_body"] as CylinderMesh
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.06
+	cyl.bottom_radius = 0.16
+	cyl.height = 0.62
+	cyl.radial_segments = 12
+	_cached_meshes["shell_body"] = cyl
+	return cyl
+
+
+static func _get_cached_shell_body_mat(color: Color) -> StandardMaterial3D:
+	var key: String = _color_key("shell_body", color)
+	if _cached_materials.has(key):
+		return _cached_materials[key] as StandardMaterial3D
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	mat.emission_enabled = true
+	mat.emission = color
+	mat.emission_energy_multiplier = 2.4
+	_cached_materials[key] = mat
+	return mat
+
+
+static func _get_cached_shell_aft_mesh() -> CylinderMesh:
+	if _cached_meshes.has("shell_aft"):
+		return _cached_meshes["shell_aft"] as CylinderMesh
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.18
+	cyl.bottom_radius = 0.18
+	cyl.height = 0.10
+	cyl.radial_segments = 12
+	_cached_meshes["shell_aft"] = cyl
+	return cyl
+
+
+static func _get_cached_shell_aft_mat(color: Color) -> StandardMaterial3D:
+	# Hot tracer cap — color is the tracer color lerped 55% toward
+	# warm white. Cache key uses the input role color so the
+	# derived hot tone falls out deterministically.
+	var key: String = _color_key("shell_aft", color)
+	if _cached_materials.has(key):
+		return _cached_materials[key] as StandardMaterial3D
+	var hot: Color = color.lerp(Color(1.0, 1.0, 0.85, 1.0), 0.55)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = hot
+	mat.emission_enabled = true
+	mat.emission = hot
+	mat.emission_energy_multiplier = 6.0
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_cached_materials[key] = mat
+	return mat
+
+
+static func _get_cached_mortar_body_mesh() -> CylinderMesh:
+	if _cached_meshes.has("mortar_body"):
+		return _cached_meshes["mortar_body"] as CylinderMesh
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.07
+	cyl.bottom_radius = 0.18
+	cyl.height = 0.50
+	cyl.radial_segments = 12
+	_cached_meshes["mortar_body"] = cyl
+	return cyl
+
+
+static func _get_cached_mortar_body_mat(color: Color) -> StandardMaterial3D:
+	var key: String = _color_key("mortar_body", color)
+	if _cached_materials.has(key):
+		return _cached_materials[key] as StandardMaterial3D
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.18, 0.16, 0.14, 1.0)
+	mat.emission_enabled = true
+	mat.emission = color
+	mat.emission_energy_multiplier = 0.6
+	_cached_materials[key] = mat
+	return mat
+
+
+static func _get_cached_mortar_fin_mesh() -> BoxMesh:
+	if _cached_meshes.has("mortar_fin"):
+		return _cached_meshes["mortar_fin"] as BoxMesh
+	var fb := BoxMesh.new()
+	fb.size = Vector3(0.04, 0.20, 0.16)
+	_cached_meshes["mortar_fin"] = fb
+	return fb
+
+
+static func _get_cached_mortar_fin_mat() -> StandardMaterial3D:
+	# Fixed near-black plastic fin colour — single shared material
+	# across every mortar shell ever fired.
+	if _cached_materials.has("mortar_fin"):
+		return _cached_materials["mortar_fin"] as StandardMaterial3D
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.10, 0.10, 0.10, 1.0)
+	_cached_materials["mortar_fin"] = mat
+	return mat
+
+
+static func _get_cached_bomb_body_mesh() -> CylinderMesh:
+	if _cached_meshes.has("bomb_body"):
+		return _cached_meshes["bomb_body"] as CylinderMesh
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.05
+	cyl.bottom_radius = 0.18
+	cyl.height = 0.65
+	cyl.radial_segments = 12
+	_cached_meshes["bomb_body"] = cyl
+	return cyl
+
+
+static func _get_cached_bomb_body_mat() -> StandardMaterial3D:
+	# Bomb body is a fixed dark olive — single shared material across
+	# every bomb ever dropped this session, regardless of role tint.
+	# (The visible bomb tint comes from the stripe near the nose.)
+	if _cached_materials.has("bomb_body"):
+		return _cached_materials["bomb_body"] as StandardMaterial3D
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.18, 0.16, 0.14, 1.0)
+	mat.metallic = 0.4
+	mat.roughness = 0.65
+	_cached_materials["bomb_body"] = mat
+	return mat
+
+
+static func _get_cached_bomb_fin_mesh() -> BoxMesh:
+	if _cached_meshes.has("bomb_fin"):
+		return _cached_meshes["bomb_fin"] as BoxMesh
+	var fb := BoxMesh.new()
+	fb.size = Vector3(0.20, 0.02, 0.18)
+	_cached_meshes["bomb_fin"] = fb
+	return fb
+
+
+static func _get_cached_bomb_stripe_mesh() -> CylinderMesh:
+	if _cached_meshes.has("bomb_stripe"):
+		return _cached_meshes["bomb_stripe"] as CylinderMesh
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.19
+	cyl.bottom_radius = 0.19
+	cyl.height = 0.05
+	cyl.radial_segments = 12
+	_cached_meshes["bomb_stripe"] = cyl
+	return cyl
+
+
+static func _get_cached_bomb_stripe_mat() -> StandardMaterial3D:
+	# Warning-yellow stripe near the bomb nose — fixed colour.
+	if _cached_materials.has("bomb_stripe"):
+		return _cached_materials["bomb_stripe"] as StandardMaterial3D
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 0.78, 0.20, 1.0)
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.78, 0.20, 1.0)
+	mat.emission_energy_multiplier = 0.8
+	_cached_materials["bomb_stripe"] = mat
+	return mat
+
+
 func set_damage_payload(damage: int, target: Node3D, shooter: Node3D, splash_radius: float, splash_damage: int) -> void:
 	pending_damage = damage
 	pending_target = target
@@ -275,43 +459,23 @@ func _create_bullet_mesh(color: Color) -> void:
 func _create_shell_mesh(color: Color) -> void:
 	# Heavy AP shell -- bigger than a tracer slug + a tapered nose.
 	# Stays a kinetic round (no arc, no missile smoke trail).
+	# Mesh + material cached statically (one cylinder per shape, one
+	# material per role-color) so a salvo of 6 shells per tick doesn't
+	# allocate 12 fresh resources.
 	_mesh = MeshInstance3D.new()
 	_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	# Tapered cylinder gives the AP nose silhouette.
-	var shell_cyl := CylinderMesh.new()
-	shell_cyl.top_radius = 0.06
-	shell_cyl.bottom_radius = 0.16
-	shell_cyl.height = 0.62
-	shell_cyl.radial_segments = 12
-	_mesh.mesh = shell_cyl
+	_mesh.mesh = _get_cached_shell_body_mesh()
 	_mesh.rotation.x = -PI / 2
-	var shell_mat := StandardMaterial3D.new()
-	shell_mat.albedo_color = color
-	shell_mat.emission_enabled = true
-	shell_mat.emission = color
-	shell_mat.emission_energy_multiplier = 2.4
-	_mesh.set_surface_override_material(0, shell_mat)
+	_mesh.set_surface_override_material(0, _get_cached_shell_body_mat(color))
 	add_child(_mesh)
 	# Bright glowing aft cap reads as the burning tracer charge so a
 	# shot fired toward camera still has a strong tail-light read.
 	var aft := MeshInstance3D.new()
 	aft.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var aft_cyl := CylinderMesh.new()
-	aft_cyl.top_radius = 0.18
-	aft_cyl.bottom_radius = 0.18
-	aft_cyl.height = 0.10
-	aft_cyl.radial_segments = 12
-	aft.mesh = aft_cyl
+	aft.mesh = _get_cached_shell_aft_mesh()
 	aft.rotation.x = -PI / 2
 	aft.position.z = 0.26
-	var aft_mat := StandardMaterial3D.new()
-	var hot: Color = color.lerp(Color(1.0, 1.0, 0.85, 1.0), 0.55)
-	aft_mat.albedo_color = hot
-	aft_mat.emission_enabled = true
-	aft_mat.emission = hot
-	aft_mat.emission_energy_multiplier = 6.0
-	aft_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	aft.set_surface_override_material(0, aft_mat)
+	aft.set_surface_override_material(0, _get_cached_shell_aft_mat(color))
 	add_child(aft)
 
 
@@ -341,37 +505,28 @@ func _create_bomb_mesh(_color: Color) -> void:
 	## cluster on the back. Distinct from missiles (which are slimmer
 	## and emissive) so a player can tell at a glance which projectile
 	## came from a Carpet Bombard vs a missile barrage.
+	## All meshes + materials are cached statically — bomb body and
+	## stripe are fixed colour (don't depend on the shooter's role
+	## tint), so one shared material per resource across the entire
+	## session.
 	_mesh = MeshInstance3D.new()
 	_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var body_cyl := CylinderMesh.new()
-	body_cyl.top_radius = 0.05
-	body_cyl.bottom_radius = 0.18
-	body_cyl.height = 0.65
-	body_cyl.radial_segments = 12
-	_mesh.mesh = body_cyl
+	_mesh.mesh = _get_cached_bomb_body_mesh()
 	# Default cylinder is along +Y. Rotate so the bomb's nose leads
 	# the trajectory along local -Z.
 	_mesh.rotation.x = -PI / 2
-	var body_mat := StandardMaterial3D.new()
-	body_mat.albedo_color = Color(0.18, 0.16, 0.14, 1.0)
-	body_mat.metallic = 0.4
-	body_mat.roughness = 0.65
+	var body_mat: StandardMaterial3D = _get_cached_bomb_body_mat()
 	_mesh.set_surface_override_material(0, body_mat)
 	add_child(_mesh)
 	# Tail-fin cluster -- four slim plates radiating around the back
 	# end. Re-uses the body material so they read as part of the
 	# bomb chassis.
+	var fin_mesh: BoxMesh = _get_cached_bomb_fin_mesh()
 	for fin_i: int in 4:
 		var fin := MeshInstance3D.new()
 		fin.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		var fin_box := BoxMesh.new()
-		fin_box.size = Vector3(0.20, 0.02, 0.18)
-		fin.mesh = fin_box
+		fin.mesh = fin_mesh
 		fin.rotation.z = float(fin_i) * (TAU / 4.0)
-		# Sit the fin cluster at the bomb's back (local +Y on the
-		# unrotated mesh -> +Z on the rotated parent, but the fin is
-		# parented under the rotated _mesh so its local +Y is the
-		# back). Cleaner: parent to _mesh so it inherits the rotation.
 		fin.position = Vector3(0.0, 0.30, 0.0)
 		fin.set_surface_override_material(0, body_mat)
 		_mesh.add_child(fin)
@@ -379,19 +534,9 @@ func _create_bomb_mesh(_color: Color) -> void:
 	# isn't lost against dark terrain. Faint warning yellow.
 	var stripe := MeshInstance3D.new()
 	stripe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var stripe_cyl := CylinderMesh.new()
-	stripe_cyl.top_radius = 0.19
-	stripe_cyl.bottom_radius = 0.19
-	stripe_cyl.height = 0.05
-	stripe_cyl.radial_segments = 12
-	stripe.mesh = stripe_cyl
+	stripe.mesh = _get_cached_bomb_stripe_mesh()
 	stripe.position = Vector3(0.0, -0.20, 0.0)
-	var stripe_mat := StandardMaterial3D.new()
-	stripe_mat.albedo_color = Color(1.0, 0.78, 0.20, 1.0)
-	stripe_mat.emission_enabled = true
-	stripe_mat.emission = Color(1.0, 0.78, 0.20, 1.0)
-	stripe_mat.emission_energy_multiplier = 0.8
-	stripe.set_surface_override_material(0, stripe_mat)
+	stripe.set_surface_override_material(0, _get_cached_bomb_stripe_mat())
 	_mesh.add_child(stripe)
 
 
@@ -400,57 +545,40 @@ func _create_mortar_mesh(color: Color) -> void:
 	## missile, with cross-fins at the tail. Reads as 'shell falling
 	## from the sky' rather than 'guided missile'. No smoke trail
 	## (handled by _is_mortar branch in _process).
+	## Mesh + material cached statically — body emission is the only
+	## colour-dependent thing, the fin material is a single shared
+	## near-black plastic.
 	_mesh = MeshInstance3D.new()
 	_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	# Body -- tapered cylinder.
-	var body_cyl := CylinderMesh.new()
-	body_cyl.top_radius = 0.07
-	body_cyl.bottom_radius = 0.18
-	body_cyl.height = 0.50
-	body_cyl.radial_segments = 12
-	_mesh.mesh = body_cyl
+	_mesh.mesh = _get_cached_mortar_body_mesh()
 	_mesh.rotation.x = -PI / 2  # body points along -Z (forward)
-	var body_mat := StandardMaterial3D.new()
-	body_mat.albedo_color = Color(0.18, 0.16, 0.14, 1.0)
-	body_mat.emission_enabled = true
-	body_mat.emission = color
-	body_mat.emission_energy_multiplier = 0.6
-	_mesh.set_surface_override_material(0, body_mat)
+	_mesh.set_surface_override_material(0, _get_cached_mortar_body_mat(color))
 	add_child(_mesh)
 	# Tail fins -- 4 thin rectangles forming a + cross at the rear.
+	var fin_mesh: BoxMesh = _get_cached_mortar_fin_mesh()
+	var fin_mat: StandardMaterial3D = _get_cached_mortar_fin_mat()
 	for fin_i: int in 4:
 		var fin := MeshInstance3D.new()
-		var fin_box := BoxMesh.new()
-		fin_box.size = Vector3(0.04, 0.20, 0.16)
-		fin.mesh = fin_box
+		fin.mesh = fin_mesh
 		fin.rotation.x = -PI / 2
 		fin.rotation.z = float(fin_i) * PI * 0.5
 		fin.position.z = 0.22
-		var fin_mat := StandardMaterial3D.new()
-		fin_mat.albedo_color = Color(0.10, 0.10, 0.10, 1.0)
 		fin.set_surface_override_material(0, fin_mat)
 		add_child(fin)
 
 
 func _create_missile_mesh(color: Color) -> void:
+	# Mesh + material cached statically. Single CylinderMesh shared
+	# across every missile ever fired; one StandardMaterial3D per
+	# (faction-tinted) role colour shared across the session.
 	_mesh = MeshInstance3D.new()
 	_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var cyl := CylinderMesh.new()
-	cyl.top_radius = 0.04   # nose
-	cyl.bottom_radius = 0.1 # exhaust
-	cyl.height = 0.4
-	_mesh.mesh = cyl
+	_mesh.mesh = _get_cached_missile_mesh()
 	# Default cylinder height is along +Y. Rotate so it aligns with the
 	# projectile's -Z (forward) — the nose then leads the trajectory and
 	# look_at properly orients the body along the arc.
 	_mesh.rotation.x = -PI / 2
-
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = color
-	mat.emission_enabled = true
-	mat.emission = color
-	mat.emission_energy_multiplier = 2.5
-	_mesh.set_surface_override_material(0, mat)
+	_mesh.set_surface_override_material(0, _get_cached_missile_mat(color))
 	add_child(_mesh)
 
 	# Exhaust trail = a stream of small smoke puffs spawned behind the
@@ -730,8 +858,19 @@ func _spawn_impact() -> void:
 		# hostile" so the round still chips bystanders rather than
 		# silently no-opping.
 		var owner_unknown: bool = shooter_owner < 0
-		for ent: Node in get_tree().get_nodes_in_group("units"):
-			if not is_instance_valid(ent) or ent == pending_target:
+		# SpatialIndex narrow-phase. The previous code walked the whole
+		# units + buildings groups (~400 entities at peak) for every
+		# splash impact -- ~1000 calls / session in profile 520.
+		# Spatial buckets cover units AND buildings.
+		var idx: SpatialIndex = SpatialIndex.get_instance(get_tree().current_scene)
+		var candidates: Array = idx.nearby(global_position, pending_splash_radius) if idx else []
+		# Untyped iteration -- spatial-index buckets can carry stale Object
+		# references for entities freed since the last rebuild tick.
+		for raw in candidates:
+			if raw == null or not is_instance_valid(raw):
+				continue
+			var ent: Node = raw as Node
+			if not ent or ent == pending_target:
 				continue
 			if not ent.has_method("take_damage"):
 				continue
@@ -743,23 +882,12 @@ func _spawn_impact() -> void:
 				hostile = ent_owner != shooter_owner
 			if not hostile:
 				continue
+			# alive_count check skipped for buildings (no field) — non-unit
+			# entries with take_damage still receive splash damage.
+			if "alive_count" in ent and (ent.get("alive_count") as int) <= 0:
+				continue
 			if global_position.distance_to((ent as Node3D).global_position) <= pending_splash_radius:
 				ent.take_damage(pending_splash_damage, splash_attacker)
-		for ent2: Node in get_tree().get_nodes_in_group("buildings"):
-			if not is_instance_valid(ent2) or ent2 == pending_target:
-				continue
-			if not ent2.has_method("take_damage"):
-				continue
-			var ent2_owner: int = (ent2.get("owner_id") as int) if "owner_id" in ent2 else 0
-			var hostile2: bool = true
-			if not owner_unknown and registry and registry.has_method("are_enemies"):
-				hostile2 = registry.call("are_enemies", shooter_owner, ent2_owner)
-			elif not owner_unknown:
-				hostile2 = ent2_owner != shooter_owner
-			if not hostile2:
-				continue
-			if global_position.distance_to((ent2 as Node3D).global_position) <= pending_splash_radius:
-				ent2.take_damage(pending_splash_damage, splash_attacker)
 	# Impact flash routed through the GPU-particle emitter — same
 	# bright-orange burst, no per-impact MeshInstance3D allocation.
 	var _pem_scene: Node = get_tree().current_scene

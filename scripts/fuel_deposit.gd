@@ -96,11 +96,28 @@ func _update_capture(delta: float) -> void:
 	# radius it counts toward "contested" so progress halts — but
 	# they cannot claim the deposit themselves; neutral never goes
 	# below into the capture-progress branch.
+	#
+	# Cumulative profile flagged this function at 5 ms / call × 10 Hz ×
+	# N deposits — the dominant cost in the entire frame at peak. The
+	# old path walked the FULL units group (200+ entities) per call.
+	# Switch to SpatialIndex.nearby so we only inspect units in cells
+	# covering capture_radius (~12u — typically 6-10 candidates).
+	# Untyped iteration: spatial-index buckets can carry stale Object
+	# references for entities freed since the last rebuild tick; a
+	# typed for-loop variable assignment errors before the
+	# is_instance_valid check below ever runs.
 	var owner_counts: Dictionary = {}
 	var has_neutral: bool = false
-	var units: Array[Node] = get_tree().get_nodes_in_group("units")
-	for node: Node in units:
-		if not is_instance_valid(node):
+	var idx: SpatialIndex = SpatialIndex.get_instance(get_tree().current_scene)
+	var candidates: Array = idx.nearby(global_position, capture_radius) if idx else []
+	for raw in candidates:
+		if raw == null or not is_instance_valid(raw):
+			continue
+		var node: Node = raw as Node
+		if not node:
+			continue
+		# Buildings live in the same SpatialIndex bucket — skip them.
+		if not node.is_in_group("units"):
 			continue
 		if not ("alive_count" in node) or node.get("alive_count") <= 0:
 			continue

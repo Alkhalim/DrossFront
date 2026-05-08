@@ -964,7 +964,9 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 
 	# Fire one projectile per alive squad member, originating at the actual
 	# barrel tip (falls back to chest-height if the unit has no cannons).
-	var proj_script: GDScript = load("res://scripts/projectile.gd") as GDScript
+	# Projectile is class_name'd so the static .create() is callable
+	# directly — the previous `load()` per fire was a dictionary lookup
+	# that the cumulative profile flagged at ~435 calls / session.
 	var muzzle_positions: Array[Vector3] = []
 	if _unit.has_method("get_muzzle_positions"):
 		muzzle_positions = _unit.get_muzzle_positions()
@@ -1124,7 +1126,7 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 				_spawn_drone(per_member_dmg, weapon.role_tag, weapon.drone_variant, weapon.max_active_drones)
 			continue
 
-		if firing_visible and proj_script:
+		if firing_visible:
 			var fire_pos: Vector3 = _unit.global_position
 			# Modulo so salvo shots (i past the muzzle count) cycle
 			# back through the available muzzles instead of all
@@ -1153,7 +1155,7 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 					pellet_target.y = aim_pos.y
 					# Force "fast" tier so Projectile renders these as bullet
 					# slugs regardless of the parent weapon's classification.
-					var pellet: Projectile = proj_script.create(fire_pos, pellet_target, weapon.role_tag, &"fast", &"", _shooter_faction_id())
+					var pellet: Projectile = Projectile.create(fire_pos, pellet_target, weapon.role_tag, &"fast", &"", _shooter_faction_id())
 					if is_glowing_volley:
 						# Bright warning-yellow tint + 3x emission so the
 						# Heavy Volley salvo unmistakably reads as the
@@ -1175,7 +1177,7 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 				var weapon_stagger: float = weapon.salvo_stagger_sec if "salvo_stagger_sec" in weapon else 0.0
 				var stagger_sec: float = weapon_stagger * float(i) if weapon_stagger > 0.0 else 0.0
 				if stagger_sec <= 0.0:
-					var proj: Node3D = proj_script.create(fire_pos, aim_pos, weapon.role_tag, weapon.rof_tier, weapon.projectile_style, _shooter_faction_id(), weapon.damage_tier)
+					var proj: Node3D = Projectile.create(fire_pos, aim_pos, weapon.role_tag, weapon.rof_tier, weapon.projectile_style, _shooter_faction_id(), weapon.damage_tier)
 					if is_glowing_volley and not _glowing_pellet_mode and proj.has_method("set_glow_boost"):
 						proj.call("set_glow_boost", 3.0, Color(1.0, 0.85, 0.20, 1.0))
 					# Damage-on-impact: attach payload to the
@@ -1270,9 +1272,6 @@ func _spawn_drone(damage: int, role_tag: StringName, variant: StringName = &"def
 	## Drones live as scene-tree children at scene root so they
 	## don't get queue_freed when the carrier moves -- they look up
 	## the carrier each frame instead.
-	var drone_script: GDScript = load("res://scripts/drone.gd") as GDScript
-	if not drone_script:
-		return
 	if not _current_target or not is_instance_valid(_current_target):
 		return
 	# Prune the active-drone list (drones queue_free on dock + on
@@ -1286,7 +1285,7 @@ func _spawn_drone(damage: int, role_tag: StringName, variant: StringName = &"def
 		_active_drones = live
 		if _active_drones.size() >= max_active:
 			return
-	var drone: Node3D = drone_script.new()
+	var drone: Node3D = Drone.new()
 	drone.set("carrier", _unit)
 	drone.set("target", _current_target)
 	drone.set("damage", damage)
@@ -1312,12 +1311,22 @@ func _apply_instant_splash(per_shot_dmg: int, primary_target: Node3D, splash_r: 
 	## Mirrors the projectile-impact splash code, just dispatched
 	## here at fire-time. Mortar / missile splash applies on
 	## projectile arrival via Projectile._spawn_impact instead.
+	## Uses SpatialIndex narrow-phase rather than walking the full
+	## units + buildings groups — at peak combat the previous group-walk
+	## was iterating ~400 entities per beam pellet impact.
 	var splash_dmg: int = maxi(int(round(float(per_shot_dmg) * splash_mult)), 1)
 	var t_pos: Vector3 = primary_target.global_position
 	var shooter_owner: int = (_unit.get("owner_id") as int) if _unit and "owner_id" in _unit else 0
 	var registry: Node = get_tree().current_scene.get_node_or_null("PlayerRegistry") if get_tree() else null
-	for ent: Node in get_tree().get_nodes_in_group("units"):
-		if not is_instance_valid(ent) or ent == primary_target:
+	var idx: SpatialIndex = SpatialIndex.get_instance(get_tree().current_scene)
+	var candidates: Array = idx.nearby(t_pos, splash_r) if idx else []
+	# Untyped iteration -- spatial-index buckets can carry stale Object
+	# references for entities freed since the last rebuild tick.
+	for raw in candidates:
+		if raw == null or not is_instance_valid(raw):
+			continue
+		var ent: Node = raw as Node
+		if not ent or ent == primary_target:
 			continue
 		if not ent.has_method("take_damage"):
 			continue
@@ -1329,19 +1338,6 @@ func _apply_instant_splash(per_shot_dmg: int, primary_target: Node3D, splash_r: 
 			continue
 		if t_pos.distance_to((ent as Node3D).global_position) <= splash_r:
 			ent.take_damage(splash_dmg, _unit)
-	for ent2: Node in get_tree().get_nodes_in_group("buildings"):
-		if not is_instance_valid(ent2) or ent2 == primary_target:
-			continue
-		if not ent2.has_method("take_damage"):
-			continue
-		var ent2_owner: int = (ent2.get("owner_id") as int) if "owner_id" in ent2 else 0
-		var hostile2: bool = true
-		if registry and registry.has_method("are_enemies"):
-			hostile2 = registry.call("are_enemies", shooter_owner, ent2_owner)
-		if not hostile2:
-			continue
-		if t_pos.distance_to((ent2 as Node3D).global_position) <= splash_r:
-			ent2.take_damage(splash_dmg, _unit)
 
 
 func _spawn_staggered_projectile(delay_sec: float, weapon: WeaponResource, fire_pos: Vector3, aim_pos: Vector3, is_glowing_volley: bool, payload_damage: int = 0, payload_splash_r: float = 0.0, payload_splash_mult: float = 0.0) -> void:
@@ -1375,10 +1371,7 @@ func _spawn_staggered_projectile(delay_sec: float, weapon: WeaponResource, fire_
 	timer.timeout.connect(func() -> void:
 		if not is_inside_tree():
 			return
-		var proj_script: GDScript = load("res://scripts/projectile.gd") as GDScript
-		if not proj_script:
-			return
-		var proj: Node3D = proj_script.create(fire_pos, aim_pos, role, rof_tier, style, faction, dmg_tier)
+		var proj: Node3D = Projectile.create(fire_pos, aim_pos, role, rof_tier, style, faction, dmg_tier)
 		if is_glowing_volley and proj.has_method("set_glow_boost"):
 			proj.call("set_glow_boost", 3.0, Color(1.0, 0.85, 0.20, 1.0))
 		# Damage-on-impact payload for staggered shots. payload_damage
