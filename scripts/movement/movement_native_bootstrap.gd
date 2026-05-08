@@ -6,6 +6,19 @@ extends Node
 
 static var _server: Object = null
 static var _kernel: Object = null
+static var _terrain_sweep_pending: bool = false
+
+# Match the configure_map call below — keep these in sync if either changes.
+const GRID_W: int = 160
+const GRID_H: int = 160
+const CELL_SIZE: float = 2.0
+const ORIGIN_X: float = -160.0
+const ORIGIN_Z: float = -160.0
+# A cell whose center is more than this far from the nearest navmesh point
+# is treated as off-mesh (cliff, void, untraversable terrain). Tuned to be
+# slightly larger than CELL_SIZE * 0.5 so cells that just barely overlap a
+# navmesh polygon edge stay traversable.
+const OFF_MESH_DIST_THRESHOLD: float = 1.5
 
 static func get_server(scene_root: Node) -> Object:
 	if _server == null:
@@ -15,7 +28,7 @@ static func get_server(scene_root: Node) -> Object:
 			return null
 		# Default 320x320m map @ 2m cells, centered at world origin. Per-map
 		# override: call configure_map again from arena setup.
-		_server.call("configure_map", 160, 160, 2.0, -160.0, -160.0)
+		_server.call("configure_map", GRID_W, GRID_H, CELL_SIZE, ORIGIN_X, ORIGIN_Z)
 		_server.call("set_agent_radius", 0, 0.6)  # small
 		_server.call("set_agent_radius", 1, 1.0)  # medium
 		_server.call("set_agent_radius", 2, 2.0)  # large
@@ -26,7 +39,80 @@ static func get_server(scene_root: Node) -> Object:
 		# arena's pre-placed structures (HQ, starting yards, etc.) which never
 		# transition through _on_constructed.
 		_mark_existing_buildings(scene_root)
+		# Schedule the terrain sweep — needs the navmesh to be synced first,
+		# which doesn't happen until at least one process frame after scene
+		# load, so we defer.
+		_schedule_terrain_sweep(scene_root)
 	return _server
+
+
+## Schedule the terrain (off-navmesh) sweep. Defers one process frame so
+## the NavigationServer3D map has time to sync after scene load — querying
+## an unsynced map returns garbage and would blanket-mark every cell as
+## blocked. Retries each frame until the map reports a non-zero iteration
+## id (synced at least once) or scene_root is freed.
+static func _schedule_terrain_sweep(scene_root: Node) -> void:
+	if _terrain_sweep_pending:
+		return
+	_terrain_sweep_pending = true
+	var tree: SceneTree = scene_root.get_tree() if scene_root else null
+	if tree == null:
+		_terrain_sweep_pending = false
+		return
+	tree.process_frame.connect(_try_terrain_sweep.bind(scene_root), CONNECT_ONE_SHOT)
+
+
+static func _try_terrain_sweep(scene_root: Node) -> void:
+	if _server == null:
+		_terrain_sweep_pending = false
+		return
+	if scene_root == null or not is_instance_valid(scene_root):
+		_terrain_sweep_pending = false
+		return
+	var world: World3D = scene_root.get_world_3d()
+	if world == null:
+		_terrain_sweep_pending = false
+		return
+	var map_rid: RID = world.get_navigation_map()
+	if not map_rid.is_valid():
+		_terrain_sweep_pending = false
+		return
+	var iter_id: int = NavigationServer3D.map_get_iteration_id(map_rid)
+	if iter_id <= 0:
+		# Map not synced yet — try again next frame.
+		var tree: SceneTree = scene_root.get_tree()
+		if tree:
+			tree.process_frame.connect(_try_terrain_sweep.bind(scene_root), CONNECT_ONE_SHOT)
+		return
+	_mark_terrain_off_navmesh(map_rid)
+	_terrain_sweep_pending = false
+
+
+## Walks the cost grid; marks cells whose XZ center is too far from the
+## nearest navmesh point as blocked. Catches cliffs, voids, untraversable
+## terrain, and obstacles like rocks that aren't in the "buildings" group.
+## Cost: GRID_W * GRID_H navmesh queries (~25k at default size). Runs once
+## per scene load; ~50–200 ms hitch acceptable at scene start.
+static func _mark_terrain_off_navmesh(map_rid: RID) -> void:
+	var threshold_sq: float = OFF_MESH_DIST_THRESHOLD * OFF_MESH_DIST_THRESHOLD
+	var marked_count: int = 0
+	for cz: int in GRID_H:
+		var wz: float = ORIGIN_Z + (cz + 0.5) * CELL_SIZE
+		for cx: int in GRID_W:
+			var wx: float = ORIGIN_X + (cx + 0.5) * CELL_SIZE
+			var query_pos: Vector3 = Vector3(wx, 0.0, wz)
+			var closest: Vector3 = NavigationServer3D.map_get_closest_point(map_rid, query_pos)
+			var dx: float = closest.x - wx
+			var dz: float = closest.z - wz
+			if dx * dx + dz * dz > threshold_sq:
+				# Off-mesh cell — mark blocked. Use a sub-cell AABB so floor/
+				# ceil-1 lands exactly on this cell.
+				var aabb: AABB = AABB(
+					Vector3(wx - CELL_SIZE * 0.4, 0.0, wz - CELL_SIZE * 0.4),
+					Vector3(CELL_SIZE * 0.8, 1.0, CELL_SIZE * 0.8))
+				_server.call("mark_obstacle", aabb, true)
+				marked_count += 1
+	print_debug("[MovementNativeBootstrap] terrain sweep: marked %d off-navmesh cells" % marked_count)
 
 
 static func _mark_existing_buildings(scene_root: Node) -> void:

@@ -99,7 +99,53 @@ void FlowField::compute_flow_directions() {
 godot::Vector2 FlowField::sample(float world_x, float world_z) const {
     int idx = grid_.cell_of(world_x, world_z);
     if (idx < 0) return godot::Vector2();
-    return flow_[idx];
+    godot::Vector2 v = flow_[idx];
+    // Clear flow direction → return as-is.
+    if (v.length_squared() > 0.0001f) {
+        return v;
+    }
+    // Flow is zero. Three cases:
+    //   (a) the cell IS the goal cell (integration == 0)
+    //   (b) the cell is a local minimum (rare with our cost discretization)
+    //   (c) the cell is BLOCKED (Dijkstra never visited; integration == INF)
+    //
+    // For (a) the kernel's arrival logic stops the agent — returning (0,0)
+    // is correct.
+    //
+    // For (c), an agent that wandered into a blocked cell (e.g. dilated
+    // building boundary, partial cell overlap, or physics push-back) would
+    // otherwise be treated as "arrived" and halt at the obstacle. Find the
+    // lowest-integration neighbor and return its direction so the agent
+    // gets pulled back to navigable terrain.
+    if (integration_[idx] >= INTEGRATION_INF) {
+        const int W = grid_.width();
+        const int H = grid_.height();
+        const int cx = idx % W;
+        const int cz = idx / W;
+        uint16_t best = INTEGRATION_INF;
+        int best_dx = 0;
+        int best_dz = 0;
+        for (int dz_off = -1; dz_off <= 1; ++dz_off) {
+            for (int dx_off = -1; dx_off <= 1; ++dx_off) {
+                if (dx_off == 0 && dz_off == 0) continue;
+                int nx = cx + dx_off;
+                int nz = cz + dz_off;
+                if (nx < 0 || nx >= W || nz < 0 || nz >= H) continue;
+                int nidx = nz * W + nx;
+                if (integration_[nidx] < best) {
+                    best = integration_[nidx];
+                    best_dx = dx_off;
+                    best_dz = dz_off;
+                }
+            }
+        }
+        if (best < INTEGRATION_INF) {
+            godot::Vector2 dir(static_cast<float>(best_dx), static_cast<float>(best_dz));
+            return dir.normalized();
+        }
+    }
+    // Goal cell or true local minimum — kernel handles arrival.
+    return v;
 }
 
 } // namespace drossfront
