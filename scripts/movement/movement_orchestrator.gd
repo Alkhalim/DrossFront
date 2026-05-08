@@ -130,13 +130,11 @@ func _physics_process(delta: float) -> void:
 		var mc: MovementComponent = mc_v as MovementComponent
 		if mc != null:
 			if mc.kernel_handle != 0 and flowfield_on and kernel != null:
-				# Flag-on path: kernel computed velocity; just apply + slide.
+				# Flag-on path: kernel computed velocity; subclass applies it
+				# (GroundMovement adds gravity + body yaw rotation; default
+				# base just sets velocity + move_and_slide).
 				var v: Vector3 = kernel.call("get_velocity", mc.kernel_handle) as Vector3
-				if mc._body_physics != null:
-					mc._body_physics.velocity = v
-					mc._body_physics.move_and_slide()
-				else:
-					mc._body.global_position += v * delta
+				mc._apply_kernel_velocity(v, delta)
 			else:
 				# Flag-off path: existing GDScript steering.
 				if mc.needs_tick():

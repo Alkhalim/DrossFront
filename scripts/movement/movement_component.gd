@@ -513,3 +513,16 @@ func _agent_class_for_self() -> int:
 
 func _radius_for_self() -> float:
 	return 0.6  # default small radius
+
+
+## PF-A — called by MovementOrchestrator under flag-on with the velocity
+## the C++ kernel computed for this agent. Default applies it to
+## CharacterBody3D + move_and_slide; subclasses override to add
+## entity-specific post-processing (GroundMovement adds gravity + body
+## yaw rotation; AircraftMovement will add altitude + banking in PF-B).
+func _apply_kernel_velocity(v: Vector3, delta: float) -> void:
+	if _body_physics != null:
+		_body_physics.velocity = v
+		_body_physics.move_and_slide()
+	elif _body != null:
+		_body.global_position += v * delta

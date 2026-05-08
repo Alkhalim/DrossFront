@@ -125,6 +125,42 @@ func tick_movement(delta: float, frame_phase: int) -> void:
 			_body_physics.velocity.y -= GRAVITY * delta
 			_body_physics.move_and_slide()
 
+## PF-A — kernel-driven velocity application for ground units. Mirrors what
+## the legacy tick_movement did after super: yaw the body to face the motion
+## direction, then apply gravity + move_and_slide. Without this, flag-on
+## hounds would face their spawn direction forever and (if airborne) wouldn't
+## fall.
+func _apply_kernel_velocity(v: Vector3, delta: float) -> void:
+	if _body_physics == null:
+		# Fall back to base behavior for non-CharacterBody3D ground units
+		# (none in PF-A, but keep the contract honest).
+		super._apply_kernel_velocity(v, delta)
+		return
+
+	# Apply kernel XZ velocity; preserve / add Y for gravity.
+	_body_physics.velocity.x = v.x
+	_body_physics.velocity.z = v.z
+	if _body_physics.is_on_floor() and _body_physics.velocity.y < 0.0:
+		_body_physics.velocity.y = 0.0
+	else:
+		_body_physics.velocity.y -= GRAVITY * delta
+	_body_physics.move_and_slide()
+
+	# Body facing — rotate to face motion direction at most max_turn_rate_rad_s
+	# per second. Same formula as the legacy tick_movement path uses.
+	if _body != null:
+		var dir_xz: Vector3 = Vector3(v.x, 0.0, v.z)
+		# Threshold (4.0 = 2 u/s squared) suppresses rotation jitter at low speed.
+		if dir_xz.length_squared() > 4.0:
+			# Godot Node3D forward is -Z; map dir_xz to target yaw.
+			var desired_yaw: float = atan2(-dir_xz.x, -dir_xz.z)
+			var current_yaw: float = _body.rotation.y
+			var yaw_diff: float = wrapf(desired_yaw - current_yaw, -PI, PI)
+			var max_step: float = max_turn_rate_rad_s * delta
+			var yaw_step: float = clampf(yaw_diff, -max_step, max_step)
+			_body.rotation.y = current_yaw + yaw_step
+
+
 func _separate_neighbors(prefetched: Array = []) -> Array:
 	# Use prefetched raw list when the centralized tick_movement
 	# already queried SpatialIndex on this heavy tick (saves the
