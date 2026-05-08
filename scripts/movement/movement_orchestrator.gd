@@ -92,11 +92,14 @@ func unregister(mc: Object) -> void:
 
 func _physics_process(delta: float) -> void:
 	_frame_counter += 1
-	# Phase bit lets components self-select whether THIS frame is
-	# their "heavy" tick. Each component derives a stable phase
-	# from its instance_id so the load spreads evenly across the
-	# alternating frames.
-	var frame_phase: int = _frame_counter & 1
+	# Phase index lets components self-select whether THIS frame
+	# is their "heavy" tick. Each component derives a stable
+	# phase index in [0..STAGGER_PERIOD-1] from its instance_id
+	# so the load spreads evenly across that many frames. Match
+	# MovementComponent.STAGGER_PERIOD; using 3 here splits the
+	# population into thirds and runs heavy work every 3rd tick
+	# per unit.
+	var frame_phase: int = _frame_counter % 3
 	# Walk in reverse so a unregister mid-iteration (e.g., a
 	# component freed during another component's tick) doesn't
 	# corrupt the index. is_instance_valid filters freed handles.

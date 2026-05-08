@@ -39,16 +39,24 @@ var _velocity: Vector3 = Vector3.ZERO
 var _body: Node3D = null                       # primary reference: position reads
 var _body_physics: CharacterBody3D = null      # set if parent is CharacterBody3D
 ## Cached separate+avoid force from the last heavy tick. Rebuilt
-## every other tick (alternating per-component phase) and re-used
-## on the off-tick so neighbor queries (SpatialIndex.nearby × 2)
-## happen at half the rate. SEEK runs every tick on top of this
-## so the unit still reacts to a moving target without the cost
-## of full recomputation.
+## every Nth tick (per-component phase chosen from instance_id);
+## reused on the other ticks so the SpatialIndex.nearby × 2 cost
+## per heavy tick is amortized across N ticks. SEEK runs every
+## tick on top of this so the unit still reacts to a moving
+## target without the cost of full recomputation.
+##
+## STAGGER_PERIOD = 3 means heavy steering happens every 3rd
+## physics tick per unit. At 20 Hz physics that's ~6.7 Hz
+## neighbor queries; cached force is at most ~150 ms stale, ≈0.5
+## u of position drift on a 4 u/s unit. Visible only if units
+## are packed very tight; for typical squad spacing the cached
+## force is fine.
+const STAGGER_PERIOD: int = 3
 var _cached_neighbor_force: Vector3 = Vector3.ZERO
 var _phase_bit: int = 0
 ## When true, neighbor queries (separate / avoid) run only on the
-## tick whose phase matches _phase_bit; cached force re-used on
-## the off-tick. Subclasses with fast-moving / sparse populations
+## tick whose phase matches _phase_bit modulo STAGGER_PERIOD.
+## Subclasses with fast-moving / sparse populations
 ## (AircraftMovement) override to false because stale neighbor
 ## force visibly oscillates them. Ground / crawler / worker
 ## movement keeps stagger on; the cost saving is worth the
@@ -65,10 +73,10 @@ func _ready() -> void:
 	if p is CharacterBody3D:
 		_body_physics = p as CharacterBody3D
 	_stuck_last_pos = _body.global_position
-	# Stable per-instance phase so half the components hit
-	# their heavy tick on phase 0 and half on phase 1. Avoids
-	# all-units-stampede on the same frame.
-	_phase_bit = int(get_instance_id() & 1)
+	# Stable per-instance phase so each unit's heavy tick lands
+	# on a different frame. Modulo STAGGER_PERIOD spreads the
+	# load evenly across that many frames.
+	_phase_bit = int(get_instance_id()) % STAGGER_PERIOD
 	# Register with the central MovementOrchestrator so we get
 	# driven from one physics callback per tick instead of one
 	# per component. The orchestrator disables our _physics_process
