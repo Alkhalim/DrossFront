@@ -10,8 +10,9 @@ var squad_group_ref: SquadGroup = null            # set when joined to a group
 var path_waypoints: PackedVector3Array = PackedVector3Array()
 var path_waypoint_idx: int = 0
 
-# Cached singleton refs to avoid per-frame linear scans of scene root children
-var _cached_spatial_idx: SpatialIndex = null
+# _cached_spatial_idx + _get_spatial_idx() moved to MovementComponent
+# base class so the centralized tick_movement can do one combined
+# nearby query per heavy tick.
 var _cached_nav_router: NavRouter = null
 
 # Auto-rejoin state (PA-15)
@@ -124,12 +125,17 @@ func tick_movement(delta: float, frame_phase: int) -> void:
 			_body_physics.velocity.y -= GRAVITY * delta
 			_body_physics.move_and_slide()
 
-func _separate_neighbors() -> Array:
-	var idx: SpatialIndex = _get_spatial_idx()
-	if idx == null:
-		return []
-	var pos: Vector3 = _body.global_position
-	var raw: Array = idx.nearby(pos, separate_min_distance + 1.0)
+func _separate_neighbors(prefetched: Array = []) -> Array:
+	# Use prefetched raw list when the centralized tick_movement
+	# already queried SpatialIndex on this heavy tick (saves the
+	# second nearby() call). Falls back to its own query for
+	# legacy callers (e.g. _compute_pushout_dir from stuck recovery).
+	var raw: Array = prefetched
+	if raw.is_empty():
+		var idx: SpatialIndex = _get_spatial_idx()
+		if idx == null:
+			return []
+		raw = idx.nearby(_body.global_position, separate_min_distance + 1.0)
 	var filtered: Array = []
 	for n: Variant in raw:
 		if not is_instance_valid(n) or not (n is Node3D):
@@ -151,12 +157,14 @@ func _separate_neighbors() -> Array:
 		filtered.append(n)
 	return filtered
 
-func _avoid_obstacles() -> Array:
-	var idx: SpatialIndex = _get_spatial_idx()
-	if idx == null:
-		return []
-	var pos: Vector3 = _body.global_position
-	var raw: Array = idx.nearby(pos, avoid_min_distance + 2.0)
+func _avoid_obstacles(prefetched: Array = []) -> Array:
+	# Same prefetched-raw-list contract as _separate_neighbors.
+	var raw: Array = prefetched
+	if raw.is_empty():
+		var idx: SpatialIndex = _get_spatial_idx()
+		if idx == null:
+			return []
+		raw = idx.nearby(_body.global_position, avoid_min_distance + 2.0)
 	var filtered: Array = []
 	for n: Variant in raw:
 		if not is_instance_valid(n) or not (n is Node3D):
@@ -219,11 +227,6 @@ func _is_combat_engaged() -> bool:
 	if owner_unit.has_method("_in_active_combat"):
 		return owner_unit._in_active_combat() as bool
 	return false
-
-func _get_spatial_idx() -> SpatialIndex:
-	if _cached_spatial_idx == null or not is_instance_valid(_cached_spatial_idx):
-		_cached_spatial_idx = SpatialIndex.get_instance(get_tree().current_scene)
-	return _cached_spatial_idx
 
 func _get_nav_router() -> NavRouter:
 	if _cached_nav_router == null or not is_instance_valid(_cached_nav_router):

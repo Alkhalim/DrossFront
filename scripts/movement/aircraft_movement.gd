@@ -102,14 +102,17 @@ func _update_bank(delta: float) -> void:
 	t.basis = Basis(Vector3.UP, new_y).rotated(Vector3.FORWARD, _bank_angle_current)
 	_body.transform = t
 
-func _separate_neighbors() -> Array:
+func _separate_neighbors(prefetched: Array = []) -> Array:
 	## Aircraft separate from other aircraft and drones in the air —
-	## not from ground units (they're far below).
-	var idx: SpatialIndex = SpatialIndex.get_instance(get_tree().current_scene)
-	if idx == null:
-		return []
-	var pos: Vector3 = _body.global_position
-	var raw: Array = idx.nearby(pos, separate_min_distance + 1.0)
+	## not from ground units (they're far below). When the base
+	## tick_movement passes a prefetched raw list, skip the
+	## SpatialIndex query and just filter.
+	var raw: Array = prefetched
+	if raw.is_empty():
+		var idx: SpatialIndex = _get_spatial_idx()
+		if idx == null:
+			return []
+		raw = idx.nearby(_body.global_position, separate_min_distance + 1.0)
 	var filtered: Array = []
 	for n: Variant in raw:
 		if not is_instance_valid(n) or not (n is Node3D):
@@ -121,7 +124,7 @@ func _separate_neighbors() -> Array:
 			filtered.append(n)
 	return filtered
 
-func _avoid_obstacles() -> Array:
+func _avoid_obstacles(_prefetched: Array = []) -> Array:
 	## Aircraft don't AVOID buildings by default — they fly over them.
 	## Plan C may add AA-building avoidance for tactical reasons.
 	return []

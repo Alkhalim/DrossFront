@@ -6206,7 +6206,12 @@ func _per_frame_bookkeeping(delta: float) -> void:
 	# arrival_radius of its slot for one frame — without the sustain window
 	# that single frame would clear has_move_order, the squad would never
 	# re-set it, and auto-acquire would pull the unit out of formation.
-	const SETTLE_FRAMES: int = 30  # ~0.5s at 60fps
+	# Settle window scaled to the active physics rate. 30 frames
+	# was tuned at 60 Hz (~0.5 s); after the rate dropped to 20 Hz
+	# the hardcoded 30 became 1.5 s, which kept settled units
+	# running heavy steering work for a full second longer than
+	# necessary. ~0.5 s of settled state at any tick rate.
+	var SETTLE_FRAMES: int = maxi(int(0.5 * float(Engine.physics_ticks_per_second)), 4)
 	if has_move_order:
 		var mc_arr: Node = get_node_or_null("MovementComponent")
 		if mc_arr != null and mc_arr is MovementComponent:

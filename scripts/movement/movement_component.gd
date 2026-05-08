@@ -62,6 +62,19 @@ var _phase_bit: int = 0
 ## movement keeps stagger on; the cost saving is worth the
 ## sub-tick lag for slow ground units.
 var _stagger_enabled: bool = true
+## Cached SpatialIndex reference (moved from GroundMovement so
+## both ground and aircraft paths can share it). The base
+## tick_movement does ONE nearby query per heavy tick and feeds
+## the raw list to both _separate_neighbors and _avoid_obstacles
+## via the optional `prefetched` arg — half the SpatialIndex
+## hits compared to the old "each helper queries its own".
+var _cached_spatial_idx: SpatialIndex = null
+
+
+func _get_spatial_idx() -> SpatialIndex:
+	if _cached_spatial_idx == null or not is_instance_valid(_cached_spatial_idx):
+		_cached_spatial_idx = SpatialIndex.get_instance(get_tree().current_scene)
+	return _cached_spatial_idx
 
 func _ready() -> void:
 	var p: Node = get_parent()
@@ -172,12 +185,26 @@ func tick_movement(delta: float, frame_phase: int) -> void:
 	# tick (cheap) so the unit still tracks a moving target
 	# between cache refreshes.
 	if (not _stagger_enabled) or frame_phase == _phase_bit:
+		# ONE SpatialIndex.nearby query per heavy tick instead of
+		# two (one in _separate_neighbors, one in _avoid_obstacles).
+		# The query radius is the larger of the two needs; subclass
+		# filters dispose of the extras. Halves the SpatialIndex
+		# cost on the heavy-tick path. Subclasses that override
+		# _separate_neighbors / _avoid_obstacles accept the
+		# prefetched raw list and skip their own query.
+		var idx: SpatialIndex = _get_spatial_idx()
+		var raw_neighbors: Array = []
+		if idx != null:
+			var query_radius: float = maxf(
+					separate_min_distance + 1.0,
+					avoid_min_distance + 2.0)
+			raw_neighbors = idx.nearby(pos, query_radius)
 		var sep_force: Vector3 = Steering.separate(pos,
-				_separate_neighbors(),
+				_separate_neighbors(raw_neighbors),
 				separate_min_distance,
 				separate_repel)
 		var avoid_force: Vector3 = Steering.avoid_static(pos,
-				_avoid_obstacles(),
+				_avoid_obstacles(raw_neighbors),
 				avoid_min_distance,
 				avoid_repel)
 		_cached_neighbor_force = sep_force + avoid_force
@@ -218,15 +245,16 @@ func arrival_target() -> Vector3:
 # --- Subclass hooks ---
 
 ## Return non-group-member dynamic agents within sensing range.
-## Subclass overrides to query SpatialIndex and filter by
-## SquadGroup membership and entity type.
-func _separate_neighbors() -> Array:
+## When `prefetched` is non-empty, subclasses should filter from
+## that list instead of running their own SpatialIndex query —
+## the base tick_movement does ONE combined query per heavy tick
+## and passes the raw list to both this and _avoid_obstacles.
+func _separate_neighbors(_prefetched: Array = []) -> Array:
 	return []
 
 ## Return static obstacles (buildings, wrecks, terrain hazards).
-## Subclass overrides to query SpatialIndex filtered to "buildings"
-## group / wreck class etc.
-func _avoid_obstacles() -> Array:
+## Same `prefetched` semantics as _separate_neighbors.
+func _avoid_obstacles(_prefetched: Array = []) -> Array:
 	return []
 
 # --- Helpers ---
@@ -266,6 +294,16 @@ func _ensure_stuck_buffer() -> void:
 		_stuck_buffer_idx = 0
 
 func _stuck_step(delta: float, combat_engaged: bool) -> void:
+	# Cheap early-out for idle units (no active move target).
+	# The stuck detector only matters while travelling; running
+	# the displacement bookkeeping every tick on idle units was
+	# the bulk of MovementComponent._stuck_step's call count
+	# (886 in the latest profile, ~half of which were idle).
+	# When a unit later gets a move order, the buffer reseeds
+	# from _stuck_last_pos via the _ensure_stuck_buffer path.
+	if not has_target():
+		_stuck_last_pos = _body.global_position
+		return
 	_ensure_stuck_buffer()
 	if _stuck_cooldown_remaining > 0.0:
 		_stuck_cooldown_remaining -= delta
@@ -275,8 +313,6 @@ func _stuck_step(delta: float, combat_engaged: bool) -> void:
 	_stuck_buffer[_stuck_buffer_idx] = disp
 	_stuck_buffer_idx = (_stuck_buffer_idx + 1) % _stuck_buffer.size()
 
-	if not has_target():
-		return
 	if combat_engaged:
 		return
 	if _stuck_cooldown_remaining > 0.0:
