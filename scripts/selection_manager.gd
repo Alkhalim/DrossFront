@@ -1040,6 +1040,20 @@ func _new_system_dispatch_movables(ground_pos: Vector3, clear_combat: bool = tru
 	##
 	## Any prior SquadGroup membership is evicted so a leftover group from
 	## an earlier dispatch doesn't keep writing slot targets behind us.
+
+	# PF-A: when use_flowfield is on AND every selected unit is migrated,
+	# route through GroupAura. Mixed selections (some migrated, some not)
+	# fall back to the existing SquadGroup path until PF-B widens migration.
+	if MovementFlags.use_flowfield():
+		var all_migrated: bool = true
+		for s_check: Node in _selected_units:
+			if not _unit_is_pf_a_migrated(s_check):
+				all_migrated = false
+				break
+		if all_migrated and not _selected_units.is_empty():
+			_dispatch_via_group_aura(ground_pos)
+			return
+
 	for s: Node in _selected_units:
 		if not is_instance_valid(s):
 			continue
@@ -2461,3 +2475,25 @@ func _confirm_build_placement(screen_pos: Vector2, keep_placing: bool = false) -
 	else:
 		# Not enough resources — keep placement mode active
 		pass
+
+func _unit_is_pf_a_migrated(u: Node) -> bool:
+	## PF-A: only Anvil Hound is migrated. Read the unit's stat ID.
+	if u == null or not is_instance_valid(u):
+		return false
+	if not "stats" in u:
+		return false
+	var stats: Variant = u.get("stats")
+	if stats == null or not "id" in stats:
+		return false
+	return (stats.id as String) == "anvil_hound"
+
+
+func _dispatch_via_group_aura(ground_pos: Vector3) -> void:
+	## Build a GroupAura node for the current selection, anchored under the
+	## scene root. The aura owns its FieldIds for its lifetime; freeing it
+	## releases the fields.
+	var aura: GroupAura = GroupAura.new()
+	aura.name = "GroupAura_%d" % Time.get_ticks_msec()
+	get_tree().current_scene.add_child(aura)
+	aura.setup(_selected_units.duplicate(), ground_pos, 0)
+
