@@ -122,6 +122,11 @@ var _burst_count: int = 0
 ## a one-frame delay on muzzle flash. Halves CombatComponent CPU cost.
 var _phys_frame: int = 0
 var _phase: int = 0
+## Cached result of `_unit.is_in_group("aircraft")`. Constant for the
+## unit's lifetime, so cache once on _ready instead of paying the
+## string-keyed group lookup on every combat tick + every search +
+## every fire (three sites).
+var _shooter_is_air_cached: bool = false
 
 const SEARCH_INTERVAL: float = 0.5
 
@@ -170,6 +175,13 @@ func _ready() -> void:
 	# resulting 20 Hz combat tick so the rate-of-fire stays identical
 	# -- the doubled delta below becomes a tripled delta to match.
 	_phase = int(get_instance_id() % 3)
+	# Cache the aircraft-vs-ground shooter flag once. Used by the 2D
+	# engagement-distance helper at three sites in this file (engage
+	# gate, target acquisition, accuracy band) — `is_in_group` is a
+	# string-keyed lookup; group membership is constant for a unit's
+	# lifetime so caching is safe.
+	if _unit != null:
+		_shooter_is_air_cached = _unit.is_in_group("aircraft")
 
 
 func apply_silence(duration: float) -> void:
@@ -452,8 +464,7 @@ func _physics_process(delta: float) -> void:
 						_unit.command_move(home_pos, false)
 		return
 
-	var shooter_is_air: bool = _unit.is_in_group("aircraft")
-	var dist: float = _engagement_distance(_unit.global_position, _current_target.global_position, shooter_is_air)
+	var dist: float = _engagement_distance(_unit.global_position, _current_target.global_position, _shooter_is_air_cached)
 	var stats: UnitStatResource = _unit.get("stats") as UnitStatResource
 	var primary: WeaponResource = stats.primary_weapon
 	var primary_range: float = primary.resolved_range() if primary else 10.0
@@ -633,7 +644,7 @@ func _find_nearest_enemy(max_range: float) -> Node3D:
 	# the candidate's distance and reject targets just past the
 	# horizontal weapon range even though the aircraft could reach
 	# them by descending into firing range.
-	var shooter_is_air: bool = _unit.is_in_group("aircraft")
+	var shooter_is_air: bool = _shooter_is_air_cached
 
 	var nearest: Node3D = null
 	var nearest_dist: float = INF
@@ -1042,8 +1053,7 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	# gate above — without it an aircraft directly over a ground
 	# target would always score in the "far" band and pay the -10%
 	# accuracy penalty just because of altitude.
-	var acc_shooter_is_air: bool = _unit.is_in_group("aircraft")
-	var dist_to_target: float = _engagement_distance(_unit.global_position, _current_target.global_position, acc_shooter_is_air)
+	var dist_to_target: float = _engagement_distance(_unit.global_position, _current_target.global_position, _shooter_is_air_cached)
 	var range_t: float = clampf(dist_to_target / maxf(weapon_range, 0.01), 0.0, 1.0)
 	# Range band: point-blank shots get a small accuracy bonus, mid
 	# range is baseline, the far third of the weapon's reach drops
