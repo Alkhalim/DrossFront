@@ -67,6 +67,16 @@ var _builder_phys_frame: int = 0
 ## build / repair path keeps running every staggered frame.
 const IDLE_SCAN_FRAME_INTERVAL: int = 6
 var _idle_scan_frame: int = 0
+## Wall-clock minimum gap between idle scans. Bounded below by the frame-
+## counter interval above (so we don't scan more often than every Nth
+## staggered frame), bounded above by this — at lowered physics rates the
+## frame counter alone would let scans drift to once-per-1.2s; the user
+## reported the rate still feels too aggressive for engineer behaviour
+## where build_time is multi-second and repair patients don't appear
+## faster than ~2s. Wall-clock gating makes the cadence physics-rate
+## independent so future physics retunes don't reintroduce the issue.
+const IDLE_SCAN_MIN_INTERVAL_MSEC: int = 2000
+var _next_idle_scan_msec: int = 0
 
 
 func _physics_process(delta: float) -> void:
@@ -99,6 +109,13 @@ func _physics_process(delta: float) -> void:
 		if _idle_scan_frame < IDLE_SCAN_FRAME_INTERVAL:
 			return
 		_idle_scan_frame = 0
+		# Wall-clock gate on top of the frame-counter gate — see
+		# IDLE_SCAN_MIN_INTERVAL_MSEC. Scan only fires when both have
+		# elapsed; whichever is slower wins.
+		var now_msec_b: int = Time.get_ticks_msec()
+		if now_msec_b < _next_idle_scan_msec:
+			return
+		_next_idle_scan_msec = now_msec_b + IDLE_SCAN_MIN_INTERVAL_MSEC
 		_try_auto_assist()
 		if _target_building and is_instance_valid(_target_building):
 			# Picked up a construction site -- bail before the
