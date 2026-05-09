@@ -670,19 +670,30 @@ func _create_beam_mesh(color: Color, from: Vector3, to: Vector3, width_scale: fl
 ## fog isn't part of the active scene.
 var _fow: Node = null
 var _fow_lookup_done: bool = false
+## Counter for the FoW visibility check. The FogOfWar polygon updates
+## at ~5 Hz so checking every frame on every projectile is wasted work
+## at high projectile traffic — the 250-pop stress test has the FoW
+## check eating ~30s of script time on Projectile._process. Phase the
+## check across frames so each projectile re-checks every Nth frame
+## (using a randomized initial offset so the load is spread instead
+## of all projectiles re-checking on the same frame).
+var _fow_check_counter: int = 0
+const FOW_CHECK_INTERVAL: int = 4   # ~15 Hz at 60 fps; FoW polys update at 5 Hz
 
 
 func _process(delta: float) -> void:
-	# Per-frame FOW visibility — projectiles tick fast enough that
-	# the 5 Hz FogOfWar group sweep can leave them visible for
-	# up to 200ms after they enter fog. Self-checking here gives
-	# tight visual gating without measurably increasing combat
-	# cost (typically <15 projectiles in flight at peak).
+	# FoW visibility — phased re-check (see _fow_check_counter doc).
 	if not _fow_lookup_done:
 		_fow_lookup_done = true
 		_fow = get_tree().current_scene.get_node_or_null("FogOfWar")
-	if _fow and _fow.has_method("is_visible_world"):
-		visible = _fow.is_visible_world(global_position)
+		# Randomize initial offset so 100 projectiles spawned on the
+		# same combat tick don't all re-check on the same future frames.
+		_fow_check_counter = randi() % FOW_CHECK_INTERVAL
+	_fow_check_counter += 1
+	if _fow_check_counter >= FOW_CHECK_INTERVAL:
+		_fow_check_counter = 0
+		if _fow and _fow.has_method("is_visible_world"):
+			visible = _fow.is_visible_world(global_position)
 
 	# Beam — instant, fade out
 	if speed > 500.0:

@@ -116,12 +116,23 @@ var _scene_cached: Node = null
 ## shots-per-second matches the underlying ROF tier.
 var _burst_count: int = 0
 
-## Half-frame stagger phase. Combat targeting and firing run at ~30 Hz
-## per unit instead of 60 Hz — fire cooldowns are tenths of a second at
-## fastest, target search is throttled to 0.5s, and the player can't tell
-## a one-frame delay on muzzle flash. Halves CombatComponent CPU cost.
+## N-frame stagger phase. Combat targeting and firing run at
+## physics_rate / STAGGER_FRAMES per unit. The cooldown scaling
+## (`delta *= STAGGER_FRAMES` in _physics_process) keeps shots-per-second
+## identical regardless of stagger count. Stagger=6 at 10 Hz physics
+## means each unit's combat AI ticks at ~1.67 Hz — invisible at RTS pace
+## but cuts per-physics-tick combat load by ~83% vs. unstaggered.
+const STAGGER_FRAMES: int = 6
 var _phys_frame: int = 0
 var _phase: int = 0
+## Sub-stagger for heavy validation guards (patrol leash, retaliation
+## lost-sight watchdog). These don't need to fire every combat tick —
+## a unit drifts <1m per combat tick at typical speeds, so re-checking
+## the home-distance / sight-distance every other combat tick is
+## indistinguishable. Halves the cost of those guards on top of the
+## 6-phase stagger above.
+const VALIDATION_SUBSTAGGER: int = 2
+var _combat_tick_count: int = 0
 ## Cached result of `_unit.is_in_group("aircraft")`. Constant for the
 ## unit's lifetime, so cache once on _ready instead of paying the
 ## string-keyed group lookup on every combat tick + every search +
@@ -174,7 +185,7 @@ func _ready() -> void:
 	# that. Fire cadence (3-10 shots/sec at peak) sits well below the
 	# resulting 20 Hz combat tick so the rate-of-fire stays identical
 	# -- the doubled delta below becomes a tripled delta to match.
-	_phase = int(get_instance_id() % 3)
+	_phase = int(get_instance_id() % STAGGER_FRAMES)
 	# Cache the aircraft-vs-ground shooter flag once. Used by the 2D
 	# engagement-distance helper at three sites in this file (engage
 	# gate, target acquisition, accuracy band) — `is_in_group` is a
@@ -315,9 +326,13 @@ func _physics_process(delta: float) -> void:
 	# on the assigned phase. Cooldowns advance via the tripled delta
 	# so fire rate is identical to an un-staggered tick.
 	_phys_frame += 1
-	if (_phys_frame % 3) != _phase:
+	if (_phys_frame % STAGGER_FRAMES) != _phase:
 		return
-	delta *= 3.0
+	delta *= float(STAGGER_FRAMES)
+	_combat_tick_count += 1
+	# Heavy distance / sight-radius validation guards only need to fire on
+	# every Nth combat tick — see VALIDATION_SUBSTAGGER doc.
+	var run_heavy_validations: bool = (_combat_tick_count % VALIDATION_SUBSTAGGER) == 0
 
 	_fire_cooldown -= delta
 	_secondary_cooldown -= delta
@@ -349,42 +364,48 @@ func _physics_process(delta: float) -> void:
 		if ft_stats_v and ft_stats_v.is_stealth_capable and not ft_revealed:
 			forced_target = null
 			_was_in_range = false
-	# Patrol leash: neutral patrols (units with a home_position set) give
-	# up the chase if they've drifted too far from home. Without this, a
-	# player could pull patrols across half the map by kiting them. Once
-	# the leash trips, forced_target is dropped — the "no current target"
-	# branch then sends the unit back home via the existing patrol
-	# return-to-home logic.
-	const PATROL_LEASH_RADIUS: float = 30.0
-	if forced_target:
-		var leash_home_v: Variant = _unit.get("home_position")
-		if leash_home_v is Vector3 and (leash_home_v as Vector3) != Vector3.INF:
-			var leash_home: Vector3 = leash_home_v as Vector3
-			var d_from_home: float = _unit.global_position.distance_to(leash_home)
-			if d_from_home > PATROL_LEASH_RADIUS:
-				forced_target = null
-				_was_in_range = false
-				_retaliation_lost_sight_timer = 0.0
-	# Retaliation lost-sight watchdog -- when an AI-owned unit was
-	# pulled into combat by notify_attacked but its attacker has
-	# stayed out of sight for RETALIATION_LOST_SIGHT_SEC seconds,
-	# clear forced_target so the unit resumes its original move
-	# order. 'Out of sight' = farther than the unit's sight radius.
-	# Player-owned units (owner 0) never enter retaliation during
-	# plain moves, so the watchdog is a no-op for them.
-	if forced_target and unit_has_move_order and attack_move_target == Vector3.INF:
-		var owner_v: int = (_unit.get("owner_id") as int) if "owner_id" in _unit else 0
-		if owner_v != 0:
-			var stats_v: UnitStatResource = _unit.get("stats") as UnitStatResource
-			var sight: float = stats_v.resolved_sight_radius() if stats_v else 20.0
-			var d_target: float = _unit.global_position.distance_to(forced_target.global_position)
-			if d_target > sight:
-				_retaliation_lost_sight_timer += delta
-				if _retaliation_lost_sight_timer >= RETALIATION_LOST_SIGHT_SEC:
+	# Patrol leash + retaliation watchdog: heavy-ish distance/sight checks
+	# that only need to fire every Nth combat tick (see VALIDATION_SUBSTAGGER).
+	# delta is scaled to match so the retaliation timer accumulates wall-clock
+	# time correctly regardless of how often this branch runs.
+	if run_heavy_validations:
+		var validation_delta: float = delta * float(VALIDATION_SUBSTAGGER)
+		# Patrol leash: neutral patrols (units with a home_position set) give
+		# up the chase if they've drifted too far from home. Without this, a
+		# player could pull patrols across half the map by kiting them. Once
+		# the leash trips, forced_target is dropped — the "no current target"
+		# branch then sends the unit back home via the existing patrol
+		# return-to-home logic.
+		const PATROL_LEASH_RADIUS: float = 30.0
+		if forced_target:
+			var leash_home_v: Variant = _unit.get("home_position")
+			if leash_home_v is Vector3 and (leash_home_v as Vector3) != Vector3.INF:
+				var leash_home: Vector3 = leash_home_v as Vector3
+				var d_from_home: float = _unit.global_position.distance_to(leash_home)
+				if d_from_home > PATROL_LEASH_RADIUS:
 					forced_target = null
+					_was_in_range = false
 					_retaliation_lost_sight_timer = 0.0
-			else:
-				_retaliation_lost_sight_timer = 0.0
+		# Retaliation lost-sight watchdog -- when an AI-owned unit was
+		# pulled into combat by notify_attacked but its attacker has
+		# stayed out of sight for RETALIATION_LOST_SIGHT_SEC seconds,
+		# clear forced_target so the unit resumes its original move
+		# order. 'Out of sight' = farther than the unit's sight radius.
+		# Player-owned units (owner 0) never enter retaliation during
+		# plain moves, so the watchdog is a no-op for them.
+		if forced_target and unit_has_move_order and attack_move_target == Vector3.INF:
+			var owner_v: int = (_unit.get("owner_id") as int) if "owner_id" in _unit else 0
+			if owner_v != 0:
+				var stats_v: UnitStatResource = _unit.get("stats") as UnitStatResource
+				var sight: float = stats_v.resolved_sight_radius() if stats_v else 20.0
+				var d_target: float = _unit.global_position.distance_to(forced_target.global_position)
+				if d_target > sight:
+					_retaliation_lost_sight_timer += validation_delta
+					if _retaliation_lost_sight_timer >= RETALIATION_LOST_SIGHT_SEC:
+						forced_target = null
+						_retaliation_lost_sight_timer = 0.0
+				else:
+					_retaliation_lost_sight_timer = 0.0
 	if forced_target:
 		_current_target = forced_target
 	elif _current_target and not _is_valid_target(_current_target):
