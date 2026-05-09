@@ -265,26 +265,7 @@ func _apply_kernel_velocity(v: Vector3, delta: float) -> void:
 	else:
 		_body_physics.velocity.y -= GRAVITY * delta
 
-	# move_and_slide is the single most expensive call on this hot path
-	# (collision shape sweep against the world); at 100 units × 10 Hz
-	# physics it dominates the orchestrator tick. For combat-stopped units
-	# (kernel velocity ~0, on the floor) skipping it is free — position
-	# doesn't change, gravity is already at floor, and is_on_floor() stays
-	# valid from the last sweep. Force a periodic refresh anyway so we
-	# detect floor-disappearance and physics nudges within a fraction of
-	# a second; SKIP_REFRESH_TICKS=6 at 10 Hz physics = 0.6 sec max staleness.
-	var v_xz_sq: float = v.x * v.x + v.z * v.z
-	if v_xz_sq < MOTION_THRESHOLD_SQ:
-		_stationary_ticks += 1
-	else:
-		_stationary_ticks = 0
-	var skip_slide: bool = (
-		_stationary_ticks > SKIP_SLIDE_AFTER_TICKS
-		and _stationary_ticks % SKIP_REFRESH_TICKS != 0
-		and _body_physics.is_on_floor()
-	)
-	if not skip_slide:
-		_body_physics.move_and_slide()
+	_body_physics.move_and_slide()
 
 	# Body facing — rotate to face motion direction at most max_turn_rate_rad_s
 	# per second. Same formula as the legacy tick_movement path uses.
