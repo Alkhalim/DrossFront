@@ -1870,8 +1870,8 @@ func _build_scenarios_panel() -> void:
 		},
 		{
 			"id": MatchSettingsClass.Scenario.PATH_TEST_FLOWFIELD_PERF,
-			"title": "Flow-Field Perf (20 v 20 Hounds)",
-			"blurb": "Two players, no win cons. 20 Anvil Hound squads each,\nspawned at (±60, 0). No other unit types. Drive units\nmanually to gauge FPS under simultaneous orders.",
+			"title": "Flow-Field Perf (Hound Stress)",
+			"blurb": "Two players, no win cons. Boots empty; in-scene\nslider picks 1-200 hound squads per side, then Spawn.\nClear and re-spawn to sweep the count vs. FPS.",
 			"scene": "res://scenes/test_arenas/path_test_flowfield_perf.tscn",
 		},
 	]
