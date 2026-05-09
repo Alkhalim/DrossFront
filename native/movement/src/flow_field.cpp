@@ -148,6 +148,11 @@ void FlowField::compute_flow_directions() {
     constexpr int N_NEIGHBORS = 8;
     static constexpr int neighbor_dx[N_NEIGHBORS] = {-1, 0, 1, -1, 1, -1, 0, 1};
     static constexpr int neighbor_dz[N_NEIGHBORS] = {-1,-1,-1, 0, 0, 1, 1, 1};
+    // Must match the threshold used in build_from()'s Dijkstra. If they
+    // diverge, integration is propagated through one set of edges but
+    // gradient direction is computed against another, and the field
+    // points units across cliffs that Dijkstra rejected.
+    constexpr float MAX_Y_DELTA = 1.5f;
 
     for (int cz = 0; cz < H; ++cz) {
         for (int cx = 0; cx < W; ++cx) {
@@ -156,7 +161,14 @@ void FlowField::compute_flow_directions() {
                 flow_[idx] = godot::Vector2(); // unreachable
                 continue;
             }
-            // Pick the neighbor with the lowest integration cost.
+            // Pick the neighbor with the lowest integration cost AMONG
+            // 3D-traversable neighbors. Without the Y check here, a
+            // cliff-edge plateau cell would point flow at the ground
+            // cliff-base cell (lower integration via direct path) and
+            // units would walk straight off the cliff instead of using
+            // the ramp. The Y check enforces "the gradient direction
+            // must follow an edge Dijkstra was allowed to traverse".
+            float cur_y = grid_.get_cell_y(idx);
             uint16_t best = integration_[idx];
             int best_dx = 0, best_dz = 0;
             for (int n = 0; n < N_NEIGHBORS; ++n) {
@@ -164,11 +176,12 @@ void FlowField::compute_flow_directions() {
                 int nz = cz + neighbor_dz[n];
                 if (nx < 0 || nx >= W || nz < 0 || nz >= H) continue;
                 int nidx = nz * W + nx;
-                if (integration_[nidx] < best) {
-                    best = integration_[nidx];
-                    best_dx = neighbor_dx[n];
-                    best_dz = neighbor_dz[n];
-                }
+                if (integration_[nidx] >= best) continue;
+                float n_y = grid_.get_cell_y(nidx);
+                if (std::abs(n_y - cur_y) > MAX_Y_DELTA) continue;
+                best = integration_[nidx];
+                best_dx = neighbor_dx[n];
+                best_dz = neighbor_dz[n];
             }
             if (best_dx == 0 && best_dz == 0) {
                 flow_[idx] = godot::Vector2(); // local minimum (or goal)
