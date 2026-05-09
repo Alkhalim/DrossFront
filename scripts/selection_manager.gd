@@ -958,8 +958,18 @@ func command_move_to_world(ground_pos: Vector3, queue: bool = false) -> void:
 	# the engineer to finish what it's doing and then walk to the waypoint.
 	if not queue:
 		_cancel_builder_tasks()
+	# Only acknowledge with a "moving" voiceline if the player actually has
+	# one of their own units in the selection — right-clicking the ground
+	# while nothing's selected, or while only enemy/neutral units are
+	# focused, shouldn't trigger the player faction's move barker.
 	if _audio and _audio.has_method("play_voice_move"):
-		_audio.play_voice_move()
+		var has_player_unit: bool = false
+		for u: Node3D in _selected_units:
+			if is_instance_valid(u) and (u.get("owner_id") as int) == 0:
+				has_player_unit = true
+				break
+		if has_player_unit:
+			_audio.play_voice_move()
 
 	if not MovementFlags.use_new_system():
 		_legacy_command_move_to_world(ground_pos, queue)
