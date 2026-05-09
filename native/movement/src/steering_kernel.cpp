@@ -27,6 +27,15 @@ namespace {
     // pattern. Cap at half max_speed so separation can nudge a unit
     // sideways without ever reversing its forward motion.
     constexpr float SEPARATE_MAX_FRACTION  = 0.5f;
+    // Reduce separation strength along the unit's direction of motion.
+    // Without this, two units running the same direction with one
+    // slightly ahead would push each other forward/backward — the rear
+    // unit slowed by separation, the front sped up — and a flock would
+    // spontaneously string into a single-file line over its travel.
+    // 0.8 means full lateral (perpendicular-to-motion) separation and
+    // 20% along-motion separation (just enough to prevent overlap when
+    // a faster unit catches up to a slower one in front of it).
+    constexpr float SEPARATE_PARALLEL_REDUCTION = 0.8f;
     constexpr float AVOID_DISTANCE         = 3.0f;     // unused in PF-A (no buildings list yet)
     constexpr float AVOID_REPEL            = 24.0f;
     // Cohesion as a fraction of the unit's own max_speed. A 5 m/s hound
@@ -177,6 +186,26 @@ void SteeringKernel::tick(float delta) {
         // physical bodies overlap until 4.8m+ apart — they constantly
         // bumped each other in mixed-size groups.
         const float my_radius = agents_.radius[i];
+        // Forward direction for parallel-reduction. Use current velocity
+        // when moving, fall back to the seek vector (flow direction) when
+        // (near) stationary so combat-stopped units still benefit from
+        // perpendicular-biased separation. has_forward gates the math —
+        // if neither velocity nor seek give a meaningful direction we
+        // apply unmodified separation.
+        godot::Vector3 forward = agents_.vel[i];
+        forward.y = 0.0f;
+        float fwd_len = forward.length();
+        bool has_forward = false;
+        if (fwd_len > 0.1f) {
+            forward = forward / fwd_len;
+            has_forward = true;
+        } else {
+            float seek_len = seek.length();
+            if (seek_len > 0.1f) {
+                forward = seek / seek_len;
+                has_forward = true;
+            }
+        }
         godot::Vector3 sep = {};
         for (int j = 0; j < N; ++j) {
             if (j == i || !agents_.alive[j]) continue;
@@ -186,7 +215,18 @@ void SteeringKernel::tick(float delta) {
             float min_dist = my_radius + agents_.radius[j] + SEPARATE_BUFFER;
             if (d <= 0.001f || d > min_dist) continue;
             float strength = SEPARATE_REPEL * (1.0f - d / min_dist);
-            sep += dp.normalized() * strength;
+            // Perpendicular-biased separation: scale strength down by
+            // SEPARATE_PARALLEL_REDUCTION × |dot(dp_normalized, forward)|
+            // so units lined up along their motion direction don't push
+            // each other forward / backward (which would string a flock
+            // into a single-file line).
+            godot::Vector3 sep_dir = dp / d;  // normalized
+            if (has_forward) {
+                float parallel_factor = std::abs(sep_dir.x * forward.x + sep_dir.z * forward.z);
+                float scale = 1.0f - parallel_factor * SEPARATE_PARALLEL_REDUCTION;
+                strength *= scale;
+            }
+            sep += sep_dir * strength;
         }
         // Cap separation magnitude so a unit caught between two peers
         // (each contributing repel) can't accumulate enough force to
