@@ -176,9 +176,16 @@ func clear_target() -> void:
 	# is cleared. Combat AI's "stop and fire" then never actually stops
 	# the body — the kernel walks past attack range, combat re-issues
 	# command_move(chase_pos), and the unit visibly wiggles in place
-	# every tick. Set HALTED to make the kernel zero velocity, and
-	# release the active field so its cache slot can be reclaimed.
+	# every tick. Set HALTED to make the kernel zero velocity.
 	# AGENT_FLAG_HALTED bit is 1 << 2 = 4 (mirrors native types.h).
+	#
+	# Keep the cached field alive — releasing it would force a full
+	# Dijkstra rebuild on the very next stop-then-chase cycle (combat
+	# AI exits range → command_move(chase_pos) → goto_world). With the
+	# field preserved, goto_world's idempotency check can short-circuit
+	# when the new chase target is within 6m of the previous goal, and
+	# the server-side cache lets sibling units sharing the goal reuse
+	# the field. set_agent_target clears HALTED on the next motion order.
 	const AGENT_FLAG_HALTED: int = 4
 	if MovementFlags.use_flowfield() and kernel_handle != 0:
 		var scene: Node = get_tree().current_scene if get_tree() else null
@@ -186,12 +193,6 @@ func clear_target() -> void:
 			var kernel: Object = MovementNativeBootstrap.get_kernel(scene)
 			if kernel != null:
 				kernel.call("set_agent_flag", kernel_handle, AGENT_FLAG_HALTED, true)
-			if _kernel_field_id != 0:
-				var server: Object = MovementNativeBootstrap.get_server(scene)
-				if server != null:
-					server.call("release_field", _kernel_field_id)
-				_kernel_field_id = 0
-				_kernel_field_target = Vector3.INF
 
 ## Override of MovementComponent.arrival_target. When a path is active,
 ## return the path's final waypoint — the unit-level arrival poll uses
