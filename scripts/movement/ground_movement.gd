@@ -39,6 +39,15 @@ var _kernel_field_id: int = 0
 ## squared distance against a one-cell threshold.
 var _kernel_field_target: Vector3 = Vector3.INF
 
+## Counts consecutive physics ticks the kernel returned ~zero velocity
+## while the unit is on the floor. Once past SKIP_SLIDE_AFTER_TICKS we
+## start skipping move_and_slide every tick (with a periodic refresh
+## via SKIP_REFRESH_TICKS) — see _apply_kernel_velocity for rationale.
+var _stationary_ticks: int = 0
+const MOTION_THRESHOLD_SQ: float = 0.04  # (0.2 m/s)^2 — below this is "parked"
+const SKIP_SLIDE_AFTER_TICKS: int = 3   # 0.3 sec at 10 Hz physics
+const SKIP_REFRESH_TICKS: int = 6        # force a sweep every ~0.6 sec
+
 func _ready() -> void:
 	super._ready()
 	if agent_profile == null:
@@ -118,6 +127,16 @@ func goto_world(world_pos: Vector3) -> void:
 						# same group_id, which a fresh ad-hoc move won't have).
 						kernel.call("set_agent_target", kernel_handle, 0, fid, 0)
 
+	# Under flag-on, the kernel steers directly from the flow field; the
+	# orchestrator's flag-on path NEVER reads `path_waypoints` (it calls
+	# _apply_kernel_velocity instead of tick_movement). Skip the legacy
+	# A* query — at high agent counts in combat this fires 4-5 times per
+	# unit per second, ~0.06 ms each, all wasted. Path waypoints are
+	# cleared so no stale data lingers if the flag is toggled off later.
+	if MovementFlags.use_flowfield() and kernel_handle != 0:
+		path_waypoints = PackedVector3Array()
+		path_waypoint_idx = 0
+		return
 	var router: NavRouter = _get_nav_router()
 	if router == null:
 		path_waypoints = PackedVector3Array()
@@ -224,7 +243,27 @@ func _apply_kernel_velocity(v: Vector3, delta: float) -> void:
 		_body_physics.velocity.y = 0.0
 	else:
 		_body_physics.velocity.y -= GRAVITY * delta
-	_body_physics.move_and_slide()
+
+	# move_and_slide is the single most expensive call on this hot path
+	# (collision shape sweep against the world); at 100 units × 10 Hz
+	# physics it dominates the orchestrator tick. For combat-stopped units
+	# (kernel velocity ~0, on the floor) skipping it is free — position
+	# doesn't change, gravity is already at floor, and is_on_floor() stays
+	# valid from the last sweep. Force a periodic refresh anyway so we
+	# detect floor-disappearance and physics nudges within a fraction of
+	# a second; SKIP_REFRESH_TICKS=6 at 10 Hz physics = 0.6 sec max staleness.
+	var v_xz_sq: float = v.x * v.x + v.z * v.z
+	if v_xz_sq < MOTION_THRESHOLD_SQ:
+		_stationary_ticks += 1
+	else:
+		_stationary_ticks = 0
+	var skip_slide: bool = (
+		_stationary_ticks > SKIP_SLIDE_AFTER_TICKS
+		and _stationary_ticks % SKIP_REFRESH_TICKS != 0
+		and _body_physics.is_on_floor()
+	)
+	if not skip_slide:
+		_body_physics.move_and_slide()
 
 	# Body facing — rotate to face motion direction at most max_turn_rate_rad_s
 	# per second. Same formula as the legacy tick_movement path uses.
