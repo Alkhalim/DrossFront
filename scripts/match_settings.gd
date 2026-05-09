@@ -45,6 +45,10 @@ enum Scenario {
 	## scenes directly. disable_match_end is set by these to suppress
 	## auto-defeat on HQ loss (some tests involve combat without an HQ).
 	PATH_TEST_FLOWFIELD_SMOKE,
+	## 2-player perf scratchpad: 20 Anvil Hound squads per side, no win
+	## conditions, no other unit types. Used to eyeball FPS under
+	## simultaneous mass-movement orders.
+	PATH_TEST_FLOWFIELD_PERF,
 }
 var scenario: Scenario = Scenario.NONE
 
@@ -62,7 +66,8 @@ func is_scenario() -> bool:
 ## checks this before _start_match so it can dispatch to the test
 ## scene directly instead of the standard loading-screen flow.
 func is_path_test() -> bool:
-	return scenario == Scenario.PATH_TEST_FLOWFIELD_SMOKE
+	return scenario == Scenario.PATH_TEST_FLOWFIELD_SMOKE or \
+		scenario == Scenario.PATH_TEST_FLOWFIELD_PERF
 
 ## Picked on the main menu before launching a match.
 var difficulty: Difficulty = Difficulty.NORMAL
