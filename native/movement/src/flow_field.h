@@ -32,6 +32,13 @@ private:
     int goal_cell_;
 
     void compute_flow_directions();
+    // Multi-source BFS over unreachable (post-Dijkstra) cells, sourced from
+    // every reachable cell at depth 0. Each unreachable cell gets
+    // integration = UNREACHABLE_BASE + bfs_depth so flow points toward the
+    // nearest reachable boundary. Implements "best-effort goal" — units
+    // separated from the goal by a cliff or void walk to the geographically
+    // closest navigable cell instead of stopping in place.
+    void fill_unreachable_via_bfs();
 };
 
 } // namespace drossfront

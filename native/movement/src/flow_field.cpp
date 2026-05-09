@@ -71,8 +71,75 @@ bool FlowField::build_from(int goal_cell) {
         }
     }
 
+    // Best-effort goal fallback: any cell still at INTEGRATION_INF after
+    // Dijkstra is in a different connected component than the goal (cliff
+    // gap, isolated pocket, etc.). Run a multi-source BFS from the
+    // reachable boundary so those cells get a flow direction toward their
+    // nearest reachable cell. A unit standing in such a cell will walk to
+    // the closest navigable point instead of stopping in place.
+    fill_unreachable_via_bfs();
     compute_flow_directions();
     return true;
+}
+
+void FlowField::fill_unreachable_via_bfs() {
+    const int W = grid_.width();
+    const int H = grid_.height();
+    const int N = grid_.cell_count();
+    constexpr int N_NEIGHBORS = 8;
+    static constexpr int neighbor_dx[N_NEIGHBORS] = {-1, 0, 1, -1, 1, -1, 0, 1};
+    static constexpr int neighbor_dz[N_NEIGHBORS] = {-1,-1,-1, 0, 0, 1, 1, 1};
+
+    // Floor for all unreachable-cell integration values. Must be greater
+    // than any plausible reachable-cell integration so that flow at the
+    // boundary always points from unreachable INTO reachable. With
+    // grid_w=160 and per-step cost ~14, max reachable integration is
+    // ~160 * sqrt(2) * 14 ≈ 3171. UNREACHABLE_BASE = 30000 leaves
+    // plenty of headroom and budget for BFS depth (max ~256 steps for
+    // a full-grid traversal) before we hit INTEGRATION_INF (65535).
+    constexpr uint16_t UNREACHABLE_BASE = 30000;
+
+    // Multi-source BFS. Sources: every cell already reachable from the
+    // goal (integration < INTEGRATION_INF). The queue stores (idx, depth)
+    // where depth is BFS distance from the nearest reachable cell.
+    struct Entry { int idx; uint16_t depth; };
+    std::queue<Entry> q;
+    std::vector<uint8_t> visited(N, 0);
+    for (int i = 0; i < N; ++i) {
+        if (integration_[i] < INTEGRATION_INF) {
+            q.push({i, 0});
+            visited[i] = 1;
+        }
+    }
+    while (!q.empty()) {
+        auto [cur, depth] = q.front();
+        q.pop();
+        int cx = cur % W;
+        int cz = cur / W;
+        uint16_t next_depth = static_cast<uint16_t>(
+            std::min<uint32_t>(static_cast<uint32_t>(depth) + 1u,
+                               INTEGRATION_INF - UNREACHABLE_BASE - 1u));
+        for (int n = 0; n < N_NEIGHBORS; ++n) {
+            int nx = cx + neighbor_dx[n];
+            int nz = cz + neighbor_dz[n];
+            if (nx < 0 || nx >= W || nz < 0 || nz >= H) continue;
+            int nidx = nz * W + nx;
+            if (visited[nidx]) continue;
+            // Don't propagate INTO blocked cells — they should remain
+            // unreachable so sample()'s push-out fallback fires for any
+            // unit that ends up inside a dilated obstacle.
+            if (grid_.get(nidx) == CostGrid::COST_BLOCKED) continue;
+            // Note: no Y-delta check here. We WANT cliff-gap cells (which
+            // Dijkstra rejected via Y check) to receive a flow direction
+            // toward the cliff edge of their own component. The unit will
+            // walk to the cliff base in XZ, then physics-collision against
+            // the cliff face stops them — which is the "as close as
+            // possible" behavior the design calls for.
+            visited[nidx] = 1;
+            integration_[nidx] = static_cast<uint16_t>(UNREACHABLE_BASE + next_depth);
+            q.push({nidx, next_depth});
+        }
+    }
 }
 
 void FlowField::compute_flow_directions() {

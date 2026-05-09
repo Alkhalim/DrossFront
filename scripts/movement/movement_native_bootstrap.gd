@@ -7,6 +7,7 @@ extends Node
 static var _server: Object = null
 static var _kernel: Object = null
 static var _terrain_sweep_pending: bool = false
+static var _building_sweep_pending: bool = false
 
 # Match the configure_map call below — keep these in sync if either changes.
 const GRID_W: int = 160
@@ -47,11 +48,16 @@ static func get_server(scene_root: Node) -> Object:
 		print_debug("[MovementNativeBootstrap] server configured: %dx%d cells @ %.1fm, agent radii small=1.0 / medium=1.4 / large=2.4" % [GRID_W, GRID_H, CELL_SIZE])
 		# Sweep buildings already in the scene tree into the cost grid so the
 		# first flow field built after server creation routes around them.
-		# Newly-constructed buildings are picked up by the mark_obstacle call
-		# in building.gd's _on_constructed hook (T20). This sweep covers the
-		# arena's pre-placed structures (HQ, starting yards, etc.) which never
-		# transition through _on_constructed.
-		_mark_existing_buildings(scene_root)
+		# DEFERRED one frame because get_server is typically called from a
+		# unit's MovementComponent._ready, and Godot's depth-first post-order
+		# _ready propagation means sibling buildings (e.g. PlayerHQ declared
+		# AFTER Units in the .tscn) haven't joined the "buildings" group yet
+		# at this point. Running the sweep immediately found 0 buildings on a
+		# scene that pre-places HQ. Deferring to process_frame guarantees all
+		# building._ready calls have completed and `add_to_group("buildings")`
+		# has run. Newly-constructed buildings are picked up additively by
+		# building.gd's mark_obstacle call in _on_constructed (T20).
+		_schedule_building_sweep(scene_root)
 		# Schedule the terrain sweep — needs the navmesh to be synced first,
 		# which doesn't happen until at least one process frame after scene
 		# load, so we defer.
@@ -151,6 +157,29 @@ static func _mark_terrain_off_navmesh(map_rid: RID) -> void:
 		[marked_count, total_cells, pct, OFF_MESH_DIST_THRESHOLD, y_min, y_max])
 
 
+## Defer the building sweep one process frame so all sibling buildings have
+## had their _ready run (and thus joined "buildings" group) before we walk it.
+static func _schedule_building_sweep(scene_root: Node) -> void:
+	if _building_sweep_pending:
+		return
+	_building_sweep_pending = true
+	var tree: SceneTree = scene_root.get_tree() if scene_root else null
+	if tree == null:
+		_building_sweep_pending = false
+		return
+	tree.process_frame.connect(_run_deferred_building_sweep.bind(scene_root), CONNECT_ONE_SHOT)
+
+
+static func _run_deferred_building_sweep(scene_root: Node) -> void:
+	_building_sweep_pending = false
+	if _server == null:
+		return
+	if scene_root == null or not is_instance_valid(scene_root):
+		return
+	_mark_existing_buildings(scene_root)
+	_mark_existing_nav_obstacles(scene_root)
+
+
 static func _mark_existing_buildings(scene_root: Node) -> void:
 	if scene_root == null:
 		return
@@ -178,6 +207,47 @@ static func _mark_existing_buildings(scene_root: Node) -> void:
 		_server.call("mark_obstacle", aabb, true)
 		building_count += 1
 	print_debug("[MovementNativeBootstrap] marked %d pre-placed buildings" % building_count)
+
+
+## Sweeps the "nav_obstacle" group for static, non-building props that need
+## to be in the cost grid (rocks, ruins, houseblock debris, etc.). These
+## don't go through building.gd's _on_constructed mark_obstacle hook, so
+## without an explicit sweep they're invisible to the flow field and units
+## walk into their colliders. Authors tag a prop by adding it to the
+## "nav_obstacle" group; footprint comes from optional `nav_footprint_size`
+## metadata (Vector3) or the AABB of the prop's first CollisionShape3D
+## descendant, with a 4x2x4 fallback.
+static func _mark_existing_nav_obstacles(scene_root: Node) -> void:
+	if scene_root == null:
+		return
+	var tree: SceneTree = scene_root.get_tree()
+	if tree == null:
+		return
+	var marked: int = 0
+	for n: Node in tree.get_nodes_in_group("nav_obstacle"):
+		if not is_instance_valid(n):
+			continue
+		if not (n is Node3D):
+			continue
+		var n3d: Node3D = n as Node3D
+		var aabb: AABB = _resolve_nav_obstacle_aabb(n3d)
+		_server.call("mark_obstacle", aabb, true)
+		marked += 1
+	print_debug("[MovementNativeBootstrap] marked %d pre-placed nav_obstacles" % marked)
+
+
+static func _resolve_nav_obstacle_aabb(n: Node3D) -> AABB:
+	# Author-supplied footprint via metadata; default 4x2x4 if absent. Set
+	# `nav_footprint_size: Vector3` on the prop's root node in the editor
+	# (Inspector → Node → Metadata → Add) to override.
+	var fp: Vector3 = Vector3(4, 2, 4)
+	if n.has_meta("nav_footprint_size"):
+		var meta: Variant = n.get_meta("nav_footprint_size")
+		if meta is Vector3:
+			fp = meta as Vector3
+	return AABB(
+		n.global_position - Vector3(fp.x * 0.5, 0.0, fp.z * 0.5),
+		fp)
 
 static func get_kernel(scene_root: Node) -> Object:
 	if _kernel == null:
