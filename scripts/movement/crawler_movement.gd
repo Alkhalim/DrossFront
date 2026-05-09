@@ -30,3 +30,11 @@ func _ready() -> void:
 	# (6u) gives more distance for decel to bring the chassis to rest
 	# cleanly instead of overshooting and orbiting the goal.
 	arrival_radius = 6.0
+
+
+## PF-B — crawlers always use the large agent class regardless of what's
+## in their .tres file. Their chassis radius is defined by the movement
+## component (this file), not by the stat resource, so authors can't
+## accidentally configure a crawler with the wrong cost-grid profile.
+func _agent_class_for_self() -> int:
+	return 2  # AGENT_CLASS_LARGE

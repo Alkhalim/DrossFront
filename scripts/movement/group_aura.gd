@@ -70,12 +70,18 @@ func _exit_tree() -> void:
 	field_ids.clear()
 
 static func _agent_class_for(unit: Node) -> int:
-	# PF-A pilot: Anvil Hound is the only migrated unit and is small class.
-	# PF-B widens this lookup to read from the unit's stat resource.
+	# PF-B: read pf_agent_class from the unit's stat resource. Crawlers
+	# explicitly use AGENT_CLASS_LARGE regardless of the stat field
+	# (CrawlerMovement._agent_class_for_self enforces it on registration);
+	# the stat field on a crawler can stay at its default. Falls back to
+	# AGENT_CLASS_SMALL when stats are missing or the field is absent
+	# (covers ghost previews and pre-PF-B .tres files).
 	if "stats" in unit:
-		var stats: Variant = unit.get("stats")
-		if stats != null and "id" in stats:
-			var id: String = stats.id as String
-			if id == "anvil_hound":
-				return AGENT_CLASS_SMALL
+		var stats: Resource = unit.get("stats") as Resource
+		if stats != null and "is_crawler" in stats and (stats.get("is_crawler") as bool):
+			return AGENT_CLASS_LARGE
+		if stats != null and "pf_agent_class" in stats:
+			var v: int = stats.get("pf_agent_class") as int
+			if v >= 0 and v <= 2:
+				return v
 	return AGENT_CLASS_SMALL

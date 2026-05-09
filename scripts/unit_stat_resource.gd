@@ -176,6 +176,16 @@ func can_target_air() -> bool:
 ## (v2 spec §1.3) — produced at the HQ but mechanically distinct from a mech.
 @export var is_crawler: bool = false
 
+## PF-B — agent class for the C++ steering kernel's flow-field cost grid.
+## 0 = small (1.0m radius dilation, light mechs / drones), 1 = medium
+## (1.4m, standard combat mechs / tanks), 2 = large (2.4m, crawlers /
+## heavy chassis). Drives both how aggressively the unit's path routes
+## around obstacles AND the per-class cost grid it samples — a small
+## unit can take corridors a large one cannot. Default 0 = small so
+## newly-defined units fall back to the cheapest, narrowest profile;
+## designers raise it explicitly for heavier mechs.
+@export_enum("Small", "Medium", "Large") var pf_agent_class: int = 0
+
 @export_group("Stealth")
 ## V3 §"Pillar 1 — Stealth System" — when true the unit camouflages
 ## itself when no enemy is within `detection_radius` and no recent

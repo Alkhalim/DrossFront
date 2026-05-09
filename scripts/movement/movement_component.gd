@@ -504,11 +504,27 @@ func _is_combat_engaged() -> bool:
 	return false
 
 
-## PF-A — agent class lookup for the steering kernel. Subclasses override
-## (GroundMovement keeps default small; Aircraft sets aircraft flag in PF-B;
-## Crawler returns large in PF-B).
+## PF-B — agent class lookup for the steering kernel. Reads
+## `pf_agent_class` from the parent unit's stats (0 = small / 1 = medium /
+## 2 = large). Falls back to 0 (small) when stats are missing or the
+## field doesn't exist (covers ghost previews, dummy units, and pre-PF-B
+## .tres files that haven't been re-saved with the new field).
+## Subclasses override to force a class regardless of stats — e.g.
+## CrawlerMovement always returns large because the chassis radius is
+## defined by the movement component, not the stat resource.
 func _agent_class_for_self() -> int:
-	return 0  # AGENT_CLASS_SMALL
+	var owner_unit: Node = get_parent()
+	if owner_unit == null:
+		return 0
+	var stats: Resource = owner_unit.get("stats") as Resource
+	if stats == null:
+		return 0
+	if not "pf_agent_class" in stats:
+		return 0
+	var v: int = stats.get("pf_agent_class") as int
+	if v < 0 or v > 2:
+		return 0
+	return v
 
 
 func _radius_for_self() -> float:
