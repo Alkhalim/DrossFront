@@ -42,6 +42,7 @@ void FlowFieldServer::configure_map(int grid_w, int grid_h, float cell_size,
     // would UB on the next sample(). configure_map is intended to be
     // called once at scene start, but this guard makes a re-config safe.
     fields_.clear();
+    cache_key_to_id_.clear();
     grid_w_ = grid_w;
     grid_h_ = grid_h;
     cell_size_ = cell_size;
@@ -70,15 +71,43 @@ FieldId FlowFieldServer::build_field(godot::Vector3 goal, int agent_class) {
         if (snapped < 0) return INVALID_FIELD_ID;
         goal_cell = snapped;
     }
+    // Cache hit: another agent already built a field for this exact
+    // (snapped goal cell, agent class) and it's still alive. Bump
+    // refcount and hand back the same FieldId. Avoids a redundant
+    // ~25k-cell Dijkstra when N units in combat all chase the same
+    // target, which is the dominant rebuild driver under high agent
+    // counts.
+    uint64_t key = cache_key_for(goal_cell, agent_class);
+    auto cit = cache_key_to_id_.find(key);
+    if (cit != cache_key_to_id_.end()) {
+        auto fit = fields_.find(cit->second);
+        if (fit != fields_.end()) {
+            fit->second.refcount += 1;
+            return cit->second;
+        }
+        // Stale cache entry — fall through and rebuild.
+        cache_key_to_id_.erase(cit);
+    }
     auto field = std::make_unique<FlowField>(*grid);
     if (!field->build_from(goal_cell)) return INVALID_FIELD_ID;
     FieldId id = next_field_id_++;
-    fields_[id] = FieldEntry{std::move(field), agent_class, goal_cell, false};
+    fields_[id] = FieldEntry{std::move(field), agent_class, goal_cell, false, 1};
+    cache_key_to_id_[key] = id;
     return id;
 }
 
 void FlowFieldServer::release_field(FieldId id) {
-    fields_.erase(id);
+    auto it = fields_.find(id);
+    if (it == fields_.end()) return;
+    it->second.refcount -= 1;
+    if (it->second.refcount > 0) return;
+    // Last holder dropped — remove from cache and destroy the field.
+    uint64_t key = cache_key_for(it->second.goal_cell, it->second.agent_class);
+    auto cit = cache_key_to_id_.find(key);
+    if (cit != cache_key_to_id_.end() && cit->second == id) {
+        cache_key_to_id_.erase(cit);
+    }
+    fields_.erase(it);
 }
 
 godot::Vector2 FlowFieldServer::sample(FieldId id, godot::Vector3 world_pos) {

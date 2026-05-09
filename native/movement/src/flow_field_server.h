@@ -62,9 +62,24 @@ private:
         int agent_class;
         int goal_cell;
         bool dirty;
+        // Refcount of GDScript-side handles holding this field. build_field
+        // increments on cache hit, release_field decrements; field is
+        // destroyed when refcount hits 0. Lets multiple units sharing
+        // (goal_cell, agent_class) reuse a single Dijkstra build instead
+        // of each rebuilding the same ~25k-cell graph.
+        int refcount;
     };
     std::unordered_map<FieldId, FieldEntry> fields_;
+    // Cache key = (goal_cell << 32) | agent_class. Maps a goal+class pair to
+    // its currently-live FieldId so build_field can short-circuit a Dijkstra
+    // rebuild when the same goal is requested by another agent.
+    std::unordered_map<uint64_t, FieldId> cache_key_to_id_;
     FieldId next_field_id_ = 1;
+
+    static uint64_t cache_key_for(int goal_cell, int agent_class) {
+        return (static_cast<uint64_t>(static_cast<uint32_t>(goal_cell)) << 32)
+               | static_cast<uint32_t>(agent_class);
+    }
 
     void rebuild_field(FieldEntry &entry);
 };
