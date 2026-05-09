@@ -718,8 +718,13 @@ func _process(delta: float) -> void:
 		var arc_y: float = _arc_height * 4.0 * t * (1.0 - t)
 		global_position = Vector3(xz_pos.x, xz_pos.y + arc_y, xz_pos.z)
 
-		# Orient missile along velocity direction
-		if t < 0.98:
+		# Orient missile along velocity direction. Stagger every other frame
+		# (toggle on the same counter as the FoW visibility check) — missile
+		# arcs change slowly relative to a 16 ms frame and a one-frame
+		# orientation lag is invisible against the projectile's small screen
+		# footprint and high speed. Halves the per-missile look_at + position
+		# calculation cost during heavy projectile traffic.
+		if t < 0.98 and (_fow_check_counter & 1) == 0:
 			var next_t: float = clampf(t + 0.05, 0.0, 1.0)
 			var next_xz: Vector3 = start_pos.lerp(target_pos, next_t)
 			var next_arc: float = _arc_height * 4.0 * next_t * (1.0 - next_t)
