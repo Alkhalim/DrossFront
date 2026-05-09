@@ -171,6 +171,27 @@ func clear_target() -> void:
 	super.clear_target()
 	path_waypoints = PackedVector3Array()
 	path_waypoint_idx = 0
+	# PF-A: under flag-on, the kernel keeps reading the unit's flow field
+	# and produces non-zero velocity even after the GDScript-side target
+	# is cleared. Combat AI's "stop and fire" then never actually stops
+	# the body — the kernel walks past attack range, combat re-issues
+	# command_move(chase_pos), and the unit visibly wiggles in place
+	# every tick. Set HALTED to make the kernel zero velocity, and
+	# release the active field so its cache slot can be reclaimed.
+	# AGENT_FLAG_HALTED bit is 1 << 2 = 4 (mirrors native types.h).
+	const AGENT_FLAG_HALTED: int = 4
+	if MovementFlags.use_flowfield() and kernel_handle != 0:
+		var scene: Node = get_tree().current_scene if get_tree() else null
+		if scene != null:
+			var kernel: Object = MovementNativeBootstrap.get_kernel(scene)
+			if kernel != null:
+				kernel.call("set_agent_flag", kernel_handle, AGENT_FLAG_HALTED, true)
+			if _kernel_field_id != 0:
+				var server: Object = MovementNativeBootstrap.get_server(scene)
+				if server != null:
+					server.call("release_field", _kernel_field_id)
+				_kernel_field_id = 0
+				_kernel_field_target = Vector3.INF
 
 ## Override of MovementComponent.arrival_target. When a path is active,
 ## return the path's final waypoint — the unit-level arrival poll uses

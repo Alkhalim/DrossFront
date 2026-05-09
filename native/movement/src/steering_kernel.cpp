@@ -78,6 +78,10 @@ void SteeringKernel::set_agent_target(AgentHandle handle, int group_id, FieldId 
     agents_.group_id[idx] = static_cast<uint32_t>(group_id);
     agents_.field_id[idx] = field_id;
     agents_.flags[idx] |= AGENT_FLAG_HAS_TARGET;
+    // Any new target acquisition clears HALTED — a halted unit being given
+    // a target should walk again. Avoids requiring every caller (goto_world,
+    // GroupAura.setup, combat-driven re-issue) to remember to clear the flag.
+    agents_.flags[idx] &= static_cast<uint8_t>(~AGENT_FLAG_HALTED);
 }
 
 void SteeringKernel::set_agent_flag(AgentHandle handle, int flag, bool value) {
