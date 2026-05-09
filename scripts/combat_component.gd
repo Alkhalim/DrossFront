@@ -133,6 +133,27 @@ var _phase: int = 0
 ## 6-phase stagger above.
 const VALIDATION_SUBSTAGGER: int = 2
 var _combat_tick_count: int = 0
+
+## Stand-and-fire lockout. When a unit issues a chase command_move
+## toward a target it can't yet hit, set this to (now + LOCKOUT_DURATION).
+## Combat ticks during the lockout skip:
+##   - chase command_move re-issue (the dominant per-tick cost during
+##     approach / pursuit phases)
+##   - heavy validation guards (leash + retaliation distance checks)
+##   - auto-target re-acquisition (already gated by `_current_target`
+##     being set, but explicit for clarity)
+## Lockout breaks early on:
+##   - forced_target dies / becomes invalid (already-existing checks
+##     near the top of the tick run regardless of lockout)
+##   - player command (clear_target, set_target, command_attack_move
+##     all reset _chase_lockout_until_msec)
+## Mood: engagements feel committed instead of twitchy, fits the
+## heavy-mech RTS pacing. Trade-off: a closer enemy walking past a
+## chasing unit is ignored until the lockout expires (~2 sec) — this
+## is the mood win, not a regression. Player retains full control via
+## explicit attack-target click.
+const COMBAT_LOCKOUT_DURATION_MSEC: int = 2000
+var _chase_lockout_until_msec: int = 0
 ## Cached result of `_unit.is_in_group("aircraft")`. Constant for the
 ## unit's lifetime, so cache once on _ready instead of paying the
 ## string-keyed group lookup on every combat tick + every search +
@@ -330,9 +351,17 @@ func _physics_process(delta: float) -> void:
 		return
 	delta *= float(STAGGER_FRAMES)
 	_combat_tick_count += 1
+	# Stand-and-fire lockout (see _chase_lockout_until_msec doc). While
+	# locked, the unit is committed to its current engagement — skip the
+	# chase command re-issue and the distance-based validation guards.
+	# forced_target validity is still checked every tick so the lockout
+	# breaks immediately when the target dies.
+	var now_msec: int = Time.get_ticks_msec()
+	var chase_locked: bool = now_msec < _chase_lockout_until_msec
 	# Heavy distance / sight-radius validation guards only need to fire on
-	# every Nth combat tick — see VALIDATION_SUBSTAGGER doc.
-	var run_heavy_validations: bool = (_combat_tick_count % VALIDATION_SUBSTAGGER) == 0
+	# every Nth combat tick — see VALIDATION_SUBSTAGGER doc. Also skipped
+	# entirely while chase-locked.
+	var run_heavy_validations: bool = (_combat_tick_count % VALIDATION_SUBSTAGGER) == 0 and not chase_locked
 
 	_fire_cooldown -= delta
 	_secondary_cooldown -= delta
@@ -522,7 +551,12 @@ func _physics_process(delta: float) -> void:
 		if _fow_cached and _fow_cached.has_method("is_visible_world"):
 			team_can_see = _fow_cached.call("is_visible_world", _current_target.global_position)
 	if dist > sight_r and not team_can_see:
-		_unit.command_move(_chase_position(_current_target, primary_range), false)
+		# Sight-lost chase: walk to last known position. Locked for
+		# COMBAT_LOCKOUT_DURATION_MSEC so we don't re-issue this chase
+		# every combat tick (the kernel field handles the actual motion).
+		if not chase_locked:
+			_unit.command_move(_chase_position(_current_target, primary_range), false)
+			_chase_lockout_until_msec = now_msec + COMBAT_LOCKOUT_DURATION_MSEC
 		return
 
 	# Hysteresis: once we've stopped to engage, treat the unit as in range
@@ -581,8 +615,13 @@ func _physics_process(delta: float) -> void:
 		# command_attack_move) or is lost (combat_ended emit).
 		# Pass `clear_combat=false` so command_move doesn't wipe the
 		# forced target we're chasing.
-		if forced_target and not _was_in_range:
+		# Approach chase: forced_target is set, unit hasn't reached engage
+		# threshold yet (_was_in_range stays false until first fire). Lock
+		# for COMBAT_LOCKOUT_DURATION_MSEC so we don't re-issue every tick
+		# while the kernel walks the unit toward the target.
+		if forced_target and not _was_in_range and not chase_locked:
 			_unit.command_move(_chase_position(_current_target, primary_range), false)
+			_chase_lockout_until_msec = now_msec + COMBAT_LOCKOUT_DURATION_MSEC
 
 
 func set_target(target: Node3D) -> void:
@@ -604,6 +643,10 @@ func set_target(target: Node3D) -> void:
 		_was_in_range = false
 		if _unit.has_method("stop"):
 			_unit.stop()
+		# Player explicitly aimed us at a new target — let the combat tick
+		# act on it immediately instead of waiting out any active chase
+		# lockout from the previous engagement.
+		_chase_lockout_until_msec = 0
 	forced_target = target
 	_current_target = target
 	attack_move_target = Vector3.INF
@@ -619,6 +662,8 @@ func clear_target() -> void:
 	_current_target = null
 	attack_move_target = Vector3.INF
 	_was_in_range = false
+	# Player command supersedes any in-flight chase commitment.
+	_chase_lockout_until_msec = 0
 	if was_engaged:
 		combat_ended.emit()
 
@@ -629,6 +674,7 @@ func command_attack_move(pos: Vector3) -> void:
 	forced_target = null
 	_current_target = null
 	_was_in_range = false
+	_chase_lockout_until_msec = 0
 	if was_engaged:
 		combat_ended.emit()
 	_unit.has_move_order = true
