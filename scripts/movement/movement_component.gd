@@ -117,7 +117,19 @@ func _ready() -> void:
 		# methods on GDScript resources, and was returning null silently,
 		# leaving kernel_handle = 0 and the orchestrator's flag-on path
 		# inactive.
-		if MovementFlags.use_flowfield():
+		# PF-B: aircraft don't register with the kernel until the kernel's
+		# aircraft branch lands (Stage 4 / spec §10 phase 6). Without this
+		# guard an aircraft would register, the kernel would have nothing
+		# to do with it (no flow field, no aircraft-seek branch), and the
+		# orchestrator's flag-on path would call _apply_kernel_velocity
+		# with a zero vector — overriding AircraftMovement's altitude /
+		# free-flight logic and leaving the aircraft glued to Y=0.
+		# kernel_handle stays 0 so the orchestrator falls back to
+		# tick_movement, which AircraftMovement implements.
+		var skip_kernel: bool = false
+		if _opts_unit_is_aircraft():
+			skip_kernel = true
+		if MovementFlags.use_flowfield() and not skip_kernel:
 			var kernel: Object = MovementNativeBootstrap.get_kernel(scene)
 			if kernel != null:
 				kernel_handle = kernel.call("register_agent",
@@ -529,6 +541,22 @@ func _agent_class_for_self() -> int:
 
 func _radius_for_self() -> float:
 	return 0.6  # default small radius
+
+
+## True when the parent unit's stat resource has is_aircraft = true.
+## Used by _ready to skip kernel registration for aircraft until the
+## kernel aircraft branch lands. Robust to missing stats / missing
+## field — returns false in those cases so non-aircraft units register.
+func _opts_unit_is_aircraft() -> bool:
+	var owner_unit: Node = get_parent()
+	if owner_unit == null:
+		return false
+	var stats: Resource = owner_unit.get("stats") as Resource
+	if stats == null:
+		return false
+	if not "is_aircraft" in stats:
+		return false
+	return stats.get("is_aircraft") as bool
 
 
 ## PF-A — called by MovementOrchestrator under flag-on with the velocity

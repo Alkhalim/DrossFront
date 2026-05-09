@@ -4,11 +4,42 @@
 
 namespace {
     // Tunables — match spec §12.
-    constexpr float SEPARATE_DISTANCE      = 2.5f;
-    constexpr float SEPARATE_REPEL         = 6.0f;
+    // SEPARATE_BUFFER is the slack added on top of the summed agent radii
+    // before separation force kicks in. Two large agents (radius 2.4 each)
+    // need ~4.8m to not overlap physically; with a 0.6m buffer separation
+    // engages at 5.4m — comfortably wider than the bodies. Two small
+    // agents (radius 1.0 each) get 2.6m — close to the previous constant
+    // 2.5m so small-unit behavior is unchanged.
+    constexpr float SEPARATE_BUFFER        = 0.6f;
+    // Reduced from 6.0 — at peak (touching contact) the previous repel
+    // produced a per-tick lateral kick large enough that the inertia
+    // integrator could flip lateral velocity every tick when two units
+    // ran roughly parallel (one tick they were on your right, next tick
+    // on your left), driving a visible left-right wiggle within groups.
+    // 3.0 keeps separation effective at preventing overlap but soft
+    // enough that the integrator can't reverse lateral motion in one
+    // tick at typical group speeds.
+    constexpr float SEPARATE_REPEL         = 3.0f;
+    // Hard cap on the per-tick separation contribution. Without this,
+    // a unit caught between two others can accumulate sep up to
+    // SEPARATE_REPEL × 2 (one push from each peer), and at peak that's
+    // enough to overshoot the centerline and ricochet — same wiggle
+    // pattern. Cap at half max_speed so separation can nudge a unit
+    // sideways without ever reversing its forward motion.
+    constexpr float SEPARATE_MAX_FRACTION  = 0.5f;
     constexpr float AVOID_DISTANCE         = 3.0f;     // unused in PF-A (no buildings list yet)
     constexpr float AVOID_REPEL            = 24.0f;
-    constexpr float COHESION_MAX_MAGNITUDE = 2.0f;
+    // Cohesion as a fraction of the unit's own max_speed. A 5 m/s hound
+    // gets 1.5 m/s pull, a 2 m/s crawler 0.6 m/s. Without per-unit scaling
+    // a constant 2 m/s cohesion was 40% of a hound's speed but ~100% of a
+    // crawler's, leaving slow chassis dragged everywhere by the centroid.
+    constexpr float COHESION_FRACTION      = 0.3f;
+    // Cohesion deadband — no pull when the unit is already within this
+    // distance of the group centroid. Avoids the "always drifting toward
+    // the middle" pile-up that made mixed-size groups bump constantly.
+    // Within deadband, only SEPARATE acts — so units settle into their
+    // natural body-radius spacing instead of stacking on the centroid.
+    constexpr float COHESION_DEADBAND      = 4.0f;
     constexpr float COHESION_QUERY_RADIUS  = 16.0f;    // unused in PF-A (no group centroid yet)
 }
 
@@ -140,20 +171,40 @@ void SteeringKernel::tick(float delta) {
         // SEPARATE pass — pairwise O(N^2). Acceptable at PF-A scale (one
         // squad type pilot, < 50 agents). PF-C swaps in SpatialIndex via a
         // GDScript-callable bridge.
+        // Per-pair separation distance: summed agent radii + SEPARATE_BUFFER.
+        // Without this, a constant SEPARATE_DISTANCE meant two large agents
+        // (radius 2.4 each) only repelled within 2.5m even though their
+        // physical bodies overlap until 4.8m+ apart — they constantly
+        // bumped each other in mixed-size groups.
+        const float my_radius = agents_.radius[i];
         godot::Vector3 sep = {};
         for (int j = 0; j < N; ++j) {
             if (j == i || !agents_.alive[j]) continue;
             godot::Vector3 dp = pos - agents_.pos[j];
             dp.y = 0.0f;
             float d = dp.length();
-            if (d <= 0.001f || d > SEPARATE_DISTANCE) continue;
-            float strength = SEPARATE_REPEL * (1.0f - d / SEPARATE_DISTANCE);
+            float min_dist = my_radius + agents_.radius[j] + SEPARATE_BUFFER;
+            if (d <= 0.001f || d > min_dist) continue;
+            float strength = SEPARATE_REPEL * (1.0f - d / min_dist);
             sep += dp.normalized() * strength;
         }
+        // Cap separation magnitude so a unit caught between two peers
+        // (each contributing repel) can't accumulate enough force to
+        // reverse its forward motion. See SEPARATE_MAX_FRACTION doc.
+        float sep_len = sep.length();
+        float sep_cap = max_speed * SEPARATE_MAX_FRACTION;
+        if (sep_len > sep_cap) sep *= (sep_cap / sep_len);
 
         // COHESION — toward same-group centroid (computed on the fly here;
         // GroupAura caches it later when wired up via group_id lookup tables).
         // Skipped on arrival so it doesn't fight SEPARATE at the destination.
+        // Two refinements over the original constant cap:
+        //   - Deadband: no cohesion when within COHESION_DEADBAND of centroid.
+        //     Prevents the "always pulling toward middle" pile-up that made
+        //     mixed-size groups bump into each other constantly.
+        //   - Fraction of own max_speed: a 5 m/s hound gets up to 1.5 m/s
+        //     pull, a 2 m/s crawler 0.6 m/s. The previous absolute 2 m/s cap
+        //     dragged slow chassis around at full speed.
         godot::Vector3 coh = {};
         if (!at_goal_or_unreachable) {
             godot::Vector3 centroid = {};
@@ -169,8 +220,16 @@ void SteeringKernel::tick(float delta) {
                 coh = centroid - pos;
                 coh.y = 0.0f;
                 float clen = coh.length();
-                if (clen > COHESION_MAX_MAGNITUDE) {
-                    coh *= (COHESION_MAX_MAGNITUDE / clen);
+                if (clen <= COHESION_DEADBAND) {
+                    coh = godot::Vector3();
+                } else {
+                    // Push effective magnitude down by the deadband so the
+                    // gradient is continuous at the boundary instead of
+                    // stepping from 0 to full pull.
+                    float effective = clen - COHESION_DEADBAND;
+                    float cohesion_max = max_speed * COHESION_FRACTION;
+                    if (effective > cohesion_max) effective = cohesion_max;
+                    coh = (coh / clen) * effective;
                 }
             }
         }
