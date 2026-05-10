@@ -31,7 +31,7 @@ window/stretch/mode="canvas_items"
 [drossfront]
 
 movement/use_new_system=true
-movement/use_flowfield=false
+movement/use_flowfield=true
 
 [gui]
 
@@ -85,10 +85,12 @@ camera_zoom_out={
 # RTS-scale physics. The default 60 Hz burned ~75% of a 16 ms frame
 # budget on movement scripts. Tried physics_interpolation for visual
 # smoothness compensation but it produced swap_chain_resize errors
-# on Windows + RTX driver. Currently at 20 Hz — about a third the
-# default cost. This is the typical lower bound for RTS pacing;
-# below this, target acquisition and click responsiveness feel
-# laggy. Anything that hardcoded 1.0/60.0 (stuck detector) reads
+# on Windows + RTX driver. Currently at 10 Hz — about a sixth the
+# default cost. This is at the low end for RTS pacing; below this,
+# target acquisition and click responsiveness start to feel laggy.
+# Once the native steering kernel lands and the per-frame movement
+# budget recovers, raise this back toward 20–30 Hz for smoother
+# motion. Anything that hardcoded 1.0/60.0 (stuck detector) reads
 # Engine.physics_ticks_per_second so the threshold scales.
 common/physics_ticks_per_second=10
 
