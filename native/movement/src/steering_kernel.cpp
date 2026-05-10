@@ -50,6 +50,41 @@ namespace {
     // natural body-radius spacing instead of stacking on the centroid.
     constexpr float COHESION_DEADBAND      = 4.0f;
     constexpr float COHESION_QUERY_RADIUS  = 16.0f;    // unused in PF-A (no group centroid yet)
+
+    // Stuck detector — spec §7 + §12.
+    //
+    // Per-agent rolling displacement window. Each tick we record actual
+    // displacement (pos - prev_pos), drop the oldest sample, and compute
+    // mean(window) / (max_speed × delta). Below threshold for the whole
+    // window means the agent isn't making progress toward whatever its
+    // SEEK is asking for.
+    //
+    // 20 ticks at our 10 Hz physics is 2.0 s of memory — long enough to
+    // ride out a momentary jam (peers shoving past each other on a
+    // choke entrance), short enough that genuine wedging escalates
+    // before the player notices a rooted unit.
+    constexpr int   STUCK_WINDOW_TICKS                 = 20;
+    // Below this fraction of expected per-tick distance, count the tick
+    // as "no progress". 0.10 is generous enough that crawler chassis at
+    // 2 m/s × 0.1 s = 0.2 m / tick still register as moving when they
+    // make ≥0.02 m / tick — but a fully wedged unit (~0 m / tick) trips.
+    constexpr float STUCK_PROGRESS_RATIO_THRESHOLD     = 0.10f;
+    // Any single tick above this resets the escalation level. A flock
+    // unit briefly stalled by a peer then ramming free shouldn't keep
+    // a stale L1 cooldown that fires a second later.
+    constexpr float STUCK_PROGRESS_RATIO_RESET         = 0.50f;
+    // Level 1: perpendicular push-out duration. Spec calls 10 ticks.
+    constexpr int   STUCK_LEVEL1_PUSHOUT_DURATION      = 10;
+    // Cooldowns are wall-clock seconds (not ticks) so they're stable if
+    // the physics rate ever changes again. 1.5 s after L1 fires before
+    // we're allowed to fire L1 again or escalate to L2.
+    constexpr float STUCK_LEVEL1_COOLDOWN_SEC          = 1.5f;
+    constexpr float STUCK_LEVEL2_COOLDOWN_SEC          = 3.0f;
+    // Multiplier applied to max_speed for the push-out vector magnitude.
+    // 1.0 = "shove at full forward speed in the perpendicular direction".
+    // We feed the result into the same desired-velocity composition path
+    // so the inertia integrator still bounds the per-tick velocity change.
+    constexpr float STUCK_PUSHOUT_STRENGTH             = 1.0f;
 }
 
 namespace drossfront {
