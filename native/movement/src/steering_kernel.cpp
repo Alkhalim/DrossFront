@@ -74,12 +74,12 @@ namespace {
     // a stale L1 cooldown that fires a second later.
     constexpr float STUCK_PROGRESS_RATIO_RESET         = 0.50f;
     // Level 1: perpendicular push-out duration. Spec calls 10 ticks.
-    constexpr int   STUCK_LEVEL1_PUSHOUT_DURATION      = 10;
+    constexpr int   STUCK_LEVEL1_PUSHOUT_DURATION_TICKS = 10;
     // Cooldowns are wall-clock seconds (not ticks) so they're stable if
     // the physics rate ever changes again. 1.5 s after L1 fires before
     // we're allowed to fire L1 again or escalate to L2.
     constexpr float STUCK_LEVEL1_COOLDOWN_SEC          = 1.5f;
-    constexpr float STUCK_LEVEL2_COOLDOWN_SEC          = 3.0f;
+    constexpr float STUCK_LEVEL2_COOLDOWN_SEC          = 3.0f;  // terminal — L2 has no further escalation; the cooldown just gates re-firing if the unit re-acquires a target via set_agent_target
     // Multiplier applied to max_speed for the push-out vector magnitude.
     // 1.0 = "shove at full forward speed in the perpendicular direction".
     // We feed the result into the same desired-velocity composition path
