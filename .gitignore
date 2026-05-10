@@ -36,3 +36,15 @@ export/
 addons/movement_native/bin/*.lib
 addons/movement_native/bin/*.exp
 addons/movement_native/bin/*.pdb
+
+# Linker temp DLLs that show up if the build doesn't atomically rename
+# the final output (file was held open or a previous run was killed
+# mid-link). The real DLL has no leading tilde.
+addons/movement_native/bin/~*.dll
+
+# Native build outputs and Godot's auto-imported sidecars for them.
+# C++ object files and the .obj.import resources Godot generates when
+# it scans the native source tree as a project resource.
+native/**/*.obj
+native/**/*.os
+native/**/*.obj.import
