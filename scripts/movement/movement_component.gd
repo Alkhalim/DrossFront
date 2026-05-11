@@ -551,18 +551,8 @@ func _agent_class_for_self() -> int:
 	return v
 
 
-## Per-component kernel agent radius. Defaults to 0.6 (single soldier).
-## Squad-Units set this BEFORE add_child(gm) so the kernel registers each
-## squad with a footprint that matches its formation_spacing × max-offset
-## geometry — without this, every squad reported 0.6m and SEPARATE only
-## kicked in at ~1.8m even though 5-unit squads are visually 3-5m wide,
-## causing attack-target convergence to pile squads into the front-most
-## one. See unit.gd at the GroundMovement creation site.
-var kernel_radius: float = 0.6
-
-
 func _radius_for_self() -> float:
-	return kernel_radius
+	return 0.6  # default small radius
 
 
 ## True when the parent unit's stat resource has is_aircraft = true.

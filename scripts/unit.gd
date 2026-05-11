@@ -452,21 +452,6 @@ func _ready() -> void:
 		gm.max_accel = stats.speed * 6.0  # TODO(PA-21): tune accel curve per-class via UnitStatResource
 		gm.max_turn_rate_rad_s = TAU * 1.0  # TODO(PA-21): per-class turn rate via UnitStatResource (default ≈ 1 rotation/sec)
 		gm.agent_profile = AgentProfile.new(0.6, 0.5, 35.0, &"squad_default")  # TODO(PA-21): per-class agent profile (radius/climb/slope)
-		# Squad-aware kernel agent radius. The kernel registers each squad
-		# as a single agent and uses radius for pairwise SEPARATE distance
-		# (sum-of-radii + buffer). Without per-squad sizing every squad
-		# reported 0.6m and squads only pushed apart within 1.8m, even
-		# though a 5-unit formation is 3-5m wide — converging attack
-		# orders piled squads into the front-most one. Compute from the
-		# same formation_spacing used by _build_squad_visuals; max member
-		# offset magnitude in FORMATION_OFFSETS[5] is sqrt(1² + 0.85²)
-		# ≈ 1.31. 0.5 is an approximation for member body half-width.
-		# Solo units (squad_size 1) stay at the default 0.6.
-		if stats.squad_size > 1:
-			var radius_shape: Dictionary = CLASS_SHAPES.get(stats.unit_class, CLASS_SHAPES[&"medium"])
-			radius_shape = _maybe_override_shape_for_unit(radius_shape)
-			var radius_spacing: float = radius_shape.get("formation_spacing", 1.5) as float
-			gm.kernel_radius = maxf(0.6, radius_spacing * 1.31 + 0.5)
 		add_child(gm)
 		_movement_cached = gm
 	else:
