@@ -796,13 +796,23 @@ func _build_pause_settings_dialog() -> void:
 		label.custom_minimum_size = Vector2(80, 24)
 		label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85, 1.0))
 		row.add_child(label)
+		# Slider is 0..100 percent. 0 fires the bus mute flag (true silence,
+		# not -40 dB leakage); 1..100 maps via linear_to_db for perceptually-
+		# smooth steps. Reads the current bus state at panel-open time so
+		# changes made elsewhere (main menu settings) reflect here.
 		var slider := HSlider.new()
 		slider.custom_minimum_size = Vector2(280, 24)
-		slider.min_value = -40.0
-		slider.max_value = 6.0
+		slider.min_value = 0.0
+		slider.max_value = 100.0
 		slider.step = 1.0
 		var bus_idx: int = AudioServer.get_bus_index(entry["bus"] as String)
-		slider.value = AudioServer.get_bus_volume_db(bus_idx) if bus_idx >= 0 else 0.0
+		if bus_idx >= 0:
+			if AudioServer.is_bus_mute(bus_idx):
+				slider.value = 0.0
+			else:
+				slider.value = clampf(db_to_linear(AudioServer.get_bus_volume_db(bus_idx)) * 100.0, 0.0, 100.0)
+		else:
+			slider.value = 0.0
 		slider.value_changed.connect(_on_bus_volume_changed.bind(entry["bus"] as String))
 		slider.process_mode = Node.PROCESS_MODE_ALWAYS
 		row.add_child(slider)
@@ -878,10 +888,19 @@ func _on_pause_restart() -> void:
 	get_tree().reload_current_scene()
 
 
-func _on_bus_volume_changed(db: float, bus_name: String) -> void:
+func _on_bus_volume_changed(percent: float, bus_name: String) -> void:
+	## Slider value is 0..100 percent. 0 = full mute via the bus's mute
+	## flag (guarantees silence, not just very-low-dB leakage). 1..100
+	## maps to linear-to-dB for perceptually-smooth steps. Mirrors the
+	## main-menu options handler in main_menu.gd::_on_bus_volume_changed.
 	var idx: int = AudioServer.get_bus_index(bus_name)
-	if idx >= 0:
-		AudioServer.set_bus_volume_db(idx, db)
+	if idx < 0:
+		return
+	if percent <= 0.0:
+		AudioServer.set_bus_mute(idx, true)
+	else:
+		AudioServer.set_bus_mute(idx, false)
+		AudioServer.set_bus_volume_db(idx, linear_to_db(percent / 100.0))
 
 
 func _on_volume_changed(db: float) -> void:
