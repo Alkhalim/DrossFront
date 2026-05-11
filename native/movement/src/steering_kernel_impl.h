@@ -29,6 +29,13 @@ public:
     void set_agent_pos(AgentHandle handle, godot::Vector3 world_pos);
     void set_agent_target(AgentHandle handle, int group_id, FieldId field_id, int stance);
     void set_agent_flag(AgentHandle handle, int flag, bool value);
+    // Aircraft / drone direct-seek target. Sets HAS_TARGET, clears HALTED,
+    // resets stuck detector (same semantics as set_agent_target since
+    // re-issuing a target should give the agent a fresh escalation window).
+    // Doesn't touch field_id (aircraft don't sample fields). Caller should
+    // also set AGENT_FLAG_IS_AIRCRAFT once via set_agent_flag at
+    // registration time (B3 wires this from AircraftMovement).
+    void set_agent_target_pos(AgentHandle handle, godot::Vector3 target_pos);
     godot::Vector3 get_velocity(AgentHandle handle);
     void tick(float delta);
 

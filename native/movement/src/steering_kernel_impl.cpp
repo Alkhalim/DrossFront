@@ -169,6 +169,25 @@ void SteeringKernelImpl::set_agent_target(AgentHandle handle, int group_id, Fiel
     // continuous motion.
 }
 
+void SteeringKernelImpl::set_agent_target_pos(AgentHandle handle, godot::Vector3 target_pos) {
+    int idx = handle_to_idx(handle);
+    if (idx < 0 || idx >= agents_.count || !agents_.alive[idx]) return;
+    agents_.target_pos[idx] = target_pos;
+    agents_.flags[idx] |= AGENT_FLAG_HAS_TARGET;
+    agents_.flags[idx] &= static_cast<uint8_t>(~AGENT_FLAG_HALTED);
+    // Same stuck-detector reset as set_agent_target (see PF-B-A6 fix).
+    // Without this, an aircraft that abandoned (stuck_level==2) and got
+    // a new target_pos would never escalate again.
+    agents_.stuck_level[idx] = 0;
+    agents_.stuck_cooldown_remaining[idx] = 0.0f;
+    agents_.stuck_window_count[idx] = 0;
+    agents_.stuck_window_sum[idx] = 0.0f;
+    agents_.stuck_window_head[idx] = 0;
+    agents_.stuck_window[idx].fill(0.0f);
+    agents_.stuck_pushout_frames_left[idx] = 0;
+    agents_.flags[idx] &= static_cast<uint8_t>(~AGENT_FLAG_STUCK_PUSHOUT);
+}
+
 void SteeringKernelImpl::set_agent_flag(AgentHandle handle, int flag, bool value) {
     int idx = handle_to_idx(handle);
     if (idx < 0 || idx >= agents_.count || !agents_.alive[idx]) return;

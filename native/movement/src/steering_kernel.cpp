@@ -20,6 +20,8 @@ void SteeringKernel::_bind_methods() {
                          &SteeringKernel::set_agent_target);
     ClassDB::bind_method(D_METHOD("set_agent_flag", "handle", "flag", "value"),
                          &SteeringKernel::set_agent_flag);
+    ClassDB::bind_method(D_METHOD("set_agent_target_pos", "handle", "target_pos"),
+                         &SteeringKernel::set_agent_target_pos);
     ClassDB::bind_method(D_METHOD("get_velocity", "handle"),
                          &SteeringKernel::get_velocity);
     ClassDB::bind_method(D_METHOD("tick", "delta"),
