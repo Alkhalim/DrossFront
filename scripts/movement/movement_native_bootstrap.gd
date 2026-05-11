@@ -178,6 +178,7 @@ static func _run_deferred_building_sweep(scene_root: Node) -> void:
 		return
 	_mark_existing_buildings(scene_root)
 	_mark_existing_nav_obstacles(scene_root)
+	_mark_existing_terrain_props(scene_root)
 
 
 static func _mark_existing_buildings(scene_root: Node) -> void:
@@ -248,6 +249,94 @@ static func _resolve_nav_obstacle_aabb(n: Node3D) -> AABB:
 	return AABB(
 		n.global_position - Vector3(fp.x * 0.5, 0.0, fp.z * 0.5),
 		fp)
+
+
+## Sweeps the "terrain" group for static physical obstacles (rocks, ruins,
+## scrap piles, boulders, fissures, forest trees, skyline features) that
+## collide with units but aren't buildings. These are created procedurally
+## by test_arena_controller.gd and ForestTree; they don't go through
+## building.gd's mark_obstacle hook so they were invisible to the flow field,
+## causing units to flow into them and get physically stuck.
+##
+## Exclusions to avoid false positives:
+##   - Nodes in the "elevation" group (plateaus and ramps): already handled
+##     by _mark_terrain_off_navmesh which marks their cliff-side cells as
+##     off-navmesh.
+##   - Nodes whose collision_layer does NOT have bit 2 set (layer 3, value 4):
+##     catches GroundCollision (layer 1) which is in "terrain" for navmesh
+##     baking but must stay walkable.
+##
+## Footprint: derived from the first CollisionShape3D child's shape extents
+## so the marked AABB matches the actual physics collision, not a guess.
+## Falls back to 3x2x3 if no CollisionShape3D is found.
+static func _mark_existing_terrain_props(scene_root: Node) -> void:
+	if scene_root == null:
+		return
+	var tree: SceneTree = scene_root.get_tree()
+	if tree == null:
+		return
+	var marked: int = 0
+	var skipped_elevation: int = 0
+	var skipped_layer: int = 0
+	for n: Node in tree.get_nodes_in_group("terrain"):
+		if not is_instance_valid(n):
+			continue
+		if not (n is StaticBody3D):
+			continue
+		# Skip plateaus and ramps — they're terrain but units walk ON them.
+		if n.is_in_group("elevation"):
+			skipped_elevation += 1
+			continue
+		var sb: StaticBody3D = n as StaticBody3D
+		# collision_layer bit 2 (value 4) = obstacle layer used by all terrain
+		# props spawned by test_arena_controller.gd and ForestTree. Bit 0
+		# (value 1) is the ground plane; skip it.
+		if (sb.collision_layer & 4) == 0:
+			skipped_layer += 1
+			continue
+		var aabb: AABB = _terrain_prop_aabb(sb)
+		_server.call("mark_obstacle", aabb, true)
+		marked += 1
+	print_debug("[MovementNativeBootstrap] marked %d pre-placed terrain props as flow-field obstacles (skipped %d elevation, %d non-obstacle-layer)" % [marked, skipped_elevation, skipped_layer])
+
+
+## Derives an AABB for a terrain StaticBody3D from its first CollisionShape3D
+## child. Uses the shape's extents (BoxShape3D.size, CylinderShape3D.radius /
+## height, etc.) so the marked region matches the physics collider. Falls back
+## to 3x2x3 if no recognisable shape is found.
+static func _terrain_prop_aabb(sb: StaticBody3D) -> AABB:
+	# Walk direct children only — terrain pieces have one CollisionShape3D
+	# directly under the StaticBody3D root.
+	for child: Node in sb.get_children():
+		if not (child is CollisionShape3D):
+			continue
+		var cs: CollisionShape3D = child as CollisionShape3D
+		if cs.shape == null:
+			continue
+		var ext: Vector3
+		if cs.shape is BoxShape3D:
+			var bs: BoxShape3D = cs.shape as BoxShape3D
+			ext = bs.size * 0.5
+		elif cs.shape is CylinderShape3D:
+			var cy: CylinderShape3D = cs.shape as CylinderShape3D
+			ext = Vector3(cy.radius, cy.height * 0.5, cy.radius)
+		elif cs.shape is SphereShape3D:
+			var sp: SphereShape3D = cs.shape as SphereShape3D
+			ext = Vector3(sp.radius, sp.radius, sp.radius)
+		elif cs.shape is CapsuleShape3D:
+			var cap: CapsuleShape3D = cs.shape as CapsuleShape3D
+			ext = Vector3(cap.radius, cap.height * 0.5 + cap.radius, cap.radius)
+		else:
+			# ConvexPolygon / ConcavePolygon: use global AABB from the shape's
+			# bounding box. get_debug_mesh is expensive; skip and use fallback.
+			break
+		# The shape's position is relative to the StaticBody3D; account for it.
+		var world_center: Vector3 = sb.global_position + cs.position
+		return AABB(world_center - ext, ext * 2.0)
+	# Fallback: 3x2x3 footprint centred on the body's global position.
+	var fallback: Vector3 = Vector3(3.0, 2.0, 3.0)
+	return AABB(sb.global_position - fallback * 0.5, fallback)
+
 
 static func get_kernel(scene_root: Node) -> Object:
 	if _kernel == null:
