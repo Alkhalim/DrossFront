@@ -23,12 +23,6 @@ env.Append(LIBPATH=["../godot-cpp/bin/"])
 env.Append(LIBS=["libgodot-cpp.windows.template_debug.x86_64"])
 
 sources = ["test_main.cpp", "test_cost_grid.cpp", "test_flow_field.cpp",
-           "../src/cost_grid.cpp", "../src/flow_field.cpp"]
-# NOTE: SteeringKernel and FlowFieldServer tests deferred to PF-B.
-# Both classes derive from godot::Object, whose constructor SIGSEGVs
-# without a loaded Godot runtime. The proper fix is to refactor them
-# into Impl classes (plain C++) wrapped by thin Object façades —
-# tests would link the Impl classes only. Plan PF-A T14 spec covers
-# this fallback; we punt the refactor to PF-B alongside the broader
-# entity migration so this PR stays scoped.
+           "../src/cost_grid.cpp", "../src/flow_field.cpp",
+           "../src/steering_kernel_impl.cpp", "../src/flow_field_server_impl.cpp"]
 env.Program(target="run_tests", source=sources)
