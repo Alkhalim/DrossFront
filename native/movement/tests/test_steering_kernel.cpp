@@ -36,7 +36,7 @@ TEST_CASE("stuck detector — displacement window populates and rolls") {
         k.tick(0.1f);
         p.x += 0.5f;
     }
-    int idx = static_cast<int>(h) - 1;  // handle to SoA index
+    int idx = k.test_handle_to_idx(h);
     CHECK(k.test_get_progress_ratio(idx, 0.1f) == doctest::Approx(1.0f).epsilon(0.05));
 }
 
@@ -56,7 +56,7 @@ TEST_CASE("stuck detector — stationary agent reports near-zero progress") {
         k.set_agent_pos(h, godot::Vector3(0, 0, 0));
         k.tick(0.1f);
     }
-    int idx = static_cast<int>(h) - 1;
+    int idx = k.test_handle_to_idx(h);
     float ratio = k.test_get_progress_ratio(idx, 0.1f);
     CHECK(ratio < 0.05f);
     // Window count should have hit STUCK_WINDOW_TICKS.
@@ -80,6 +80,6 @@ TEST_CASE("stuck detector — newly registered agent reports progress=1.0 (no fa
     k.set_agent_pos(h, godot::Vector3(0, 0, 0));
     k.tick(0.1f);
 
-    int idx = static_cast<int>(h) - 1;
+    int idx = k.test_handle_to_idx(h);
     CHECK(k.test_get_progress_ratio(idx, 0.1f) == doctest::Approx(1.0f));
 }
