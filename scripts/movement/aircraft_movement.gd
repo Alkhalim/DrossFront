@@ -36,19 +36,26 @@ func _ready() -> void:
 	# in place when the aircraft "arrived". 6 u gives the inertia
 	# step room to converge cleanly.
 	arrival_radius = 6.0
-	# Altitude snap on spawn: move the body to base_altitude immediately
-	# so the unit never sits at Y=0 waiting for its first goto_world.
-	# Also push an initial target_pos = current (snapped) position so the
-	# kernel's AIRCRAFT SEEK has a finite target to aim at — result is
-	# hover-in-place until a move order arrives.
+	# Altitude snap on spawn — deferred. Godot's spawn order is
+	# `instantiate → add_child (triggers _ready) → global_position = pos`,
+	# so at _ready time the body is still at (0,0,0). A direct snap here
+	# would write Y=base_altitude at the origin, and an immediate
+	# set_agent_target_pos would point the kernel's AIRCRAFT SEEK at
+	# (0, base_altitude, 0) — the middle of the map. Deferring to the
+	# next idle frame guarantees the spawner has placed the body first.
+	#
+	# We DON'T call set_agent_target_pos here — that would set HAS_TARGET
+	# and force the kernel to SEEK toward our current position. Without
+	# HAS_TARGET set, the kernel tick() short-circuits and the aircraft
+	# simply hovers wherever the orchestrator's set_agent_pos mirrors
+	# from _body.global_position. First real goto_world sets both the
+	# target and HAS_TARGET correctly.
+	call_deferred("_snap_altitude_on_spawn")
+
+
+func _snap_altitude_on_spawn() -> void:
 	if _body != null:
 		_body.global_position.y = base_altitude
-		if kernel_handle != 0:
-			var scene: Node = get_tree().current_scene if get_tree() else null
-			if scene != null:
-				var kernel: Object = MovementNativeBootstrap.get_kernel(scene)
-				if kernel != null:
-					kernel.call("set_agent_target_pos", kernel_handle, _body.global_position)
 
 
 func goto_world(world_pos: Vector3) -> void:
