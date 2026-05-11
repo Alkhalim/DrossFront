@@ -11,6 +11,11 @@ signal combat_ended()
 
 var _unit: Node = null  # Parent Unit — accessed via duck typing to avoid class resolution issues
 var _current_target: Node3D = null
+## True after the unit has fired at least one shot at _current_target.
+## Reset when _current_target changes (new target = new engagement).
+## Pre-engagement switches are free; post-engagement switches respect
+## the 2-second stand-and-fire lockout.
+var _has_fired_at_current_target: bool = false
 var _fire_cooldown: float = 0.0
 ## Whatever _fire_cooldown was set to on the most recent firing.
 var _fire_cooldown_max: float = 1.0
@@ -477,6 +482,7 @@ func _physics_process(delta: float) -> void:
 		_current_target = forced_target
 	elif _current_target and not _is_valid_target(_current_target):
 		_current_target = null
+		_has_fired_at_current_target = false
 		_was_in_range = false
 		# Unguarded: the elif condition guarantees _current_target was non-null
 		_set_engaged(false)
@@ -520,7 +526,49 @@ func _physics_process(delta: float) -> void:
 			# if the enemy starts outside weapon range.
 			forced_target = found
 			_current_target = found
+			_has_fired_at_current_target = false
 			_set_engaged(true)
+
+	# Pre-engagement opportunistic re-acquisition.
+	# A unit that has been given a forced_target (via attack-move or player
+	# command) but has NEVER fired at it yet — e.g. it's still walking toward
+	# the target or is peer-blocked — is not truly committed to that target.
+	# If a different enemy is currently within weapon range AND the current
+	# forced_target is NOT in weapon range, switch. This handles the classic
+	# "back squads blocked from reaching enemy A, enemy B flanks into range"
+	# scenario without adding any new timer or scan cadence — we piggyback
+	# on the existing _search_timer gate.
+	# Post-engagement switches (unit has already fired at _current_target)
+	# are intentionally NOT covered here; those go through the 2-second
+	# stand-and-fire lockout defined by _chase_lockout_until_msec.
+	if _current_target and not _has_fired_at_current_target and can_auto_target and _search_timer <= 0.0:
+		_search_timer = SEARCH_INTERVAL
+		var stats_pre: UnitStatResource = _unit.get("stats") as UnitStatResource
+		var weapon_range_pre: float = 10.0
+		if stats_pre and stats_pre.primary_weapon:
+			weapon_range_pre = stats_pre.primary_weapon.resolved_range()
+		# Check whether the current target is already in weapon range.
+		# If it is, the unit is about to fire normally — no need to switch.
+		var dist_to_current: float = _engagement_distance(
+			_unit.global_position, _current_target.global_position, _shooter_is_air_cached
+		)
+		var current_in_range: bool = dist_to_current <= weapon_range_pre
+		if not current_in_range:
+			# Scan at weapon range only — we only want targets the unit can
+			# IMMEDIATELY fire at, not merely visible targets. ENGAGE_RANGE_MULT
+			# is intentionally omitted here: we don't want to chase toward B
+			# when A is closer; we only want to snap to B if B is already
+			# inside firing range.
+			var candidate: Node3D = _find_nearest_enemy(weapon_range_pre)
+			if candidate and candidate != _current_target:
+				# Switch to the in-range flanker. Reset hysteresis so the unit
+				# can enter the fire branch immediately on the next tick.
+				forced_target = candidate
+				_current_target = candidate
+				_has_fired_at_current_target = false
+				_was_in_range = false
+				_chase_lockout_until_msec = 0
+				_set_engaged(true)
 
 	if not _current_target:
 		# Reset the burst counter so a half-finished burst from the previous
@@ -681,6 +729,7 @@ func set_target(target: Node3D) -> void:
 	# combat tick will then chase or fire as appropriate.
 	if target != forced_target:
 		_was_in_range = false
+		_has_fired_at_current_target = false
 		if _unit.has_method("stop"):
 			_unit.stop()
 		# Player explicitly aimed us at a new target — let the combat tick
@@ -701,6 +750,7 @@ func clear_target() -> void:
 	var was_engaged: bool = _current_target != null
 	forced_target = null
 	_current_target = null
+	_has_fired_at_current_target = false
 	attack_move_target = Vector3.INF
 	_was_in_range = false
 	# Player command supersedes any in-flight chase commitment.
@@ -715,6 +765,7 @@ func command_attack_move(pos: Vector3) -> void:
 	attack_move_target = pos
 	forced_target = null
 	_current_target = null
+	_has_fired_at_current_target = false
 	_was_in_range = false
 	_chase_lockout_until_msec = 0
 	if was_engaged:
@@ -858,6 +909,7 @@ func notify_attacked(attacker: Node3D) -> void:
 		if d_attacker < weapon_range and d_current > weapon_range * 1.5:
 			forced_target = attacker
 			_current_target = attacker
+			_has_fired_at_current_target = false
 			_was_in_range = false
 			_set_engaged(true)
 		return
@@ -878,6 +930,7 @@ func notify_attacked(attacker: Node3D) -> void:
 	# the attacker is out of weapon range.
 	if forced_target != attacker:
 		_was_in_range = false
+		_has_fired_at_current_target = false
 	forced_target = attacker
 	_current_target = attacker
 	_set_engaged(true)
@@ -945,6 +998,9 @@ func _face_target() -> void:
 func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	if not weapon or not _current_target:
 		return
+	# First shot at this target — mark as committed so the pre-engagement
+	# target-switch path no longer overrides this choice.
+	_has_fired_at_current_target = true
 
 	# Mesh strength bonus — V3 §Pillar 2. Sable units inside friendly
 	# Mesh provider auras get faster reload (rof shrinks) AND higher
