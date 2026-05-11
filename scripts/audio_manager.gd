@@ -124,6 +124,10 @@ func _ensure_sfx_bus() -> void:
 	# settings slider gives a positive headroom up to +6 dB if anyone
 	# wants the heavy mix back.
 	AudioServer.set_bus_volume_db(idx, -8.0)
+	# Testing-phase default: start muted so launching the game during
+	# PF-B verification doesn't fire sounds every reload. Settings
+	# slider un-mutes when dragged above 0.
+	AudioServer.set_bus_mute(idx, true)
 
 
 func _ensure_music_bus() -> void:
@@ -133,6 +137,8 @@ func _ensure_music_bus() -> void:
 	AudioServer.add_bus(idx)
 	AudioServer.set_bus_name(idx, "Music")
 	AudioServer.set_bus_send(idx, "Master")
+	# Testing-phase default: muted (see _ensure_sfx_bus).
+	AudioServer.set_bus_mute(idx, true)
 
 
 func _load_sfx_banks() -> void:
@@ -284,6 +290,8 @@ func _setup_voiceline_bus() -> void:
 	# (-3 dB on SFX bus). Per-faction tweaks happen at the per-call
 	# level (Anvil VO gets a small extra dB boost in `_play_voiceline`).
 	AudioServer.set_bus_volume_db(idx, 5.0)
+	# Testing-phase default: muted (see _ensure_sfx_bus).
+	AudioServer.set_bus_mute(idx, true)
 	_vl_bus_idx = idx
 
 

@@ -782,9 +782,12 @@ func _build_settings_panel() -> void:
 	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_settings_panel.add_child(heading)
 
-	# One slider per audio bus. Range from -40 dB (effectively muted) to
-	# +6 dB (a tad above unity). The bus init values (-3 dB SFX, +5 dB
-	# Voiceline, 0 dB Music) load as the slider's starting position.
+	# One slider per audio bus as a 0..100 percent. 0 = full mute (the
+	# bus's mute flag fires, guaranteeing silence — not just very low
+	# volume). 100 = unity gain (0 dB). Linear-to-dB inside the handler
+	# gives perceptually-smooth steps.
+	# Testing-phase: audio_manager starts all three buses muted, so all
+	# sliders open at 0 and the player drags up to enable.
 	for entry: Dictionary in [
 		{"label": "SFX", "bus": "SFX"},
 		{"label": "Voices", "bus": "Voiceline"},
@@ -802,12 +805,17 @@ func _build_settings_panel() -> void:
 
 		var slider := HSlider.new()
 		slider.custom_minimum_size = Vector2(280, 24)
-		slider.min_value = -40.0
-		slider.max_value = 6.0
+		slider.min_value = 0.0
+		slider.max_value = 100.0
 		slider.step = 1.0
 		var bus_idx: int = AudioServer.get_bus_index(entry["bus"] as String)
 		if bus_idx >= 0:
-			slider.value = AudioServer.get_bus_volume_db(bus_idx)
+			if AudioServer.is_bus_mute(bus_idx):
+				slider.value = 0.0
+			else:
+				# Reverse the linear-to-dB map: slider % = db_to_linear(bus_db) × 100,
+				# clamped to the slider range so +dB headroom collapses to 100.
+				slider.value = clampf(db_to_linear(AudioServer.get_bus_volume_db(bus_idx)) * 100.0, 0.0, 100.0)
 		else:
 			slider.value = 0.0
 		slider.value_changed.connect(_on_bus_volume_changed.bind(entry["bus"] as String))
@@ -1089,21 +1097,19 @@ func _modal_difficulty(diffs: Dictionary) -> int:
 	return best
 
 
-func _on_bus_volume_changed(db: float, bus_name: String) -> void:
-	## Slider position drives both the bus volume and the bus mute
-	## flag. The slider's minimum (-40 dB) was nominally "muted" but
-	## still passed audio at ~1%; calling set_bus_mute when the
-	## slider sits at its minimum guarantees full silence so a player
-	## who drags Music to 0 actually gets no music. Any position
-	## above the minimum re-enables audio at the requested level.
+func _on_bus_volume_changed(percent: float, bus_name: String) -> void:
+	## Slider value is 0..100 percent. 0 = full mute via the bus's
+	## mute flag (guarantees silence, not just very-low-dB leakage).
+	## 1..100 maps to linear-to-dB so each step is a fixed loudness
+	## ratio (perceptually smooth).
 	var idx: int = AudioServer.get_bus_index(bus_name)
 	if idx < 0:
 		return
-	if db <= -40.0:
+	if percent <= 0.0:
 		AudioServer.set_bus_mute(idx, true)
 	else:
 		AudioServer.set_bus_mute(idx, false)
-		AudioServer.set_bus_volume_db(idx, db)
+		AudioServer.set_bus_volume_db(idx, linear_to_db(percent / 100.0))
 
 
 func _start_match() -> void:
