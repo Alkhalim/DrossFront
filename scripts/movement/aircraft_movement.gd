@@ -42,6 +42,21 @@ func goto_world(world_pos: Vector3) -> void:
 	## Aircraft don't navmesh-route; just set the target. Y is overridden
 	## to base_altitude so the unit doesn't try to dive into the ground.
 	target = Vector3(world_pos.x, base_altitude, world_pos.z)
+	# PF-B-B6: forward single-aircraft targets to the kernel via
+	# set_agent_target_pos. The kernel's AIRCRAFT branch (B2) consumes
+	# target_pos for direct 3D seek. Multi-unit aircraft orders are
+	# already routed via GroupAura (B4). Solo orders — drone repositions,
+	# ai_controller per-tick moves, ability targeting that translates
+	# to a move — land here.
+	if kernel_handle == 0:
+		return
+	var scene: Node = get_tree().current_scene if get_tree() else null
+	if scene == null:
+		return
+	var kernel: Object = MovementNativeBootstrap.get_kernel(scene)
+	if kernel == null:
+		return
+	kernel.call("set_agent_target_pos", kernel_handle, target)
 
 func tick_movement(delta: float, frame_phase: int) -> void:
 	super.tick_movement(delta, frame_phase)
