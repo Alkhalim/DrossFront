@@ -182,8 +182,10 @@ var _atmos_indicator_mats: Array = []                   # Foundry/armory front l
 var _atmos_anim_time: float = 0.0
 
 ## Half-frame stagger for the cosmetic smoke / fire / atmospheric loop.
-## Damage VFX flicker reads fine at 30Hz; halving the rate at high
-## building counts cuts Building._process roughly in half.
+## Damage VFX flicker reads fine at 15Hz (every 4th frame); dropping to
+## 8Hz (every 8th frame) halves cosmetic cost further with no perceptible
+## change — smoke/ember/glow animations are slow enough to look smooth at
+## either rate.
 var _process_phase: int = 0
 var _process_frame: int = 0
 var _atmos_smoke_timer: float = 0.0
@@ -220,8 +222,10 @@ func _ready() -> void:
 	# the static collider (which carves the footprint) and the obstacle
 	# (which adds the conservative ~30% padding around it).
 	add_to_group("terrain")
-	# Round-robin phase for the half-frame stagger in `_process`.
-	_process_phase = int(get_instance_id() & 1)
+	# Round-robin phase for the cosmetic stagger in `_process`.
+	# 3 low-order bits → 8 distinct phases so a 16-building base spreads
+	# its cosmetic ticks evenly instead of piling into 2 buckets.
+	_process_phase = int(get_instance_id() & 7)
 	if stats:
 		# Foundations start at 20% of the final HP and fill toward
 		# stats.hp as construction progresses (see advance_construction).
@@ -3148,6 +3152,10 @@ const _BAR_STATE_CHECK_INTERVAL_MS: int = 250
 ## explicit interaction points.
 const _BUILDING_ANIM_CULL_DIST_SQ: float = 110.0 * 110.0
 var _bldg_camera_cached: Camera3D = null
+## Cached reference to the scene-level ParticleEmitterManager so
+## _spawn_smoke_puff / _spawn_steam_puff / _spawn_damage_sparks don't do
+## a scene-tree traversal on every cosmetic tick.
+var _cached_pem: Node = null
 
 
 ## True when the building's owner is the local player or an allied
@@ -4625,9 +4633,9 @@ func _process(delta: float) -> void:
 	# Phase is set at _enter_tree (instance-id parity) for the
 	# stagger.
 	_process_frame += 1
-	if (_process_frame & 3) != (_process_phase & 3):
+	if (_process_frame & 7) != (_process_phase & 7):
 		return
-	delta *= 4.0
+	delta *= 8.0
 	# Distance-cull cosmetic ticks for buildings far from the
 	# camera. The player can't see embers / smoke / glow pulses
 	# at zoom-out range anyway, so spending script time on them
@@ -5548,8 +5556,10 @@ func _spawn_smoke_puff(world_pos: Vector3) -> void:
 	## ones come in. Emits a small CLUSTER of three puffs per call
 	## at slight offsets so the column reads as a thick plume
 	## rather than a single thin wisp the eye misses at zoom.
-	var _pem_scene: Node = get_tree().current_scene
-	var pem: Node = _pem_scene.get_node_or_null("ParticleEmitterManager") if _pem_scene else null
+	if not _cached_pem or not is_instance_valid(_cached_pem):
+		var _pem_scene: Node = get_tree().current_scene
+		_cached_pem = _pem_scene.get_node_or_null("ParticleEmitterManager") if _pem_scene else null
+	var pem: Node = _cached_pem
 	if not pem:
 		return
 	# Slightly darker tint than the missile-trail smoke so building
@@ -5574,8 +5584,10 @@ func _spawn_steam_puff(world_pos: Vector3) -> void:
 	## Reactor / cooling-tower vapor. Reuses the smoke emitter with
 	## a near-white tint and a brisk upward drift so the puffs read
 	## as wet steam rather than dirty soot.
-	var _pem_scene: Node = get_tree().current_scene
-	var pem: Node = _pem_scene.get_node_or_null("ParticleEmitterManager") if _pem_scene else null
+	if not _cached_pem or not is_instance_valid(_cached_pem):
+		var _pem_scene: Node = get_tree().current_scene
+		_cached_pem = _pem_scene.get_node_or_null("ParticleEmitterManager") if _pem_scene else null
+	var pem: Node = _cached_pem
 	if not pem:
 		return
 	for k: int in 2:
@@ -5599,8 +5611,10 @@ func _spawn_damage_sparks(world_pos: Vector3, count: int = 6) -> void:
 	## crackling shorts rather than a steady warm lamp glow. Used by
 	## the per-tick damage VFX so each visible 'ember' actually pops
 	## sparks at random intervals on top of its persistent flicker.
-	var _pem_scene: Node = get_tree().current_scene
-	var pem: Node = _pem_scene.get_node_or_null("ParticleEmitterManager") if _pem_scene else null
+	if not _cached_pem or not is_instance_valid(_cached_pem):
+		var _pem_scene: Node = get_tree().current_scene
+		_cached_pem = _pem_scene.get_node_or_null("ParticleEmitterManager") if _pem_scene else null
+	var pem: Node = _cached_pem
 	if not pem or not pem.has_method("emit_spark"):
 		return
 	pem.call("emit_spark", world_pos, count)
