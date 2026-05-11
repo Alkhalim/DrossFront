@@ -179,6 +179,8 @@ AgentHandle SteeringKernel::pop_path_unreachable_event(int *out_reason) {
         if (out_reason) *out_reason = 0;
         return 0;
     }
+    // LIFO: most recent failure surfaces first. Order doesn't matter
+    // since drain-all callers iterate until empty anyway.
     PathFailureEvent e = pending_failures_.back();
     pending_failures_.pop_back();
     if (out_reason) *out_reason = e.reason;

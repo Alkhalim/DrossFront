@@ -17,6 +17,7 @@ protected:
 
 public:
     enum PathFailureReason {
+        PATH_FAILURE_NONE = 0,              // sentinel — pop_path_unreachable_event returns this when queue is empty
         PATH_FAILURE_REPEATEDLY_STUCK = 2,  // matches MovementComponent.REASON_REPEATEDLY_STUCK
     };
 
@@ -32,7 +33,6 @@ public:
     AgentHandle pop_path_unreachable_event(int *out_reason);
     godot::Vector2i pop_path_unreachable_event_v();
 
-public:
     SteeringKernel();
     ~SteeringKernel();
 
