@@ -132,7 +132,13 @@ func _physics_process(delta: float) -> void:
 				if mc_b != null and mc_b.kernel_handle != 0:
 					handle_to_mc[mc_b.kernel_handle] = mc_b
 			i_b -= 1
-		while true:
+		# Hard cap: protects against a hypothetical kernel bug returning
+		# non-zero forever. 512 is well above any realistic per-tick
+		# event count (200 agents × max 1 event each = 200), so a real
+		# event burst won't trip the guard.
+		const MAX_DRAIN_PER_TICK: int = 512
+		var drained: int = 0
+		while drained < MAX_DRAIN_PER_TICK:
 			var ev: Vector2i = kernel.call("pop_path_unreachable_event") as Vector2i
 			var ev_handle: int = ev.x
 			if ev_handle == 0:
@@ -141,6 +147,9 @@ func _physics_process(delta: float) -> void:
 			var target_mc_v: Variant = handle_to_mc.get(ev_handle, null)
 			if target_mc_v != null and is_instance_valid(target_mc_v):
 				(target_mc_v as MovementComponent).emit_path_unreachable_from_kernel(ev_reason)
+			drained += 1
+		if drained >= MAX_DRAIN_PER_TICK:
+			push_warning("MovementOrchestrator drained MAX_DRAIN_PER_TICK kernel events — possible kernel bug")
 
 	# Phase 2: walk components. Flag-on units get velocity from the kernel
 	# and apply via move_and_slide. Flag-off units run tick_movement.
