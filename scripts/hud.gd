@@ -4740,10 +4740,11 @@ func _on_selected_unit_path_unreachable(_reason: int, unit: Node) -> void:
 	if not is_instance_valid(unit):
 		return
 	var unit_name: String = unit.name if unit.has_method("get_name") else "<unit>"
-	if _alert_label:
-		_on_alert("%s is stuck — cannot reach target" % unit_name, 1, Vector3.ZERO)
-	else:
-		print_debug("[HUD] path_unreachable on ", unit_name)
+	# Console-only — the in-game UI alert was firing on every kernel
+	# stuck event (which can be frequent during normal play in tight
+	# terrain) and producing notification spam. Keep the print for
+	# debugging; don't pop a HUD alert.
+	print_debug("[HUD] path_unreachable on ", unit_name)
 
 
 func _rebuild_build_buttons() -> void:
