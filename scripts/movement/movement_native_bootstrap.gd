@@ -125,7 +125,15 @@ static func _mark_terrain_off_navmesh(map_rid: RID) -> void:
 			var closest: Vector3 = NavigationServer3D.map_get_closest_point(map_rid, query_pos)
 			var dx: float = closest.x - wx
 			var dz: float = closest.z - wz
-			if dx * dx + dz * dz > threshold_sq:
+			# Cliff guard: closest navmesh point that's near in XZ but high in
+			# Y means the cell is at the base of a cliff/plateau, with the
+			# only navmesh "nearby" being the ledge above. Without this check
+			# the XZ-only distance sees the ledge as close (<= 2.5m XZ) and
+			# leaves the base cell walkable — units flow into the vertical
+			# wall and physically halt. 1.5m Y-delta covers normal plateau
+			# / ramp-wall heights without affecting gentle slope cells.
+			var dy: float = closest.y - query_pos.y
+			if dx * dx + dz * dz > threshold_sq or dy > 1.5:
 				# Off-mesh cell — mark blocked. Use a sub-cell AABB so floor/
 				# ceil-1 lands exactly on this cell.
 				var aabb: AABB = AABB(
@@ -278,6 +286,7 @@ static func _mark_existing_terrain_props(scene_root: Node) -> void:
 	var marked: int = 0
 	var skipped_elevation: int = 0
 	var skipped_layer: int = 0
+	var skipped_buildings: int = 0
 	for n: Node in tree.get_nodes_in_group("terrain"):
 		if not is_instance_valid(n):
 			continue
@@ -286,6 +295,15 @@ static func _mark_existing_terrain_props(scene_root: Node) -> void:
 		# Skip plateaus and ramps — they're terrain but units walk ON them.
 		if n.is_in_group("elevation"):
 			skipped_elevation += 1
+			continue
+		# Skip buildings — they're double-tagged (in BOTH "buildings" and
+		# "terrain") and already handled by _mark_existing_buildings with
+		# their stats.footprint_size. Marking them again here is redundant
+		# AND wrong for buildings that are also destinations: a Salvage
+		# Yard marked as an obstacle blocks its own home cell, so workers
+		# call goto_world repeatedly and trigger a Dijkstra rebuild storm.
+		if n.is_in_group("buildings"):
+			skipped_buildings += 1
 			continue
 		var sb: StaticBody3D = n as StaticBody3D
 		# collision_layer bit 2 (value 4) = obstacle layer used by all terrain
@@ -297,7 +315,7 @@ static func _mark_existing_terrain_props(scene_root: Node) -> void:
 		var aabb: AABB = _terrain_prop_aabb(sb)
 		_server.call("mark_obstacle", aabb, true)
 		marked += 1
-	print_debug("[MovementNativeBootstrap] marked %d pre-placed terrain props as flow-field obstacles (skipped %d elevation, %d non-obstacle-layer)" % [marked, skipped_elevation, skipped_layer])
+	print_debug("[MovementNativeBootstrap] marked %d pre-placed terrain props as flow-field obstacles (skipped %d elevation, %d buildings, %d non-obstacle-layer)" % [marked, skipped_elevation, skipped_buildings, skipped_layer])
 
 
 ## Derives an AABB for a terrain StaticBody3D from its first CollisionShape3D
