@@ -132,8 +132,15 @@ static func _mark_terrain_off_navmesh(map_rid: RID) -> void:
 			# leaves the base cell walkable — units flow into the vertical
 			# wall and physically halt. 1.5m Y-delta covers normal plateau
 			# / ramp-wall heights without affecting gentle slope cells.
-			var dy: float = closest.y - query_pos.y
-			if dx * dx + dz * dz > threshold_sq or dy > 1.5:
+			# Was: also marked off-mesh when dy > 1.5 to catch cliff bases.
+			# That heuristic was wrong: a ramp surface at high Y also has
+			# dy > 1.5 from the ground-level query, so ramp cells got marked
+			# as obstacles and units routed to the closest cliff face instead
+			# of taking the ramp. Cliff bases are now covered by the
+			# elevation-walls AABB pass in _mark_existing_terrain_props
+			# (commit 6fa4611), so the simple XZ-only off-mesh check is
+			# sufficient here.
+			if dx * dx + dz * dz > threshold_sq:
 				# Off-mesh cell — mark blocked. Use a sub-cell AABB so floor/
 				# ceil-1 lands exactly on this cell.
 				var aabb: AABB = AABB(
