@@ -111,6 +111,8 @@ void SteeringKernel::_bind_methods() {
                          &SteeringKernel::tick);
     ClassDB::bind_method(D_METHOD("set_flow_field_server", "server"),
                          &SteeringKernel::set_flow_field_server);
+    ClassDB::bind_method(D_METHOD("pop_path_unreachable_event"),
+                         &SteeringKernel::pop_path_unreachable_event_v);
 #endif
 }
 
@@ -170,6 +172,23 @@ godot::Vector3 SteeringKernel::get_velocity(AgentHandle handle) {
     int idx = handle_to_idx(handle);
     if (idx < 0 || idx >= agents_.count || !agents_.alive[idx]) return {};
     return agents_.vel[idx];
+}
+
+AgentHandle SteeringKernel::pop_path_unreachable_event(int *out_reason) {
+    if (pending_failures_.empty()) {
+        if (out_reason) *out_reason = 0;
+        return 0;
+    }
+    PathFailureEvent e = pending_failures_.back();
+    pending_failures_.pop_back();
+    if (out_reason) *out_reason = e.reason;
+    return e.handle;
+}
+
+godot::Vector2i SteeringKernel::pop_path_unreachable_event_v() {
+    int r = 0;
+    AgentHandle h = pop_path_unreachable_event(&r);
+    return godot::Vector2i(static_cast<int>(h), r);
 }
 
 void SteeringKernel::tick(float delta) {

@@ -1,5 +1,6 @@
 #pragma once
 #include <godot_cpp/classes/object.hpp>
+#include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 #include "types.h"
 #include "agent.h"
@@ -13,6 +14,23 @@ class SteeringKernel : public godot::Object {
 
 protected:
     static void _bind_methods();
+
+public:
+    enum PathFailureReason {
+        PATH_FAILURE_REPEATEDLY_STUCK = 2,  // matches MovementComponent.REASON_REPEATEDLY_STUCK
+    };
+
+    // Drain the per-tick event queue. Returns the AgentHandle of the next
+    // pending failure (or 0 if the queue is empty). Reason is written to
+    // *out_reason. Designed for a simple drain loop:
+    //   int reason = 0;
+    //   while (AgentHandle h = kernel.pop_path_unreachable_event(&reason)) { ... }
+    //
+    // GDScript can't take output pointers, so the GDScript-bound wrapper
+    // pop_path_unreachable_event_v() returns Vector2i(handle, reason)
+    // with (0, 0) signalling empty queue.
+    AgentHandle pop_path_unreachable_event(int *out_reason);
+    godot::Vector2i pop_path_unreachable_event_v();
 
 public:
     SteeringKernel();
@@ -36,6 +54,12 @@ public:
     int agent_count() const { return agents_.count; }
 
 private:
+    struct PathFailureEvent {
+        AgentHandle handle;
+        int reason;
+    };
+    std::vector<PathFailureEvent> pending_failures_;
+
     AgentSoA agents_;
     FlowFieldServer *server_ = nullptr;
 
