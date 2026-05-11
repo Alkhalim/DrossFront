@@ -84,6 +84,10 @@ func _setup_move(dest: Vector3, server: Object, kernel: Object) -> void:
 			var fid: int = field_ids.get(c, 0) as int
 			if fid != 0:
 				kernel.call("set_agent_target", mc.kernel_handle, get_instance_id(), fid, stance)
+				# Mirror group_id into the mc so combat-chase goto_world calls
+				# preserve flock cohesion (see _kernel_group_id in GroundMovement).
+				if "_kernel_group_id" in mc:
+					mc.set("_kernel_group_id", get_instance_id())
 
 
 func _setup_attack_spread(dest: Vector3, server: Object, kernel: Object) -> void:
@@ -141,6 +145,10 @@ func _setup_attack_spread(dest: Vector3, server: Object, kernel: Object) -> void
 			if fid != 0:
 				_per_member_field_ids[m.get_instance_id()] = fid
 				kernel.call("set_agent_target", mc.kernel_handle, get_instance_id(), fid, stance)
+				# Mirror group_id into the mc so combat-chase goto_world calls
+				# preserve flock cohesion (see _kernel_group_id in GroundMovement).
+				if "_kernel_group_id" in mc:
+					mc.set("_kernel_group_id", get_instance_id())
 			else:
 				push_warning("[GroupAura] build_field failed for attack-spread member %d at %s" % [i, squad_dest])
 

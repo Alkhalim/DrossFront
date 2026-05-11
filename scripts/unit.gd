@@ -5331,6 +5331,13 @@ func command_move(target: Vector3, clear_combat: bool = true) -> void:
 		_rebalance_formation()
 	var _mc: Node = get_node_or_null("MovementComponent")
 	if _mc != null and _mc is GroundMovement:
+		# Player-issued plain move breaks the unit out of any prior GroupAura
+		# flock: clear _kernel_group_id so the subsequent goto_world passes
+		# group_id=0, giving solo cohesion semantics. Combat-internal chases
+		# (clear_combat=false) skip this so the unit stays in its flock group
+		# while approaching an enemy during attack-move.
+		if clear_combat:
+			(_mc as GroundMovement)._kernel_group_id = 0
 		(_mc as GroundMovement).goto_world(move_target)
 	elif _nav_agent != null:
 		_nav_agent.target_position = move_target

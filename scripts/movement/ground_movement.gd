@@ -38,6 +38,15 @@ var _kernel_field_id: int = 0
 ## against walls/obstacles. Tracked as a Vector3; comparisons use
 ## squared distance against a one-cell threshold.
 var _kernel_field_target: Vector3 = Vector3.INF
+## The group_id most recently assigned to this agent via set_agent_target.
+## GroupAura writes this (= aura.get_instance_id()) after wiring the field
+## so that subsequent ad-hoc goto_world calls (combat chase, attack-move
+## resume) pass the same group_id instead of 0. Passing 0 would drop the
+## unit out of its cohesion group mid-approach, breaking the flock and
+## causing lateral oscillation (the attack-move wiggle bug). Cleared to 0
+## by unit.command_move(clear_combat=true) so a player-issued plain move
+## correctly detaches the unit from any prior GroupAura flock.
+var _kernel_group_id: int = 0
 
 ## Counts consecutive physics ticks the kernel returned ~zero velocity
 ## while the unit is on the floor. Once past SKIP_SLIDE_AFTER_TICKS we
@@ -123,9 +132,12 @@ func goto_world(world_pos: Vector3) -> void:
 					if fid != 0:
 						_kernel_field_id = fid
 						_kernel_field_target = world_pos
-						# group_id 0 = solo (cohesion only against peers with the
-						# same group_id, which a fresh ad-hoc move won't have).
-						kernel.call("set_agent_target", kernel_handle, 0, fid, 0)
+						# Use _kernel_group_id so combat-chase re-issues
+						# preserve the GroupAura flock (group_id != 0).
+						# Solo moves (player plain-move) clear _kernel_group_id
+						# to 0 via unit.command_move before calling goto_world,
+						# so this correctly falls back to solo behaviour there.
+						kernel.call("set_agent_target", kernel_handle, _kernel_group_id, fid, 0)
 
 	# Under flag-on, the kernel steers directly from the flow field; the
 	# orchestrator's flag-on path NEVER reads `path_waypoints` (it calls
