@@ -68,7 +68,7 @@ struct AgentSoA {
         stuck_window_sum.push_back(0.0f);
         stuck_window_count.push_back(0);
         stuck_window_head.push_back(0);
-        stuck_window.emplace_back();  // zero-initialized std::array<float, 32>
+        stuck_window.push_back(std::array<float, 32>{});  // brace-init zeros all 32 floats
         stuck_pushout_frames_left.push_back(0);
         stuck_pushout_dir.push_back({});
         stuck_cooldown_remaining.push_back(0.0f);
