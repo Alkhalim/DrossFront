@@ -199,3 +199,48 @@ TEST_CASE("stuck detector — L1 push direction is away from peers, not into the
     godot::Vector3 va = k.get_velocity(a);
     CHECK(va.z < 0.0f);  // CRITICAL: must be negative; positive means push toward peer (the bug)
 }
+
+TEST_CASE("stuck detector — L2 abandon zeroes velocity, sets HALTED, clears HAS_TARGET, pushes event") {
+    FlowFieldServerImpl s;
+    s.configure_map(32, 32, 2.0f, -32.0f, -32.0f);
+    s.set_agent_radius(0, 0.5f);
+    SteeringKernelImpl k;
+    k.set_flow_field_server(&s);
+    FieldId fid = s.build_field(godot::Vector3(20, 0, 20), 0);
+    REQUIRE(fid != INVALID_FIELD_ID);
+    AgentHandle h = k.register_agent(1, 0, 0.5f, 5.0f, 20.0f, 8.0f);
+    k.set_agent_target(h, 1, fid, 0);
+    int idx = k.test_handle_to_idx(h);
+
+    // Sequence:
+    //   Ticks 0-19 (20 ticks): fill window with zero displacement.
+    //   Tick 20: window full + ratio<threshold → L1 fires; stuck_level=1,
+    //            cooldown=1.5s, STUCK_PUSHOUT set, pushout_frames=10.
+    //   Ticks 21-30: STUCK_PUSHOUT active for 10 ticks (pushout_frames
+    //                decrements each). After tick 30, flag clears.
+    //   During those 10 ticks, cooldown decrements from 1.5s by 0.1s/tick
+    //   = 1.0s remaining after pushout ends.
+    //   Need 10 more ticks (1.0s / 0.1s) for cooldown to reach 0.
+    //   So tick 41 = first tick where stuck_level==1, cooldown<=0,
+    //                STUCK_PUSHOUT off, window full, ratio<threshold.
+    //   L2 fires, stuck_level=2, HALTED set, HAS_TARGET cleared, event
+    //   pushed.
+    // Total: ≈42 ticks. Run 50 to leave margin.
+    for (int t = 0; t < 50; ++t) {
+        k.set_agent_pos(h, godot::Vector3(0, 0, 0));
+        k.tick(0.1f);
+    }
+    CHECK(k.test_get_stuck_level(idx) == 2);
+    CHECK(k.test_pending_failure_count() == 1);
+
+    // Drain the event.
+    int reason = 0;
+    AgentHandle popped = k.pop_path_unreachable_event(&reason);
+    CHECK(popped == h);
+    CHECK(reason == SteeringKernelImpl::PATH_FAILURE_REPEATEDLY_STUCK);
+
+    // Subsequent pop returns 0/0.
+    AgentHandle empty_pop = k.pop_path_unreachable_event(&reason);
+    CHECK(empty_pop == 0);
+    CHECK(reason == 0);
+}

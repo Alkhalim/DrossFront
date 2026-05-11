@@ -399,6 +399,34 @@ void SteeringKernelImpl::tick(float delta) {
             }
         }
 
+        // Stuck detector — escalation L2 (abandon).
+        // Conditions: previously fired L1 (stuck_level == 1), the L1
+        // cooldown has elapsed, push-out is no longer active, the window
+        // is still showing no progress, not engaged.
+        // Effect: zero velocity, set HALTED, clear HAS_TARGET, push a
+        // PathFailureEvent for GDScript to drain. Set stuck_level = 2 +
+        // L2 cooldown so we don't re-fire; the only way out is for
+        // GDScript to call set_agent_target again (which clears HALTED
+        // and HAS_TARGET re-asserts).
+        if (!(f & AGENT_FLAG_ENGAGED_IN_COMBAT) && !(f & AGENT_FLAG_STUCK_PUSHOUT)
+                && agents_.stuck_level[i] == 1
+                && agents_.stuck_cooldown_remaining[i] <= 0.0f
+                && agents_.stuck_window_count[i] >= STUCK_WINDOW_TICKS) {
+            float ratio = compute_progress_ratio(agents_, i, delta);
+            if (ratio < STUCK_PROGRESS_RATIO_THRESHOLD) {
+                agents_.vel[i] = {};
+                agents_.flags[i] |= AGENT_FLAG_HALTED;
+                agents_.flags[i] &= static_cast<uint8_t>(~AGENT_FLAG_HAS_TARGET);
+                agents_.stuck_level[i] = 2;
+                agents_.stuck_cooldown_remaining[i] = STUCK_LEVEL2_COOLDOWN_SEC;
+                pending_failures_.push_back({idx_to_handle(i), PATH_FAILURE_REPEATEDLY_STUCK});
+                // Skip the rest of the tick body for this agent — vel
+                // is already correct (zero) and we don't want SEEK to
+                // overwrite it.
+                continue;
+            }
+        }
+
         // While L1 push-out is active, replace SEEK with the push-out
         // vector at full strength. SEPARATE still acts so we don't push
         // into peers; COHESION still acts but is bounded so it can't

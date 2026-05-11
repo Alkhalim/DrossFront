@@ -16,9 +16,11 @@ protected:
     static void _bind_methods();
 
 public:
+    // Re-export impl's PathFailureReason so GDScript bindings remain on the
+    // wrapper class. Values must match SteeringKernelImpl::PathFailureReason.
     enum PathFailureReason {
-        PATH_FAILURE_NONE = 0,              // sentinel — pop_path_unreachable_event returns this when queue is empty
-        PATH_FAILURE_REPEATEDLY_STUCK = 2,  // matches MovementComponent.REASON_REPEATEDLY_STUCK
+        PATH_FAILURE_NONE             = SteeringKernelImpl::PATH_FAILURE_NONE,
+        PATH_FAILURE_REPEATEDLY_STUCK = SteeringKernelImpl::PATH_FAILURE_REPEATEDLY_STUCK,
     };
 
     SteeringKernel();

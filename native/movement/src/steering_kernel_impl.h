@@ -14,6 +14,15 @@ public:
     SteeringKernelImpl();
     ~SteeringKernelImpl();
 
+    // Reason codes written into PathFailureEvent and surfaced via
+    // pop_path_unreachable_event. The wrapper class SteeringKernel re-exports
+    // these as its own PathFailureReason enum so GDScript bindings stay on the
+    // wrapper; the values must match MovementComponent constants.
+    enum PathFailureReason {
+        PATH_FAILURE_NONE = 0,              // sentinel — queue empty
+        PATH_FAILURE_REPEATEDLY_STUCK = 2,  // matches MovementComponent.REASON_REPEATEDLY_STUCK
+    };
+
     AgentHandle register_agent(int unit_id, int agent_class, float radius,
                                 float max_speed, float max_accel, float max_turn_rate);
     void unregister_agent(AgentHandle handle);
