@@ -62,9 +62,11 @@ func setup(initial_members: Array, dest: Vector3, initial_stance: int) -> void:
 		if not "kernel_handle" in mc:
 			continue
 		if (mc as MovementComponent)._opts_unit_is_aircraft():
-			# Aircraft: direct target position, no field. B2's tick() takes the
-			# IS_AIRCRAFT branch and 3D-seeks toward target_pos.
-			kernel.call("set_agent_target_pos", mc.kernel_handle, destination)
+			# PF-B-final-fix: route through AircraftMovement.goto_world so Y
+			# gets remapped to base_altitude. Raw destination (Y≈ground) would
+			# cause the kernel's AIRCRAFT branch (B2) to 3D-seek toward
+			# ground level, diving aircraft into terrain.
+			(mc as AircraftMovement).goto_world(destination)
 		else:
 			var c: int = _agent_class_for(m)
 			var fid: int = field_ids.get(c, 0) as int

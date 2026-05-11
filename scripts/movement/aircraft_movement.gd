@@ -58,6 +58,16 @@ func goto_world(world_pos: Vector3) -> void:
 		return
 	kernel.call("set_agent_target_pos", kernel_handle, target)
 
+func _apply_kernel_velocity(v: Vector3, delta: float) -> void:
+	# PF-B-final-fix: kernel computes 3D velocity for aircraft but does
+	# nothing about visual rotation. Populate _velocity so _update_bank
+	# can read heading, apply movement via super (Node3D positional
+	# integration: global_position += v * delta), then update bank/yaw
+	# the same way the legacy tick_movement did.
+	_velocity = v
+	super._apply_kernel_velocity(v, delta)
+	_update_bank(delta)
+
 func tick_movement(delta: float, frame_phase: int) -> void:
 	super.tick_movement(delta, frame_phase)
 	# Altitude maintenance: pull Y toward base_altitude. Aircraft don't
