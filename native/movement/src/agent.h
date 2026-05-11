@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <vector>
 #include <cstdint>
 #include <godot_cpp/variant/vector3.hpp>
@@ -18,6 +19,16 @@ struct AgentSoA {
     std::vector<float>          radius;
     std::vector<uint8_t>        flags;
     std::vector<uint8_t>        agent_class;
+    // Stuck detector — see steering_kernel.cpp tick().
+    std::vector<godot::Vector3> prev_pos;                // last tick's pos for displacement
+    std::vector<float>          stuck_window_sum;        // running sum of last STUCK_WINDOW_TICKS displacements
+    std::vector<int>            stuck_window_count;      // tick count populating the window (capped at STUCK_WINDOW_TICKS)
+    std::vector<int>            stuck_window_head;       // ring-buffer index for next write
+    std::vector<std::array<float, 32>> stuck_window;     // ring buffer; size 32 = pow2 above STUCK_WINDOW_TICKS (currently 20). Grow this if the window ever exceeds 32.
+    std::vector<int>            stuck_pushout_frames_left;
+    std::vector<godot::Vector3> stuck_pushout_dir;
+    std::vector<float>          stuck_cooldown_remaining; // seconds until next escalation allowed
+    std::vector<uint8_t>        stuck_level;             // 0 = clear, 1 = L1 fired, 2 = L2 fired (terminal)
     std::vector<bool>           alive;          // false = slot recyclable
     int count = 0;
 
@@ -25,6 +36,17 @@ struct AgentSoA {
         for (int i = 0; i < count; ++i) {
             if (!alive[i]) {
                 alive[i] = true;
+                // Clear stuck-detector state so a recycled slot doesn't
+                // inherit the prior occupant's escalation history.
+                prev_pos[i] = {};
+                stuck_window_sum[i] = 0.0f;
+                stuck_window_count[i] = 0;
+                stuck_window_head[i] = 0;
+                stuck_window[i].fill(0.0f);
+                stuck_pushout_frames_left[i] = 0;
+                stuck_pushout_dir[i] = {};
+                stuck_cooldown_remaining[i] = 0.0f;
+                stuck_level[i] = 0;
                 return i;
             }
         }
@@ -42,6 +64,15 @@ struct AgentSoA {
         radius.push_back(0.0f);
         flags.push_back(0);
         agent_class.push_back(0);
+        prev_pos.push_back({});
+        stuck_window_sum.push_back(0.0f);
+        stuck_window_count.push_back(0);
+        stuck_window_head.push_back(0);
+        stuck_window.emplace_back();  // zero-initialized std::array<float, 32>
+        stuck_pushout_frames_left.push_back(0);
+        stuck_pushout_dir.push_back({});
+        stuck_cooldown_remaining.push_back(0.0f);
+        stuck_level.push_back(0);
         alive.push_back(true);
         return idx;
     }

@@ -22,6 +22,7 @@ enum AgentFlag : uint8_t {
     AGENT_FLAG_HALTED     = 1 << 2,
     AGENT_FLAG_IS_AIRCRAFT = 1 << 3,
     AGENT_FLAG_ENGAGED_IN_COMBAT = 1 << 4,
+    AGENT_FLAG_STUCK_PUSHOUT     = 1 << 5,  // L1 push-out is active
 };
 
 } // namespace drossfront
