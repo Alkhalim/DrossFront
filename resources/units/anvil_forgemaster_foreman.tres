@@ -52,7 +52,7 @@ mult_vs_heavy_air_v2 = 1.0
 [resource]
 script = ExtResource("1")
 unit_name = "Forgemaster (Foreman)"
-display_name = "KV-C Coordinator (Foreman)"
+display_name = "Forgemaster (Foreman)"
 unit_class = &"heavy"
 hp_total = 1200
 hp_per_unit = 1200

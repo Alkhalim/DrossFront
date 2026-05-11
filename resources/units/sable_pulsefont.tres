@@ -53,7 +53,7 @@ ability_cooldown = 30.0
 ability_radius = 25.0
 ability_duration = 4.0
 ability_description = "Pulse-disable enemy mech weapons within 25u for 4s."
-special_description = "Sable mid-tier caster. Beam sidearm + active System Crash ability. Mobile Mesh aura provider. Fragile and expensive — protect this unit; killing one degrades the entire Sable army's combat strength temporarily."
+special_description = "Meridian mid-tier caster. Beam sidearm + active System Crash ability. Mobile Mesh aura provider. Fragile and expensive — protect this unit; killing one degrades the entire Meridian army's combat strength temporarily."
 
 speed = 8.0
 sight_radius = 26.0

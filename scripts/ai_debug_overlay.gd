@@ -135,7 +135,7 @@ func _make_panel(owner_id: int) -> RichTextLabel:
 
 func _format_snapshot(s: Dictionary) -> String:
 	var oid: int = s.get("owner_id", -1) as int
-	var faction_str: String = "Anvil" if (s.get("faction", 0) as int) == 0 else "Sable"
+	var faction_str: String = "Combine" if (s.get("faction", 0) as int) == 0 else "Meridian"
 	var color_hex: String = _color_for_owner(oid)
 	var lines: Array[String] = []
 	lines.append("[color=%s][b]AI %d[/b][/color]  %s · %s · %s" % [

@@ -843,7 +843,7 @@ func _spawn_first_building_raid() -> void:
 	if alerts and alerts.has_method("emit_alert"):
 		alerts.call(
 			"emit_alert",
-			"Sable scout contact inbound from the north",
+			"Meridian scout contact inbound from the north",
 			1,
 			Vector3(0.0, 0.0, raid_z),
 		)

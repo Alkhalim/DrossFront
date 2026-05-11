@@ -671,8 +671,8 @@ func _build_ai_row(player_id: int, label_text: String, team: int) -> void:
 	var fac_dropdown := OptionButton.new()
 	fac_dropdown.custom_minimum_size = Vector2(110, 32)
 	for fac_entry: Dictionary in [
-		{"label": "Anvil", "value": MatchSettingsClass.FactionId.ANVIL},
-		{"label": "Sable", "value": MatchSettingsClass.FactionId.SABLE},
+		{"label": "Combine", "value": MatchSettingsClass.FactionId.ANVIL},
+		{"label": "Meridian", "value": MatchSettingsClass.FactionId.SABLE},
 	]:
 		fac_dropdown.add_item(fac_entry["label"] as String, fac_entry["value"] as int)
 	# Default selection mirrors the team-based fallback so the player
@@ -1806,13 +1806,13 @@ func _build_scenarios_panel() -> void:
 	var scenario_defs: Array[Dictionary] = [
 		{
 			"id": MatchSettingsClass.Scenario.SPECOPS_SABLE_PROVING,
-			"title": "Sable Proving Ground",
-			"blurb": "Play Sable. Established base + full economy.\nThree Anvil opponents with parity setups.\nTest Sable's full toolkit at scale.",
+			"title": "Meridian Proving Ground",
+			"blurb": "Play Meridian. Established base + full economy.\nThree Combine opponents with parity setups.\nTest Meridian's full toolkit at scale.",
 		},
 		{
 			"id": MatchSettingsClass.Scenario.SPECOPS_ANVIL_PROVING,
-			"title": "Anvil Proving Ground",
-			"blurb": "Play Anvil. Same parity setup, mirrored.\nThree Sable opponents, full economy on every side.\nTest the Directive's discipline.",
+			"title": "Combine Proving Ground",
+			"blurb": "Play Combine. Same parity setup, mirrored.\nThree Meridian opponents, full economy on every side.\nTest the Directive's discipline.",
 		},
 		{
 			"id": MatchSettingsClass.Scenario.SPECOPS_STRESS_TEST,

@@ -5683,7 +5683,7 @@ func _building_description(id: StringName) -> String:
 		&"salvage_yard":
 			return "Stationary harvester. Pulls salvage from wrecks inside its work radius."
 		&"gun_emplacement":
-			return "Anvil mode-switchable emplacement: Balanced / Anti-Light / Anti-Heavy. Ground only. +15% HP / damage vs the baseline turret."
+			return "Combine mode-switchable emplacement: Balanced / Anti-Light / Anti-Heavy. Ground only. +15% HP / damage vs the baseline turret."
 		&"gun_emplacement_basic":
 			return "Fixed-mode ground turret. No profile swap, no air targeting."
 		&"aerodrome":
@@ -5693,7 +5693,7 @@ func _building_description(id: StringName) -> String:
 		&"sam_site":
 			return "Anti-air missile rack. Strong against aircraft, near-zero against ground."
 		&"black_pylon":
-			return "Sable Mesh anchor. Boosts nearby Sable units' accuracy/reload and unlocks the Wraith bomber."
+			return "Meridian Mesh anchor. Boosts nearby Meridian units' accuracy/reload and unlocks the Wraith bomber."
 	return ""
 
 

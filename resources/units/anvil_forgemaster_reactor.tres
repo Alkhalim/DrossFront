@@ -52,7 +52,7 @@ mult_vs_heavy_air_v2 = 1.0
 [resource]
 script = ExtResource("1")
 unit_name = "Forgemaster (Reactor)"
-display_name = "KV-C Coordinator (Reactor)"
+display_name = "Forgemaster (Reactor)"
 unit_class = &"heavy"
 hp_total = 1100
 hp_per_unit = 1100
