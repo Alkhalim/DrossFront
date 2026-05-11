@@ -33,8 +33,15 @@ func setup(initial_members: Array, dest: Vector3, initial_stance: int) -> void:
 	if server == null:
 		push_warning("[GroupAura] FlowFieldServer unavailable — no fields built")
 		return
+	# Collect ground agent classes only — aircraft don't need flow fields;
+	# they use the kernel's IS_AIRCRAFT branch (B2) with set_agent_target_pos.
 	var classes_seen: Dictionary = {}
 	for m: Node in members:
+		var mc_check: Node = m.get_node_or_null("MovementComponent")
+		if mc_check == null or not (mc_check is MovementComponent):
+			continue
+		if (mc_check as MovementComponent)._opts_unit_is_aircraft():
+			continue  # aircraft skip field-build; handled via set_agent_target_pos below
 		var c: int = _agent_class_for(m)
 		classes_seen[c] = true
 	for c_v: Variant in classes_seen:
@@ -54,10 +61,15 @@ func setup(initial_members: Array, dest: Vector3, initial_stance: int) -> void:
 			continue
 		if not "kernel_handle" in mc:
 			continue
-		var c: int = _agent_class_for(m)
-		var fid: int = field_ids.get(c, 0) as int
-		if fid != 0:
-			kernel.call("set_agent_target", mc.kernel_handle, get_instance_id(), fid, stance)
+		if (mc as MovementComponent)._opts_unit_is_aircraft():
+			# Aircraft: direct target position, no field. B2's tick() takes the
+			# IS_AIRCRAFT branch and 3D-seeks toward target_pos.
+			kernel.call("set_agent_target_pos", mc.kernel_handle, destination)
+		else:
+			var c: int = _agent_class_for(m)
+			var fid: int = field_ids.get(c, 0) as int
+			if fid != 0:
+				kernel.call("set_agent_target", mc.kernel_handle, get_instance_id(), fid, stance)
 
 func _exit_tree() -> void:
 	var server: Object = MovementNativeBootstrap.get_server(get_tree().current_scene)

@@ -2487,12 +2487,11 @@ func _confirm_build_placement(screen_pos: Vector2, keep_placing: bool = false) -
 		pass
 
 func _unit_is_pf_a_migrated(u: Node) -> bool:
-	## PF-B: every ground combat unit and the salvage crawler routes
-	## through the C++ steering kernel. Aircraft / drones still use the
-	## legacy AircraftMovement free-flight path until the kernel's
-	## aircraft branch lands (PF-B Stage 4 / spec §10 phase 6).
-	## Salvage workers also migrate — autonomous goal-picking lives in
-	## salvage_yard_component, the kernel just steers them.
+	## PF-B: every movable entity routes through the C++ steering kernel.
+	## Ground combat units and the salvage crawler use flow fields; the
+	## salvage worker uses the same flow-field path; aircraft and drones
+	## use the kernel's IS_AIRCRAFT branch (3D direct seek, no flow field
+	## sample) wired in B2/B3. Range checks: existence + stats resource.
 	if u == null or not is_instance_valid(u):
 		return false
 	if not "stats" in u:
@@ -2500,12 +2499,8 @@ func _unit_is_pf_a_migrated(u: Node) -> bool:
 	var stats_res: Resource = u.get("stats") as Resource
 	if stats_res == null:
 		return false
-	# Aircraft are not yet kernel-migrated (no aircraft branch in tick()).
-	# Detect via the stat flag rather than scene class so this works for
-	# aircraft Units that haven't loaded their script yet.
-	if "is_aircraft" in stats_res and (stats_res.get("is_aircraft") as bool):
-		return false
 	# Crawler is migrated via CrawlerMovement (large agent class).
+	# Aircraft are migrated via the AIRCRAFT branch (B2-B3).
 	# Everything else is a ground combat unit or worker — migrated.
 	return true
 
