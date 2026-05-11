@@ -366,13 +366,15 @@ void SteeringKernelImpl::tick(float delta) {
                 if (has_forward) {
                     // Right-perpendicular in XZ: (forward.z, 0, -forward.x).
                     godot::Vector3 perp(forward.z, 0.0f, -forward.x);
-                    // If sep has a component on perp, push the OPPOSITE way
-                    // (toward the open side). Otherwise pick perp arbitrarily.
+                    // sep already points away from peers (toward open
+                    // space). Pick the perpendicular direction that aligns
+                    // with sep's projection — that's the side away from
+                    // the densest separation contribution.
                     float sep_dot_perp = sep.x * perp.x + sep.z * perp.z;
                     if (sep_dot_perp > 0.001f) {
-                        push_dir = -perp;
+                        push_dir = perp;     // sep has +perp component → +perp is open
                     } else {
-                        push_dir = perp;
+                        push_dir = -perp;    // sep has 0 or -perp component → -perp is open (or arbitrary)
                     }
                 } else {
                     // No forward direction available — push along sep's

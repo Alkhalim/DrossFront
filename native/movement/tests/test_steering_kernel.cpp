@@ -146,3 +146,56 @@ TEST_CASE("stuck detector — meaningful progress resets stuck_level") {
     }
     CHECK(k.test_get_stuck_level(idx) == 0);
 }
+
+TEST_CASE("stuck detector — L1 push direction is away from peers, not into them") {
+    // Setup: two agents. Agent A at origin, agent B at (0, 0, +1) — i.e.
+    // B is in the +Z direction from A at distance 1m, inside the sep
+    // threshold (r_A + r_B + SEPARATE_BUFFER = 1.6m). A's SEPARATE force
+    // from B will point in -Z (away from B). A's `forward` is (1, 0, 0)
+    // (goal at +X). Right-perpendicular to forward (1,0,0) is
+    // `perp = (0, 0, -1)` (Godot left-handed XZ — perp.x =
+    // forward.z = 0; perp.z = -forward.x = -1).
+    //
+    // sep ≈ (0, 0, -K) for some positive K → sep . perp = (-K)*(-1) = +K > 0.
+    // So push_dir should be +perp = (0, 0, -1) — i.e., AWAY from peer B
+    // (which is at +Z). If the bug returns, push_dir would be -perp = (0,0,+1)
+    // — toward B.
+    //
+    // We can't directly read push_dir from the kernel (no test hook), but
+    // we can verify behavior: hold A pinned at origin while B is held at
+    // (0, 0, +1). Run enough ticks to fire L1, then UNPIN A for one tick
+    // and observe the velocity sign on Z. Negative Z = away from B = correct.
+    FlowFieldServerImpl s;
+    s.configure_map(32, 32, 2.0f, -32.0f, -32.0f);
+    s.set_agent_radius(0, 0.5f);
+    SteeringKernelImpl k;
+    k.set_flow_field_server(&s);
+    FieldId fid = s.build_field(godot::Vector3(20, 0, 0), 0);  // goal at +X
+    REQUIRE(fid != INVALID_FIELD_ID);
+
+    AgentHandle a = k.register_agent(1, 0, 0.5f, 5.0f, 20.0f, 8.0f);
+    AgentHandle b = k.register_agent(2, 0, 0.5f, 5.0f, 20.0f, 8.0f);
+    k.set_agent_target(a, 1, fid, 0);
+    k.set_agent_target(b, 1, fid, 0);
+    int ai = k.test_handle_to_idx(a);
+
+    // Pin both at chosen positions. A at origin, B at (0, 0, 1).
+    // Distance = 1 m < sep threshold (r_A + r_B + SEPARATE_BUFFER = 1.6 m)
+    // so separation force is active and sep accumulates in -Z each tick.
+    // Many ticks of zero progress for A → L1 fires.
+    for (int t = 0; t < 21; ++t) {
+        k.set_agent_pos(a, godot::Vector3(0, 0, 0));
+        k.set_agent_pos(b, godot::Vector3(0, 0, 1));
+        k.tick(0.1f);
+    }
+    REQUIRE(k.test_get_stuck_level(ai) == 1);
+    REQUIRE(k.test_get_pushout_frames(ai) > 0);
+
+    // Now run one more tick. velocity for A should have negative Z
+    // component (push away from B, which is at +Z).
+    k.set_agent_pos(a, godot::Vector3(0, 0, 0));
+    k.set_agent_pos(b, godot::Vector3(0, 0, 1));
+    k.tick(0.1f);
+    godot::Vector3 va = k.get_velocity(a);
+    CHECK(va.z < 0.0f);  // CRITICAL: must be negative; positive means push toward peer (the bug)
+}
