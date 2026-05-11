@@ -282,3 +282,67 @@ TEST_CASE("stuck detector — set_agent_target after L2 re-arms the detector for
     CHECK(k.test_get_stuck_level(idx) == 2);
     CHECK(k.test_pending_failure_count() == 1);  // exactly one new event
 }
+
+TEST_CASE("aircraft branch — direct 3D seek toward target_pos, no flow-field sample") {
+    FlowFieldServerImpl s;
+    s.configure_map(32, 32, 2.0f, -32.0f, -32.0f);
+    s.set_agent_radius(0, 0.5f);
+    SteeringKernelImpl k;
+    k.set_flow_field_server(&s);
+
+    AgentHandle h = k.register_agent(1, 0, 0.5f, 10.0f, 40.0f, 8.0f);
+    k.set_agent_flag(h, AGENT_FLAG_IS_AIRCRAFT, true);
+    k.set_agent_pos(h, godot::Vector3(0, 0, 0));
+    k.set_agent_target_pos(h, godot::Vector3(10, 5, 0));  // diagonal up + east
+    k.tick(0.1f);
+    godot::Vector3 v = k.get_velocity(h);
+    CHECK(v.x > 0.0f);   // moving east
+    CHECK(v.y > 0.0f);   // aircraft moves up — ground would have y == 0
+    CHECK(std::abs(v.z) < 0.001f);  // no Z motion
+}
+
+TEST_CASE("aircraft branch — within 1m of target, seek is zero (hover)") {
+    FlowFieldServerImpl s;
+    s.configure_map(32, 32, 2.0f, -32.0f, -32.0f);
+    s.set_agent_radius(0, 0.5f);
+    SteeringKernelImpl k;
+    k.set_flow_field_server(&s);
+
+    AgentHandle h = k.register_agent(1, 0, 0.5f, 10.0f, 40.0f, 8.0f);
+    k.set_agent_flag(h, AGENT_FLAG_IS_AIRCRAFT, true);
+    k.set_agent_pos(h, godot::Vector3(0.5f, 0, 0));  // 0.5m from origin target
+    k.set_agent_target_pos(h, godot::Vector3(0, 0, 0));
+    k.tick(0.1f);
+    godot::Vector3 v = k.get_velocity(h);
+    // Velocity should be near zero — at_goal, no SEEK, no neighbors, no
+    // cohesion (single agent). Only the inertia integrator might leave a
+    // tiny residual but it should decay quickly.
+    CHECK(v.length() < 1.0f);  // generous bound
+}
+
+TEST_CASE("aircraft branch — vertical motion counts as displacement progress") {
+    FlowFieldServerImpl s;
+    s.configure_map(32, 32, 2.0f, -32.0f, -32.0f);
+    s.set_agent_radius(0, 0.5f);
+    SteeringKernelImpl k;
+    k.set_flow_field_server(&s);
+
+    AgentHandle h = k.register_agent(1, 0, 0.5f, 10.0f, 40.0f, 8.0f);
+    k.set_agent_flag(h, AGENT_FLAG_IS_AIRCRAFT, true);
+    k.set_agent_target_pos(h, godot::Vector3(0, 10, 0));  // straight up
+    int idx = k.test_handle_to_idx(h);
+
+    // Manually advance the agent's pos +1m in Y per tick. Ground would
+    // see this as zero displacement (Y projected away); aircraft sees the
+    // full Y delta.
+    godot::Vector3 p(0, 0, 0);
+    for (int t = 0; t < 20; ++t) {
+        k.set_agent_pos(h, p);
+        k.tick(0.1f);
+        p.y += 1.0f;  // exactly max_speed × delta (10 × 0.1) when full-throttle vertical
+    }
+    // progress_ratio should be ~1.0 — aircraft moving at max_speed
+    // vertically registers as full progress, NOT zero.
+    CHECK(k.test_get_progress_ratio(idx, 0.1f) == doctest::Approx(1.0f).epsilon(0.1));
+    CHECK(k.test_get_stuck_level(idx) == 0);  // no escalation
+}

@@ -227,6 +227,8 @@ void SteeringKernelImpl::tick(float delta) {
     for (int i = 0; i < N; ++i) {
         if (!agents_.alive[i]) continue;
 
+        const bool is_aircraft = (agents_.flags[i] & AGENT_FLAG_IS_AIRCRAFT) != 0;
+
         // Stuck detector input — compute actual displacement since last
         // tick and slide it into the ring buffer. We do this before the
         // HAS_TARGET / HALTED short-circuits so the window has a clean
@@ -234,7 +236,9 @@ void SteeringKernelImpl::tick(float delta) {
         // and any subsequent re-target starts from the current pos.
         {
             godot::Vector3 dp = agents_.pos[i] - agents_.prev_pos[i];
-            dp.y = 0.0f;
+            if (!is_aircraft) {
+                dp.y = 0.0f;
+            }
             float dist = dp.length();
             int head = agents_.stuck_window_head[i];
             float old = agents_.stuck_window[i][head];
@@ -270,24 +274,41 @@ void SteeringKernelImpl::tick(float delta) {
         godot::Vector3 pos = agents_.pos[i];
         float max_speed = agents_.max_speed[i];
 
-        // SEEK from flow field (or aircraft direct seek; PF-A: ground only,
-        // so we always sample). Aircraft branch lands in PF-B.
-        godot::Vector2 flow = server_->sample(agents_.field_id[i], pos);
-        godot::Vector3 seek(flow.x * max_speed, 0.0f, flow.y * max_speed);
-
-        // Arrival (or unreachable goal): the field returns (0,0) flow at
-        // the goal cell itself AND at any cell that's disconnected from
-        // the goal. In both cases the agent should stop trying to drive
-        // toward the goal — no SEEK, no COHESION pulling toward the
-        // group centroid (which would cause stutter-step at the
-        // destination). Keep SEPARATE so peers maintain spacing instead
-        // of stacking on a single point. With seek=0 and coh=0, sep
-        // decays to zero once peers are at SEPARATE_DISTANCE apart, and
-        // inertia takes velocity to zero. Final state: units settle in
-        // a small cluster around the goal, standing still.
-        bool at_goal_or_unreachable = (flow.length_squared() < 0.0001f);
-        if (at_goal_or_unreachable) {
-            seek = godot::Vector3();
+        // SEEK — aircraft fly direct 3D toward target_pos; ground agents
+        // sample the flow field.
+        godot::Vector3 seek;
+        bool at_goal_or_unreachable;
+        if (is_aircraft) {
+            // Aircraft: direct 3D seek toward target_pos. No flow-field
+            // sample. Within 1m of target → seek = 0 (let the aircraft
+            // hover; peers handle separation).
+            godot::Vector3 to_target = agents_.target_pos[i] - pos;
+            float to_target_len = to_target.length();
+            if (to_target_len < 1.0f) {
+                seek = godot::Vector3();
+                at_goal_or_unreachable = true;
+            } else {
+                seek = (to_target / to_target_len) * max_speed;
+                at_goal_or_unreachable = false;
+            }
+        } else {
+            // Ground / crawler: sample flow field.
+            // Arrival (or unreachable goal): the field returns (0,0) flow
+            // at the goal cell itself AND at any cell that's disconnected
+            // from the goal. In both cases the agent should stop trying to
+            // drive toward the goal — no SEEK, no COHESION pulling toward
+            // the group centroid (which would cause stutter-step at the
+            // destination). Keep SEPARATE so peers maintain spacing instead
+            // of stacking on a single point. With seek=0 and coh=0, sep
+            // decays to zero once peers are at SEPARATE_DISTANCE apart, and
+            // inertia takes velocity to zero. Final state: units settle in
+            // a small cluster around the goal, standing still.
+            godot::Vector2 flow = server_->sample(agents_.field_id[i], pos);
+            seek = godot::Vector3(flow.x * max_speed, 0.0f, flow.y * max_speed);
+            at_goal_or_unreachable = (flow.length_squared() < 0.0001f);
+            if (at_goal_or_unreachable) {
+                seek = godot::Vector3();
+            }
         }
 
         // SEPARATE pass — pairwise O(N^2). Acceptable at PF-A scale (one
@@ -306,7 +327,9 @@ void SteeringKernelImpl::tick(float delta) {
         // if neither velocity nor seek give a meaningful direction we
         // apply unmodified separation.
         godot::Vector3 forward = agents_.vel[i];
-        forward.y = 0.0f;
+        if (!is_aircraft) {
+            forward.y = 0.0f;
+        }
         float fwd_len = forward.length();
         bool has_forward = false;
         if (fwd_len > 0.1f) {
@@ -401,7 +424,15 @@ void SteeringKernelImpl::tick(float delta) {
                 // contribution. Forward already computed by the SEPARATE
                 // pass above; sep too.
                 godot::Vector3 push_dir;
-                if (has_forward) {
+                if (is_aircraft) {
+                    // Vertical push — up by default. If the agent's forward
+                    // has a clear downward component, push down instead.
+                    // The bias prefers escaping into open air above.
+                    push_dir = godot::Vector3(0.0f, 1.0f, 0.0f);
+                    if (has_forward && forward.y < -0.1f) {
+                        push_dir = godot::Vector3(0.0f, -1.0f, 0.0f);
+                    }
+                } else if (has_forward) {
                     // Right-perpendicular in XZ: (forward.z, 0, -forward.x).
                     godot::Vector3 perp(forward.z, 0.0f, -forward.x);
                     // sep already points away from peers (toward open
@@ -424,7 +455,9 @@ void SteeringKernelImpl::tick(float delta) {
                         push_dir = godot::Vector3(1.0f, 0.0f, 0.0f);
                     }
                 }
-                push_dir.y = 0.0f;
+                if (!is_aircraft) {
+                    push_dir.y = 0.0f;
+                }
                 float push_len = push_dir.length();
                 if (push_len > 0.001f) push_dir /= push_len;
 
@@ -482,7 +515,9 @@ void SteeringKernelImpl::tick(float delta) {
         } else {
             desired = seek + sep + coh;
         }
-        desired.y = 0.0f;
+        if (!is_aircraft) {
+            desired.y = 0.0f;
+        }
         float dlen = desired.length();
         if (dlen > max_speed) desired *= (max_speed / dlen);
 
