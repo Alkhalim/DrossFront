@@ -353,9 +353,15 @@ func _process(delta: float) -> void:
 			# Subtle Z roll mimicking drone yaw correction.
 			drone.rotation.z = sin(_drone_anim_time * 1.7 + phase) * 0.05
 
-	# New system owns XZ position when active (PB-6). Visual-only work
-	# above (altitude bob, shadow, rotor spin, drone bob) still runs.
-	if get_node_or_null("MovementComponent") is AircraftMovement:
+	# PB-6 / PF-B-B5: new movement system owns XZ position when active.
+	# Visual-only work above (altitude bob, shadow, rotor spin, drone bob)
+	# still runs. When AircraftMovement is present, either:
+	#   - kernel_handle == 0: orchestrator drives via AircraftMovement.tick_movement
+	#   - kernel_handle != 0: orchestrator drives via _apply_kernel_velocity (PF-B-B5)
+	# Either way the legacy lerp below must not run. Keep it alive only for
+	# flag-off mode where no MovementComponent is attached.
+	var _mc_loco: Node = get_node_or_null("MovementComponent")
+	if _mc_loco is AircraftMovement:
 		return
 
 	if move_target == Vector3.INF:

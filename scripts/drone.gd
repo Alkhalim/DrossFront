@@ -230,9 +230,16 @@ func _process(delta: float) -> void:
 		queue_free()
 		return
 
-	# New movement system: AircraftMovement owns locomotion for LAUNCHING
-	# and RETURNING. ATTACKING is orbit math (direct position writes) and
-	# must always run here regardless of system flag — see concern note below.
+	# PB-6 / PF-B-B5: AircraftMovement owns locomotion for LAUNCHING and
+	# RETURNING when the new system is active (use_new_system on) OR when
+	# the kernel is driving (kernel_handle != 0). Either condition means
+	# AircraftMovement is attached; _using_new gates the legacy fly paths.
+	# ATTACKING is orbit math (direct position writes) and must always run
+	# here regardless of system flag — see concern note in ATTACKING block.
+	# PF-B-B5: when kernel_handle != 0 the orchestrator drives locomotion
+	# via _apply_kernel_velocity; the legacy _fly_toward / _fly_toward_curved
+	# calls below are already dead because _using_new is true whenever
+	# AircraftMovement is present (which is always the case for kernel agents).
 	var _mc: Node = get_node_or_null("MovementComponent")
 	var _using_new: bool = _mc != null and _mc is AircraftMovement
 
