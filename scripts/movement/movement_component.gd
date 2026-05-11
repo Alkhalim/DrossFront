@@ -19,6 +19,14 @@ const REASON_GOAL_IN_OBSTACLE: int = 1
 const REASON_REPEATEDLY_STUCK: int = 2
 const REASON_AGENT_OFF_NAVMESH: int = 3
 
+## Called by MovementOrchestrator after kernel.tick() when the kernel
+## reports a path failure for this component's agent. Plumbs through to
+## the existing path_unreachable signal so listeners (ai_controller,
+## HUD) don't need to know whether the failure came from the legacy
+## GDScript escalator or the kernel detector.
+func emit_path_unreachable_from_kernel(reason: int) -> void:
+	path_unreachable.emit(reason)
+
 # --- Configurable per-instance (set by owning unit on _ready) ---
 var max_speed: float = 8.0
 var max_accel: float = 30.0

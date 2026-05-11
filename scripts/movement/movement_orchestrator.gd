@@ -118,6 +118,30 @@ func _physics_process(delta: float) -> void:
 			i_a -= 1
 		kernel.call("tick", delta)
 
+		# PF-B-A7: Drain path_unreachable events the kernel pushed during
+		# tick(). The kernel can't emit Godot signals (no Object identity
+		# per agent), so it buffers events and we route them to the
+		# matching component here. Build a quick handle→component map
+		# so the per-event lookup is O(1).
+		var handle_to_mc: Dictionary = {}
+		var i_b: int = _components.size() - 1
+		while i_b >= 0:
+			var mc_v_b: Variant = _components[i_b]
+			if is_instance_valid(mc_v_b):
+				var mc_b: MovementComponent = mc_v_b as MovementComponent
+				if mc_b != null and mc_b.kernel_handle != 0:
+					handle_to_mc[mc_b.kernel_handle] = mc_b
+			i_b -= 1
+		while true:
+			var ev: Vector2i = kernel.call("pop_path_unreachable_event") as Vector2i
+			var ev_handle: int = ev.x
+			if ev_handle == 0:
+				break
+			var ev_reason: int = ev.y
+			var target_mc_v: Variant = handle_to_mc.get(ev_handle, null)
+			if target_mc_v != null and is_instance_valid(target_mc_v):
+				(target_mc_v as MovementComponent).emit_path_unreachable_from_kernel(ev_reason)
+
 	# Phase 2: walk components. Flag-on units get velocity from the kernel
 	# and apply via move_and_slide. Flag-off units run tick_movement.
 	var i: int = _components.size() - 1
