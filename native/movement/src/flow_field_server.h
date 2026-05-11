@@ -11,6 +11,8 @@ namespace drossfront {
 class FlowFieldServer : public godot::Object {
     GDCLASS(FlowFieldServer, godot::Object)
 
+    friend class SteeringKernel;
+
 protected:
     static void _bind_methods();
 
@@ -47,11 +49,10 @@ public:
     int field_count() const { return impl_.field_count(); }
     bool field_exists(FieldId id) const { return impl_.field_exists(id); }
 
-    // Access to the underlying impl for cross-class wiring
-    // (SteeringKernel::set_flow_field_server unwraps via this).
-    FlowFieldServerImpl& impl() { return impl_; }
-
 private:
+    // impl() is private; only SteeringKernel (friend) may call it
+    // to unwrap the FlowFieldServerImpl* during set_flow_field_server.
+    FlowFieldServerImpl& impl() { return impl_; }
     FlowFieldServerImpl impl_;
 };
 

@@ -53,8 +53,6 @@ public:
 
     int agent_count() const { return impl_.agent_count(); }
 
-    SteeringKernelImpl& impl() { return impl_; }
-
 private:
     SteeringKernelImpl impl_;
 };

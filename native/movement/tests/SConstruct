@@ -22,6 +22,12 @@ else:
 env.Append(LIBPATH=["../godot-cpp/bin/"])
 env.Append(LIBS=["libgodot-cpp.windows.template_debug.x86_64"])
 
+# Test placement convention (post-PF-B-A0):
+# - Impl-class doctests live in native/movement/tests/test_<name>.cpp
+#   and link against ../src/<name>_impl.cpp directly.
+# - Façades (godot::Object subclasses) cannot be tested here — their
+#   constructor SIGSEGVs without a loaded Godot runtime. Verify those
+#   paths via tools/test_*.gd headless snapshot tests instead.
 sources = ["test_main.cpp", "test_cost_grid.cpp", "test_flow_field.cpp",
            "../src/cost_grid.cpp", "../src/flow_field.cpp",
            "../src/steering_kernel_impl.cpp", "../src/flow_field_server_impl.cpp"]
