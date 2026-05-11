@@ -30,7 +30,7 @@ mult_vs_heavy_air_v2 = 1.0
 [resource]
 script = ExtResource("1")
 unit_name = "Switchblade (Dogfighter)"
-display_name = "BLADE Interceptor (Dogfighter)"
+display_name = "Switchblade (Dogfighter)"
 unit_class = &"aircraft"
 hp_total = 1020
 hp_per_unit = 510

@@ -53,7 +53,7 @@ mult_vs_heavy_air_v2 = 0.4
 [resource]
 script = ExtResource("1")
 unit_name = "Bulwark (Siegebreaker)"
-display_name = "KV-7S Bulwark (Siegebreaker)"
+display_name = "Bulwark (Siegebreaker)"
 unit_class = &"heavy"
 hp_total = 2240
 hp_per_unit = 1120

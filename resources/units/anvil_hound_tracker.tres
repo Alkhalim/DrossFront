@@ -32,7 +32,7 @@ mult_vs_heavy_air_v2 = 0.3
 [resource]
 script = ExtResource("1")
 unit_name = "Hound — Tracker"
-display_name = "KV-3R Mainline (Tracker)"
+display_name = "Hound (Tracker)"
 unit_class = &"medium"
 hp_total = 1260
 hp_per_unit = 420

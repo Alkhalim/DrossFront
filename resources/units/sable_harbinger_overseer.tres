@@ -54,7 +54,7 @@ mult_vs_heavy_air_v2 = 1.0
 [resource]
 script = ExtResource("1")
 unit_name = "Harbinger (Overseer)"
-display_name = "NODE Command Carrier (Overseer)"
+display_name = "Harbinger (Overseer)"
 unit_class = &"heavy"
 hp_total = 2240
 hp_per_unit = 1120

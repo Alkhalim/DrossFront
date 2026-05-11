@@ -30,7 +30,7 @@ mult_vs_heavy_air_v2 = 0.5
 [resource]
 script = ExtResource("1")
 unit_name = "Hammerhead (Escort)"
-display_name = "VA-H \"Hammerhead\" (Escort)"
+display_name = "Hammerhead (Escort)"
 unit_class = &"aircraft"
 hp_total = 1280
 hp_per_unit = 1280

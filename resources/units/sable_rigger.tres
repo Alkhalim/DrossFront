@@ -30,7 +30,7 @@ mult_vs_heavy_air_v2 = 0.5
 [resource]
 script = ExtResource("1")
 unit_name = "Rigger"
-display_name = "MPR Field Specialist"
+display_name = "Field Technician"
 unit_class = &"engineer"
 hp_total = 680
 hp_per_unit = 136

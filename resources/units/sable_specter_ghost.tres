@@ -34,7 +34,7 @@ mult_vs_heavy_air_v2 = 0.3
 [resource]
 script = ExtResource("1")
 unit_name = "Specter (Ghost)"
-display_name = "SHADE Scout (Ghost)"
+display_name = "Specter (Ghost)"
 unit_class = &"light"
 hp_total = 640
 hp_per_unit = 160

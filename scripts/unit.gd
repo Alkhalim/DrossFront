@@ -777,7 +777,6 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		# diverges from the Sable Courier Tank's turreted
 		# transport silhouette; defaults route to Courier Tank.
 		var tank_result: Dictionary
-		var is_grinder: bool = stats.unit_name.findn("Grinder") >= 0
 		if stats.unit_name.findn("Breacher") >= 0:
 			# Branch variants get distinct silhouettes -- Mortar
 			# is an open-topped artillery vehicle, Salvo carries
@@ -789,16 +788,12 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 				tank_result = _build_breacher_salvo_member(index, offset, team_color)
 			else:
 				tank_result = _build_breacher_tank_member(index, offset, team_color)
-		elif is_grinder:
-			tank_result = _build_grinder_tank_member(index, offset, team_color)
 		else:
 			tank_result = _build_courier_tank_member(index, offset, team_color)
 		# Tank-visual shrink: user feedback that Breacher and Courier
 		# read too large for the squad-of-3 footprint. 0.9 trims them
-		# down without losing the tank silhouette. Grinder is a
-		# different vehicle class (industrial wrecker) and stays at
-		# its original size — only the dual tank silhouettes scale.
-		if not is_grinder and "root" in tank_result:
+		# down without losing the tank silhouette.
+		if "root" in tank_result:
 			var tank_root: Variant = tank_result["root"]
 			if tank_root is Node3D:
 				(tank_root as Node3D).scale = Vector3(0.9, 0.9, 0.9)
@@ -5203,8 +5198,6 @@ func _mech_total_height() -> float:
 	if stats.unit_class == &"transport":
 		if stats.unit_name.findn("Breacher") >= 0:
 			return 1.95
-		if stats.unit_name.findn("Grinder") >= 0:
-			return 1.55
 		# Sable Courier Tank default.
 		return 1.40
 	var shape: Dictionary = CLASS_SHAPES.get(stats.unit_class, CLASS_SHAPES[&"medium"])

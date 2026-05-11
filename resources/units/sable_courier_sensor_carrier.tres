@@ -29,7 +29,7 @@ mult_vs_heavy_air_v2 = 0.5
 [resource]
 script = ExtResource("1")
 unit_name = "Courier (Sensor Carrier)"
-display_name = "RELAY Transport (Sensor Carrier)"
+display_name = "Courier (Sensor Carrier)"
 unit_class = &"transport"
 hp_total = 3960
 hp_per_unit = 1320

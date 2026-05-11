@@ -150,8 +150,8 @@ func get_ai_faction(player_id: int) -> FactionId:
 
 func get_faction_label(f: FactionId) -> String:
 	match f:
-		FactionId.SABLE: return "Sable Concord"
-		_: return "Anvil Directive"
+		FactionId.SABLE: return "Meridian Protocol"
+		_: return "The Combine"
 
 
 func get_map_label() -> String:

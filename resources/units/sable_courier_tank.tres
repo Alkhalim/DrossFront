@@ -33,7 +33,7 @@ mult_vs_heavy_air_v2 = 0.5
 [resource]
 script = ExtResource("1")
 unit_name = "Courier Tank"
-display_name = "RELAY Transport"
+display_name = "Courier"
 unit_class = &"transport"
 hp_total = 2160
 hp_per_unit = 720

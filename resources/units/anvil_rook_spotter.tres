@@ -34,7 +34,7 @@ mult_vs_heavy_air_v2 = 0.3
 [resource]
 script = ExtResource("1")
 unit_name = "Rook (Spotter)"
-display_name = "KV-1S Scout (Spotter)"
+display_name = "Strelet (Spotter)"
 unit_class = &"light"
 hp_total = 920
 hp_per_unit = 230

@@ -29,7 +29,7 @@ mult_vs_heavy_air_v2 = 0.5
 [resource]
 script = ExtResource("1")
 unit_name = "Switchblade (Strafe Runner)"
-display_name = "BLADE Interceptor (Strafe Runner)"
+display_name = "Switchblade (Strafe Runner)"
 unit_class = &"aircraft"
 hp_total = 950
 hp_per_unit = 475

@@ -39,7 +39,7 @@ mult_vs_heavy_air_v2 = 0.5
 [resource]
 script = ExtResource("1")
 unit_name = "Jackal"
-display_name = "JACKAL Strike Platform"
+display_name = "Jackal"
 unit_class = &"medium"
 hp_total = 1170
 hp_per_unit = 390

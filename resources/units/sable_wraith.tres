@@ -32,7 +32,7 @@ mult_vs_heavy_air_v2 = 0.2
 [resource]
 script = ExtResource("1")
 unit_name = "Wraith Bomber"
-display_name = "WRAITH Strike Craft"
+display_name = "Wraith"
 unit_class = &"aircraft"
 hp_total = 820
 hp_per_unit = 820

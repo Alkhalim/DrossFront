@@ -30,7 +30,7 @@ mult_vs_heavy_air_v2 = 0.5
 [resource]
 script = ExtResource("1")
 unit_name = "Ratchet"
-display_name = "KV-0 Field Engineer"
+display_name = "Mekh"
 unit_class = &"engineer"
 hp_total = 720
 hp_per_unit = 144

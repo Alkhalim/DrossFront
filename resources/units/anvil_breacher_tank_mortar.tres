@@ -39,7 +39,7 @@ mult_vs_heavy_air_v2 = 0.5
 [resource]
 script = ExtResource("1")
 unit_name = "Breacher Tank (Mortar)"
-display_name = "VA-9M Breacher (Mortar)"
+display_name = "Breacher (Mortar)"
 unit_class = &"transport"
 hp_total = 1380
 hp_per_unit = 460

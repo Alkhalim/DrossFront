@@ -32,7 +32,7 @@ mult_vs_structure_v2 = 0.4
 [resource]
 script = ExtResource("1")
 unit_name = "Jackal (Striker)"
-display_name = "JACKAL (Striker)"
+display_name = "Jackal (Striker)"
 unit_class = &"medium"
 hp_total = 1230
 hp_per_unit = 410

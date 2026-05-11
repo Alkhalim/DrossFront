@@ -31,7 +31,7 @@ mult_vs_heavy_air_v2 = 0.4
 [resource]
 script = ExtResource("1")
 unit_name = "Fang (Hunter)"
-display_name = "FANG Drone Pack (Hunter)"
+display_name = "Fang (Hunter)"
 unit_class = &"aircraft"
 hp_total = 700
 hp_per_unit = 70

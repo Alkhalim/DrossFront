@@ -30,7 +30,7 @@ mult_vs_heavy_air_v2 = 0.5
 [resource]
 script = ExtResource("1")
 unit_name = "Pulsefont"
-display_name = "SIGNAL Coordinator"
+display_name = "Pulsefont"
 unit_class = &"medium"
 hp_total = 980
 hp_per_unit = 980

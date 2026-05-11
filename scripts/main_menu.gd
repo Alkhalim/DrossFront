@@ -440,11 +440,11 @@ func _build_map_section(parent: Container) -> void:
 const _PLAYABLE_FACTIONS: Array[Dictionary] = [
 	{ "value": MatchSettingsClass.FactionId.ANVIL,
 	  "icon_id": 0,  # FactionIconScript.Faction.ANVIL
-	  "label": "Anvil Directive",
+	  "label": "The Combine",
 	  "tagline": "Heavy industrial — armored, deliberate, anchors a position." },
 	{ "value": MatchSettingsClass.FactionId.SABLE,
 	  "icon_id": 1,  # FactionIconScript.Faction.SABLE
-	  "label": "Sable Concord",
+	  "label": "Meridian Protocol",
 	  "tagline": "Information warfare — fast, fragile, plays the whole map." },
 ]
 
@@ -1130,7 +1130,7 @@ const _FACTION_ROSTER: Dictionary = {
 	# Foundry unit (Courier Tank), pylon_air is the Black-Pylon-gated
 	# Wraith. Anvil leaves slots it doesn't fill empty.
 	0: {
-		"label": "Anvil Directive",
+		"label": "The Combine",
 		"engineer":      "res://resources/units/anvil_ratchet.tres",
 		"crawler":       "res://resources/units/anvil_crawler.tres",
 		"light_a":       "res://resources/units/anvil_rook.tres",
@@ -1141,7 +1141,7 @@ const _FACTION_ROSTER: Dictionary = {
 		"air_adv":       "res://resources/units/anvil_hammerhead.tres",
 	},
 	1: {
-		"label": "Sable Concord",
+		"label": "Meridian Protocol",
 		"engineer":      "res://resources/units/sable_rigger.tres",
 		"crawler":       "res://resources/units/anvil_crawler.tres",  # shared chassis
 		"light_a":       "res://resources/units/sable_specter.tres",
