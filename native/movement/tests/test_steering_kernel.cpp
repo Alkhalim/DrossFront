@@ -244,3 +244,41 @@ TEST_CASE("stuck detector — L2 abandon zeroes velocity, sets HALTED, clears HA
     CHECK(empty_pop == 0);
     CHECK(reason == 0);
 }
+
+TEST_CASE("stuck detector — set_agent_target after L2 re-arms the detector for fresh escalation") {
+    FlowFieldServerImpl s;
+    s.configure_map(32, 32, 2.0f, -32.0f, -32.0f);
+    s.set_agent_radius(0, 0.5f);
+    SteeringKernelImpl k;
+    k.set_flow_field_server(&s);
+    FieldId fid = s.build_field(godot::Vector3(20, 0, 20), 0);
+    REQUIRE(fid != INVALID_FIELD_ID);
+    AgentHandle h = k.register_agent(1, 0, 0.5f, 5.0f, 20.0f, 8.0f);
+    k.set_agent_target(h, 1, fid, 0);
+    int idx = k.test_handle_to_idx(h);
+
+    // 50 stationary ticks → L2 fires.
+    for (int t = 0; t < 50; ++t) {
+        k.set_agent_pos(h, godot::Vector3(0, 0, 0));
+        k.tick(0.1f);
+    }
+    REQUIRE(k.test_get_stuck_level(idx) == 2);
+
+    // Drain the event.
+    int reason = 0;
+    k.pop_path_unreachable_event(&reason);
+
+    // Re-issue target. Detector state should reset.
+    k.set_agent_target(h, 1, fid, 0);
+    CHECK(k.test_get_stuck_level(idx) == 0);
+    CHECK(k.test_get_pushout_frames(idx) == 0);
+
+    // Now run 50 more stationary ticks — L1 + L2 should fire again on
+    // this fresh round, proving the detector is genuinely re-armed.
+    for (int t = 0; t < 50; ++t) {
+        k.set_agent_pos(h, godot::Vector3(0, 0, 0));
+        k.tick(0.1f);
+    }
+    CHECK(k.test_get_stuck_level(idx) == 2);
+    CHECK(k.test_pending_failure_count() == 1);  // exactly one new event
+}

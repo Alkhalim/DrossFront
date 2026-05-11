@@ -148,6 +148,25 @@ void SteeringKernelImpl::set_agent_target(AgentHandle handle, int group_id, Fiel
     // a target should walk again. Avoids requiring every caller (goto_world,
     // GroupAura.setup, combat-driven re-issue) to remember to clear the flag.
     agents_.flags[idx] &= static_cast<uint8_t>(~AGENT_FLAG_HALTED);
+    // PF-B-A6 fix: re-issuing a target also resets the stuck detector so
+    // an agent that previously abandoned (stuck_level == 2) can escalate
+    // again on the new attempt. Without this, the post-L2 agent is
+    // permanently un-escalatable: L1's gate requires stuck_level == 0,
+    // L2's requires stuck_level == 1, and the reset-on-progress block
+    // requires actual movement which never happens for a still-wedged
+    // unit. Clear the displacement window so the next ~20 ticks start
+    // fresh measurements rather than carrying the prior stuck samples.
+    agents_.stuck_level[idx] = 0;
+    agents_.stuck_cooldown_remaining[idx] = 0.0f;
+    agents_.stuck_window_count[idx] = 0;
+    agents_.stuck_window_sum[idx] = 0.0f;
+    agents_.stuck_window_head[idx] = 0;
+    agents_.stuck_window[idx].fill(0.0f);
+    agents_.stuck_pushout_frames_left[idx] = 0;
+    agents_.flags[idx] &= static_cast<uint8_t>(~AGENT_FLAG_STUCK_PUSHOUT);
+    // prev_pos NOT reset — the next displacement-record tick uses the
+    // current pos vs. the last-known pos, which is correct for tracking
+    // continuous motion.
 }
 
 void SteeringKernelImpl::set_agent_flag(AgentHandle handle, int flag, bool value) {
