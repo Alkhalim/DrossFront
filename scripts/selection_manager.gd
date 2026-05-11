@@ -2519,6 +2519,10 @@ func _dispatch_via_group_aura(ground_pos: Vector3, clear_combat: bool = true) ->
 	## The per-unit ad-hoc fields built by command_move's goto_world path
 	## are immediately overridden by GroupAura.setup below; they leak until
 	## the next goto_world on each unit, which is acceptable for PF-A.
+	##
+	## clear_combat=false signals an attack-move order; GroupAura.setup uses
+	## is_attack=true in that case to assign per-squad arc-offset fields so
+	## squads fan out laterally instead of all converging on the same cell.
 	for s: Node in _selected_units:
 		if not is_instance_valid(s):
 			continue
@@ -2527,4 +2531,7 @@ func _dispatch_via_group_aura(ground_pos: Vector3, clear_combat: bool = true) ->
 	var aura: GroupAura = GroupAura.new()
 	aura.name = "GroupAura_%d" % Time.get_ticks_msec()
 	get_tree().current_scene.add_child(aura)
-	aura.setup(_selected_units.duplicate(), ground_pos, 0)
+	# is_attack: attack-move does not clear combat (clear_combat=false);
+	# regular move clears combat (clear_combat=true). Invert to detect attack.
+	var is_attack: bool = not clear_combat
+	aura.setup(_selected_units.duplicate(), ground_pos, 0, is_attack)

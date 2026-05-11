@@ -785,6 +785,61 @@ TEST_CASE("behavioral — mixed 20-unit attack on single target shows lateral sp
     CHECK(z_spread >= 2.0f);
 }
 
+TEST_CASE("behavioral — attack-spread via per-squad arc offsets produces wide fan-out") {
+    // Mirrors what GroupAura._setup_attack_spread does: each squad gets its
+    // own flow field at a laterally-offset goal position. This test exercises
+    // the math independently of GDScript to verify spread is achieved.
+    FlowFieldServerImpl s;
+    s.configure_map(80, 80, 2.0f, -80.0f, -80.0f);
+    s.set_agent_radius(0, 0.5f);
+    SteeringKernelImpl k;
+    k.set_flow_field_server(&s);
+    godot::Vector3 target(30, 0, 0);
+
+    // Approach direction: from (-30,0,0) → (30,0,0) = +X. Perp = (0,0,-1).
+    godot::Vector3 perp(0, 0, -1);
+    constexpr int N_SQUADS = 5;
+    // spread_half_width = clamp(3 + 5*1.5, 4, 18) = 10.5
+    float spread_half_width = 3.0f + static_cast<float>(N_SQUADS) * 1.5f;  // 10.5
+
+    std::vector<AgentHandle> handles;
+    for (int i = 0; i < N_SQUADS; ++i) {
+        float lateral_t = static_cast<float>(i) / static_cast<float>(N_SQUADS - 1) * 2.0f - 1.0f;
+        godot::Vector3 squad_dest = target + perp * (lateral_t * spread_half_width);
+        FieldId fid = s.build_field(squad_dest, 0);
+        REQUIRE(fid != INVALID_FIELD_ID);
+        AgentHandle h = k.register_agent(i + 5000, 0, 0.5f, 5.0f, 20.0f, 8.0f);
+        REQUIRE(h != INVALID_AGENT_HANDLE);
+        k.set_agent_target(h, 1, fid, 0);
+        k.set_agent_pos(h, godot::Vector3(-30.0f, 0.0f, static_cast<float>(i - 2) * 2.0f));
+        handles.push_back(h);
+    }
+
+    constexpr float DELTA = 0.1f;
+    constexpr int TICKS = 400;
+    for (int t = 0; t < TICKS; ++t) {
+        k.tick(DELTA);
+        for (AgentHandle h : handles) {
+            int idx = k.test_handle_to_idx(h);
+            k.set_agent_pos(h, k.test_get_pos(idx) + k.get_velocity(h) * DELTA);
+        }
+    }
+
+    float z_min = std::numeric_limits<float>::infinity();
+    float z_max = -std::numeric_limits<float>::infinity();
+    for (AgentHandle h : handles) {
+        godot::Vector3 p = k.test_get_pos(k.test_handle_to_idx(h));
+        z_min = std::min(z_min, p.z);
+        z_max = std::max(z_max, p.z);
+    }
+    float z_spread = z_max - z_min;
+    INFO("Z spread with attack-spread: " << z_spread << "m (expected >= 15m for 5 squads × 10.5m half-width)");
+    // 5 squads × 10.5m half-width = 21m max possible. Real spread will be
+    // less due to cohesion + starting clustering. 15m is a robust threshold
+    // proving the arc-offset math is working end-to-end.
+    CHECK(z_spread >= 15.0f);
+}
+
 TEST_CASE("behavioral — two opposing 10-unit groups cross paths without permanent jam") {
     FlowFieldServerImpl s;
     s.configure_map(80, 80, 2.0f, -80.0f, -80.0f);
