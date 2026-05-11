@@ -84,6 +84,18 @@ namespace {
     // We feed the result into the same desired-velocity composition path
     // so the inertia integrator still bounds the per-tick velocity change.
     constexpr float STUCK_PUSHOUT_STRENGTH             = 1.0f;
+    // Aircraft direct-seek hover band: within this distance of target_pos,
+    // SEEK = 0 so the aircraft can hover instead of oscillating around
+    // its destination. 1m is roughly two agent radii — generous enough
+    // that small overshoot doesn't trigger re-SEEK.
+    constexpr float AIRCRAFT_HOVER_RADIUS = 1.0f;
+    // L1 push-out vertical-direction bias: if the aircraft's forward
+    // velocity has a downward component below this threshold, push DOWN
+    // instead of UP. -0.1 m/s gives hovering / level-flying agents a
+    // clear "push up" preference; only genuinely descending agents push
+    // further down (assumption: they're stuck against a ceiling, not a
+    // floor).
+    constexpr float AIRCRAFT_DOWN_BIAS_THRESHOLD = -0.1f;
 }
 
 namespace drossfront {
@@ -284,7 +296,7 @@ void SteeringKernelImpl::tick(float delta) {
             // hover; peers handle separation).
             godot::Vector3 to_target = agents_.target_pos[i] - pos;
             float to_target_len = to_target.length();
-            if (to_target_len < 1.0f) {
+            if (to_target_len < AIRCRAFT_HOVER_RADIUS) {
                 seek = godot::Vector3();
                 at_goal_or_unreachable = true;
             } else {
@@ -429,7 +441,7 @@ void SteeringKernelImpl::tick(float delta) {
                     // has a clear downward component, push down instead.
                     // The bias prefers escaping into open air above.
                     push_dir = godot::Vector3(0.0f, 1.0f, 0.0f);
-                    if (has_forward && forward.y < -0.1f) {
+                    if (has_forward && forward.y < AIRCRAFT_DOWN_BIAS_THRESHOLD) {
                         push_dir = godot::Vector3(0.0f, -1.0f, 0.0f);
                     }
                 } else if (has_forward) {
