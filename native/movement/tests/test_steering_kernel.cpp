@@ -3,6 +3,10 @@
 #include "../src/flow_field_server_impl.h"
 #include "../src/types.h"
 #include <godot_cpp/variant/vector3.hpp>
+#include <vector>
+#include <cmath>
+#include <limits>
+#include <algorithm>
 
 using namespace drossfront;
 
@@ -345,4 +349,278 @@ TEST_CASE("aircraft branch — vertical motion counts as displacement progress")
     // vertically registers as full progress, NOT zero.
     CHECK(k.test_get_progress_ratio(idx, 0.1f) == doctest::Approx(1.0f).epsilon(0.1));
     CHECK(k.test_get_stuck_level(idx) == 0);  // no escalation
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Behavioral simulation tests — emergent multi-agent regression net.
+// Each test constructs kernel + server from scratch (no shared state).
+// Velocity is integrated into agent pos after each tick, mirroring the
+// orchestrator's move_and_slide loop. Tests run in pure C++; no Godot
+// runtime required.
+// ─────────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("behavioral — flock traveling in same direction does not exhibit lateral wiggle") {
+    FlowFieldServerImpl s;
+    s.configure_map(64, 64, 2.0f, -64.0f, -64.0f);
+    s.set_agent_radius(0, 0.5f);
+    SteeringKernelImpl k;
+    k.set_flow_field_server(&s);
+    FieldId fid = s.build_field(godot::Vector3(50, 0, 0), 0);
+    REQUIRE(fid != INVALID_FIELD_ID);
+
+    // Spawn 5 agents in a tight row along Z, all heading toward +X.
+    // group_id = 1 so cohesion applies — matches "one selection of 5 squads".
+    std::vector<AgentHandle> handles;
+    for (int z_off = -2; z_off <= 2; ++z_off) {
+        AgentHandle h = k.register_agent(z_off + 100, 0, 0.5f, 5.0f, 20.0f, 8.0f);
+        REQUIRE(h != INVALID_AGENT_HANDLE);
+        k.set_agent_target(h, 1, fid, 0);
+        k.set_agent_pos(h, godot::Vector3(-30.0f, 0.0f, static_cast<float>(z_off)));
+        handles.push_back(h);
+    }
+
+    // Tick 200 frames (~20 s at 10 Hz). Mirror the orchestrator:
+    // get_velocity AFTER tick, then advance pos by velocity × delta.
+    constexpr float DELTA = 0.1f;
+    constexpr int TICKS = 200;
+    // Skip the first 30 ticks (acceleration ramp) and the last 40
+    // (potential arrival deceleration). Measure lateral RMS during
+    // steady-state travel: frames [30, 160).
+    float lateral_velocity_sum_sq = 0.0f;
+    int sample_count = 0;
+    for (int t = 0; t < TICKS; ++t) {
+        k.tick(DELTA);
+        for (AgentHandle h : handles) {
+            godot::Vector3 v = k.get_velocity(h);
+            int idx = k.test_handle_to_idx(h);
+            godot::Vector3 cur_pos = k.test_get_pos(idx);
+            k.set_agent_pos(h, cur_pos + v * DELTA);
+            if (t >= 30 && t < 160) {
+                // Z component is the lateral axis when traveling in +X.
+                lateral_velocity_sum_sq += v.z * v.z;
+                sample_count += 1;
+            }
+        }
+    }
+    float lateral_rms = std::sqrt(lateral_velocity_sum_sq / std::max(sample_count, 1));
+    INFO("Lateral velocity RMS during steady-state travel: " << lateral_rms << " m/s");
+    // Threshold: agents traveling at ~5 m/s should have lateral velocity
+    // well below 1 m/s on average. 0.8 m/s allows for normal inter-agent
+    // separation nudges while flagging genuine persistent wiggle.
+    // At HEAD (PARALLEL_REDUCTION=0.6) measured ~0.09 m/s — so 0.8 is
+    // generous headroom; tighten to ~0.3 once behavior is fully verified.
+    CHECK(lateral_rms < 0.8f);
+}
+
+TEST_CASE("behavioral — 5 squads converging on a single target spread out laterally") {
+    FlowFieldServerImpl s;
+    s.configure_map(64, 64, 2.0f, -64.0f, -64.0f);
+    s.set_agent_radius(0, 0.5f);
+    SteeringKernelImpl k;
+    k.set_flow_field_server(&s);
+    godot::Vector3 goal(30, 0, 0);
+    FieldId fid = s.build_field(goal, 0);
+    REQUIRE(fid != INVALID_FIELD_ID);
+
+    // Spawn 5 agents in a starting cluster at (-30, 0, *) with 2 m Z gaps.
+    std::vector<AgentHandle> handles;
+    for (int z_off = -2; z_off <= 2; ++z_off) {
+        AgentHandle h = k.register_agent(z_off + 200, 0, 0.5f, 5.0f, 20.0f, 8.0f);
+        k.set_agent_target(h, 1, fid, 0);
+        k.set_agent_pos(h, godot::Vector3(-30.0f, 0.0f, static_cast<float>(z_off) * 2.0f));
+        handles.push_back(h);
+    }
+
+    // 400 ticks = 40 s — long enough to reach and settle near the goal.
+    constexpr float DELTA = 0.1f;
+    constexpr int TICKS = 400;
+    for (int t = 0; t < TICKS; ++t) {
+        k.tick(DELTA);
+        for (AgentHandle h : handles) {
+            int idx = k.test_handle_to_idx(h);
+            godot::Vector3 cur_pos = k.test_get_pos(idx);
+            godot::Vector3 v = k.get_velocity(h);
+            k.set_agent_pos(h, cur_pos + v * DELTA);
+        }
+    }
+
+    // Measure the spread along Z for agents that reached the goal area.
+    float z_min = std::numeric_limits<float>::infinity();
+    float z_max = -std::numeric_limits<float>::infinity();
+    int near_goal_count = 0;
+    for (AgentHandle h : handles) {
+        int idx = k.test_handle_to_idx(h);
+        godot::Vector3 p = k.test_get_pos(idx);
+        // 15 m is a generous arrival radius — checks reachability, not
+        // tight arrival. Full arrival radius from set_agent_target semantics
+        // is typically ~2 m; 15 m here because clumped agents may park
+        // slightly away from the exact goal cell.
+        if ((p - goal).length() < 15.0f) {
+            z_min = std::min(z_min, p.z);
+            z_max = std::max(z_max, p.z);
+            near_goal_count += 1;
+        }
+    }
+    INFO("Agents near goal: " << near_goal_count << " / 5, Z spread: " << (z_max - z_min) << " m");
+    // At least 4 of 5 should reach the goal area (one may be slow on the edges).
+    CHECK(near_goal_count >= 4);
+    // Z spread >= 3 m: agents are not stacking perfectly on top of each
+    // other. This is a LENIENT bar — proper attack-spread would produce
+    // 8–10 m. Currently PARALLEL_REDUCTION=0.6 still clumps somewhat;
+    // attack-spread feature will raise this threshold.
+    CHECK((z_max - z_min) >= 3.0f);
+}
+
+TEST_CASE("behavioral — agents spawned within mutual separation distance still make progress") {
+    FlowFieldServerImpl s;
+    s.configure_map(64, 64, 2.0f, -64.0f, -64.0f);
+    s.set_agent_radius(0, 0.5f);
+    SteeringKernelImpl k;
+    k.set_flow_field_server(&s);
+    FieldId fid = s.build_field(godot::Vector3(30, 0, 0), 0);
+    REQUIRE(fid != INVALID_FIELD_ID);
+
+    // Spawn 5 agents at tight 0.8 m gaps — well inside the SEPARATE
+    // threshold (sum of radii 1.0 m + SEPARATE_BUFFER 0.6 m = 1.6 m).
+    // Forces partially cancel but flow-field SEEK should drive net forward
+    // motion. Verifies "initial jam" doesn't halt the group.
+    std::vector<AgentHandle> handles;
+    for (int z_off = -2; z_off <= 2; ++z_off) {
+        AgentHandle h = k.register_agent(z_off + 300, 0, 0.5f, 5.0f, 20.0f, 8.0f);
+        k.set_agent_target(h, 1, fid, 0);
+        k.set_agent_pos(h, godot::Vector3(-30.0f, 0.0f, static_cast<float>(z_off) * 0.8f));
+        handles.push_back(h);
+    }
+
+    // Record initial centroid X before any ticks.
+    float initial_centroid_x = 0.0f;
+    for (AgentHandle h : handles) {
+        initial_centroid_x += k.test_get_pos(k.test_handle_to_idx(h)).x;
+    }
+    initial_centroid_x /= 5.0f;
+
+    constexpr float DELTA = 0.1f;
+    constexpr int TICKS = 100;  // 10 s — plenty for forward motion to develop
+    for (int t = 0; t < TICKS; ++t) {
+        k.tick(DELTA);
+        for (AgentHandle h : handles) {
+            int idx = k.test_handle_to_idx(h);
+            godot::Vector3 cur_pos = k.test_get_pos(idx);
+            godot::Vector3 v = k.get_velocity(h);
+            k.set_agent_pos(h, cur_pos + v * DELTA);
+        }
+    }
+
+    // No agent should have HALTED (stuck_level == 2). If the initial jam
+    // overwhelms the seek, a unit may wedge and escalate to L2.
+    for (AgentHandle h : handles) {
+        int idx = k.test_handle_to_idx(h);
+        CHECK(k.test_get_stuck_level(idx) < 2);
+    }
+
+    // Centroid should have moved at least 5 m forward in 10 s.
+    // At 5 m/s max speed with partial separation drag, even 1 m/s net
+    // forward motion covers 10 m — 5 m is a conservative lower bound.
+    float final_centroid_x = 0.0f;
+    for (AgentHandle h : handles) {
+        final_centroid_x += k.test_get_pos(k.test_handle_to_idx(h)).x;
+    }
+    final_centroid_x /= 5.0f;
+    float displacement = final_centroid_x - initial_centroid_x;
+    INFO("Centroid displacement after 100 ticks: " << displacement << " m");
+    CHECK(displacement >= 5.0f);
+}
+
+TEST_CASE("behavioral — two aircraft flying to nearby goals maintain separation") {
+    FlowFieldServerImpl s;
+    s.configure_map(64, 64, 2.0f, -64.0f, -64.0f);
+    s.set_agent_radius(0, 0.5f);
+    SteeringKernelImpl k;
+    k.set_flow_field_server(&s);
+
+    // Two aircraft at altitude 10, side-by-side at z = ±2, same goal.
+    // Aircraft branch (B2) uses direct 3D seek toward target_pos.
+    AgentHandle a = k.register_agent(401, 0, 0.5f, 10.0f, 40.0f, 8.0f);
+    AgentHandle b = k.register_agent(402, 0, 0.5f, 10.0f, 40.0f, 8.0f);
+    // Set IS_AIRCRAFT flag before set_agent_target_pos so the tick branch
+    // picks up the flag on the very first tick.
+    k.set_agent_flag(a, AGENT_FLAG_IS_AIRCRAFT, true);
+    k.set_agent_flag(b, AGENT_FLAG_IS_AIRCRAFT, true);
+    k.set_agent_pos(a, godot::Vector3(-20, 10, -2));
+    k.set_agent_pos(b, godot::Vector3(-20, 10,  2));
+    k.set_agent_target_pos(a, godot::Vector3(20, 10, 0));
+    k.set_agent_target_pos(b, godot::Vector3(20, 10, 0));
+    // Both are in default group_id=0 — cohesion + separation both apply
+    // across the two agents since they share a group.
+
+    constexpr float DELTA = 0.1f;
+    constexpr int TICKS = 80;
+    float min_distance = std::numeric_limits<float>::infinity();
+    for (int t = 0; t < TICKS; ++t) {
+        k.tick(DELTA);
+        int idx_a = k.test_handle_to_idx(a);
+        int idx_b = k.test_handle_to_idx(b);
+        godot::Vector3 pa = k.test_get_pos(idx_a);
+        godot::Vector3 pb = k.test_get_pos(idx_b);
+        // Integrate positions.
+        k.set_agent_pos(a, pa + k.get_velocity(a) * DELTA);
+        k.set_agent_pos(b, pb + k.get_velocity(b) * DELTA);
+        // Measure pairwise distance after integration (at updated positions).
+        float d = (k.test_get_pos(idx_a) - k.test_get_pos(idx_b)).length();
+        min_distance = std::min(min_distance, d);
+    }
+    INFO("Closest pairwise distance over 80 ticks: " << min_distance << " m");
+    // Aircraft radius 0.5 m each; separation starts at r_a + r_b +
+    // SEPARATE_BUFFER = 1.6 m. They should never physically overlap
+    // (bodies touch at 1.0 m). 0.5 m is a generous lower bound —
+    // separation should prevent actual body contact.
+    CHECK(min_distance > 0.5f);
+}
+
+TEST_CASE("behavioral — agent pinned at origin escalates L1 then L2 within bounded ticks") {
+    FlowFieldServerImpl s;
+    s.configure_map(32, 32, 2.0f, -32.0f, -32.0f);
+    s.set_agent_radius(0, 0.5f);
+    SteeringKernelImpl k;
+    k.set_flow_field_server(&s);
+    FieldId fid = s.build_field(godot::Vector3(20, 0, 20), 0);
+    REQUIRE(fid != INVALID_FIELD_ID);
+    AgentHandle h = k.register_agent(501, 0, 0.5f, 5.0f, 20.0f, 8.0f);
+    k.set_agent_target(h, 1, fid, 0);
+    int idx = k.test_handle_to_idx(h);
+
+    // Pin at origin every tick — DO NOT integrate velocity into pos.
+    // Simulates a truly wedged agent: kernel keeps requesting motion,
+    // position never changes, stuck detector escalates.
+    int l1_fire_tick = -1;
+    int l2_fire_tick = -1;
+    for (int t = 0; t < 60; ++t) {
+        k.set_agent_pos(h, godot::Vector3(0, 0, 0));
+        k.tick(0.1f);
+        if (l1_fire_tick < 0 && k.test_get_stuck_level(idx) >= 1) {
+            l1_fire_tick = t;
+        }
+        if (l2_fire_tick < 0 && k.test_get_stuck_level(idx) >= 2) {
+            l2_fire_tick = t;
+            break;
+        }
+    }
+    INFO("L1 fired at tick " << l1_fire_tick << ", L2 fired at tick " << l2_fire_tick);
+    // L1 fires after STUCK_WINDOW_TICKS (20) stationary samples, on the
+    // tick where the window is full and ratio < threshold. The first tick
+    // recorded is tick 0 (set_agent_pos sets pos, then tick runs and
+    // records displacement = 0). Window fills at tick 19, L1 checks
+    // fire at tick 20. Allow up to 25 for floating-point / ordering slack.
+    CHECK(l1_fire_tick >= 0);
+    CHECK(l1_fire_tick <= 25);
+    // L2 fires after:
+    //   L1 at tick ~20
+    //   + STUCK_LEVEL1_PUSHOUT_DURATION_TICKS (10 ticks)
+    //   + STUCK_LEVEL1_COOLDOWN_SEC / DELTA (1.5 s / 0.1 s = 15 ticks of cooldown)
+    //   + 1 tick for L2 check to run
+    //   Total ≈ 20 + 10 + 15 + 1 = 46 ticks. Allow up to 55 for slack.
+    CHECK(l2_fire_tick >= 0);
+    CHECK(l2_fire_tick <= 55);
+    // Exactly one path_unreachable event for the single agent.
+    CHECK(k.test_pending_failure_count() == 1);
 }

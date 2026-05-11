@@ -61,6 +61,7 @@ public:
     int   test_get_pushout_frames(int idx) const { return agents_.stuck_pushout_frames_left[idx]; }
     int   test_pending_failure_count() const { return static_cast<int>(pending_failures_.size()); }
     int   test_handle_to_idx(AgentHandle h) const { return handle_to_idx(h); }
+    godot::Vector3 test_get_pos(int idx) const { return agents_.pos[idx]; }
 #endif
 
 private:
