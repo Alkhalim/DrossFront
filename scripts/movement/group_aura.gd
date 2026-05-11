@@ -89,6 +89,35 @@ func _setup_move(dest: Vector3, server: Object, kernel: Object) -> void:
 				if "_kernel_group_id" in mc:
 					mc.set("_kernel_group_id", get_instance_id())
 
+	# Convoy speed cap (spec §4): every ground member travels at the slowest
+	# member's pace so faster units don't pull ahead and stretch the formation
+	# into a column. Aircraft are excluded — mixed air+ground convoy logic is
+	# handled elsewhere (or currently absent).
+	var convoy_cap: float = INF
+	for m: Node in members:
+		if not is_instance_valid(m):
+			continue
+		var mc_for_cap: Node = m.get_node_or_null("MovementComponent")
+		if mc_for_cap == null or not (mc_for_cap is MovementComponent):
+			continue
+		if (mc_for_cap as MovementComponent)._opts_unit_is_aircraft():
+			continue
+		convoy_cap = min(convoy_cap, (mc_for_cap as MovementComponent).max_speed)
+
+	if convoy_cap < INF:
+		for m: Node in members:
+			if not is_instance_valid(m):
+				continue
+			var mc_apply: Node = m.get_node_or_null("MovementComponent")
+			if mc_apply == null or not (mc_apply is MovementComponent):
+				continue
+			if (mc_apply as MovementComponent)._opts_unit_is_aircraft():
+				continue
+			var h: int = (mc_apply as MovementComponent).kernel_handle
+			if h == 0:
+				continue
+			kernel.call("set_agent_speed_cap", h, convoy_cap)
+
 
 func _setup_attack_spread(dest: Vector3, server: Object, kernel: Object) -> void:
 	## Per-squad arc-offset path: each member gets its own field at a lateral
@@ -169,6 +198,21 @@ func _exit_tree() -> void:
 		if fid != 0:
 			server.call("release_field", fid)
 	_per_member_field_ids.clear()
+	# Release convoy speed cap so dispersed squads recover their own max_speed.
+	# Requires the kernel to be available; skip silently if it isn't (e.g.
+	# group dissolved during shutdown before the kernel is freed).
+	var kernel: Object = MovementNativeBootstrap.get_kernel(get_tree().current_scene)
+	if kernel != null:
+		for m: Node in members:
+			if not is_instance_valid(m):
+				continue
+			var mc_release: Node = m.get_node_or_null("MovementComponent")
+			if mc_release == null or not (mc_release is MovementComponent):
+				continue
+			var h: int = (mc_release as MovementComponent).kernel_handle
+			if h == 0:
+				continue
+			kernel.call("set_agent_speed_cap", h, INF)
 
 static func _agent_class_for(unit: Node) -> int:
 	# PF-B: read pf_agent_class from the unit's stat resource. Crawlers

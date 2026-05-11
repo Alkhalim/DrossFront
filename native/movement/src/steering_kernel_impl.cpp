@@ -1,5 +1,6 @@
 #include "steering_kernel_impl.h"
 #include "flow_field_server_impl.h"
+#include <algorithm>  // std::min (convoy cap)
 
 namespace {
     // Tunables — match spec §12.
@@ -215,6 +216,12 @@ void SteeringKernelImpl::set_agent_flag(AgentHandle handle, int flag, bool value
     else       agents_.flags[idx] &= static_cast<uint8_t>(~flag);
 }
 
+void SteeringKernelImpl::set_agent_speed_cap(AgentHandle handle, float cap) {
+    int idx = handle_to_idx(handle);
+    if (idx < 0 || idx >= agents_.count || !agents_.alive[idx]) return;
+    agents_.speed_cap[idx] = cap;
+}
+
 godot::Vector3 SteeringKernelImpl::get_velocity(AgentHandle handle) {
     int idx = handle_to_idx(handle);
     if (idx < 0 || idx >= agents_.count || !agents_.alive[idx]) return {};
@@ -292,7 +299,9 @@ void SteeringKernelImpl::tick(float delta) {
         }
 
         godot::Vector3 pos = agents_.pos[i];
-        float max_speed = agents_.max_speed[i];
+        // Convoy cap (spec §4): effective max_speed = min(agent's own speed, group cap).
+        // Default cap is INF so agents without a convoy cap are unaffected.
+        float max_speed = std::min(agents_.max_speed[i], agents_.speed_cap[i]);
 
         // SEEK — aircraft fly direct 3D toward target_pos; ground agents
         // sample the flow field.

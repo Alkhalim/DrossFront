@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <limits>
 #include <vector>
 #include <cstdint>
 #include <godot_cpp/variant/vector3.hpp>
@@ -14,6 +15,7 @@ struct AgentSoA {
     std::vector<uint32_t>       group_id;
     std::vector<FieldId>        field_id;
     std::vector<float>          max_speed;
+    std::vector<float>          speed_cap;   // convoy cap — effective max_speed = min(max_speed, speed_cap). INF = no cap.
     std::vector<float>          max_accel;
     std::vector<float>          max_turn_rate;
     std::vector<float>          radius;
@@ -47,6 +49,8 @@ struct AgentSoA {
                 stuck_pushout_dir[i] = {};
                 stuck_cooldown_remaining[i] = 0.0f;
                 stuck_level[i] = 0;
+                // Recycle: reset convoy cap so the new occupant starts uncapped.
+                speed_cap[i] = std::numeric_limits<float>::infinity();
                 return i;
             }
         }
@@ -59,6 +63,7 @@ struct AgentSoA {
         group_id.push_back(0);
         field_id.push_back(INVALID_FIELD_ID);
         max_speed.push_back(0.0f);
+        speed_cap.push_back(std::numeric_limits<float>::infinity());
         max_accel.push_back(0.0f);
         max_turn_rate.push_back(0.0f);
         radius.push_back(0.0f);

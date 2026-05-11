@@ -43,6 +43,8 @@ public:
         { impl_.set_agent_target(handle, group_id, field_id, stance); }
     void set_agent_flag(AgentHandle handle, int flag, bool value)
         { impl_.set_agent_flag(handle, flag, value); }
+    void set_agent_speed_cap(AgentHandle handle, float cap)
+        { impl_.set_agent_speed_cap(handle, cap); }
     void set_agent_target_pos(AgentHandle handle, godot::Vector3 target_pos)
         { impl_.set_agent_target_pos(handle, target_pos); }
     godot::Vector3 get_velocity(AgentHandle handle)

@@ -29,6 +29,11 @@ public:
     void set_agent_pos(AgentHandle handle, godot::Vector3 world_pos);
     void set_agent_target(AgentHandle handle, int group_id, FieldId field_id, int stance);
     void set_agent_flag(AgentHandle handle, int flag, bool value);
+    // Convoy speed cap — per spec §4. Sets the effective max_speed upper bound
+    // for this agent. Pass std::numeric_limits<float>::infinity() to clear (no cap).
+    // GroupAura.setup applies min(max_speed across members) to all ground members;
+    // _exit_tree resets to INF so dispersed squads recover their own speed.
+    void set_agent_speed_cap(AgentHandle handle, float cap);
     // Aircraft / drone direct-seek target. Sets HAS_TARGET, clears HALTED,
     // resets stuck detector (same semantics as set_agent_target since
     // re-issuing a target should give the agent a fresh escalation window).

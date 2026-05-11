@@ -840,6 +840,88 @@ TEST_CASE("behavioral — attack-spread via per-squad arc offsets produces wide 
     CHECK(z_spread >= 15.0f);
 }
 
+TEST_CASE("convoy speed cap — mixed-speed group throttles to slowest member") {
+    FlowFieldServerImpl s;
+    s.configure_map(80, 80, 2.0f, -80.0f, -80.0f);
+    s.set_agent_radius(0, 0.5f);
+    SteeringKernelImpl k;
+    k.set_flow_field_server(&s);
+    FieldId fid = s.build_field(godot::Vector3(50, 0, 0), 0);
+    REQUIRE(fid != INVALID_FIELD_ID);
+
+    // 3 agents: fast (10 m/s), medium (5 m/s), slow (3 m/s).
+    // No cap: fast unit reaches goal first, formation stretches.
+    // With cap set to 3 m/s: all three move at slow's pace, formation
+    // stays compact.
+    AgentHandle h_fast = k.register_agent(1, 0, 0.5f, 10.0f, 40.0f, 8.0f);
+    AgentHandle h_med  = k.register_agent(2, 0, 0.5f, 5.0f, 20.0f, 8.0f);
+    AgentHandle h_slow = k.register_agent(3, 0, 0.5f, 3.0f, 12.0f, 8.0f);
+    k.set_agent_target(h_fast, 1, fid, 0);
+    k.set_agent_target(h_med, 1, fid, 0);
+    k.set_agent_target(h_slow, 1, fid, 0);
+    k.set_agent_pos(h_fast, godot::Vector3(-30.0f, 0.0f, -2.0f));
+    k.set_agent_pos(h_med, godot::Vector3(-30.0f, 0.0f, 0.0f));
+    k.set_agent_pos(h_slow, godot::Vector3(-30.0f, 0.0f, 2.0f));
+
+    // Apply convoy cap = slow's speed.
+    k.set_agent_speed_cap(h_fast, 3.0f);
+    k.set_agent_speed_cap(h_med, 3.0f);
+    k.set_agent_speed_cap(h_slow, 3.0f);
+
+    constexpr float DELTA = 0.1f;
+    constexpr int TICKS = 200;
+    for (int t = 0; t < TICKS; ++t) {
+        k.tick(DELTA);
+        for (AgentHandle h : {h_fast, h_med, h_slow}) {
+            int idx = k.test_handle_to_idx(h);
+            k.set_agent_pos(h, k.test_get_pos(idx) + k.get_velocity(h) * DELTA);
+        }
+    }
+
+    // After 200 ticks (20s at 10 Hz × 3 m/s = ~60m travel), all three
+    // should be near each other along X. With no cap, the fast one
+    // would be ~140m further than the slow one.
+    float x_fast = k.test_get_pos(k.test_handle_to_idx(h_fast)).x;
+    float x_med  = k.test_get_pos(k.test_handle_to_idx(h_med)).x;
+    float x_slow = k.test_get_pos(k.test_handle_to_idx(h_slow)).x;
+    float spread_x = std::max({x_fast, x_med, x_slow}) - std::min({x_fast, x_med, x_slow});
+    INFO("X spread under convoy cap: " << spread_x << "m (no cap would be ~140m)");
+    CHECK(spread_x < 10.0f);  // tight column; would be 100m+ without the cap
+}
+
+TEST_CASE("convoy speed cap — INF cap means no throttle (fast unit pulls ahead)") {
+    FlowFieldServerImpl s;
+    s.configure_map(80, 80, 2.0f, -80.0f, -80.0f);
+    s.set_agent_radius(0, 0.5f);
+    SteeringKernelImpl k;
+    k.set_flow_field_server(&s);
+    FieldId fid = s.build_field(godot::Vector3(50, 0, 0), 0);
+    REQUIRE(fid != INVALID_FIELD_ID);
+
+    AgentHandle h_fast = k.register_agent(1, 0, 0.5f, 10.0f, 40.0f, 8.0f);
+    AgentHandle h_slow = k.register_agent(3, 0, 0.5f, 3.0f, 12.0f, 8.0f);
+    k.set_agent_target(h_fast, 1, fid, 0);
+    k.set_agent_target(h_slow, 1, fid, 0);
+    k.set_agent_pos(h_fast, godot::Vector3(-30.0f, 0.0f, -2.0f));
+    k.set_agent_pos(h_slow, godot::Vector3(-30.0f, 0.0f, 2.0f));
+    // No cap (default INF).
+
+    constexpr float DELTA = 0.1f;
+    for (int t = 0; t < 50; ++t) {
+        k.tick(DELTA);
+        for (AgentHandle h : {h_fast, h_slow}) {
+            int idx = k.test_handle_to_idx(h);
+            k.set_agent_pos(h, k.test_get_pos(idx) + k.get_velocity(h) * DELTA);
+        }
+    }
+    float spread = k.test_get_pos(k.test_handle_to_idx(h_fast)).x
+                 - k.test_get_pos(k.test_handle_to_idx(h_slow)).x;
+    INFO("X spread without convoy cap (50 ticks): " << spread << "m");
+    // Without cap, after ~5s the fast unit (10 m/s × 5s = ~50m max) should
+    // be at least 15m ahead of the slow one (3 m/s × 5s = ~15m).
+    CHECK(spread >= 15.0f);
+}
+
 TEST_CASE("behavioral — two opposing 10-unit groups cross paths without permanent jam") {
     FlowFieldServerImpl s;
     s.configure_map(80, 80, 2.0f, -80.0f, -80.0f);
