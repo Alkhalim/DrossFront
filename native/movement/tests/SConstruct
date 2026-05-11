@@ -29,6 +29,7 @@ env.Append(LIBS=["libgodot-cpp.windows.template_debug.x86_64"])
 #   constructor SIGSEGVs without a loaded Godot runtime. Verify those
 #   paths via tools/test_*.gd headless snapshot tests instead.
 sources = ["test_main.cpp", "test_cost_grid.cpp", "test_flow_field.cpp",
+           "test_steering_kernel.cpp",
            "../src/cost_grid.cpp", "../src/flow_field.cpp",
            "../src/steering_kernel_impl.cpp", "../src/flow_field_server_impl.cpp"]
 env.Program(target="run_tests", source=sources)

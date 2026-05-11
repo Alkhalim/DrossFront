@@ -39,6 +39,13 @@ public:
 
     int agent_count() const { return agents_.count; }
 
+#ifdef MOVEMENT_NATIVE_TESTS
+    float test_get_progress_ratio(int idx, float delta) const;
+    int   test_get_stuck_level(int idx) const { return agents_.stuck_level[idx]; }
+    int   test_get_pushout_frames(int idx) const { return agents_.stuck_pushout_frames_left[idx]; }
+    int   test_pending_failure_count() const { return static_cast<int>(pending_failures_.size()); }
+#endif
+
 private:
     struct PathFailureEvent {
         AgentHandle handle;

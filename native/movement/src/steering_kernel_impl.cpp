@@ -88,6 +88,23 @@ namespace {
 
 namespace drossfront {
 
+namespace {
+    // Returns the agent's progress ratio over its current window, or 1.0
+    // if the window isn't full yet (don't false-positive newly-spawned
+    // agents). Caller should only escalate when the window is full.
+    float compute_progress_ratio(const AgentSoA &agents, int i, float delta) {
+        if (agents.stuck_window_count[i] < STUCK_WINDOW_TICKS) {
+            return 1.0f;
+        }
+        float expected_per_tick = agents.max_speed[i] * delta;
+        if (expected_per_tick <= 0.0001f) {
+            return 1.0f;  // immobile-by-design (e.g. zero max_speed) never triggers
+        }
+        float mean = agents.stuck_window_sum[i] / static_cast<float>(STUCK_WINDOW_TICKS);
+        return mean / expected_per_tick;
+    }
+}
+
 SteeringKernelImpl::SteeringKernelImpl() {}
 SteeringKernelImpl::~SteeringKernelImpl() {}
 
@@ -171,6 +188,36 @@ void SteeringKernelImpl::tick(float delta) {
 
     for (int i = 0; i < N; ++i) {
         if (!agents_.alive[i]) continue;
+
+        // Stuck detector input — compute actual displacement since last
+        // tick and slide it into the ring buffer. We do this before the
+        // HAS_TARGET / HALTED short-circuits so the window has a clean
+        // reference frame: displacement of 0 while halted is the truth,
+        // and any subsequent re-target starts from the current pos.
+        {
+            godot::Vector3 dp = agents_.pos[i] - agents_.prev_pos[i];
+            dp.y = 0.0f;
+            float dist = dp.length();
+            int head = agents_.stuck_window_head[i];
+            float old = agents_.stuck_window[i][head];
+            agents_.stuck_window[i][head] = dist;
+            agents_.stuck_window_sum[i] += dist - old;
+            agents_.stuck_window_head[i] = (head + 1) % STUCK_WINDOW_TICKS;
+            if (agents_.stuck_window_count[i] < STUCK_WINDOW_TICKS) {
+                agents_.stuck_window_count[i] += 1;
+            }
+            agents_.prev_pos[i] = agents_.pos[i];
+        }
+
+        // Stuck detector cooldown decrements unconditionally — it's a
+        // wall-clock countdown.
+        if (agents_.stuck_cooldown_remaining[i] > 0.0f) {
+            agents_.stuck_cooldown_remaining[i] -= delta;
+            if (agents_.stuck_cooldown_remaining[i] < 0.0f) {
+                agents_.stuck_cooldown_remaining[i] = 0.0f;
+            }
+        }
+
         uint8_t f = agents_.flags[i];
         if (!(f & AGENT_FLAG_HAS_TARGET)) continue;
         if (f & (AGENT_FLAG_PARALYZED | AGENT_FLAG_HALTED)) {
@@ -318,5 +365,11 @@ void SteeringKernelImpl::tick(float delta) {
         agents_.vel[i] = v;
     }
 }
+
+#ifdef MOVEMENT_NATIVE_TESTS
+float SteeringKernelImpl::test_get_progress_ratio(int idx, float delta) const {
+    return compute_progress_ratio(agents_, idx, delta);
+}
+#endif
 
 } // namespace drossfront
