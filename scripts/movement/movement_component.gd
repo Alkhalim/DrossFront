@@ -1,4 +1,4 @@
-class_name MovementComponent
+﻿class_name MovementComponent
 extends Node                  # attached as child of CharacterBody3D, not the body itself
 ## Abstract base for all movement. Attached to a Node3D (or
 ## CharacterBody3D) unit chassis. Reads `target` from the order
@@ -119,25 +119,14 @@ func _ready() -> void:
 		var orch: MovementOrchestrator = MovementOrchestrator.get_instance(scene)
 		if orch:
 			orch.register(self)
-		# PF-A: when use_flowfield is on, register with the steering kernel.
-		# Flag-off path is unchanged. Use the class-name directly (not
-		# load().call()) — Script.call() doesn't reliably invoke static
-		# methods on GDScript resources, and was returning null silently,
-		# leaving kernel_handle = 0 and the orchestrator's flag-on path
-		# inactive.
-		# PF-B: aircraft don't register with the kernel until the kernel's
-		# aircraft branch lands (Stage 4 / spec §10 phase 6). Without this
-		# guard an aircraft would register, the kernel would have nothing
-		# to do with it (no flow field, no aircraft-seek branch), and the
-		# orchestrator's flag-on path would call _apply_kernel_velocity
-		# with a zero vector — overriding AircraftMovement's altitude /
-		# free-flight logic and leaving the aircraft glued to Y=0.
-		# kernel_handle stays 0 so the orchestrator falls back to
-		# tick_movement, which AircraftMovement implements.
-		var skip_kernel: bool = false
-		if _opts_unit_is_aircraft():
-			skip_kernel = true
-		if MovementFlags.use_flowfield() and not skip_kernel:
+		# PF-B-B3: when use_flowfield is on, register with the steering
+		# kernel. Aircraft now register too — the kernel's aircraft branch
+		# in tick() (B2) handles them via direct 3D seek toward target_pos
+		# and AGENT_FLAG_IS_AIRCRAFT toggles the branch. Pre-B3, aircraft
+		# were skipped because the kernel had no aircraft tick() branch
+		# and would have written zero velocity to AircraftMovement,
+		# gluing aircraft to Y=0.
+		if MovementFlags.use_flowfield():
 			var kernel: Object = MovementNativeBootstrap.get_kernel(scene)
 			if kernel != null:
 				kernel_handle = kernel.call("register_agent",
@@ -147,6 +136,9 @@ func _ready() -> void:
 					max_speed,
 					max_accel,
 					max_turn_rate_rad_s) as int
+				if kernel_handle != 0 and _opts_unit_is_aircraft():
+					const AGENT_FLAG_IS_AIRCRAFT_LOCAL: int = 0x08
+					kernel.call("set_agent_flag", kernel_handle, AGENT_FLAG_IS_AIRCRAFT_LOCAL, true)
 
 
 func _exit_tree() -> void:
