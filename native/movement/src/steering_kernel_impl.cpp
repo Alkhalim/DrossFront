@@ -349,8 +349,71 @@ void SteeringKernelImpl::tick(float delta) {
             }
         }
 
-        // Compose; clamp to max_speed.
-        godot::Vector3 desired = seek + sep + coh;
+        // Stuck detector — escalation L1 (perpendicular push-out).
+        // Skip when ENGAGED so combat-stopped units don't fire. Skip when
+        // L1 is already burning, when escalation level is already past 0,
+        // or when the cooldown timer hasn't elapsed.
+        if (!(f & AGENT_FLAG_ENGAGED_IN_COMBAT) && !(f & AGENT_FLAG_STUCK_PUSHOUT)
+                && agents_.stuck_level[i] == 0
+                && agents_.stuck_cooldown_remaining[i] <= 0.0f
+                && agents_.stuck_window_count[i] >= STUCK_WINDOW_TICKS) {
+            float ratio = compute_progress_ratio(agents_, i, delta);
+            if (ratio < STUCK_PROGRESS_RATIO_THRESHOLD) {
+                // Perpendicular to forward, biased away from dominant sep
+                // contribution. Forward already computed by the SEPARATE
+                // pass above; sep too.
+                godot::Vector3 push_dir;
+                if (has_forward) {
+                    // Right-perpendicular in XZ: (forward.z, 0, -forward.x).
+                    godot::Vector3 perp(forward.z, 0.0f, -forward.x);
+                    // If sep has a component on perp, push the OPPOSITE way
+                    // (toward the open side). Otherwise pick perp arbitrarily.
+                    float sep_dot_perp = sep.x * perp.x + sep.z * perp.z;
+                    if (sep_dot_perp > 0.001f) {
+                        push_dir = -perp;
+                    } else {
+                        push_dir = perp;
+                    }
+                } else {
+                    // No forward direction available — push along sep's
+                    // opposite (away from the crowd) or +X as last resort.
+                    float sep_len_inner = sep.length();
+                    if (sep_len_inner > 0.001f) {
+                        push_dir = -sep / sep_len_inner;
+                    } else {
+                        push_dir = godot::Vector3(1.0f, 0.0f, 0.0f);
+                    }
+                }
+                push_dir.y = 0.0f;
+                float push_len = push_dir.length();
+                if (push_len > 0.001f) push_dir /= push_len;
+
+                agents_.stuck_pushout_dir[i] = push_dir;
+                agents_.stuck_pushout_frames_left[i] = STUCK_LEVEL1_PUSHOUT_DURATION_TICKS;
+                agents_.flags[i] |= AGENT_FLAG_STUCK_PUSHOUT;
+                agents_.stuck_level[i] = 1;
+                agents_.stuck_cooldown_remaining[i] = STUCK_LEVEL1_COOLDOWN_SEC;
+                f = agents_.flags[i];  // refresh local copy so the next block sees STUCK_PUSHOUT
+            }
+        }
+
+        // While L1 push-out is active, replace SEEK with the push-out
+        // vector at full strength. SEPARATE still acts so we don't push
+        // into peers; COHESION still acts but is bounded so it can't
+        // overwhelm the push.
+        godot::Vector3 desired;
+        if (f & AGENT_FLAG_STUCK_PUSHOUT) {
+            godot::Vector3 push = agents_.stuck_pushout_dir[i] * (max_speed * STUCK_PUSHOUT_STRENGTH);
+            desired = push + sep + coh;
+            agents_.stuck_pushout_frames_left[i] -= 1;
+            if (agents_.stuck_pushout_frames_left[i] <= 0) {
+                agents_.flags[i] &= static_cast<uint8_t>(~AGENT_FLAG_STUCK_PUSHOUT);
+                // Don't reset stuck_level here — that resets in the
+                // progress-recovery branch below or in A6's L2 fire.
+            }
+        } else {
+            desired = seek + sep + coh;
+        }
         desired.y = 0.0f;
         float dlen = desired.length();
         if (dlen > max_speed) desired *= (max_speed / dlen);
@@ -363,6 +426,19 @@ void SteeringKernelImpl::tick(float delta) {
         if (dvlen > max_dv) dv *= (max_dv / dvlen);
         v += dv;
         agents_.vel[i] = v;
+
+        // Any tick of meaningful progress resets the escalation. Without
+        // this, a unit that successfully push-outs and walks free would
+        // still carry stuck_level = 1 and a cooldown that delays the next
+        // L1 fire — so a *new* stuck event minutes later wouldn't escalate
+        // properly. Resetting on success makes each stuck event independent.
+        if (agents_.stuck_window_count[i] >= STUCK_WINDOW_TICKS) {
+            float ratio_now = compute_progress_ratio(agents_, i, delta);
+            if (ratio_now > STUCK_PROGRESS_RATIO_RESET) {
+                agents_.stuck_level[i] = 0;
+                agents_.stuck_cooldown_remaining[i] = 0.0f;
+            }
+        }
     }
 }
 
