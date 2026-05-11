@@ -196,6 +196,13 @@ var _retaliation_lost_sight_timer: float = 0.0
 # moved a fraction past the exact range boundary.
 var _was_in_range: bool = false
 
+## Kernel combat-suppression flag — mirrors engaged state into the native
+## kernel so the stuck detector pauses while combat-stopped (spec §7).
+## Tracked here so _set_engaged() is idempotent and avoids redundant
+## cross-language calls when the unit re-targets within the same engagement.
+const _AGENT_FLAG_ENGAGED_IN_COMBAT: int = 0x10  # matches native/movement/src/types.h::AgentFlag
+var _is_kernel_engaged: bool = false
+
 
 func _ready() -> void:
 	_unit = get_parent()
@@ -214,6 +221,37 @@ func _ready() -> void:
 	# lifetime so caching is safe.
 	if _unit != null:
 		_shooter_is_air_cached = _unit.is_in_group("aircraft")
+
+
+func _set_kernel_engaged(engaged: bool) -> void:
+	## Pushes the AGENT_FLAG_ENGAGED_IN_COMBAT bit to the kernel.
+	## Only call via _set_engaged() so the idempotence guard fires first.
+	var unit: Node = get_parent()
+	if unit == null or not is_instance_valid(unit):
+		return
+	var mc: Node = unit.get_node_or_null("MovementComponent")
+	if mc == null or not (mc is MovementComponent):
+		return
+	var handle: int = (mc as MovementComponent).kernel_handle
+	if handle == 0:
+		return  # flag-off unit; nothing to mirror
+	var scene: Node = unit.get_tree().current_scene if unit.get_tree() else null
+	if scene == null:
+		return
+	var kernel: Object = MovementNativeBootstrap.get_kernel(scene)
+	if kernel == null:
+		return
+	kernel.call("set_agent_flag", handle, _AGENT_FLAG_ENGAGED_IN_COMBAT, engaged)
+
+
+func _set_engaged(value: bool) -> void:
+	## Idempotent wrapper — only calls _set_kernel_engaged when the state
+	## actually changes. Prevents redundant cross-language calls on re-target
+	## within the same engagement.
+	if _is_kernel_engaged == value:
+		return
+	_is_kernel_engaged = value
+	_set_kernel_engaged(value)
 
 
 func apply_silence(duration: float) -> void:
@@ -441,6 +479,7 @@ func _physics_process(delta: float) -> void:
 		_current_target = null
 		_was_in_range = false
 		# Unguarded: the elif condition guarantees _current_target was non-null
+		_set_engaged(false)
 		combat_ended.emit()
 
 	# Auto-acquire targets: allowed when idle, or during attack-move. We scan a
@@ -481,6 +520,7 @@ func _physics_process(delta: float) -> void:
 			# if the enemy starts outside weapon range.
 			forced_target = found
 			_current_target = found
+			_set_engaged(true)
 
 	if not _current_target:
 		# Reset the burst counter so a half-finished burst from the previous
@@ -649,6 +689,7 @@ func set_target(target: Node3D) -> void:
 		_chase_lockout_until_msec = 0
 	forced_target = target
 	_current_target = target
+	_set_engaged(true)
 	attack_move_target = Vector3.INF
 
 
@@ -665,6 +706,7 @@ func clear_target() -> void:
 	# Player command supersedes any in-flight chase commitment.
 	_chase_lockout_until_msec = 0
 	if was_engaged:
+		_set_engaged(false)
 		combat_ended.emit()
 
 
@@ -676,6 +718,7 @@ func command_attack_move(pos: Vector3) -> void:
 	_was_in_range = false
 	_chase_lockout_until_msec = 0
 	if was_engaged:
+		_set_engaged(false)
 		combat_ended.emit()
 	_unit.has_move_order = true
 	# New-system units: MovementComponent owns the movement target and the
@@ -816,6 +859,7 @@ func notify_attacked(attacker: Node3D) -> void:
 			forced_target = attacker
 			_current_target = attacker
 			_was_in_range = false
+			_set_engaged(true)
 		return
 
 	var has_move_order: bool = _unit.get("has_move_order") as bool
@@ -836,6 +880,7 @@ func notify_attacked(attacker: Node3D) -> void:
 		_was_in_range = false
 	forced_target = attacker
 	_current_target = attacker
+	_set_engaged(true)
 
 
 func _is_valid_target(target: Node3D) -> bool:
