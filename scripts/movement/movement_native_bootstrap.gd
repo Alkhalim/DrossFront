@@ -284,6 +284,7 @@ static func _mark_existing_terrain_props(scene_root: Node) -> void:
 	if tree == null:
 		return
 	var marked: int = 0
+	var marked_elevation_walls: int = 0
 	var skipped_elevation: int = 0
 	var skipped_layer: int = 0
 	var skipped_buildings: int = 0
@@ -292,10 +293,23 @@ static func _mark_existing_terrain_props(scene_root: Node) -> void:
 			continue
 		if not (n is StaticBody3D):
 			continue
-		# Skip plateaus and ramps — they're terrain but units walk ON them.
+		# Elevation nodes need special handling: plateau top bodies and ramp
+		# bodies (ConvexPolygonShape3D) are walkable surfaces — skip them.
+		# But side walls (BoxShape3D children of the plateau root) are vertical
+		# cliffside colliders that units cannot pass through — mark them so the
+		# flow field routes around them (i.e. through the ramp).
 		if n.is_in_group("elevation"):
-			skipped_elevation += 1
-			continue
+			var sb_elev: StaticBody3D = n as StaticBody3D
+			var cs_elev: CollisionShape3D = null
+			for child: Node in sb_elev.get_children():
+				if child is CollisionShape3D:
+					cs_elev = child as CollisionShape3D
+					break
+			if cs_elev == null or cs_elev.shape is ConvexPolygonShape3D:
+				# Plateau top or ramp body — walkable surface, skip.
+				skipped_elevation += 1
+				continue
+			# BoxShape3D (or any other) = side wall, fall through to mark.
 		# Skip buildings — they're double-tagged (in BOTH "buildings" and
 		# "terrain") and already handled by _mark_existing_buildings with
 		# their stats.footprint_size. Marking them again here is redundant
@@ -314,8 +328,11 @@ static func _mark_existing_terrain_props(scene_root: Node) -> void:
 			continue
 		var aabb: AABB = _terrain_prop_aabb(sb)
 		_server.call("mark_obstacle", aabb, true)
-		marked += 1
-	print_debug("[MovementNativeBootstrap] marked %d pre-placed terrain props as flow-field obstacles (skipped %d elevation, %d buildings, %d non-obstacle-layer)" % [marked, skipped_elevation, skipped_buildings, skipped_layer])
+		if n.is_in_group("elevation"):
+			marked_elevation_walls += 1
+		else:
+			marked += 1
+	print_debug("[MovementNativeBootstrap] marked %d pre-placed terrain props + %d elevation side walls as flow-field obstacles (skipped %d elevation tops/ramps, %d buildings, %d non-obstacle-layer)" % [marked, marked_elevation_walls, skipped_elevation, skipped_buildings, skipped_layer])
 
 
 ## Derives an AABB for a terrain StaticBody3D from its first CollisionShape3D
