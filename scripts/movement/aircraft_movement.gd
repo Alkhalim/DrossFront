@@ -36,6 +36,19 @@ func _ready() -> void:
 	# in place when the aircraft "arrived". 6 u gives the inertia
 	# step room to converge cleanly.
 	arrival_radius = 6.0
+	# Altitude snap on spawn: move the body to base_altitude immediately
+	# so the unit never sits at Y=0 waiting for its first goto_world.
+	# Also push an initial target_pos = current (snapped) position so the
+	# kernel's AIRCRAFT SEEK has a finite target to aim at — result is
+	# hover-in-place until a move order arrives.
+	if _body != null:
+		_body.global_position.y = base_altitude
+		if kernel_handle != 0:
+			var scene: Node = get_tree().current_scene if get_tree() else null
+			if scene != null:
+				var kernel: Object = MovementNativeBootstrap.get_kernel(scene)
+				if kernel != null:
+					kernel.call("set_agent_target_pos", kernel_handle, _body.global_position)
 
 
 func goto_world(world_pos: Vector3) -> void:
