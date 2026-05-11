@@ -32,17 +32,17 @@ namespace {
     // unit slowed by separation, the front sped up — and a flock would
     // spontaneously string into a single-file line over its travel.
     //
-    // 0.4 leaves 60% along-motion separation. Earlier value (0.8) gutted
-    // along-motion repel too aggressively: when N squads converged on a
-    // single attack target from the same direction, pairwise separation
-    // was almost entirely fore-aft (parallel to shared motion), got
-    // scaled down by 80%, and squads piled into the back of whichever
-    // one stopped first — only the front squad could shoot. 0.4 keeps
-    // enough anti-line behavior to prevent open-ground single-filing
-    // while leaving substantial along-motion force to keep converging
-    // squads spaced for combat. Watch this knob if line formation
-    // returns during straight-line travel — raise toward 0.6 if so.
-    constexpr float SEPARATE_PARALLEL_REDUCTION = 0.4f;
+    // 0.6 is the middle ground between the original 0.8 (which fixed
+    // open-ground line formation + wiggle but caused converging squads
+    // to pile into the front-most one during attack orders) and 0.4
+    // (which fixed the pile-up but brought wiggle back during travel).
+    // 40% reduction along motion: still some bias toward perpendicular
+    // separation to prevent strict line formation, but enough along-
+    // motion force to keep squads spaced when they converge on a
+    // single goal. Clumping at attack targets is a known remaining
+    // limitation — the proper fix is attack-spread (each squad offset
+    // on an arc around the target), not more separation tuning.
+    constexpr float SEPARATE_PARALLEL_REDUCTION = 0.6f;
     constexpr float AVOID_DISTANCE         = 3.0f;     // unused in PF-A (no buildings list yet)
     constexpr float AVOID_REPEL            = 24.0f;
     // Cohesion as a fraction of the unit's own max_speed. A 5 m/s hound
