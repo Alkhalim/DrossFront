@@ -393,6 +393,12 @@ func _ensure_stuck_buffer() -> void:
 		_stuck_buffer_idx = 0
 
 func _stuck_step(delta: float, combat_engaged: bool, is_heavy_tick: bool) -> void:
+	# PF-B-A9: kernel-driven units have detection in steering_kernel_impl.cpp::tick()
+	# (4-level → 2-level rewrite). Running both ladders would double-count and
+	# confuse the GDScript repath/pushout state with the kernel STUCK_PUSHOUT
+	# flag. PF-C deletes this entire method; for PF-B we just gate it off.
+	if kernel_handle != 0:
+		return
 	# Cheap early-out for idle units (no active move target).
 	# The stuck detector only matters while travelling; running
 	# the displacement bookkeeping every tick on idle units was
@@ -449,6 +455,12 @@ func _stuck_step(delta: float, combat_engaged: bool, is_heavy_tick: bool) -> voi
 		_escalate()
 
 func _escalate() -> void:
+	# PF-B-A9: kernel-driven units have escalation in the C++ kernel; this
+	# function is unreachable for them after the _stuck_step guard above,
+	# but defense-in-depth — guard here too in case any other caller ever
+	# reaches it (e.g., legacy debug code).
+	if kernel_handle != 0:
+		return
 	_stuck_level += 1
 	match _stuck_level:
 		1:
