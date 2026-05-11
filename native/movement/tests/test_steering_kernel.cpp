@@ -624,3 +624,248 @@ TEST_CASE("behavioral — agent pinned at origin escalates L1 then L2 within bou
     // Exactly one path_unreachable event for the single agent.
     CHECK(k.test_pending_failure_count() == 1);
 }
+
+TEST_CASE("behavioral — mixed 20-unit flock arrives cohesively, no stuck, no severe wiggle") {
+    FlowFieldServerImpl s;
+    s.configure_map(80, 80, 2.0f, -80.0f, -80.0f);
+    s.set_agent_radius(0, 0.5f);
+    SteeringKernelImpl k;
+    k.set_flow_field_server(&s);
+    godot::Vector3 goal(40, 0, 0);
+    FieldId fid = s.build_field(goal, 0);
+    REQUIRE(fid != INVALID_FIELD_ID);
+
+    // 20 mixed agents: 4 distinct profiles × 5 of each. Spawn in a
+    // 4×5 starting grid covering ~12m × 8m (Z × X) — like a real
+    // multi-squad selection.
+    struct GameplayAgentSpec {
+        godot::Vector3 spawn_pos;
+        float radius;
+        float max_speed;
+        float max_accel;
+        float max_turn_rate;
+    };
+    std::vector<GameplayAgentSpec> specs;
+    // "Hound" — medium, moderate speed
+    for (int i = 0; i < 5; ++i) specs.push_back({godot::Vector3(-30.0f, 0.0f, -6.0f + static_cast<float>(i) * 3.0f), 0.5f, 5.0f, 20.0f, 8.0f});
+    // "Ratchet" — small, fast
+    for (int i = 0; i < 5; ++i) specs.push_back({godot::Vector3(-32.0f, 0.0f, -6.0f + static_cast<float>(i) * 3.0f), 0.4f, 7.0f, 28.0f, 10.0f});
+    // "Bulwark" — large, slow
+    for (int i = 0; i < 5; ++i) specs.push_back({godot::Vector3(-28.0f, 0.0f, -6.0f + static_cast<float>(i) * 3.0f), 1.0f, 3.0f, 12.0f, 5.0f});
+    // "Rook" — medium-small, fast-ish
+    for (int i = 0; i < 5; ++i) specs.push_back({godot::Vector3(-26.0f, 0.0f, -6.0f + static_cast<float>(i) * 3.0f), 0.5f, 6.0f, 24.0f, 9.0f});
+
+    std::vector<AgentHandle> handles;
+    for (const GameplayAgentSpec &spec : specs) {
+        AgentHandle h = k.register_agent(static_cast<int>(handles.size() + 1000), 0,
+                                         spec.radius, spec.max_speed, spec.max_accel, spec.max_turn_rate);
+        REQUIRE(h != INVALID_AGENT_HANDLE);
+        k.set_agent_target(h, 1 /*group_id*/, fid, 0);
+        k.set_agent_pos(h, spec.spawn_pos);
+        handles.push_back(h);
+    }
+
+    constexpr float DELTA = 0.1f;
+    constexpr int TICKS = 400;  // 40s — slower units (bulwark 3 m/s) take longest
+    float lateral_velocity_sum_sq = 0.0f;
+    int sample_count = 0;
+    for (int t = 0; t < TICKS; ++t) {
+        k.tick(DELTA);
+        for (AgentHandle h : handles) {
+            int idx = k.test_handle_to_idx(h);
+            godot::Vector3 cur_pos = k.test_get_pos(idx);
+            godot::Vector3 v = k.get_velocity(h);
+            k.set_agent_pos(h, cur_pos + v * DELTA);
+            // Sample lateral velocity in steady-state window (ticks 80..280).
+            if (t >= 80 && t < 280) {
+                lateral_velocity_sum_sq += v.z * v.z;
+                sample_count += 1;
+            }
+        }
+    }
+
+    // No agent should be HALTED.
+    int halted_count = 0;
+    for (AgentHandle h : handles) {
+        if (k.test_get_stuck_level(k.test_handle_to_idx(h)) >= 2) halted_count += 1;
+    }
+    INFO("Halted at end: " << halted_count << " / 20");
+    CHECK(halted_count == 0);
+
+    // Most agents reach the goal area. Bulwarks are slow; allow a few
+    // stragglers.
+    int near_goal = 0;
+    for (AgentHandle h : handles) {
+        godot::Vector3 p = k.test_get_pos(k.test_handle_to_idx(h));
+        if ((p - goal).length() < 20.0f) near_goal += 1;
+    }
+    INFO("Near goal (< 20m) at end: " << near_goal << " / 20");
+    CHECK(near_goal >= 16);
+
+    // Lateral RMS during steady-state — mixed flock with varied speeds
+    // generates more separation activity than uniform single-class. 1.2
+    // m/s is a generous bar; the 5-agent same-class test measured 0.26.
+    float lateral_rms = std::sqrt(lateral_velocity_sum_sq / std::max(sample_count, 1));
+    INFO("Lateral RMS over steady-state: " << lateral_rms << " m/s");
+    CHECK(lateral_rms < 1.2f);
+}
+
+TEST_CASE("behavioral — mixed 20-unit attack on single target shows lateral spread") {
+    FlowFieldServerImpl s;
+    s.configure_map(80, 80, 2.0f, -80.0f, -80.0f);
+    s.set_agent_radius(0, 0.5f);
+    SteeringKernelImpl k;
+    k.set_flow_field_server(&s);
+    godot::Vector3 goal(30, 0, 0);
+    FieldId fid = s.build_field(goal, 0);
+    REQUIRE(fid != INVALID_FIELD_ID);
+
+    struct GameplayAgentSpec {
+        godot::Vector3 spawn_pos;
+        float radius;
+        float max_speed;
+        float max_accel;
+        float max_turn_rate;
+    };
+    std::vector<GameplayAgentSpec> specs;
+    for (int i = 0; i < 5; ++i) specs.push_back({godot::Vector3(-30.0f, 0.0f, -6.0f + static_cast<float>(i) * 3.0f), 0.5f, 5.0f, 20.0f, 8.0f});
+    for (int i = 0; i < 5; ++i) specs.push_back({godot::Vector3(-32.0f, 0.0f, -6.0f + static_cast<float>(i) * 3.0f), 0.4f, 7.0f, 28.0f, 10.0f});
+    for (int i = 0; i < 5; ++i) specs.push_back({godot::Vector3(-28.0f, 0.0f, -6.0f + static_cast<float>(i) * 3.0f), 1.0f, 3.0f, 12.0f, 5.0f});
+    for (int i = 0; i < 5; ++i) specs.push_back({godot::Vector3(-26.0f, 0.0f, -6.0f + static_cast<float>(i) * 3.0f), 0.5f, 6.0f, 24.0f, 9.0f});
+
+    std::vector<AgentHandle> handles;
+    for (const GameplayAgentSpec &spec : specs) {
+        AgentHandle h = k.register_agent(static_cast<int>(handles.size() + 2000), 0,
+                                         spec.radius, spec.max_speed, spec.max_accel, spec.max_turn_rate);
+        REQUIRE(h != INVALID_AGENT_HANDLE);
+        k.set_agent_target(h, 1, fid, 0);
+        k.set_agent_pos(h, spec.spawn_pos);
+        handles.push_back(h);
+    }
+
+    constexpr float DELTA = 0.1f;
+    constexpr int TICKS = 500;
+    for (int t = 0; t < TICKS; ++t) {
+        k.tick(DELTA);
+        for (AgentHandle h : handles) {
+            int idx = k.test_handle_to_idx(h);
+            godot::Vector3 cur_pos = k.test_get_pos(idx);
+            godot::Vector3 v = k.get_velocity(h);
+            k.set_agent_pos(h, cur_pos + v * DELTA);
+        }
+    }
+
+    // Spatial spread of agents close to the goal — what a player sees
+    // when ordering 20 units to attack one target.
+    float z_min = std::numeric_limits<float>::infinity();
+    float z_max = -std::numeric_limits<float>::infinity();
+    float x_min = std::numeric_limits<float>::infinity();
+    float x_max = -std::numeric_limits<float>::infinity();
+    int near_goal_count = 0;
+    for (AgentHandle h : handles) {
+        godot::Vector3 p = k.test_get_pos(k.test_handle_to_idx(h));
+        if ((p - goal).length() < 20.0f) {
+            z_min = std::min(z_min, p.z);
+            z_max = std::max(z_max, p.z);
+            x_min = std::min(x_min, p.x);
+            x_max = std::max(x_max, p.x);
+            near_goal_count += 1;
+        }
+    }
+    float z_spread = z_max - z_min;
+    float x_spread = x_max - x_min;
+    INFO("Near goal: " << near_goal_count << " / 20, Z spread: " << z_spread << "m, X spread: " << x_spread << "m");
+
+    CHECK(near_goal_count >= 14);  // bulwarks are slow; allow stragglers
+    // 20 units converging on one cell currently clump because there's
+    // no attack-spread feature — they all SEEK the same point. Without
+    // attack-spread the measured Z spread is ~2.3m (separation-only).
+    // 2.0m proves they don't stack literally on top of each other.
+    // Adjust this threshold UP once attack-spread lands; it should hit 10-15m.
+    CHECK(z_spread >= 2.0f);
+}
+
+TEST_CASE("behavioral — two opposing 10-unit groups cross paths without permanent jam") {
+    FlowFieldServerImpl s;
+    s.configure_map(80, 80, 2.0f, -80.0f, -80.0f);
+    s.set_agent_radius(0, 0.5f);
+    SteeringKernelImpl k;
+    k.set_flow_field_server(&s);
+    // Group A heads east, group B heads west — opposing paths through
+    // a shared region.
+    FieldId fid_a = s.build_field(godot::Vector3(40, 0, 0), 0);
+    FieldId fid_b = s.build_field(godot::Vector3(-40, 0, 0), 0);
+    REQUIRE(fid_a != INVALID_FIELD_ID);
+    REQUIRE(fid_b != INVALID_FIELD_ID);
+
+    struct GameplayAgentSpec {
+        godot::Vector3 spawn_pos;
+        float radius;
+        float max_speed;
+        float max_accel;
+        float max_turn_rate;
+    };
+
+    // Group A: 10 mixed at x=-30, varied z
+    std::vector<GameplayAgentSpec> specs_a;
+    for (int i = 0; i < 3; ++i) specs_a.push_back({godot::Vector3(-30.0f, 0.0f, -4.0f + static_cast<float>(i) * 2.0f), 0.5f, 5.0f, 20.0f, 8.0f});
+    for (int i = 0; i < 3; ++i) specs_a.push_back({godot::Vector3(-32.0f, 0.0f, -4.0f + static_cast<float>(i) * 2.0f), 0.4f, 7.0f, 28.0f, 10.0f});
+    for (int i = 0; i < 2; ++i) specs_a.push_back({godot::Vector3(-28.0f, 0.0f, -2.0f + static_cast<float>(i) * 2.0f), 1.0f, 3.0f, 12.0f, 5.0f});
+    for (int i = 0; i < 2; ++i) specs_a.push_back({godot::Vector3(-26.0f, 0.0f, -2.0f + static_cast<float>(i) * 2.0f), 0.5f, 6.0f, 24.0f, 9.0f});
+
+    // Group B: same composition at x=+30
+    std::vector<GameplayAgentSpec> specs_b;
+    for (int i = 0; i < 3; ++i) specs_b.push_back({godot::Vector3(30.0f, 0.0f, -4.0f + static_cast<float>(i) * 2.0f), 0.5f, 5.0f, 20.0f, 8.0f});
+    for (int i = 0; i < 3; ++i) specs_b.push_back({godot::Vector3(32.0f, 0.0f, -4.0f + static_cast<float>(i) * 2.0f), 0.4f, 7.0f, 28.0f, 10.0f});
+    for (int i = 0; i < 2; ++i) specs_b.push_back({godot::Vector3(28.0f, 0.0f, -2.0f + static_cast<float>(i) * 2.0f), 1.0f, 3.0f, 12.0f, 5.0f});
+    for (int i = 0; i < 2; ++i) specs_b.push_back({godot::Vector3(26.0f, 0.0f, -2.0f + static_cast<float>(i) * 2.0f), 0.5f, 6.0f, 24.0f, 9.0f});
+
+    std::vector<AgentHandle> handles_a;
+    for (const GameplayAgentSpec &spec : specs_a) {
+        AgentHandle h = k.register_agent(static_cast<int>(handles_a.size() + 3000), 0,
+                                         spec.radius, spec.max_speed, spec.max_accel, spec.max_turn_rate);
+        k.set_agent_target(h, 1 /*group A*/, fid_a, 0);
+        k.set_agent_pos(h, spec.spawn_pos);
+        handles_a.push_back(h);
+    }
+    std::vector<AgentHandle> handles_b;
+    for (const GameplayAgentSpec &spec : specs_b) {
+        AgentHandle h = k.register_agent(static_cast<int>(handles_b.size() + 4000), 0,
+                                         spec.radius, spec.max_speed, spec.max_accel, spec.max_turn_rate);
+        k.set_agent_target(h, 2 /*group B — different group_id, no cohesion w/ A*/, fid_b, 0);
+        k.set_agent_pos(h, spec.spawn_pos);
+        handles_b.push_back(h);
+    }
+
+    constexpr float DELTA = 0.1f;
+    constexpr int TICKS = 400;
+    for (int t = 0; t < TICKS; ++t) {
+        k.tick(DELTA);
+        for (AgentHandle h : handles_a) {
+            int idx = k.test_handle_to_idx(h);
+            k.set_agent_pos(h, k.test_get_pos(idx) + k.get_velocity(h) * DELTA);
+        }
+        for (AgentHandle h : handles_b) {
+            int idx = k.test_handle_to_idx(h);
+            k.set_agent_pos(h, k.test_get_pos(idx) + k.get_velocity(h) * DELTA);
+        }
+    }
+
+    // No agent permanently stuck (HALTED).
+    int halted_a = 0, halted_b = 0;
+    for (AgentHandle h : handles_a) if (k.test_get_stuck_level(k.test_handle_to_idx(h)) >= 2) halted_a += 1;
+    for (AgentHandle h : handles_b) if (k.test_get_stuck_level(k.test_handle_to_idx(h)) >= 2) halted_b += 1;
+    INFO("Halted: A=" << halted_a << " B=" << halted_b);
+    // Crossing two flocks IS a stressful test; allow up to 2 stuck per group
+    // (the centermost agents may get pushed back-and-forth long enough).
+    CHECK(halted_a <= 2);
+    CHECK(halted_b <= 2);
+
+    // Most of each group reached their respective goal.
+    int reached_a = 0, reached_b = 0;
+    for (AgentHandle h : handles_a) if (k.test_get_pos(k.test_handle_to_idx(h)).x > 25.0f) reached_a += 1;
+    for (AgentHandle h : handles_b) if (k.test_get_pos(k.test_handle_to_idx(h)).x < -25.0f) reached_b += 1;
+    INFO("Reached A>+25: " << reached_a << " / 10, B<-25: " << reached_b << " / 10");
+    CHECK(reached_a >= 7);
+    CHECK(reached_b >= 7);
+}
