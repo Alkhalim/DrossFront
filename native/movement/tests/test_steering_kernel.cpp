@@ -922,6 +922,44 @@ TEST_CASE("convoy speed cap — INF cap means no throttle (fast unit pulls ahead
     CHECK(spread >= 15.0f);
 }
 
+TEST_CASE("arrival hysteresis — AGENT_FLAG_ARRIVED suppresses SEEK") {
+    FlowFieldServerImpl s;
+    s.configure_map(32, 32, 2.0f, -32.0f, -32.0f);
+    s.set_agent_radius(0, 0.5f);
+    SteeringKernelImpl k;
+    k.set_flow_field_server(&s);
+    FieldId fid = s.build_field(godot::Vector3(20, 0, 0), 0);
+    REQUIRE(fid != INVALID_FIELD_ID);
+
+    AgentHandle h = k.register_agent(1, 0, 0.5f, 5.0f, 20.0f, 8.0f);
+    k.set_agent_target(h, 1, fid, 0);
+
+    // Place agent away from goal; tick once to confirm SEEK produces motion.
+    k.set_agent_pos(h, godot::Vector3(0, 0, 0));
+    k.tick(0.1f);
+    godot::Vector3 v_seeking = k.get_velocity(h);
+    CHECK(v_seeking.length() > 1.0f);  // should be moving toward goal
+
+    // Now mark as arrived. SEEK should zero out; no peers so no separation;
+    // inertia decays the existing velocity over several ticks.
+    k.set_agent_flag(h, AGENT_FLAG_ARRIVED, true);
+    for (int t = 0; t < 30; ++t) {
+        k.set_agent_pos(h, godot::Vector3(0, 0, 0));  // keep pinned — no real movement
+        k.tick(0.1f);
+    }
+    godot::Vector3 v_arrived = k.get_velocity(h);
+    INFO("Velocity after AGENT_FLAG_ARRIVED set: " << v_arrived.length() << " m/s");
+    CHECK(v_arrived.length() < 0.5f);
+
+    // Re-issue target — ARRIVED flag should clear and SEEK resume.
+    k.set_agent_target(h, 1, fid, 0);
+    k.set_agent_pos(h, godot::Vector3(0, 0, 0));
+    k.tick(0.1f);
+    godot::Vector3 v_re = k.get_velocity(h);
+    INFO("Velocity after re-issuing target: " << v_re.length() << " m/s");
+    CHECK(v_re.length() > 1.0f);
+}
+
 TEST_CASE("behavioral — two opposing 10-unit groups cross paths without permanent jam") {
     FlowFieldServerImpl s;
     s.configure_map(80, 80, 2.0f, -80.0f, -80.0f);

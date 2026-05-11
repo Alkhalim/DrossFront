@@ -53,6 +53,15 @@ var _kernel_group_id: int = 0
 ## start skipping move_and_slide every tick (with a periodic refresh
 ## via SKIP_REFRESH_TICKS) — see _apply_kernel_velocity for rationale.
 var _stationary_ticks: int = 0
+
+## Arrival hysteresis state (PF-B arrival fix). True when the unit is
+## within arrival_radius of its goal and the kernel's AGENT_FLAG_ARRIVED
+## is set (SEEK suppressed). Cleared on every new target so the unit
+## actively drives toward the new goal. Hysteresis: once arrived, the
+## flag is only cleared when the unit drifts more than 1.5 × arrival_radius
+## away from the goal — prevents the oscillation where separation from a
+## peer shoves the unit just past the boundary and SEEK immediately re-fires.
+var _is_arrived: bool = false
 const MOTION_THRESHOLD_SQ: float = 0.04  # (0.2 m/s)^2 — below this is "parked"
 const SKIP_SLIDE_AFTER_TICKS: int = 3   # 0.3 sec at 10 Hz physics
 const SKIP_REFRESH_TICKS: int = 6        # force a sweep every ~0.6 sec
@@ -88,6 +97,11 @@ func goto_world(world_pos: Vector3) -> void:
 	## "best effort" behavior — leaving the unit idle would mask
 	## navmesh setup problems during early development.
 	target = world_pos
+	# New order — reset arrival state so the unit actively seeks the new goal.
+	# The kernel also clears AGENT_FLAG_ARRIVED in set_agent_target below, but
+	# resetting the local bool here keeps hysteresis decisions consistent even
+	# during the ticks before set_agent_target is called (idempotency short-circuit).
+	_is_arrived = false
 
 	# PF-A: under flag-on, also push the new target into the kernel via
 	# an ad-hoc per-unit field. selection_manager's _dispatch_via_group_aura
@@ -183,6 +197,8 @@ func clear_target() -> void:
 	super.clear_target()
 	path_waypoints = PackedVector3Array()
 	path_waypoint_idx = 0
+	# Reset arrival state — a fresh order must drive actively toward the goal.
+	_is_arrived = false
 	# PF-A: under flag-on, the kernel keeps reading the unit's flow field
 	# and produces non-zero velocity even after the GDScript-side target
 	# is cleared. Combat AI's "stop and fire" then never actually stops
@@ -269,6 +285,37 @@ func _apply_kernel_velocity(v: Vector3, delta: float) -> void:
 		# (none in PF-A, but keep the contract honest).
 		super._apply_kernel_velocity(v, delta)
 		return
+
+	# Arrival hysteresis (PF-B arrival pile-up fix).
+	# When this unit is within arrival_radius of its destination, suppress
+	# the kernel's SEEK via AGENT_FLAG_ARRIVED so the unit stops driving
+	# back into the goal cell (the pile-up cause: SEPARATE pushes units off
+	# the goal cell, they land on adjacent cells where the flow field still
+	# points TOWARD the goal, so they SEEK back in — infinite shove).
+	#
+	# Hysteresis: once arrived, the flag is not cleared until the unit drifts
+	# more than 1.5 × arrival_radius away. This prevents oscillation where a
+	# peer's separation force shoves the unit just past the boundary every
+	# tick, causing SEEK to re-engage and pull it back in.
+	const AGENT_FLAG_ARRIVED_BIT: int = 64  # 1 << 6, mirrors types.h
+	if kernel_handle != 0 and has_target():
+		var arrived_target: Vector3 = arrival_target()
+		var dist_to_target: float = _body.global_position.distance_to(arrived_target)
+		var ar: float = arrival_radius
+		if not _is_arrived and dist_to_target < ar:
+			_is_arrived = true
+			var scene: Node = get_tree().current_scene if get_tree() else null
+			if scene != null:
+				var kernel: Object = MovementNativeBootstrap.get_kernel(scene)
+				if kernel != null:
+					kernel.call("set_agent_flag", kernel_handle, AGENT_FLAG_ARRIVED_BIT, true)
+		elif _is_arrived and dist_to_target > ar * 1.5:
+			_is_arrived = false
+			var scene2: Node = get_tree().current_scene if get_tree() else null
+			if scene2 != null:
+				var kernel2: Object = MovementNativeBootstrap.get_kernel(scene2)
+				if kernel2 != null:
+					kernel2.call("set_agent_flag", kernel_handle, AGENT_FLAG_ARRIVED_BIT, false)
 
 	# Apply kernel XZ velocity; preserve / add Y for gravity.
 	_body_physics.velocity.x = v.x

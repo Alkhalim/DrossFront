@@ -169,6 +169,10 @@ void SteeringKernelImpl::set_agent_target(AgentHandle handle, int group_id, Fiel
     // a target should walk again. Avoids requiring every caller (goto_world,
     // GroupAura.setup, combat-driven re-issue) to remember to clear the flag.
     agents_.flags[idx] &= static_cast<uint8_t>(~AGENT_FLAG_HALTED);
+    // Clear ARRIVED so the unit actively seeks its new target instead of
+    // staying parked at the old arrival zone. GDScript will re-set the
+    // flag once the unit is within arrival_radius of the new goal.
+    agents_.flags[idx] &= static_cast<uint8_t>(~AGENT_FLAG_ARRIVED);
     // PF-B-A6 fix: re-issuing a target also resets the stuck detector so
     // an agent that previously abandoned (stuck_level == 2) can escalate
     // again on the new attempt. Without this, the post-L2 agent is
@@ -196,6 +200,9 @@ void SteeringKernelImpl::set_agent_target_pos(AgentHandle handle, godot::Vector3
     agents_.target_pos[idx] = target_pos;
     agents_.flags[idx] |= AGENT_FLAG_HAS_TARGET;
     agents_.flags[idx] &= static_cast<uint8_t>(~AGENT_FLAG_HALTED);
+    // Clear ARRIVED so the unit actively seeks its new target (same
+    // reasoning as set_agent_target — new orders start fresh).
+    agents_.flags[idx] &= static_cast<uint8_t>(~AGENT_FLAG_ARRIVED);
     // Same stuck-detector reset as set_agent_target (see PF-B-A6 fix).
     // Without this, an aircraft that abandoned (stuck_level==2) and got
     // a new target_pos would never escalate again.
@@ -340,6 +347,15 @@ void SteeringKernelImpl::tick(float delta) {
             }
         }
 
+        // GDScript-side arrival hysteresis: when ARRIVED flag is set the unit
+        // is within its arrival_radius of the goal. Suppress SEEK entirely so
+        // the unit stops driving back in — SEPARATE still acts so peers can
+        // push it aside without the unit immediately seeking back into the pile.
+        if (agents_.flags[i] & AGENT_FLAG_ARRIVED) {
+            seek = godot::Vector3();
+            at_goal_or_unreachable = true;
+        }
+
         // SEPARATE pass — pairwise O(N^2). Acceptable at PF-A scale (one
         // squad type pilot, < 50 agents). PF-C swaps in SpatialIndex via a
         // GDScript-callable bridge.
@@ -442,8 +458,11 @@ void SteeringKernelImpl::tick(float delta) {
         // Stuck detector — escalation L1 (perpendicular push-out).
         // Skip when ENGAGED so combat-stopped units don't fire. Skip when
         // L1 is already burning, when escalation level is already past 0,
-        // or when the cooldown timer hasn't elapsed.
+        // or when the cooldown timer hasn't elapsed. Skip when ARRIVED —
+        // a unit that has reached its goal is not stuck; the stuck detector
+        // must not push it back out of the arrival zone.
         if (!(f & AGENT_FLAG_ENGAGED_IN_COMBAT) && !(f & AGENT_FLAG_STUCK_PUSHOUT)
+                && !(agents_.flags[i] & AGENT_FLAG_ARRIVED)
                 && agents_.stuck_level[i] == 0
                 && agents_.stuck_cooldown_remaining[i] <= 0.0f
                 && agents_.stuck_window_count[i] >= STUCK_WINDOW_TICKS) {
@@ -507,8 +526,9 @@ void SteeringKernelImpl::tick(float delta) {
         // PathFailureEvent for GDScript to drain. Set stuck_level = 2 +
         // L2 cooldown so we don't re-fire; the only way out is for
         // GDScript to call set_agent_target again (which clears HALTED
-        // and HAS_TARGET re-asserts).
+        // and HAS_TARGET re-asserts). Skip when ARRIVED (same as L1).
         if (!(f & AGENT_FLAG_ENGAGED_IN_COMBAT) && !(f & AGENT_FLAG_STUCK_PUSHOUT)
+                && !(agents_.flags[i] & AGENT_FLAG_ARRIVED)
                 && agents_.stuck_level[i] == 1
                 && agents_.stuck_cooldown_remaining[i] <= 0.0f
                 && agents_.stuck_window_count[i] >= STUCK_WINDOW_TICKS) {
