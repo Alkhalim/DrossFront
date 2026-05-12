@@ -418,6 +418,12 @@ func _avoid_obstacles(prefetched: Array = []) -> Array:
 			continue
 		if n is Building:
 			filtered.append(n)
+		elif n is SalvageCrawler:
+			# Large dynamic obstacle — treat like a small building so units
+			# steer around it instead of grinding their CharacterBody3D
+			# physics into the chassis (the crawler's collision_layer includes
+			# the obstacle bit, so move_and_slide blocks them).
+			filtered.append(n)
 	return filtered
 
 func _on_stuck_level_1_repath() -> void:
