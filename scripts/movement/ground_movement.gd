@@ -337,12 +337,36 @@ func _apply_kernel_velocity(v: Vector3, delta: float) -> void:
 	# Apply kernel XZ velocity; preserve / add Y for gravity.
 	_body_physics.velocity.x = v.x
 	_body_physics.velocity.z = v.z
-	if _body_physics.is_on_floor() and _body_physics.velocity.y < 0.0:
+	var on_floor: bool = _body_physics.is_on_floor()
+	if on_floor and _body_physics.velocity.y < 0.0:
 		_body_physics.velocity.y = 0.0
 	else:
 		_body_physics.velocity.y -= GRAVITY * delta
 
-	_body_physics.move_and_slide()
+	# Stationary-tick optimization. move_and_slide does physics queries
+	# (floor cast + collision sweep) every call, which at ~200 ground
+	# units × 60 Hz = 12k physics calls/sec costs real frame time.
+	# For units parked at their destination (kernel velocity ≈ 0 and
+	# already on the floor), the result of move_and_slide is a no-op —
+	# the body doesn't move and stays on the same floor. Skip it on
+	# most ticks, with a periodic refresh so terrain changes underfoot
+	# (a building underneath the unit dies, a ramp gets carved) are
+	# still picked up. Field _stationary_ticks was pre-declared (line 55)
+	# but never wired; this is the wiring.
+	var v_xz_sq: float = v.x * v.x + v.z * v.z
+	var stationary_now: bool = on_floor and v_xz_sq < MOTION_THRESHOLD_SQ
+	if stationary_now:
+		_stationary_ticks += 1
+	else:
+		_stationary_ticks = 0
+	if _stationary_ticks > SKIP_SLIDE_AFTER_TICKS \
+			and (_stationary_ticks % SKIP_REFRESH_TICKS) != 0:
+		# Parked; skip the physics sweep this tick. Periodic refresh
+		# every SKIP_REFRESH_TICKS still runs move_and_slide so any
+		# floor-state changes get caught.
+		pass
+	else:
+		_body_physics.move_and_slide()
 
 	# Body facing — rotate to face motion direction at most max_turn_rate_rad_s
 	# per second. Same formula as the legacy tick_movement path uses.
