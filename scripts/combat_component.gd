@@ -201,6 +201,21 @@ var _retaliation_lost_sight_timer: float = 0.0
 # moved a fraction past the exact range boundary.
 var _was_in_range: bool = false
 
+## Attack-move resume — counts consecutive combat ticks where the unit was
+## supposed to be heading to attack_move_target (mc.target equals it) but
+## hasn't actually moved. Triggers a forced command_move re-issue once the
+## count crosses ATTACK_MOVE_IDLE_RESUME_TICKS so a peer-blocked unit whose
+## blocker has cleared (or whose kernel slipped into HALTED via the native
+## L2 stuck detector) can wake up on its own. Reset whenever the unit is
+## actually moving or whenever a fresh attack-move / set_target / clear_target
+## resets the engagement state. Without this, the existing resume only fires
+## when mc.target differs from attack_move_target (Case 2: chase residue),
+## and the Case 1 unit (never auto-acquired anything, just blocked behind a
+## sibling) stayed parked even after the blocker walked off.
+var _attack_move_idle_ticks: int = 0
+const ATTACK_MOVE_IDLE_RESUME_TICKS: int = 2  # ~1.2s at 6-frame combat stagger / 10 Hz physics
+const ATTACK_MOVE_STATIONARY_THRESHOLD_SQ: float = 0.25  # (0.5 m/s)^2 — below this counts as "not moving"
+
 ## Kernel combat-suppression flag — mirrors engaged state into the native
 ## kernel so the stuck detector pauses while combat-stopped (spec §7).
 ## Tracked here so _set_engaged() is idempotent and avoids redundant
@@ -612,6 +627,23 @@ func _physics_process(delta: float) -> void:
 		# Without this, after the engaged target dies the unit's mc.target
 		# is the chase position from the last engagement — the unit just
 		# sits there instead of continuing the attack-move.
+		#
+		# Idle-tick fallback (peer-blocked recovery): the chase-target check
+		# below misses the case where the unit's mc.target is still the
+		# attack_move_target itself — i.e. the unit never auto-acquired
+		# anything during the attack-move because a sibling squad blocked
+		# its path before it got into engagement range. The native L2 stuck
+		# detector then sets HALTED and zeros the kernel velocity, but
+		# nothing ever calls set_agent_target again so HALTED stays set
+		# even after the blocker walks off. Symptoms: blocked back squads
+		# stay frozen after the front squad kills its target and moves on,
+		# and only un-stick when the player re-issues attack-move.
+		# We detect this by counting consecutive combat ticks where the
+		# unit is far from the destination, mc.target IS the destination,
+		# and the body isn't actually moving — then force a re-issue,
+		# which goes through goto_world → set_agent_target and wakes the
+		# kernel up. Reset on actual motion so the counter only trips for
+		# genuinely-stationary units.
 		if attack_move_target != Vector3.INF:
 			var mc_amt: Node = _unit.get_node_or_null("MovementComponent")
 			if mc_amt is GroundMovement:
@@ -619,9 +651,28 @@ func _physics_process(delta: float) -> void:
 				var unit_pos: Vector3 = _unit.global_position
 				var d_to_dest: float = unit_pos.distance_to(attack_move_target)
 				var arr_r: float = (mc_amt as GroundMovement).arrival_radius
-				if d_to_dest > arr_r and cur_mc_target.distance_to(attack_move_target) > 1.0:
+				var target_pointed_elsewhere: bool = cur_mc_target.distance_to(attack_move_target) > 1.0
+				# Stationarity probe: read the parent CharacterBody3D's XZ
+				# velocity. HALTED units have kernel velocity = 0 which the
+				# orchestrator writes through to body.velocity, so this is a
+				# robust signal for the L2-stuck case.
+				var body_v: Vector3 = _unit.velocity if "velocity" in _unit else Vector3.ZERO
+				var vxz_sq: float = body_v.x * body_v.x + body_v.z * body_v.z
+				var stationary: bool = vxz_sq < ATTACK_MOVE_STATIONARY_THRESHOLD_SQ
+				var idle_resume_ready: bool = false
+				if d_to_dest > arr_r and not target_pointed_elsewhere and stationary:
+					_attack_move_idle_ticks += 1
+					if _attack_move_idle_ticks >= ATTACK_MOVE_IDLE_RESUME_TICKS:
+						idle_resume_ready = true
+				else:
+					_attack_move_idle_ticks = 0
+				if d_to_dest > arr_r and (target_pointed_elsewhere or idle_resume_ready):
 					if _unit.has_method("command_move"):
 						_unit.command_move(attack_move_target, false)
+					# Reset so a stuck-then-recover-then-stuck-again cycle
+					# can re-trigger after the cooldown ticks elapse instead
+					# of firing on every subsequent combat tick.
+					_attack_move_idle_ticks = 0
 		# Patrol return-to-home: if this unit has a home position and no
 		# current target, send it back home so it doesn't drift across
 		# the map after a brief chase ends.
@@ -791,6 +842,7 @@ func clear_target() -> void:
 	_was_in_range = false
 	# Player command supersedes any in-flight chase commitment.
 	_chase_lockout_until_msec = 0
+	_attack_move_idle_ticks = 0
 	if was_engaged:
 		_set_engaged(false)
 		combat_ended.emit()
@@ -804,6 +856,9 @@ func command_attack_move(pos: Vector3) -> void:
 	_has_fired_at_current_target = false
 	_was_in_range = false
 	_chase_lockout_until_msec = 0
+	# Fresh attack-move clears the idle-resume counter so a stale stationary
+	# tally from the prior order can't trip a spurious re-issue on tick one.
+	_attack_move_idle_ticks = 0
 	if was_engaged:
 		_set_engaged(false)
 		combat_ended.emit()
