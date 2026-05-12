@@ -1383,15 +1383,20 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	# visibility source.
 	var firing_visible: bool = _firing_observable()
 
-	# Damage timing model: beams (instant flash) and drone-release
-	# (damage delivered by the spawned drone on arrival) keep their
-	# previous damage path. Every other projectile style (bullet /
-	# shell / missile / mortar / bomb) defers damage to the
-	# projectile's _spawn_impact -- payload attached after
-	# spawning the projectile below. This makes the damage land
-	# WHEN the visible projectile reaches the target instead of
-	# at fire-time, which the player kept noticing as
-	# 'why did that guy take damage before the missile got there?'.
+	# Damage timing model. Two paths:
+	#   - Fire-tick (hitscan): beams, bullets, shotgun pellets, drone-release.
+	#     Damage + splash apply synchronously in _fire_weapon below.
+	#     The visible projectile (if any) is a pure-VFX tracer and its
+	#     _spawn_impact sees pending_damage == 0.
+	#   - Impact-tick (deferred): shells, missiles, mortars, bombs.
+	#     A set_damage_payload call attaches the damage to the spawned
+	#     Projectile; _spawn_impact applies it when the visible round
+	#     arrives. This is what the player wants for slow-moving rounds
+	#     ('why did that guy take damage before the missile got there?').
+	# Bullets used to defer too (95 u/s tracer that took 100-260 ms to
+	# arrive); they moved to fire-tick when the tracer speed bumped to
+	# 250 u/s — at that speed the visual gap is sub-perceptual, and the
+	# Process-bucket savings from short-lived tracers are real.
 	var weapon_style: StringName = weapon.projectile_style if "projectile_style" in weapon else &""
 	# rof_tier -> default projectile style mapping mirrors
 	# Projectile.ROF_STYLES so beams (rof=continuous) get instant
