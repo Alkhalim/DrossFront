@@ -190,27 +190,17 @@ func _physics_process(delta: float) -> void:
 	_approach_stuck_timer = 0.0
 	_approach_last_dist = INF
 
-	# Foundation-block self-rescue. With big-footprint buildings
-	# (MOLOT / EChO / Headquarters) the engineer's "in range" gate
-	# (extent + BUILD_BUFFER) sits outside the footprint, but nav
-	# precision occasionally lands the engineer just inside the
-	# foundation XZ box. The engineer then blocks its own
-	# foundation-clear check, advance_construction silently no-ops,
-	# and the build stalls until the player nudges them out.
-	#
-	# Single fixed approach point wasn't enough: if that approach
-	# direction was blocked (by another building, ramp, or unit)
-	# the engineer kept re-issuing the same blocked path tick
-	# after tick. Now we try eight cardinal-and-diagonal escape
-	# directions and commit to the first one with a clear edge,
-	# rotating the start each time we re-enter the rescue branch
-	# so the engineer doesn't always pick the same blocked one.
-	if _is_inside_foundation_footprint():
-		var escape: Vector3 = _pick_clear_escape_point()
-		# clear_combat=false — internal escape move, see other call above.
-		_unit.command_move(escape, false)
-		_set_build_anim(false)
-		return
+	# Foundation-block self-rescue was the workaround for "engineer
+	# inside the foundation footprint blocks its own construction".
+	# That's no longer a problem — Building._is_foundation_clear
+	# exempts the assigned engineer (commit 04b80b4), so the engineer
+	# can stand inside the footprint+0.4 box and construction still
+	# progresses. With this self-rescue branch active, the engineer
+	# kept getting bounced to an escape point on every tick (the
+	# tighter arrival_radius lands many engineers just inside the
+	# box at the end of approach), so advance_construction below
+	# never fired — visible in error report 600 as foundations stuck
+	# at 0% with engineers parked right next to them. Branch removed.
 
 	# In range — stop moving and build
 	_unit.stop()
