@@ -3125,6 +3125,20 @@ func _is_foundation_clear() -> bool:
 		# same is-worker check below.
 		if node is SalvageWorker:
 			continue
+		# The engineer currently assigned to THIS foundation isn't a
+		# blocker either — they're the worker. With the tighter
+		# arrival_radius (1.5u for engineers), the engineer's stop
+		# position can fall just inside the foundation+0.4 box for
+		# small/medium buildings. Without this exemption,
+		# _is_foundation_clear returned false → advance_construction
+		# bailed at the top → build sat at 0% with the engineer right
+		# next to it. The _evacuate exemption in f22f6e8 stopped them
+		# from being kicked out but didn't unblock construction;
+		# this exemption closes the loop.
+		if node is Unit:
+			var bc: Node = (node as Unit).get_node_or_null("BuilderComponent")
+			if bc and "_target_building" in bc and bc.get("_target_building") == self:
+				continue
 		var dx: float = absf(node3d.global_position.x - global_position.x)
 		var dz: float = absf(node3d.global_position.z - global_position.z)
 		if dx < half_x and dz < half_z:
