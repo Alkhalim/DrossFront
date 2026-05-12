@@ -223,6 +223,30 @@ static func _build_combined_surface(entries: Array) -> Array:
 	return out
 
 
+## Per-class bake cache. Keyed by a caller-supplied string that
+## uniquely identifies (unit_class, team_color, pivot_path). The
+## first bake of a (class, color, pivot) combination pays the full
+## combine cost; subsequent instances of the same combination hit
+## the cache and reuse the ArrayMesh. Materials are baked onto the
+## mesh surfaces — they get reused too, which is fine because the
+## team_color is part of the cache key and we don't mutate baked
+## surface materials post-bake.
+static var _per_class_bake_cache: Dictionary = {}
+
+
+static func combine_immediate_cached(parent: Node3D, skip_ids: Dictionary, cache_key: String) -> ArrayMesh:
+	## Same contract as combine_immediate(), but consults a static
+	## cache first. Pass an empty string to bypass the cache (e.g.
+	## for one-off bakes where the caller can't construct a stable
+	## key).
+	if cache_key != "" and _per_class_bake_cache.has(cache_key):
+		return _per_class_bake_cache[cache_key] as ArrayMesh
+	var result: ArrayMesh = combine_immediate(parent, skip_ids)
+	if cache_key != "" and result != null and result.get_surface_count() > 0:
+		_per_class_bake_cache[cache_key] = result
+	return result
+
+
 static func combine_immediate(parent: Node3D, skip_ids: Dictionary = {}) -> ArrayMesh:
 	## Like combine(), but folds ONLY the IMMEDIATE MeshInstance3D
 	## children of `parent` (does NOT recurse into nested Node3Ds).

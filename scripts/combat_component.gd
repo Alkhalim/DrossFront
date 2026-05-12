@@ -165,6 +165,26 @@ var _chase_lockout_until_msec: int = 0
 ## every fire (three sites).
 var _shooter_is_air_cached: bool = false
 
+## Cached resolved values from the stat resource. The chain
+## `stats.primary_weapon.resolved_range()` runs on every combat tick
+## (10k+ calls per session at full population); each call walks 2-3
+## branches plus a Dictionary lookup. The values themselves are
+## constant for the unit's lifetime — no in-match weapon swaps or
+## stat upgrades — so resolve them once on _ready. If a future
+## upgrade path needs to refresh them, call _refresh_stat_caches().
+var _stats_cached: UnitStatResource = null
+var _primary_weapon_cached: WeaponResource = null
+var _secondary_weapon_cached: WeaponResource = null
+var _primary_range_cached: float = 10.0
+var _secondary_range_cached: float = 10.0
+var _sight_radius_cached: float = 20.0
+## Per-component SpatialIndex handle. The orchestrator-level cache
+## handles per-tick movement queries; CombatComponent's auto-target
+## scan + fire-time stray-hit scan do their own lookups. Resolving
+## SpatialIndex.get_instance every call adds up under sustained
+## combat.
+var _spatial_idx_cached: SpatialIndex = null
+
 const SEARCH_INTERVAL: float = 0.5
 
 ## Weapons whose ROF is at or below this threshold (seconds between shots)
@@ -241,6 +261,25 @@ func _ready() -> void:
 	# lifetime so caching is safe.
 	if _unit != null:
 		_shooter_is_air_cached = _unit.is_in_group("aircraft")
+	_refresh_stat_caches()
+
+
+func _refresh_stat_caches() -> void:
+	## Re-resolve the cached weapon-range / sight-radius values from
+	## the parent unit's stat resource. Call after any in-match
+	## change to stats / weapons (none currently — units have a
+	## fixed loadout — but the hook is here for future upgrades).
+	if _unit == null:
+		return
+	_stats_cached = _unit.get("stats") as UnitStatResource
+	if _stats_cached:
+		_primary_weapon_cached = _stats_cached.primary_weapon
+		_secondary_weapon_cached = _stats_cached.secondary_weapon
+		_sight_radius_cached = _stats_cached.resolved_sight_radius()
+		if _primary_weapon_cached:
+			_primary_range_cached = _primary_weapon_cached.resolved_range()
+		if _secondary_weapon_cached:
+			_secondary_range_cached = _secondary_weapon_cached.resolved_range()
 
 
 func _set_kernel_engaged(engaged: bool) -> void:
@@ -557,10 +596,7 @@ func _physics_process(delta: float) -> void:
 	var can_auto_target: bool = (not unit_has_move_order or attack_move_target != Vector3.INF) and not holding
 	if not _current_target and can_auto_target and _search_timer <= 0.0:
 		_search_timer = SEARCH_INTERVAL
-		var stats: UnitStatResource = _unit.get("stats") as UnitStatResource
-		var weapon_range: float = 10.0
-		if stats and stats.primary_weapon:
-			weapon_range = stats.primary_weapon.resolved_range()
+		var weapon_range: float = _primary_range_cached
 		var engage_radius: float = weapon_range * ENGAGE_RANGE_MULT
 		# Attack-move: scan with full sight radius so the unit engages the
 		# moment an enemy becomes visible, not after walking to within
@@ -568,8 +604,7 @@ func _physics_process(delta: float) -> void:
 		# halfway across the bubble before noticing and ends up firing at
 		# point-blank — the user's "zooms in then fights close" report.
 		if attack_move_target != Vector3.INF:
-			var sight_r_acq: float = stats.resolved_sight_radius() if stats else weapon_range * 2.0
-			engage_radius = maxf(engage_radius, sight_r_acq)
+			engage_radius = maxf(engage_radius, _sight_radius_cached)
 		# Patrol units (any unit with a `home_position` set) get a -40%
 		# aggro multiplier so a careful player can route past them
 		# without triggering a fight, and they don't pre-aggro the
@@ -703,9 +738,9 @@ func _physics_process(delta: float) -> void:
 		_unit.global_position, _current_target.global_position, _shooter_is_air_cached,
 		_current_target.is_in_group("aircraft")
 	)
-	var stats: UnitStatResource = _unit.get("stats") as UnitStatResource
-	var primary: WeaponResource = stats.primary_weapon
-	var primary_range: float = primary.resolved_range() if primary else 10.0
+	var stats: UnitStatResource = _stats_cached
+	var primary: WeaponResource = _primary_weapon_cached
+	var primary_range: float = _primary_range_cached
 
 	# Shared-FOW LOS gate -- a unit can engage anything within its
 	# weapon range as long as ANY friendly observer (own units,
@@ -717,7 +752,7 @@ func _physics_process(delta: float) -> void:
 	# The shared-vision rule mirrors how the player sees the world
 	# (FOW is per-team), so a unit firing on what the player can see
 	# matches expectations.
-	var sight_r: float = stats.resolved_sight_radius() if stats else primary_range
+	var sight_r: float = _sight_radius_cached
 	# Only player-side units (owner 0) and player allies benefit
 	# from the shared-FOW reveal; the FOW grid is the local
 	# player's vision, so applying it to enemy AI would let the

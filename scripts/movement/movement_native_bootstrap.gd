@@ -44,8 +44,19 @@ static func get_server(scene_root: Node) -> Object:
 		# tighter corridors get rejected as impassable.
 		_server.call("set_agent_radius", 0, 1.0)  # small
 		_server.call("set_agent_radius", 1, 1.4)  # medium
-		_server.call("set_agent_radius", 2, 2.4)  # large
-		print_debug("[MovementNativeBootstrap] server configured: %dx%d cells @ %.1fm, agent radii small=1.0 / medium=1.4 / large=2.4" % [GRID_W, GRID_H, CELL_SIZE])
+		# Large (crawler). Was 2.4u to match the chassis half-extent
+		# (3.8×5.2 box -> ~2.6u center→corner), but that left gaps the
+		# crawler could physically thread through marked as impassable.
+		# 1.8u dilation lets the crawler navigate corridors ~5u wide
+		# (1.8 dilation per side + chassis half = 2.5u, plus 0.5u
+		# margin) — compensates for the crawler's slow turn rate by
+		# giving the flow field more room to slip the chassis through.
+		# Trade-off: kernel will route the crawler closer to walls than
+		# before, so move_and_slide may push back on the chassis at
+		# corners. The crawler arrival_radius=3.0 (commit 0d1a7b9) and
+		# anchor-mode pause should absorb that.
+		_server.call("set_agent_radius", 2, 1.8)  # large (crawler)
+		print_debug("[MovementNativeBootstrap] server configured: %dx%d cells @ %.1fm, agent radii small=1.0 / medium=1.4 / large=1.8" % [GRID_W, GRID_H, CELL_SIZE])
 		# Sweep buildings already in the scene tree into the cost grid so the
 		# first flow field built after server creation routes around them.
 		# DEFERRED one frame because get_server is typically called from a

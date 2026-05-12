@@ -748,34 +748,55 @@ func _bake_member_pivots(member_info: Dictionary) -> void:
 		for n: Variant in arr:
 			if n is MeshInstance3D:
 				skip_ids[(n as MeshInstance3D).get_instance_id()] = true
-	_collect_bake_tasks(member_root, skip_ids)
+	# Build a cache-key prefix scoped to this (unit_class, team_color)
+	# pair. The recursive collector appends the per-pivot node-name
+	# path so the final key identifies a specific (class, color, pivot)
+	# combination — second-and-later instances of the same combo hit
+	# MeshCombiner._per_class_bake_cache and reuse the ArrayMesh
+	# instead of re-running combine_immediate.
+	var color_packed: int = _pack_color_for_bake_key(_resolve_team_color())
+	var class_name_str: String = stats.unit_name if stats else ""
+	var key_prefix: String = "%s|%d" % [class_name_str, color_packed]
+	_collect_bake_tasks(member_root, skip_ids, key_prefix)
 	if not _pending_bake_tasks.is_empty():
 		set_process(true)
 
 
-## Deferred-bake queue. Each entry is { node: Node3D, skip_ids: Dictionary }.
-## Process pops one per frame from _process and runs that one pivot's bake.
+## Deferred-bake queue. Each entry is { node: Node3D, skip_ids: Dictionary, cache_key: String }.
 var _pending_bake_tasks: Array[Dictionary] = []
 
 
-func _collect_bake_tasks(node: Node3D, skip_ids: Dictionary) -> void:
+static func _pack_color_for_bake_key(c: Color) -> int:
+	return int(c.r * 255.0) | (int(c.g * 255.0) << 8) | (int(c.b * 255.0) << 16) | (int(c.a * 255.0) << 24)
+
+
+func _collect_bake_tasks(node: Node3D, skip_ids: Dictionary, key_prefix: String) -> void:
 	## Tree-walk that enqueues a bake task for `node` and recurses
 	## into the same children _bake_pivot_subtree used to recurse into.
 	## Cheap (no mesh work) — the actual MeshCombiner cost happens
 	## later, one task at a time, in _process.
 	if not is_instance_valid(node):
 		return
-	_pending_bake_tasks.append({"node": node, "skip_ids": skip_ids})
+	var node_name: String = str(node.name)
+	# Auto-generated names start with '@' and embed the instance id —
+	# they differ per spawn, so the cache key would never hit. Skip
+	# caching for those by passing an empty key (MeshCombiner falls
+	# back to the uncached path).
+	var path_here: String = key_prefix + "|" + node_name
+	var cache_key: String = path_here if not node_name.contains("@") and not key_prefix.contains("@") else ""
+	_pending_bake_tasks.append({
+		"node": node,
+		"skip_ids": skip_ids,
+		"cache_key": cache_key,
+	})
 	for child: Node in node.get_children():
 		if child is MeshInstance3D:
 			# Skipped MI3D (e.g. head) — recurse so nested static
 			# decorations parented to it still get baked.
 			if skip_ids.has((child as MeshInstance3D).get_instance_id()):
-				_collect_bake_tasks(child as Node3D, skip_ids)
-			# Non-skipped MI3Ds are absorbed by the parent's bake and
-			# freed — don't enqueue them as recursion targets.
+				_collect_bake_tasks(child as Node3D, skip_ids, path_here)
 		elif child is Node3D:
-			_collect_bake_tasks(child as Node3D, skip_ids)
+			_collect_bake_tasks(child as Node3D, skip_ids, path_here)
 
 
 func _process(_delta: float) -> void:
@@ -789,14 +810,16 @@ func _process(_delta: float) -> void:
 	if node == null or not is_instance_valid(node):
 		return
 	var skip_ids: Dictionary = task.get("skip_ids") as Dictionary
-	_bake_one_pivot(node, skip_ids)
+	var cache_key: String = task.get("cache_key", "") as String
+	_bake_one_pivot(node, skip_ids, cache_key)
 
 
-func _bake_one_pivot(node: Node3D, skip_ids: Dictionary) -> void:
+func _bake_one_pivot(node: Node3D, skip_ids: Dictionary, cache_key: String) -> void:
 	## Fold this node's IMMEDIATE MeshInstance3D children (minus
 	## skip_ids) into one combined ArrayMesh on the node. No recursion
 	## — children's bakes are separate queue entries that ran (or
-	## will run) on their own ticks.
+	## will run) on their own ticks. Uses the per-class bake cache
+	## when cache_key is non-empty.
 	var to_bake: Array[MeshInstance3D] = []
 	for child: Node in node.get_children():
 		if child is MeshInstance3D:
@@ -807,7 +830,7 @@ func _bake_one_pivot(node: Node3D, skip_ids: Dictionary) -> void:
 		# Single mesh (or none): nothing useful to merge. Same gate
 		# the synchronous version used.
 		return
-	var combined: ArrayMesh = MeshCombiner.combine_immediate(node, skip_ids)
+	var combined: ArrayMesh = MeshCombiner.combine_immediate_cached(node, skip_ids, cache_key)
 	if combined == null or combined.get_surface_count() == 0:
 		return
 	var baked := MeshInstance3D.new()
