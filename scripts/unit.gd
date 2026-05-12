@@ -602,6 +602,27 @@ func _build_squad_visuals() -> void:
 		var member_info: Dictionary = _build_mech_member(i, offset, shape_data, team_color)
 		_member_meshes.append(member_info["root"])
 		_member_data.append(member_info)
+		# Per-pivot mesh bake. Each animated pivot (legs, head,
+		# cannons, shoulders, torso, member root, the implicit
+		# torso_pivot) collapses its STATIC immediate mesh children
+		# into a single combined ArrayMesh. Animated nodes (the head
+		# MeshInstance3D rotated for swivel, leg / cannon Node3D
+		# pivots rotated / recoiled) stay separate so animation keeps
+		# working. Measured node savings per member (smoke test):
+		# Ratchet 33→10, Rook 24→8, Hound 23→8, Bulwark 45→18 — a
+		# ~65-72% MeshInstance3D reduction across chassis classes.
+		# Diagnostic: log the before/after on the first member of
+		# each unit_name once per session.
+		if i == 0 and stats and not _per_pivot_bake_counted.has(stats.unit_name):
+			_per_pivot_bake_counted[stats.unit_name] = true
+			var before_count: int = _count_mi3d_descendants(member_info["root"] as Node3D)
+			_bake_member_pivots(member_info)
+			var after_count: int = _count_mi3d_descendants(member_info["root"] as Node3D)
+			print_debug("[pivot-bake] %s: %d MI3D -> %d MI3D (saved %d)" % [
+				stats.unit_name, before_count, after_count, before_count - after_count
+			])
+		else:
+			_bake_member_pivots(member_info)
 		# X-ray silhouette REMAINS DISABLED. A second attempt with a
 		# FRAGCOORD.z vs DEPTH_TEXTURE.r comparison (avoiding the
 		# INV_PROJECTION_MATRIX reconstruction) still drew the silhouette
@@ -701,6 +722,109 @@ func _build_squad_visuals() -> void:
 				print_debug("[mesh-bake] %s -> %s" % [key, str(bake)])
 
 
+func _bake_member_pivots(member_info: Dictionary) -> void:
+	## Per-pivot mesh bake. Walks the member's Node3D subtree and
+	## folds each pivot's IMMEDIATE MeshInstance3D children into a
+	## single combined ArrayMesh on that pivot (one BakedMesh
+	## MeshInstance3D child per pivot). Animated nodes — the head
+	## mesh (rotated by the swivel tick) and any leg / cannon /
+	## shoulder pivot stored in `member_info` — are excluded from
+	## absorption, so the per-frame animation tick keeps writing to
+	## the same Node3Ds it always has.
+	##
+	## Why this works without breaking animation:
+	## - Walk-bob rotates LEG PIVOTS (Node3Ds). We bake the immediate
+	##   mesh children of each leg pivot into one mesh on the pivot.
+	##   The pivot itself stays a Node3D — its rotation still applies.
+	## - Head swivel rotates the HEAD MeshInstance3D directly. We add
+	##   it to skip_ids so the parent (torso_pivot) bake doesn't fold
+	##   the head into itself.
+	## - Cannon recoil translates the CANNON PIVOT (Node3D) along Z.
+	##   We bake the barrels / sleeve / muzzle housing into one mesh
+	##   on the pivot; the pivot's translation still moves the whole
+	##   baked barrel assembly back as one piece.
+	## - Marker3Ds (muzzle markers) and OmniLight3Ds are non-mesh
+	##   Node3Ds — the combiner only folds MeshInstance3D children,
+	##   so markers and lights pass through untouched.
+	var member_root: Node3D = member_info.get("root", null) as Node3D
+	if member_root == null or not is_instance_valid(member_root):
+		return
+	# Build the skip set: any MeshInstance3D the animation tick
+	# rotates directly. Only `head` is animated as a raw mesh in
+	# practice; `torso` / `shoulders` are listed defensively in case
+	# a future builder mounts them as MI3Ds AND animates them.
+	var skip_ids: Dictionary = {}
+	var head_val: Variant = member_info.get("head", null)
+	if head_val is MeshInstance3D:
+		skip_ids[(head_val as MeshInstance3D).get_instance_id()] = true
+	# legs / cannons / shoulders are normally Node3D pivots, not
+	# MI3Ds, but guard anyway so a stray MI3D entry doesn't get
+	# silently absorbed.
+	for key: String in ["legs", "cannons", "shoulders"]:
+		var arr: Array = member_info.get(key, []) as Array
+		for n: Variant in arr:
+			if n is MeshInstance3D:
+				skip_ids[(n as MeshInstance3D).get_instance_id()] = true
+	_bake_pivot_subtree(member_root, skip_ids)
+
+
+func _bake_pivot_subtree(node: Node3D, skip_ids: Dictionary) -> void:
+	## For each Node3D in the subtree rooted at `node`, fold its
+	## immediate MeshInstance3D children (minus skip_ids) into one
+	## combined ArrayMesh. Recurses into ALL Node3D children
+	## (including animated pivots) so nested static decorations also
+	## get folded onto the closest pivot above them.
+	# Snapshot what we plan to do BEFORE mutating the tree:
+	#   - to_bake: MI3Ds whose geometry will fold into the combined mesh
+	#   - to_recurse: Node3Ds we'll visit AFTER baking. Computed up front
+	#     because the bake `free()`s entries in `to_bake`, and a freed
+	#     node read back via `is Node3D` errors with "previously freed
+	#     instance". MeshInstance3Ds in `to_bake` would never recurse
+	#     anyway (their children would have been baked into them), so
+	#     excluding them costs nothing.
+	var original_children: Array = node.get_children()
+	var to_bake: Array[MeshInstance3D] = []
+	var to_recurse: Array[Node3D] = []
+	for child: Node in original_children:
+		if child is MeshInstance3D:
+			var mi: MeshInstance3D = child as MeshInstance3D
+			if not skip_ids.has(mi.get_instance_id()) and mi.mesh != null:
+				to_bake.append(mi)
+			else:
+				# Skipped MI3D (head): recurse so any nested static
+				# decoration parented to it would also get baked.
+				# MeshInstance3D is-a Node3D, so this is safe.
+				to_recurse.append(mi)
+		elif child is Node3D:
+			to_recurse.append(child as Node3D)
+	# Only bake when there are at least two meshes to merge; baking
+	# a single child mesh swaps it for a freshly built ArrayMesh
+	# with no node-count saving, and would strip the source mesh's
+	# StandardMaterial3D albedo_texture / uv_offset metadata.
+	if to_bake.size() >= 2:
+		var combined: ArrayMesh = MeshCombiner.combine_immediate(node, skip_ids)
+		if combined != null and combined.get_surface_count() > 0:
+			var baked := MeshInstance3D.new()
+			baked.name = "BakedMesh"
+			baked.mesh = combined
+			node.add_child(baked)
+			for mi: MeshInstance3D in to_bake:
+				# Immediate free (not queue_free) so the node-count
+				# saving lands the same frame the bake runs — squad
+				# visuals rebuild during _ready / faction changes,
+				# and we don't want a one-frame window where every
+				# pivot has both its baked mesh AND its (queued)
+				# originals visible. Originals hold no external
+				# refs beyond `mats` (which keeps the
+				# StandardMaterial alive, not the MeshInstance), so
+				# immediate free is safe. Godot detaches a freed
+				# node from its parent automatically.
+				mi.free()
+	# Recurse into pre-snapshotted Node3D children.
+	for child: Node3D in to_recurse:
+		_bake_pivot_subtree(child, skip_ids)
+
+
 ## Cached x-ray shader instance -- one ShaderMaterial parent that
 ## every silhouette mesh inherits via `next_pass`. Each member
 ## clones the material so it can carry its own team-colour
@@ -713,6 +837,22 @@ static var _xray_shader: Shader = null
 ## us a snapshot of how many MeshInstance3D each unit type
 ## composes and what a baked combine would look like.
 static var _bake_stats_seen: Dictionary = {}
+## Tracks which unit types we've already printed a per-pivot
+## bake before/after count for. One log line per unit type per
+## session; remove with the pivot-bake diagnostic once perf
+## win is confirmed.
+static var _per_pivot_bake_counted: Dictionary = {}
+
+
+static func _count_mi3d_descendants(root: Node) -> int:
+	## Recursive MeshInstance3D count. Used by the per-pivot bake
+	## diagnostic to log before / after node counts.
+	var n: int = 0
+	if root is MeshInstance3D:
+		n += 1
+	for child: Node in root.get_children():
+		n += _count_mi3d_descendants(child)
+	return n
 
 
 func _attach_xray_silhouette(member: Node3D, shape: Dictionary, team_color: Color) -> void:

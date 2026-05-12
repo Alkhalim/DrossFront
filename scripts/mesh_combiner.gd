@@ -223,6 +223,77 @@ static func _build_combined_surface(entries: Array) -> Array:
 	return out
 
 
+static func combine_immediate(parent: Node3D, skip_ids: Dictionary = {}) -> ArrayMesh:
+	## Like combine(), but folds ONLY the IMMEDIATE MeshInstance3D
+	## children of `parent` (does NOT recurse into nested Node3Ds).
+	## Used by the per-pivot unit bake: each animated pivot (legs,
+	## head, cannons, shoulders, torso, member root) keeps its
+	## Node3D children intact so animation still works, while the
+	## flat-mesh decorations directly under it collapse into a
+	## single ArrayMesh on the pivot.
+	##
+	## `skip_ids` is a dictionary keyed by instance_id of any
+	## MeshInstance3D that must NOT be folded (e.g., the head mesh,
+	## which the animation tick rotates independently). The combiner
+	## reads the keys via `has(get_instance_id())`.
+	##
+	## Vertices land in `parent`'s local space — the caller can drop
+	## the returned mesh on `parent` at the origin (default
+	## MeshInstance3D transform) to replace every absorbed child
+	## visually without any further offsetting.
+	var entries: Array = []
+	for child: Node in parent.get_children():
+		if child is not MeshInstance3D:
+			continue
+		var mi: MeshInstance3D = child as MeshInstance3D
+		if skip_ids.has(mi.get_instance_id()):
+			continue
+		if mi.mesh == null:
+			continue
+		var xform: Transform3D = mi.transform
+		var n_surfaces: int = mi.mesh.get_surface_count()
+		for surf_idx: int in n_surfaces:
+			var mat: Material = mi.get_surface_override_material(surf_idx)
+			if mat == null:
+				mat = mi.mesh.surface_get_material(surf_idx)
+			entries.append({
+				"mesh": mi.mesh,
+				"surface": surf_idx,
+				"transform": xform,
+				"material": mat,
+			})
+	return _entries_to_arraymesh(entries)
+
+
+static func _entries_to_arraymesh(entries: Array) -> ArrayMesh:
+	## Shared post-processing tail. Groups entries by material
+	## signature and emits one surface per group. Extracted from
+	## combine() so combine_immediate() can reuse the same grouping
+	## + surface-build logic without duplicating it.
+	var groups: Dictionary = {}
+	var group_order: Array = []
+	for entry: Dictionary in entries:
+		var mat: Material = entry.get("material", null) as Material
+		var sig: String = _material_signature(mat)
+		if not groups.has(sig):
+			groups[sig] = {"material": mat, "entries": []}
+			group_order.append(sig)
+		((groups[sig] as Dictionary)["entries"] as Array).append(entry)
+
+	var combined := ArrayMesh.new()
+	for sig: String in group_order:
+		var grp: Dictionary = groups[sig] as Dictionary
+		var arrays: Array = _build_combined_surface(grp["entries"] as Array)
+		if arrays.is_empty():
+			continue
+		combined.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		var rep_mat: Material = grp["material"] as Material
+		if rep_mat != null:
+			var surf_idx: int = combined.get_surface_count() - 1
+			combined.surface_set_material(surf_idx, rep_mat)
+	return combined
+
+
 static func bake_stats(root: Node3D) -> Dictionary:
 	## Diagnostic helper: bakes `root` and returns a stat dump
 	## without keeping the result. Useful for sanity-checking the
