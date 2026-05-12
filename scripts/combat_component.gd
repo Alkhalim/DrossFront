@@ -1017,33 +1017,34 @@ func _face_target() -> void:
 
 
 ## Returns true if this unit has at least one weapon that can physically engage
-## the given target type. Conservative: returns true when uncertain (null target,
-## target lacks group membership info) so callers never incorrectly release a
-## valid engagement. Used to release commitment when a unit has committed to a
-## target it can never hit — e.g. a non-AA ground unit locked onto an aircraft,
-## or a pure-AA unit that was manually aimed at a building.
+## the given target type. CONSERVATIVE — only returns false when the target is
+## a confirmed aircraft AND no weapon on this unit can engage air. Returns true
+## in every other case (ground targets, unknown targets, missing stats / weapons).
+##
+## The asymmetry is deliberate: the original prior version also returned false
+## when no weapon had hits_ground — but units with primary_weapon=null,
+## secondary-only weapons whose hits_ground was somehow false, or units whose
+## weapon-resource fields were briefly null mid-init were getting their valid
+## ground targets wrongly released, so they walked past enemies on attack-move.
+## Narrow the release to ONLY the AA-mismatch case (which was the original bug).
 func _can_engage(target: Node) -> bool:
 	if target == null or not is_instance_valid(target):
 		return false
+	var target_is_air: bool = target.is_in_group("aircraft")
+	if not target_is_air:
+		# Ground / building / worker targets — assume always engageable. The
+		# release block is meant to fix "stuck on un-hittable air target",
+		# not to gatekeep ground engagements.
+		return true
+	# Aircraft target. Need at least one weapon that engages air.
 	var stats: UnitStatResource = _unit.get("stats") as UnitStatResource
 	if stats == null:
 		return true  # no stat info — assume capable, don't release
-	var target_is_air: bool = target.is_in_group("aircraft")
-	# Check primary weapon
-	if stats.primary_weapon:
-		var pw: WeaponResource = stats.primary_weapon
-		if target_is_air and pw.engages_air():
-			return true
-		if not target_is_air and pw.hits_ground:
-			return true
-	# Check secondary weapon
-	if stats.secondary_weapon:
-		var sw: WeaponResource = stats.secondary_weapon
-		if target_is_air and sw.engages_air():
-			return true
-		if not target_is_air and sw.hits_ground:
-			return true
-	# No weapon can engage this target type.
+	if stats.primary_weapon and stats.primary_weapon.engages_air():
+		return true
+	if stats.secondary_weapon and stats.secondary_weapon.engages_air():
+		return true
+	# Aircraft target, no AA weapon — release.
 	return false
 
 
