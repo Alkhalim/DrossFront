@@ -13,7 +13,18 @@ const MOVE_SPEED: float = 6.0
 # (it takes real time to recover lost gathering throughput).
 const HARVEST_RATE: float = 7.5
 const CARRY_CAPACITY: int = 30
-const ARRIVE_THRESHOLD: float = 1.5
+## Bumped 1.5 → 3.0: under the kernel-driven flowfield path, the worker
+## stops when its kernel target is within arrival_radius (1.0u) of the
+## body, NOT when the body is within 1.5u of the actual wreck. If the
+## wreck sits in a slightly dilated cell (near terrain props or another
+## building's dilation halo) the kernel's snap-to-nearest-open offsets
+## the goal cell from the wreck position by 1–2u, the worker stops at
+## the snapped cell, and the harvest gate (which checks raw
+## body→wreck distance) sees > 1.5u and never triggers. Worker idles
+## next to an available wreck. 3.0u absorbs the snap-offset jitter so
+## the harvest fires even when the worker can't physically reach the
+## wreck cell itself.
+const ARRIVE_THRESHOLD: float = 3.0
 ## Dropoff radius at the home crawler. Wider than ARRIVE_THRESHOLD
 ## because the crawler is a chunky chassis -- the worker can be
 ## physically touching the side of the crawler and still be 2.5u
@@ -836,14 +847,20 @@ func _find_wreck_new() -> void:
 		if mc != null and mc is GroundMovement:
 			(mc as GroundMovement).goto_world(_move_target)
 		return
-	# No wreck in range — walk home if we've drifted.
+	# No wreck in range — always return home. The previous 2.5u threshold
+	# left workers idling scattered in the field whenever a scan came up
+	# empty (each one was already inside its own 2.5u "near" zone relative
+	# to its stopping point, not the actual yard). The user spec is
+	# "workers belong at home; emerge only when salvage is available", so
+	# always RETURN. The deposit guard in _return_to_yard_new is
+	# DROPOFF_RADIUS=5.0, so a worker already inside dropoff range
+	# transitions back to IDLE on the next tick — the round-trip is a
+	# no-op for the docked case.
 	if is_instance_valid(home_yard):
-		var d_home: float = global_position.distance_to(home_yard.global_position)
-		if d_home > 2.5:
-			state = State.RETURNING
-			var mc: Node = get_node_or_null("MovementComponent")
-			if mc != null and mc is GroundMovement:
-				(mc as GroundMovement).goto_world(home_yard.global_position)
+		state = State.RETURNING
+		var mc: Node = get_node_or_null("MovementComponent")
+		if mc != null and mc is GroundMovement:
+			(mc as GroundMovement).goto_world(home_yard.global_position)
 
 
 func _move_toward_wreck_new(delta: float) -> void:
