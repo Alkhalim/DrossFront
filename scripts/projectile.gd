@@ -422,14 +422,17 @@ static func create(from: Vector3, to: Vector3, role_tag: StringName, rof_tier: S
 			proj._bullet_oriented = true
 		_:
 			proj._create_bullet_mesh(color)
-			# Bullets are hitscan now (damage applied at fire-time in
+			# Bullets are hitscan (damage applied at fire-time in
 			# CombatComponent._fire_weapon via the damage_is_instant path),
-			# so the projectile is a pure-visual tracer. Bumped from the old
-			# 95 u/s travel speed to 250 u/s so the slug arrives in 1–4 frames
-			# at typical engagement ranges (8–25 u). Still well below the 500
-			# u/s beam-detection threshold in _process, so it renders through
-			# the straight-line bullet branch, not the beam-fadeout branch.
-			proj.speed = 250.0
+			# so the projectile is a pure-visual tracer. 150 u/s gives the
+			# 0.34 u slug ~3–10 frames of visibility at typical engagement
+			# ranges (8–25 u) — fast enough that the lead-the-target window
+			# is sub-perceptual, slow enough that the tracer reads cleanly
+			# as a moving bullet rather than vanishing in one frame. Earlier
+			# 250 u/s pass was invisible at short range (only 2 frames). Still
+			# under the 500 u/s beam threshold in _process so renders via the
+			# straight-line bullet branch, not the beam-fadeout branch.
+			proj.speed = 150.0
 			# Orient the slug along the firing direction at spawn time. Using
 			# Transform3D.looking_at directly (rather than Node3D.look_at) so
 			# the rotation is correct on the very first frame, before the
@@ -761,12 +764,12 @@ func _process(delta: float) -> void:
 		if global_position.distance_to(target_pos) > 0.05:
 			look_at(target_pos, Vector3.UP)
 
-	# Lifetime safety: at 250 u/s even the longest-range bullet should reach
-	# its target in well under 0.5 s. If we ever exceed that, something has
-	# gone wrong with the impact-distance check — kill it silently instead of
+	# Lifetime safety: at 150 u/s the longest-range bullet (~25 u) reaches
+	# its target in ~170 ms. If we ever exceed 0.7 s, something has gone
+	# wrong with the impact-distance check — kill it silently instead of
 	# leaving a ghost projectile to flicker.
 	_life += delta
-	if _life > 0.5:
+	if _life > 0.7:
 		queue_free()
 		return
 
