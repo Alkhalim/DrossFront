@@ -281,9 +281,17 @@ func _process(delta: float) -> void:
 	# (via AircraftMovement.tick_movement) while the visual updates
 	# below were gated to ~10 Hz by the 1-in-3 stagger. Three
 	# Vector3 assignments per frame; cheap.
-	if _shadow_blob and is_instance_valid(_shadow_blob):
+	# is_inside_tree() guard alongside is_instance_valid: the shadow blob
+	# and selection ring are parented to the scene root (so they don't
+	# inherit aircraft Y), which means they live a separate lifecycle from
+	# the aircraft. During scene reloads / unit despawns there's a window
+	# where the node is valid but not yet/no-longer in the tree, and
+	# writing global_position then triggers Godot's "is_inside_tree() is
+	# true. Returning: Transform3D()" error. 2000+ such errors per second
+	# was floods the console and starves the GPU command queue.
+	if _shadow_blob and is_instance_valid(_shadow_blob) and _shadow_blob.is_inside_tree():
 		_shadow_blob.global_position = Vector3(global_position.x, 0.06, global_position.z)
-	if _select_ring and is_instance_valid(_select_ring):
+	if _select_ring and is_instance_valid(_select_ring) and _select_ring.is_inside_tree():
 		_select_ring.global_position = Vector3(global_position.x, 0.08, global_position.z)
 	_ac_phys_frame += 1
 	# Third-frame stagger (was half-frame) -- matches the
