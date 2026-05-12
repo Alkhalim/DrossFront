@@ -300,8 +300,17 @@ func _is_movement_priority_active() -> bool:
 ## stay stuck in the "chase forever" branch — visible as: no fire, no
 ## rotation, frozen-near-target, plus pathological per-tick steering
 ## cost (the unit never drops to the cheaper idle path).
-func _engagement_distance(unit_pos: Vector3, target_pos: Vector3, shooter_is_air: bool) -> float:
-	if shooter_is_air:
+##
+## The XZ swap fires when EITHER side is in the aircraft group. The
+## original version only checked the shooter, which left the symmetric
+## case (ground unit firing UP at an aircraft — the AA case) on 3D
+## distance, so AA-capable units would walk into XZ-range, halt, and
+## never satisfy `dist <= primary_range` because the aircraft's altitude
+## inflated `dist` past the weapon range. Visible bug: Bulwark missile
+## pods / Forgemaster Skyspike / Jackal Widow approach an aircraft on
+## attack-move, stop in detection range, never fire.
+func _engagement_distance(unit_pos: Vector3, target_pos: Vector3, shooter_is_air: bool, target_is_air: bool = false) -> float:
+	if shooter_is_air or target_is_air:
 		var dx: float = unit_pos.x - target_pos.x
 		var dz: float = unit_pos.z - target_pos.z
 		return sqrt(dx * dx + dz * dz)
@@ -573,7 +582,8 @@ func _physics_process(delta: float) -> void:
 		# Check whether the current target is already in weapon range.
 		# If it is, the unit is about to fire normally — no need to switch.
 		var dist_to_current: float = _engagement_distance(
-			_unit.global_position, _current_target.global_position, _shooter_is_air_cached
+			_unit.global_position, _current_target.global_position, _shooter_is_air_cached,
+			_current_target.is_in_group("aircraft")
 		)
 		var current_in_range: bool = dist_to_current <= weapon_range_pre
 		if not current_in_range:
@@ -625,7 +635,10 @@ func _physics_process(delta: float) -> void:
 						_unit.command_move(home_pos, false)
 		return
 
-	var dist: float = _engagement_distance(_unit.global_position, _current_target.global_position, _shooter_is_air_cached)
+	var dist: float = _engagement_distance(
+		_unit.global_position, _current_target.global_position, _shooter_is_air_cached,
+		_current_target.is_in_group("aircraft")
+	)
 	var stats: UnitStatResource = _unit.get("stats") as UnitStatResource
 	var primary: WeaponResource = stats.primary_weapon
 	var primary_range: float = primary.resolved_range() if primary else 10.0
@@ -822,12 +835,13 @@ func _find_nearest_enemy(max_range: float) -> Node3D:
 
 	var my_owner: int = _unit.get("owner_id")
 	var my_pos: Vector3 = _unit.global_position
-	# Aircraft acquire targets by 2D distance — same reason as the
-	# main engagement gate (see _engagement_distance). Without this,
-	# an aircraft over a ground target would read the altitude into
-	# the candidate's distance and reject targets just past the
-	# horizontal weapon range even though the aircraft could reach
-	# them by descending into firing range.
+	# Aircraft / AA acquire by 2D distance — same reason as the main
+	# engagement gate (see _engagement_distance). Without this, an
+	# aircraft over a ground target (or a ground AA unit under one)
+	# would read the altitude into the candidate's distance and reject
+	# targets just past the horizontal weapon range. The XZ swap fires
+	# whenever EITHER side is in the aircraft group, decided per
+	# candidate below.
 	var shooter_is_air: bool = _shooter_is_air_cached
 
 	var nearest: Node3D = null
@@ -876,7 +890,8 @@ func _find_nearest_enemy(max_range: float) -> Node3D:
 		# Alive check only applies to units (alive_count field).
 		if "alive_count" in node and (node.get("alive_count") as int) <= 0:
 			continue
-		if ground_only and node.is_in_group("aircraft"):
+		var node_is_air: bool = node.is_in_group("aircraft")
+		if ground_only and node_is_air:
 			continue
 		# V3 stealth -- auto-target ignores stealth-capable units
 		# that aren't currently revealed.
@@ -884,7 +899,9 @@ func _find_nearest_enemy(max_range: float) -> Node3D:
 			var their_stats: UnitStatResource = node.get("stats") as UnitStatResource
 			if their_stats and their_stats.is_stealth_capable:
 				continue
-		var d: float = _engagement_distance(my_pos, (node as Node3D).global_position, shooter_is_air)
+		var d: float = _engagement_distance(
+			my_pos, (node as Node3D).global_position, shooter_is_air, node_is_air
+		)
 		if d <= max_range and d < nearest_dist:
 			nearest_dist = d
 			nearest = node as Node3D
@@ -1276,7 +1293,10 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	# gate above — without it an aircraft directly over a ground
 	# target would always score in the "far" band and pay the -10%
 	# accuracy penalty just because of altitude.
-	var dist_to_target: float = _engagement_distance(_unit.global_position, _current_target.global_position, _shooter_is_air_cached)
+	var dist_to_target: float = _engagement_distance(
+		_unit.global_position, _current_target.global_position, _shooter_is_air_cached,
+		_current_target.is_in_group("aircraft")
+	)
 	var range_t: float = clampf(dist_to_target / maxf(weapon_range, 0.01), 0.0, 1.0)
 	# Range band: point-blank shots get a small accuracy bonus, mid
 	# range is baseline, the far third of the weapon's reach drops
