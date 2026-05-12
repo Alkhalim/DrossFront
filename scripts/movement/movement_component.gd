@@ -62,6 +62,13 @@ var _body_physics: CharacterBody3D = null      # set if parent is CharacterBody3
 const STAGGER_PERIOD: int = 3
 var _cached_neighbor_force: Vector3 = Vector3.ZERO
 var _phase_bit: int = 0
+
+## Last body position mirrored to the kernel SoA via
+## MovementOrchestrator.Phase 1. Used to skip the mirror call when
+## the body hasn't moved since last tick (typical for parked units,
+## which is the majority of the population mid-battle). Sentinel INF
+## guarantees the first tick always mirrors.
+var _last_mirrored_pos: Vector3 = Vector3(INF, INF, INF)
 ## Cached output of _is_combat_engaged. Recomputed on heavy-tick
 ## frames; reused on intervening ticks. The previous build called
 ## the virtual method (which itself does a string-keyed has_method

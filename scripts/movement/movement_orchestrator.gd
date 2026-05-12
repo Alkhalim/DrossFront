@@ -140,7 +140,16 @@ func _physics_process(delta: float) -> void:
 				continue
 			var mc: MovementComponent = mc_v as MovementComponent
 			if mc != null and mc.kernel_handle != 0:
-				_set_agent_pos_c.call(mc.kernel_handle, mc._body.global_position)
+				# Skip the mirror call when the body hasn't moved since
+				# last tick — the kernel SoA already holds the same
+				# value. Parked / arrived units (typically 30-50% of
+				# the population mid-battle) save the cached-callable
+				# crossing every tick. Component-side _last_mirrored_pos
+				# is initialized to INF so the first tick always mirrors.
+				var pos: Vector3 = mc._body.global_position
+				if pos != mc._last_mirrored_pos:
+					_set_agent_pos_c.call(mc.kernel_handle, pos)
+					mc._last_mirrored_pos = pos
 			i_a -= 1
 		_tick_c.call(delta)
 
