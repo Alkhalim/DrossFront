@@ -70,6 +70,23 @@ func _ready() -> void:
 	super._ready()
 	if agent_profile == null:
 		agent_profile = AgentProfile.new(0.6, 0.5, 35.0, &"squad_default")
+	# Bump arrival_radius from the base 3.0 default to 6.0 to fix the
+	# crowd-arrival wiggle. With ~20+ units converging on a goal, the
+	# inner ring fills the goal cell and the cluster's effective radius
+	# (body_radius + separation buffer) easily reaches 6-10m. Outer
+	# units sit 5-10m from the goal center, outside a 3m arrival zone,
+	# so they never hit the AGENT_FLAG_ARRIVED hysteresis check in
+	# _apply_kernel_velocity. The kernel keeps SEEK on, peers shove
+	# them back via separation, and they oscillate. Widening to 6m
+	# matches AircraftMovement / CrawlerMovement and covers a typical
+	# 5-20-unit cluster so outer units settle via the existing
+	# direct-arrival path instead of needing a peer-aware proxy.
+	#
+	# For very large groups (50+) where the cluster radius exceeds 6m,
+	# a peer-arrived-proxy ("nearest same-group peer is ARRIVED and
+	# within 6m → I'm ARRIVED too") would propagate arrival outward.
+	# Deferred — revisit if the wiggle reappears at scale.
+	arrival_radius = 6.0
 
 
 func _exit_tree() -> void:
