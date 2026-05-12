@@ -234,6 +234,41 @@ func _build_visual() -> void:
 			_build_dead()
 		Variant.STUMP:
 			_build_stump()
+	# Perf: collapse all the per-tree decoration MeshInstance3Ds
+	# (trunk + flare + bark plates + canopy discs + needle clumps +
+	# twigs / branches) into a single baked ArrayMesh attached to one
+	# MeshInstance3D. Schwarzwald spawns thousands of trees on a
+	# 3.4u grid; the unbaked tree contributed 13-17 child nodes per
+	# healthy instance and 6-9 per dead instance, dominating the
+	# scene's node count and per-frame transform / visibility walk.
+	# Collision (StaticBody3D + CollisionShape3D) is preserved as-is
+	# so the navmesh bake + unit bumping still see real obstacles.
+	_bake_visual_to_single_mesh()
+
+
+func _bake_visual_to_single_mesh() -> void:
+	## Walk the just-built MeshInstance3D children, combine their
+	## geometry via MeshCombiner, attach the result as a single
+	## MeshInstance3D, and free the originals. CollisionShape3D
+	## children are left untouched (the navmesh bake + physics still
+	## need them). Per-tree material jitter is preserved because each
+	## tree gets its own combined ArrayMesh — we trade per-tree mesh
+	## sharing (which we never had anyway, given the duplicated
+	## jitter material) for a 10x+ node-count reduction.
+	var mesh_children: Array[MeshInstance3D] = []
+	for child: Node in get_children():
+		if child is MeshInstance3D:
+			mesh_children.append(child as MeshInstance3D)
+	if mesh_children.is_empty():
+		return
+	var combined: ArrayMesh = MeshCombiner.combine(self)
+	if combined == null or combined.get_surface_count() == 0:
+		return
+	var baked: MeshInstance3D = MeshInstance3D.new()
+	baked.mesh = combined
+	add_child(baked)
+	for mi: MeshInstance3D in mesh_children:
+		mi.queue_free()
 
 
 func _build_healthy() -> void:
