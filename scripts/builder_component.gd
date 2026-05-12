@@ -89,6 +89,18 @@ func _physics_process(delta: float) -> void:
 	if (_builder_phys_frame & 1) == 0:
 		return
 	delta *= 2.0
+	# Respect player priority. unit.command_move(clear_combat=true) sets
+	# _move_priority_until_ms = now + 4s; CombatComponent already honors this
+	# to suppress combat re-engagement. Mirror it here so a player's "go
+	# there" right-click isn't immediately overridden by the build-approach
+	# re-issue loop. Without this guard, the player can't reposition an
+	# engineer that's locked onto a build target — every BuilderComponent
+	# tick (~30 Hz) re-issues command_move(_approach_point()) on top of
+	# the player's command.
+	if "_move_priority_until_ms" in _unit:
+		var prio_until: int = _unit.get("_move_priority_until_ms") as int
+		if prio_until > 0 and Time.get_ticks_msec() < prio_until:
+			return
 	if not _target_building or not is_instance_valid(_target_building):
 		_target_building = null
 		_set_build_anim(false)
