@@ -791,17 +791,38 @@ func _process(delta: float) -> void:
 	global_position += direction * step
 
 
+## Cap on concurrent smoke-trail puffs in flight. Each puff is
+## MeshInstance3D + SphereMesh + StandardMaterial3D + a 3-property
+## Tween — at 15k+ allocations / 91 sec on the latest profile this
+## was the next-biggest source of per-frame GC pressure after the
+## now-deferred unit bake. 60 concurrent puffs covers a 6-missile
+## salvo's worth of trail at the visible-arc level; over-cap calls
+## drop silently so dense fights don't snowball allocation.
+static var _alive_trail_puffs: int = 0
+const MAX_TRAIL_PUFFS: int = 60
+
+
+static func _release_trail_puff(puff: Node) -> void:
+	## Tween-callback target. Decrements the global counter so the
+	## next _spawn_trail_puff slot opens up, then frees the puff
+	## node. Static so the bound callable doesn't keep `self` alive
+	## past the projectile's own queue_free.
+	if is_instance_valid(puff):
+		puff.queue_free()
+	_alive_trail_puffs = maxi(_alive_trail_puffs - 1, 0)
+
+
 func _spawn_trail_puff() -> void:
 	## Drops one smoke puff behind the missile. Direct MeshInstance3D +
 	## Tween — the GPU-particle path through ParticleEmitterManager
 	## was silently emitting nothing on the project's Godot build, so
-	## missile trails went invisible mid-match. Per-puff allocation is
-	## paid back by the missile-side trail interval (one puff every
-	## 70ms ≈ 14/sec across a salvo of 6 missiles = ~85/sec peak), and
-	## tween auto-frees the puff so memory stays bounded.
+	## missile trails went invisible mid-match.
+	if _alive_trail_puffs >= MAX_TRAIL_PUFFS:
+		return
 	var scene: Node = get_tree().current_scene
 	if not scene:
 		return
+	_alive_trail_puffs += 1
 	# Drop just behind the missile body. global_basis.z is the local +Z
 	# direction in world space (missile's "backward" after look_at).
 	var rear_offset: Vector3 = global_basis.z.normalized() * randf_range(0.18, 0.32)
@@ -839,7 +860,7 @@ func _spawn_trail_puff() -> void:
 	tween.tween_property(puff, "global_position", target_pos_drift, 0.7)
 	tween.tween_property(puff, "scale", Vector3(2.4, 2.4, 2.4), 0.7)
 	tween.tween_property(mat, "albedo_color:a", 0.0, 0.7)
-	tween.chain().tween_callback(puff.queue_free)
+	tween.chain().tween_callback(Callable(Projectile, "_release_trail_puff").bind(puff))
 
 
 func _spawn_impact() -> void:
