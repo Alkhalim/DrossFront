@@ -1405,6 +1405,7 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	var effective_style: String = String(weapon_style) if weapon_style != &"" else inferred_style
 	var damage_is_instant: bool = (
 		effective_style == "beam"
+		or effective_style == "bullet"  # bullets are hitscan (see drossfront-docs/superpowers/plans/2026-05-12-hitscan-bullets.md)
 		or weapon.is_drone_release
 		or is_shotgun  # shotgun pellets stay instant for now -- the cone is the whole damage event
 	)
