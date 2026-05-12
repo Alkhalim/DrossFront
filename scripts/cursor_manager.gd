@@ -115,7 +115,49 @@ func set_kind(kind: int) -> void:
 	_apply_current()
 
 
+## Throttle for `Input.set_custom_mouse_cursor`. Profile capture in
+## report599 showed the OS cursor swap eating ~58 ms PER CALL (GPU
+## texture upload that blocks on the render queue) — at ~3.5 swaps/sec
+## that's a steady stream of one-frame stutters whenever the player's
+## mouse hovered between attack/move/repair candidates and as they
+## clicked. The visible swap can tolerate ~50 ms of latency without
+## anyone noticing; coalesce repeated calls into the deferred phase.
+const _APPLY_MIN_INTERVAL_MSEC: int = 50
+var _next_apply_at_msec: int = 0
+var _apply_pending: bool = false
+
+
 func _apply_current() -> void:
+	# If we're inside the cooldown, mark dirty and defer to a
+	# process-frame callback. The deferred call coalesces any further
+	# kind-toggle / press-toggle changes that happen within the
+	# window — only the final state actually hits the OS cursor.
+	var now_msec: int = Time.get_ticks_msec()
+	if now_msec < _next_apply_at_msec:
+		if not _apply_pending:
+			_apply_pending = true
+			get_tree().process_frame.connect(_deferred_apply, CONNECT_ONE_SHOT)
+		return
+	_next_apply_at_msec = now_msec + _APPLY_MIN_INTERVAL_MSEC
+	_apply_now()
+
+
+func _deferred_apply() -> void:
+	_apply_pending = false
+	# Re-check the cooldown — if a fast burst of toggles landed back-to-back
+	# the deferred fire might still be inside the window; clamp to the
+	# minimum interval so we don't stack-spam set_custom_mouse_cursor.
+	var now_msec: int = Time.get_ticks_msec()
+	if now_msec < _next_apply_at_msec:
+		# Re-arm for the remaining slice.
+		_apply_pending = true
+		get_tree().process_frame.connect(_deferred_apply, CONNECT_ONE_SHOT)
+		return
+	_next_apply_at_msec = now_msec + _APPLY_MIN_INTERVAL_MSEC
+	_apply_now()
+
+
+func _apply_now() -> void:
 	var bank: Dictionary = _textures_pressed if _is_pressed else _textures
 	var tex: ImageTexture = bank.get(_current) as ImageTexture
 	if not tex:
