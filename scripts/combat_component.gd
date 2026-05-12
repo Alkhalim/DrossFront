@@ -488,6 +488,29 @@ func _physics_process(delta: float) -> void:
 		_set_engaged(false)
 		combat_ended.emit()
 
+	# PF-B follow-up: release commitment when this unit cannot physically
+	# engage the current target — e.g. a non-AA ground unit that committed
+	# to an aircraft during attack-move, or a pure-AA unit aimed at a
+	# building. Without this, the unit halts, never fires, and the
+	# pre-engagement re-acquisition (003278d) never picks a valid target
+	# because it only switches when a closer in-range candidate exists.
+	# The 2-second stand-and-fire lockout is post-engagement protection;
+	# this path is pre-engagement (no shot was ever fired against an
+	# unattackable target), so the lockout does not apply here.
+	# Only fires pre-engagement (_has_fired_at_current_target is false)
+	# so a unit that has legitimately opened fire is never released mid-
+	# engagement by a transient state change (e.g. an aircraft landing).
+	if _current_target != null and not _has_fired_at_current_target:
+		if not _can_engage(_current_target):
+			forced_target = null
+			_current_target = null
+			_has_fired_at_current_target = false
+			_was_in_range = false
+			_set_engaged(false)
+			# Do NOT emit combat_ended — the unit never actually engaged,
+			# so there is no combat session to end. The auto-scan on the
+			# next stagger tick will pick a valid target.
+
 	# Auto-acquire targets: allowed when idle, or during attack-move. We scan a
 	# wider engage range than the weapon range so an idle unit will move toward
 	# an enemy that's in sight but just out of range, rather than ignoring it.
@@ -991,6 +1014,37 @@ func _face_target() -> void:
 		_unit._turn_toward(to_target.normalized(), get_physics_process_delta_time())
 	else:
 		_unit.look_at(look_pos, Vector3.UP)
+
+
+## Returns true if this unit has at least one weapon that can physically engage
+## the given target type. Conservative: returns true when uncertain (null target,
+## target lacks group membership info) so callers never incorrectly release a
+## valid engagement. Used to release commitment when a unit has committed to a
+## target it can never hit — e.g. a non-AA ground unit locked onto an aircraft,
+## or a pure-AA unit that was manually aimed at a building.
+func _can_engage(target: Node) -> bool:
+	if target == null or not is_instance_valid(target):
+		return false
+	var stats: UnitStatResource = _unit.get("stats") as UnitStatResource
+	if stats == null:
+		return true  # no stat info — assume capable, don't release
+	var target_is_air: bool = target.is_in_group("aircraft")
+	# Check primary weapon
+	if stats.primary_weapon:
+		var pw: WeaponResource = stats.primary_weapon
+		if target_is_air and pw.engages_air():
+			return true
+		if not target_is_air and pw.hits_ground:
+			return true
+	# Check secondary weapon
+	if stats.secondary_weapon:
+		var sw: WeaponResource = stats.secondary_weapon
+		if target_is_air and sw.engages_air():
+			return true
+		if not target_is_air and sw.hits_ground:
+			return true
+	# No weapon can engage this target type.
+	return false
 
 
 ## --- Damage Calculation ---
