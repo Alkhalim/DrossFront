@@ -947,12 +947,29 @@ func stop() -> void:
 	has_move_order = false
 
 
+## Per-instance frame counter for the track-plate stagger. Phased on
+## instance_id so a row of crawlers spreads its track updates across
+## different render frames rather than spiking on the same one.
+var _track_proc_frame: int = 0
+
+
 func _process(delta: float) -> void:
 	# Scroll the track plates along their segment when the crawler
 	# is moving. Each plate slides a constant distance per frame
 	# proportional to ground speed; once a plate falls off the rear
 	# end of its segment it wraps back to the front. Cheap (single
 	# float per plate) and reads as a continuously moving track.
+	#
+	# 1-in-3 frame stagger — at 60 FPS render the tread updates run
+	# at ~20 Hz, fast enough to sell continuous motion at typical RTS
+	# zoom (a plate moving 5 u/s scrolls ~0.25u between updates which
+	# is well below the 0.4u plate spacing). Delta is tripled so the
+	# scroll-per-frame matches what the unstaggered loop produced.
+	# Mirrors the building / aircraft cosmetic-stagger pattern.
+	_track_proc_frame += 1
+	if (_track_proc_frame % 3) != int(get_instance_id() % 3):
+		return
+	delta *= 3.0
 	var speed_xz: float = Vector2(velocity.x, velocity.z).length()
 	if speed_xz > 0.05 and not _track_plates.is_empty():
 		# Treads run faster than the chassis to look like the track

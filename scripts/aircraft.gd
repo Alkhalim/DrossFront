@@ -2915,10 +2915,32 @@ func _build_hp_bar() -> void:
 	_update_hp_bar()
 
 
+## Cached pct of last full bar refresh. Compared against current_hp
+## on each _process tick to short-circuit the scale/material writes
+## when nothing changed. Float so the 0.999 visibility threshold uses
+## the same value the writes did. Initialised to -1 so the first call
+## always triggers a full write.
+var _hp_bar_last_pct: float = -1.0
+
+
 func _update_hp_bar() -> void:
 	if not _hp_bar or not is_instance_valid(_hp_bar):
 		return
 	if not _hp_bar_fill or not stats:
+		return
+	# At-full-HP fast path. Aircraft spend the vast majority of their
+	# lifetime undamaged; running the position write + pct compute +
+	# scale + material recolour every render frame on every aircraft
+	# was the dominant per-frame cost in the per-aircraft _process
+	# (called unconditionally before the 1-in-3 stagger gate). When
+	# the bar is already hidden AND HP is full, all the per-frame
+	# work below is wasted -- the bar isn't drawn and pct hasn't
+	# changed since the last call. take_damage explicitly invokes
+	# _update_hp_bar on every hit so the cached pct gets refreshed
+	# the moment damage lands (forces the visible branch on the next
+	# tick).
+	var pct_now: float = float(maxi(current_hp, 0)) / float(maxi(stats.hp_total, 1))
+	if pct_now >= 0.999 and _hp_bar_last_pct >= 0.999 and not _hp_bar.visible:
 		return
 	# Reposition the bar above the aircraft each tick so it
 	# tracks the aircraft as it moves (top_level needs explicit
@@ -2927,14 +2949,21 @@ func _update_hp_bar() -> void:
 	_hp_bar.global_position = global_position + Vector3(0.0, bar_y - global_position.y, 0.0)
 	# Hide the bar at full HP so it only appears when damaged --
 	# matches the land-unit bar policy.
-	var pct: float = float(maxi(current_hp, 0)) / float(maxi(stats.hp_total, 1))
-	_hp_bar.visible = pct < 0.999
+	_hp_bar.visible = pct_now < 0.999
+	# Skip the scale + material writes when pct hasn't moved. These
+	# only need to refresh when current_hp actually changes; the
+	# position update above still runs every frame so the bar tracks
+	# the moving aircraft. take_damage call sites trigger the write
+	# branch directly.
+	if absf(pct_now - _hp_bar_last_pct) < 0.0005:
+		return
+	_hp_bar_last_pct = pct_now
 	var bar_width: float = 2.0
-	_hp_bar_fill.scale.x = maxf(pct * bar_width, 0.01)
-	_hp_bar_fill.position.x = -bar_width * 0.5 * (1.0 - pct)
+	_hp_bar_fill.scale.x = maxf(pct_now * bar_width, 0.01)
+	_hp_bar_fill.position.x = -bar_width * 0.5 * (1.0 - pct_now)
 	var fill_mat: StandardMaterial3D = _hp_bar_fill.get_surface_override_material(0) as StandardMaterial3D
 	if fill_mat:
-		var r: float = 1.0 - pct
-		var g: float = pct
+		var r: float = 1.0 - pct_now
+		var g: float = pct_now
 		fill_mat.albedo_color = Color(r, g, 0.1, 0.9)
 		fill_mat.emission = Color(r, g, 0.1, 1.0)
