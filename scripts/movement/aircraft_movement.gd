@@ -15,6 +15,11 @@ extends MovementComponent
 
 var _bank_angle_current: float = 0.0
 var _last_heading_xz: Vector2 = Vector2.ZERO
+## Arrival hysteresis state (mirrors GroundMovement._is_arrived). True when
+## the aircraft is within arrival_radius of its goal and the kernel's
+## AGENT_FLAG_ARRIVED is set (SEEK suppressed). Cleared on every new order
+## in goto_world so a new destination starts fresh.
+var _is_arrived: bool = false
 
 
 func _ready() -> void:
@@ -62,6 +67,8 @@ func goto_world(world_pos: Vector3) -> void:
 	## Aircraft don't navmesh-route; just set the target. Y is overridden
 	## to base_altitude so the unit doesn't try to dive into the ground.
 	target = Vector3(world_pos.x, base_altitude, world_pos.z)
+	# New order — reset arrival state so the unit actively seeks the new goal.
+	_is_arrived = false
 	# PF-B-B6: forward single-aircraft targets to the kernel via
 	# set_agent_target_pos. The kernel's AIRCRAFT branch (B2) consumes
 	# target_pos for direct 3D seek. Multi-unit aircraft orders are
@@ -79,6 +86,29 @@ func goto_world(world_pos: Vector3) -> void:
 	kernel.call("set_agent_target_pos", kernel_handle, target)
 
 func _apply_kernel_velocity(v: Vector3, delta: float) -> void:
+	# Arrival hysteresis — same pattern as GroundMovement._apply_kernel_velocity.
+	# Aircraft target is set by goto_world (which GroupAura also calls for aircraft
+	# members), so has_target() is valid here. arrival_radius is 6.0 for aircraft.
+	# When within arrival_radius the kernel's SEEK is suppressed via
+	# AGENT_FLAG_ARRIVED so crowded aircraft stop jostling for the same point.
+	const AGENT_FLAG_ARRIVED_BIT: int = 64  # 1 << 6, mirrors types.h
+	if kernel_handle != 0 and has_target() and _body != null:
+		var dist_to_target: float = _body.global_position.distance_to(target)
+		var ar: float = arrival_radius
+		if not _is_arrived and dist_to_target < ar:
+			_is_arrived = true
+			var scene1: Node = get_tree().current_scene if get_tree() else null
+			if scene1 != null:
+				var kernel1: Object = MovementNativeBootstrap.get_kernel(scene1)
+				if kernel1 != null:
+					kernel1.call("set_agent_flag", kernel_handle, AGENT_FLAG_ARRIVED_BIT, true)
+		elif _is_arrived and dist_to_target > ar * 1.5:
+			_is_arrived = false
+			var scene2: Node = get_tree().current_scene if get_tree() else null
+			if scene2 != null:
+				var kernel2: Object = MovementNativeBootstrap.get_kernel(scene2)
+				if kernel2 != null:
+					kernel2.call("set_agent_flag", kernel_handle, AGENT_FLAG_ARRIVED_BIT, false)
 	# PF-B-final-fix: kernel computes 3D velocity for aircraft but does
 	# nothing about visual rotation. Populate _velocity so _update_bank
 	# can read heading, apply movement via super (Node3D positional

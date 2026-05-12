@@ -88,6 +88,9 @@ func _setup_move(dest: Vector3, server: Object, kernel: Object) -> void:
 				# preserve flock cohesion (see _kernel_group_id in GroundMovement).
 				if "_kernel_group_id" in mc:
 					mc.set("_kernel_group_id", get_instance_id())
+				# Bug A fix: set MC.target so arrival_target() returns the real
+				# destination and the hysteresis check in _apply_kernel_velocity fires.
+				(mc as MovementComponent).target = dest
 
 	# Convoy speed cap (spec §4): every ground member travels at the slowest
 	# member's pace so faster units don't pull ahead and stretch the formation
@@ -178,6 +181,9 @@ func _setup_attack_spread(dest: Vector3, server: Object, kernel: Object) -> void
 				# preserve flock cohesion (see _kernel_group_id in GroundMovement).
 				if "_kernel_group_id" in mc:
 					mc.set("_kernel_group_id", get_instance_id())
+				# Bug A fix: set MC.target so arrival_target() returns the real
+				# destination and the hysteresis check in _apply_kernel_velocity fires.
+				(mc as MovementComponent).target = squad_dest
 			else:
 				push_warning("[GroupAura] build_field failed for attack-spread member %d at %s" % [i, squad_dest])
 

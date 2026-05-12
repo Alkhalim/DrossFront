@@ -194,6 +194,15 @@ static func _run_deferred_building_sweep(scene_root: Node) -> void:
 	_mark_existing_buildings(scene_root)
 	_mark_existing_nav_obstacles(scene_root)
 	_mark_existing_terrain_props(scene_root)
+	# Bug C fix: the plateau body BoxShape3D gets marked as an obstacle by
+	# _mark_existing_terrain_props (it's in "elevation" but has a BoxShape3D,
+	# not ConvexPolygonShape3D, so the elevation-top skip doesn't apply).
+	# That AABB covers the entire plateau footprint including the ramp-top
+	# connection zone, blocking cells where units need to step from the ramp
+	# onto the plateau. Clear obstacle marks for all ramp bodies (identified
+	# by ConvexPolygonShape3D in the "elevation" group) so those cells
+	# remain walkable.
+	_clear_ramp_obstacles(scene_root)
 
 
 static func _mark_existing_buildings(scene_root: Node) -> void:
@@ -378,6 +387,70 @@ static func _terrain_prop_aabb(sb: StaticBody3D) -> AABB:
 	# Fallback: 3x2x3 footprint centred on the body's global position.
 	var fallback: Vector3 = Vector3(3.0, 2.0, 3.0)
 	return AABB(sb.global_position - fallback * 0.5, fallback)
+
+
+## Un-marks obstacle cells that ramp bodies (ConvexPolygonShape3D in the
+## "elevation" group) occupy. Run AFTER _mark_existing_terrain_props so the
+## clear overwrites the plateau-body BoxShape3D mark that covers the ramp-top
+## connection zone.
+##
+## For each ramp StaticBody3D, the ConvexPolygonShape3D points are in local
+## space. We transform them to world space, compute an XZ-tight AABB, and call
+## mark_obstacle(aabb, false) to restore walkability on those cells.
+static func _clear_ramp_obstacles(scene_root: Node) -> void:
+	if _server == null or scene_root == null:
+		return
+	var tree: SceneTree = scene_root.get_tree()
+	if tree == null:
+		return
+	var cleared: int = 0
+	for n: Node in tree.get_nodes_in_group("elevation"):
+		if not is_instance_valid(n):
+			continue
+		if not (n is StaticBody3D):
+			continue
+		var sb: StaticBody3D = n as StaticBody3D
+		# Ramp bodies are identified by having a ConvexPolygonShape3D.
+		# Plateau bodies (BoxShape3D) and ramp side walls (BoxShape3D)
+		# are already handled correctly — only ramp wedges need clearing.
+		var cs: CollisionShape3D = null
+		for child: Node in sb.get_children():
+			if child is CollisionShape3D:
+				cs = child as CollisionShape3D
+				break
+		if cs == null or not (cs.shape is ConvexPolygonShape3D):
+			continue
+		# Build a tight XZ AABB from the convex hull points in world space.
+		# The ramp body's global_transform accounts for the parent's position
+		# (plateau_center). Points are in local space relative to the StaticBody3D.
+		var hull: ConvexPolygonShape3D = cs.shape as ConvexPolygonShape3D
+		var pts: PackedVector3Array = hull.points
+		if pts.is_empty():
+			continue
+		var gt: Transform3D = sb.global_transform
+		var x_min: float = INF
+		var x_max: float = -INF
+		var z_min: float = INF
+		var z_max: float = -INF
+		var y_min: float = INF
+		var y_max: float = -INF
+		for pt: Vector3 in pts:
+			var wp: Vector3 = gt * pt
+			x_min = minf(x_min, wp.x)
+			x_max = maxf(x_max, wp.x)
+			z_min = minf(z_min, wp.z)
+			z_max = maxf(z_max, wp.z)
+			y_min = minf(y_min, wp.y)
+			y_max = maxf(y_max, wp.y)
+		# Slight inward inset (0.1m) so we don't accidentally clear cells
+		# that belong to neighboring plateau-body or side-wall regions.
+		const INSET: float = 0.1
+		var aabb: AABB = AABB(
+			Vector3(x_min + INSET, y_min, z_min + INSET),
+			Vector3((x_max - x_min) - INSET * 2.0, y_max - y_min + 1.0, (z_max - z_min) - INSET * 2.0))
+		_server.call("mark_obstacle", aabb, false)
+		cleared += 1
+	print_debug("[MovementNativeBootstrap] cleared obstacle marks on %d ramp bodies" % cleared)
 
 
 static func get_kernel(scene_root: Node) -> Object:
