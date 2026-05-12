@@ -911,9 +911,25 @@ func _return_to_yard_new(delta: float) -> void:
 		if mc != null and mc is GroundMovement:
 			(mc as GroundMovement).goto_world(dest)
 
-	# Deposit when within DROPOFF_RADIUS (same logic as legacy).
-	var d: float = global_position.distance_to(dest)
-	if d < DROPOFF_RADIUS:
+	# Deposit when within DROPOFF_RADIUS of the yard's EDGE (not its
+	# center). Larger yards (advanced_armory, salvage_yard with big
+	# footprints) have their cost-grid cells dilated by SMALL agent
+	# radius (1.0u), so the kernel snaps the worker's goal to a cell
+	# 'extent + dilation' from the yard center. With center-based
+	# distance, larger yards left workers stranded outside DROPOFF_
+	# RADIUS=5u — they walked left/right along the dilation tangent
+	# without ever depositing. Edge-based distance accounts for yard
+	# size: deposit fires when the worker is within 2u of the yard's
+	# footprint edge regardless of how big the yard is.
+	var d_to_center: float = global_position.distance_to(dest)
+	var yard_extent: float = 0.0
+	if "stats" in home_yard:
+		var hy_stats: Resource = home_yard.get("stats") as Resource
+		if hy_stats and "footprint_size" in hy_stats:
+			var fs: Vector3 = hy_stats.get("footprint_size") as Vector3
+			yard_extent = maxf(fs.x, fs.z) * 0.5
+	var d_to_edge: float = maxf(d_to_center - yard_extent, 0.0)
+	if d_to_edge < 2.0 or d_to_center < DROPOFF_RADIUS:
 		if resource_manager:
 			resource_manager.add_salvage(_carried_salvage)
 			if _carried_microchips > 0 and resource_manager.has_method("add_microchips"):
