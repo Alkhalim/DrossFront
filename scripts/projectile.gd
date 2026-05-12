@@ -422,9 +422,14 @@ static func create(from: Vector3, to: Vector3, role_tag: StringName, rof_tier: S
 			proj._bullet_oriented = true
 		_:
 			proj._create_bullet_mesh(color)
-			# Faster bullets so the volley reads as actually shooting rather than
-			# floating across the field — important now that Rook fires bursts.
-			proj.speed = 95.0
+			# Bullets are hitscan now (damage applied at fire-time in
+			# CombatComponent._fire_weapon via the damage_is_instant path),
+			# so the projectile is a pure-visual tracer. Bumped from the old
+			# 95 u/s travel speed to 250 u/s so the slug arrives in 1–4 frames
+			# at typical engagement ranges (8–25 u). Still well below the 500
+			# u/s beam-detection threshold in _process, so it renders through
+			# the straight-line bullet branch, not the beam-fadeout branch.
+			proj.speed = 250.0
 			# Orient the slug along the firing direction at spawn time. Using
 			# Transform3D.looking_at directly (rather than Node3D.look_at) so
 			# the rotation is correct on the very first frame, before the
@@ -756,12 +761,12 @@ func _process(delta: float) -> void:
 		if global_position.distance_to(target_pos) > 0.05:
 			look_at(target_pos, Vector3.UP)
 
-	# Lifetime safety: even at the lowest weapon range a bullet should reach
-	# its target in well under 1.5 seconds at 95u/s. If we ever exceed that,
-	# something has gone wrong with the impact-distance check — kill it
-	# silently instead of leaving a ghost projectile to flicker.
+	# Lifetime safety: at 250 u/s even the longest-range bullet should reach
+	# its target in well under 0.5 s. If we ever exceed that, something has
+	# gone wrong with the impact-distance check — kill it silently instead of
+	# leaving a ghost projectile to flicker.
 	_life += delta
-	if _life > 1.5:
+	if _life > 0.5:
 		queue_free()
 		return
 
