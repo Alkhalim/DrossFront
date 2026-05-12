@@ -167,14 +167,32 @@ func _physics_process(delta: float) -> void:
 	var dist: float = _unit.global_position.distance_to(_target_building.global_position)
 	var build_max: float = _build_max_distance()
 
-	# DEBUG (TEMP) — track engineer transit. Every 30 ticks (~1 sec) log
-	# dist and build_max so we can see whether the engineer is approaching
-	# or stuck. Resets when the engineer enters build range.
+	# DEBUG (TEMP) — track engineer transit. Every 30 ticks (~1 sec).
 	_debug_transit_tick += 1
 	if _debug_transit_tick % 30 == 0:
-		print_debug("[BC %s] transit: dist=%.2f build_max=%.2f goal=%s _is_arrived=%s" % [
-			_unit.name, dist, build_max, _target_building.name,
-			str(_unit.get_node_or_null("MovementComponent").get("_is_arrived")) if _unit.get_node_or_null("MovementComponent") else "no-mc"
+		var mc_dbg: Node = _unit.get_node_or_null("MovementComponent")
+		var mc_target_dbg: Vector3 = Vector3.INF
+		var mc_arrived_dbg: bool = false
+		var mc_kh_dbg: int = 0
+		if mc_dbg:
+			mc_target_dbg = mc_dbg.get("target") as Vector3
+			mc_arrived_dbg = mc_dbg.get("_is_arrived") as bool
+			mc_kh_dbg = mc_dbg.get("kernel_handle") as int
+		var ap_dbg: Vector3 = _approach_point()
+		var center_dbg: Vector3 = _target_building.global_position
+		var unit_pos: Vector3 = _unit.global_position
+		var d_to_target: float = unit_pos.distance_to(mc_target_dbg)
+		var d_to_approach: float = unit_pos.distance_to(ap_dbg)
+		print_debug("[BC %s] tr: u=(%.1f,%.1f,%.1f) c=(%.1f,%.1f,%.1f) dist=%.2f bmax=%.2f mc.target=(%.1f,%.1f,%.1f) d_to_target=%.2f appr=(%.1f,%.1f,%.1f) d_to_appr=%.2f arr=%s kh=%d has_move=%s prio=%d" % [
+			_unit.name,
+			unit_pos.x, unit_pos.y, unit_pos.z,
+			center_dbg.x, center_dbg.y, center_dbg.z,
+			dist, build_max,
+			mc_target_dbg.x, mc_target_dbg.y, mc_target_dbg.z, d_to_target,
+			ap_dbg.x, ap_dbg.y, ap_dbg.z, d_to_approach,
+			str(mc_arrived_dbg), mc_kh_dbg,
+			str(_unit.get("has_move_order")),
+			(_unit.get("_move_priority_until_ms") as int) - Time.get_ticks_msec(),
 		])
 	if dist > build_max:
 		# Move toward an approach point just outside the building edge facing us,
