@@ -527,6 +527,17 @@ func _physics_process(delta: float) -> void:
 	# range but don't hunt.
 	var holding: bool = bool(_unit.get("is_holding_position"))
 	var can_auto_target: bool = (not unit_has_move_order or attack_move_target != Vector3.INF) and not holding
+	# [CC-DEBUG] Trace the auto-acquire gate when on attack-move. Emits ONLY
+	# when the search timer just elapsed (avoids per-tick spam). Captures the
+	# state of every gate so we can see why scan didn't fire when the user
+	# expected it to. Remove this block after debugging.
+	if attack_move_target != Vector3.INF and _search_timer <= 0.0:
+		var dbg_unit_name: String = _unit.name if _unit else "<no_unit>"
+		var dbg_ct: String = ("none" if _current_target == null else (_current_target.name if is_instance_valid(_current_target) else "freed"))
+		var dbg_ft: String = ("none" if forced_target == null else (forced_target.name if is_instance_valid(forced_target) else "freed"))
+		print("[CC-DEBUG] %s tick: search_timer<=0, can_auto=%s, holding=%s, has_move_order=%s, current_target=%s, forced_target=%s, has_fired=%s, chase_locked=%s" % [
+			dbg_unit_name, str(can_auto_target), str(holding), str(unit_has_move_order),
+			dbg_ct, dbg_ft, str(_has_fired_at_current_target), str(chase_locked)])
 	if not _current_target and can_auto_target and _search_timer <= 0.0:
 		_search_timer = SEARCH_INTERVAL
 		var stats: UnitStatResource = _unit.get("stats") as UnitStatResource
@@ -553,6 +564,12 @@ func _physics_process(delta: float) -> void:
 		if is_patrol:
 			engage_radius *= 0.6
 		var found: Node3D = _find_nearest_enemy(engage_radius)
+		# [CC-DEBUG] Log the scan result so we can see whether _find_nearest_enemy
+		# is missing the enemies the user thinks should be in range.
+		if attack_move_target != Vector3.INF:
+			var dbg_unit_name2: String = _unit.name if _unit else "<no_unit>"
+			var dbg_found: String = ("none" if found == null else found.name)
+			print("[CC-DEBUG] %s SCAN engage_radius=%.1f found=%s" % [dbg_unit_name2, engage_radius, dbg_found])
 		if found:
 			# Promote to forced_target so the unit will close the distance even
 			# if the enemy starts outside weapon range.
