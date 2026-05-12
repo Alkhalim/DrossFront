@@ -343,7 +343,20 @@ func _chase_position(target: Node3D, primary_range: float) -> Vector3:
 	if d < 0.001:
 		return enemy_pos
 	to_unit /= d
-	return enemy_pos + to_unit * (primary_range * 0.95)
+	# Chase-distance factor — how far INSIDE primary_range to aim. Ground
+	# units use 0.95 (stop just inside max range, preserves player intent
+	# of "stay at long range"). Aircraft use 0.5: aircraft arrival_radius
+	# is 6u (intentionally wide to suppress hover-tremble at the
+	# destination), so a 0.95-factor chase position is so close to
+	# primary_range that the aircraft can end up OUTSIDE weapon range
+	# after arrival (chase at 14.25u from enemy ± 6u arrival = up to
+	# 20.25u from enemy for range=15). Deeper chase at 0.5×range puts
+	# the arrival envelope (D ± 6u) safely inside weapon range — for
+	# range=15, that's 1.5–13.5u, always within 15u. Aircraft don't have
+	# a physical "stay back" requirement (they fly over ground targets)
+	# so closing further is harmless.
+	var chase_factor: float = 0.5 if _shooter_is_air_cached else 0.95
+	return enemy_pos + to_unit * (primary_range * chase_factor)
 
 
 func apply_damage_buff(multiplier: float, duration: float) -> void:
