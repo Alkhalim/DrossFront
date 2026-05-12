@@ -18,6 +18,8 @@ signal construction_finished(building: Building)
 const BUILD_BUFFER: float = 3.5
 
 var _target_building: Building = null
+## DEBUG (TEMP) — one-shot trace flag for the engineer-freeze report.
+var _debug_logged: bool = false
 ## Damaged friendly node (Building or Unit) the engineer is currently
 ## walking to / repairing. Independent from `_target_building` because
 ## repair targets stay registered until full HP, not until "constructed".
@@ -195,14 +197,18 @@ func _physics_process(delta: float) -> void:
 	# That's no longer a problem — Building._is_foundation_clear
 	# exempts the assigned engineer (commit 04b80b4), so the engineer
 	# can stand inside the footprint+0.4 box and construction still
-	# progresses. With this self-rescue branch active, the engineer
-	# kept getting bounced to an escape point on every tick (the
-	# tighter arrival_radius lands many engineers just inside the
-	# box at the end of approach), so advance_construction below
-	# never fired — visible in error report 600 as foundations stuck
-	# at 0% with engineers parked right next to them. Branch removed.
+	# progresses. Branch removed (commit 7fbf7fc).
 
 	# In range — stop moving and build
+	# DEBUG (TEMP) — diagnosing the persistent 'engineer freezes at
+	# foundation, construction stays at 0%' report. Remove after fix
+	# verified.
+	if not _debug_logged:
+		_debug_logged = true
+		print_debug("[BC] in-range: unit=%s building=%s dist=%.2f build_max=%.2f progress=%.3f" % [
+			_unit.name, _target_building.name, dist, build_max,
+			_target_building._construction_progress if "_construction_progress" in _target_building else -1.0
+		])
 	_unit.stop()
 	_target_building.advance_construction(build_rate * delta, _unit)
 	# Only animate when the foundation is actually progressing (it can be

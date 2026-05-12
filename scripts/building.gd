@@ -17,6 +17,9 @@ var is_ghost_preview: bool = false
 
 ## Set during placement by the builder.
 var is_constructed: bool = false
+## DEBUG (TEMP) — one-shot trace flags for engineer-freeze diagnosis.
+var _debug_clear_logged: bool = false
+var _debug_progress_logged: bool = false
 ## True once an engineer has actually started building the foundation
 ## (first advance_construction() call). Foundations sit in this
 ## not-yet-started state from begin_construction() until the placing
@@ -3038,8 +3041,42 @@ func advance_construction(amount: float, builder: Node = null) -> void:
 	# friendly / allied units out so the player doesn't have to manually
 	# move them every time a building is plopped on top of an idle squad.
 	if not _is_foundation_clear():
+		# DEBUG (TEMP) — one-shot diagnostic for the engineer-freeze report.
+		# Logs which unit(s) the clear-check found inside the box on first
+		# failure so we can see why my exemption isn't catching the
+		# assigned engineer.
+		if not _debug_clear_logged:
+			_debug_clear_logged = true
+			var hits: Array = []
+			var half_x_d: float = stats.footprint_size.x * 0.5 + 0.4
+			var half_z_d: float = stats.footprint_size.z * 0.5 + 0.4
+			for n_d: Node in get_tree().get_nodes_in_group("units"):
+				if not is_instance_valid(n_d) or not (n_d is Node3D):
+					continue
+				var n3_d: Node3D = n_d as Node3D
+				var dx_d: float = absf(n3_d.global_position.x - global_position.x)
+				var dz_d: float = absf(n3_d.global_position.z - global_position.z)
+				if dx_d < half_x_d and dz_d < half_z_d:
+					var bc_d: Node = n_d.get_node_or_null("BuilderComponent") if n_d.has_method("get_node_or_null") else null
+					var bc_target: String = "(no bc)"
+					if bc_d and "_target_building" in bc_d:
+						var tb: Object = bc_d.get("_target_building") as Object
+						bc_target = ("tb=%s" % (tb.name if tb else "null"))
+					hits.append("%s[%s, sw=%s, dx=%.2f, dz=%.2f, %s]" % [
+						n_d.name, n_d.get_class(), str(n_d is SalvageWorker),
+						dx_d, dz_d, bc_target
+					])
+			print_debug("[BLD %s] _is_foundation_clear=false, half=(%.2f,%.2f), hits=%s" % [
+				name, half_x_d, half_z_d, str(hits)
+			])
 		_evacuate_foundation_blockers()
 		return
+	# DEBUG (TEMP) — one-shot confirm that we reached real progress.
+	if not _debug_progress_logged:
+		_debug_progress_logged = true
+		print_debug("[BLD %s] advance_construction firing (foundation clear, builder=%s)" % [
+			name, builder.name if builder else "null"
+		])
 	# First tick of real progress flips construction_started so opponents'
 	# FOW visibility + auto-target acquisition start treating the foundation
 	# as a real structure. Pre-start foundations are placement intent only.
