@@ -1125,6 +1125,17 @@ func _setup_player() -> void:
 			focus = Vector3(hq.global_position.x, 0.0, hq.global_position.z)
 		cam.set("_pivot", focus)
 		cam.set("_target_pivot", focus)
+		# Also snap the camera's actual global_position so the FIRST
+		# rendered frame already shows the player's base. Without this,
+		# RTSCamera._ready set global_position = origin + _cam_offset
+		# (from the scene's authored camera position at origin),
+		# and the pivot update only landed visually on the next
+		# _process tick — the player saw the map center for one
+		# frame and FOW briefly revealed origin before the camera
+		# moved away.
+		var offset_v: Variant = cam.get("_cam_offset")
+		var cam_offset: Vector3 = offset_v if offset_v is Vector3 else Vector3.ZERO
+		cam.global_position = focus + cam_offset
 
 	# Wire resource manager to all player buildings
 	var buildings: Array[Node] = get_tree().get_nodes_in_group("buildings")

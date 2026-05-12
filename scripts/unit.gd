@@ -818,8 +818,15 @@ func _process(_delta: float) -> void:
 		set_process(false)
 		return
 	var task: Dictionary = _pending_bake_tasks.pop_front()
-	var node: Node3D = task.get("node") as Node3D
-	if node == null or not is_instance_valid(node):
+	# Read as Variant FIRST and validate before any typed cast. Casting
+	# a freed Object via `as Node3D` errors with "Trying to cast a freed
+	# object" before the null/is_instance_valid check can fire (scene
+	# transitions where the unit dies mid-bake-queue triggered this).
+	var node_v: Variant = task.get("node")
+	if not is_instance_valid(node_v):
+		return
+	var node: Node3D = node_v as Node3D
+	if node == null:
 		return
 	var skip_ids: Dictionary = task.get("skip_ids") as Dictionary
 	var cache_key: String = task.get("cache_key", "") as String
