@@ -5460,6 +5460,22 @@ func command_move(target: Vector3, clear_combat: bool = true) -> void:
 	## its own forced target. Plain move clears any pending waypoint queue,
 	## the patrol pair, and the stand-ground flag — those are all
 	## superseded by an explicit move.
+	# Combat-internal idempotency. Combat AI re-issues command_move(chase_pos)
+	# every chase tick (~0.5 Hz under the 2-second lockout, multiplied by
+	# 50+ engaged units in mid-battle = ~150 calls/sec). The downstream
+	# goto_world already short-circuits the kernel field rebuild for
+	# near-identical targets, but command_move's own setup work
+	# (move_queue.clear, patrol reset, formation rebalance check, mc
+	# resolution) was running unconditionally. Skip the whole function
+	# for combat-internal calls whose target is within ~3 m XZ of the
+	# already-active move_target — the result is the same. Player
+	# commands (clear_combat=true) always fall through so a player
+	# right-click is never silently ignored.
+	if not clear_combat and has_move_order and move_target != Vector3.INF:
+		var dx_m: float = target.x - move_target.x
+		var dz_m: float = target.z - move_target.z
+		if dx_m * dx_m + dz_m * dz_m < 9.0:  # (3 m)^2
+			return
 	move_queue.clear()
 	is_holding_position = false
 	patrol_a = Vector3.INF
