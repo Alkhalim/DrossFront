@@ -93,12 +93,41 @@ var _fog_tint_last_revision: int = -1
 var _fog_tint_grid_size: int = 0
 
 
+## Sizing the fog texture rect so its FOW grid coords align with the
+## minimap's world coords. FOW covers [-FogOfWar.MAP_HALF_EXTENT,
+## +FogOfWar.MAP_HALF_EXTENT] (200 u half-extent = 400 u total), while
+## the minimap shows [-MAP_WORLD_SIZE/2, +MAP_WORLD_SIZE/2] (150 u half
+## = 300 u total). Stretching the FOW texture to the minimap area
+## compressed it horizontally + vertically, so revealed areas drew
+## offset toward the +X / +Z corner ("SE" in screen terms). Fix:
+## size the fog rect so each FOW cell lands at the minimap pixel that
+## corresponds to the same world coord. With FOW > minimap, the rect
+## extends OUTSIDE the map area on each side; clipping handled by the
+## parent Control's clip_contents.
+func _fog_rect_position(map_origin: Vector2, map_size: Vector2) -> Vector2:
+	var fow_full: float = FogOfWar.MAP_HALF_EXTENT * 2.0
+	var ratio: float = fow_full / MAP_WORLD_SIZE
+	# FOW pixel u=0 lands at minimap world (-MAP_HALF_EXTENT). On the
+	# minimap that's map_origin.x - (FOW_HALF - MAP_HALF)/MAP_WORLD * size.
+	var inset: Vector2 = (Vector2(ratio, ratio) - Vector2.ONE) * 0.5 * map_size
+	return map_origin - inset
+
+
+func _fog_rect_size(map_size: Vector2) -> Vector2:
+	var fow_full: float = FogOfWar.MAP_HALF_EXTENT * 2.0
+	var ratio: float = fow_full / MAP_WORLD_SIZE
+	return map_size * ratio
+
+
 func _ensure_fog_tint_overlay(map_origin: Vector2, map_size: Vector2) -> void:
+	# Always enable clip_contents so the over-sized fog rect doesn't
+	# bleed into the surrounding HUD.
+	clip_contents = true
 	if _fog_tint_rect != null and is_instance_valid(_fog_tint_rect):
 		# Keep the overlay sized + positioned with the current
 		# map area in case the minimap was resized.
-		_fog_tint_rect.position = map_origin
-		_fog_tint_rect.size = map_size
+		_fog_tint_rect.position = _fog_rect_position(map_origin, map_size)
+		_fog_tint_rect.size = _fog_rect_size(map_size)
 		return
 	var sh := Shader.new()
 	sh.code = """
@@ -125,8 +154,8 @@ void fragment() {
 	_fog_tint_rect.stretch_mode = TextureRect.STRETCH_SCALE
 	_fog_tint_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_fog_tint_rect.material = mat
-	_fog_tint_rect.position = map_origin
-	_fog_tint_rect.size = map_size
+	_fog_tint_rect.position = _fog_rect_position(map_origin, map_size)
+	_fog_tint_rect.size = _fog_rect_size(map_size)
 	# Renders AFTER the minimap _draw entity loop so the fog
 	# overlay sits on top of entity dots. Visible cells use alpha
 	# 0 (pass-through) so visible-area dots stay fully bright;
