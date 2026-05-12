@@ -452,6 +452,7 @@ func _ready() -> void:
 		gm.max_accel = stats.speed * 6.0  # TODO(PA-21): tune accel curve per-class via UnitStatResource
 		gm.max_turn_rate_rad_s = TAU * 1.0  # TODO(PA-21): per-class turn rate via UnitStatResource (default ≈ 1 rotation/sec)
 		gm.agent_profile = AgentProfile.new(0.6, 0.5, 35.0, &"squad_default")  # TODO(PA-21): per-class agent profile (radius/climb/slope)
+		add_child(gm)
 		# Engineer build/repair docking: the GroundMovement default
 		# arrival_radius (6.0u, sized for the outer ring of a crowd combat
 		# arrival) leaves engineers frozen 6u from their build/repair
@@ -459,9 +460,11 @@ func _ready() -> void:
 		# never starts. Tight 1.5u arrival drives the engineer all the way
 		# to the approach point. RANGE_TOLERANCE in BuilderComponent (also
 		# 1.5u) absorbs any residual jitter once docked.
+		# MUST be set AFTER add_child(gm) — gm._ready() resets arrival_radius
+		# to the GroundMovement default of 6.0u, which would clobber any
+		# pre-add_child override. Same pattern salvage_worker.gd uses.
 		if stats.can_build:
 			gm.arrival_radius = 1.5
-		add_child(gm)
 		_movement_cached = gm
 	else:
 		# Legacy NavigationAgent3D path
