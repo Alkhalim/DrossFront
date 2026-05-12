@@ -426,8 +426,23 @@ void SteeringKernelImpl::tick(float delta) {
         //   - Fraction of own max_speed: a 5 m/s hound gets up to 1.5 m/s
         //     pull, a 2 m/s crawler 0.6 m/s. The previous absolute 2 m/s cap
         //     dragged slow chassis around at full speed.
+        //
+        // group_id == 0 is "ungrouped" (the AgentSoA default for newly-
+        // registered units, and what unit.command_move(clear_combat=true)
+        // resets _kernel_group_id to for player-issued solo moves). Skip
+        // cohesion entirely for ungrouped units — otherwise every solo
+        // mover, idle unit, freshly-spawned unit, and aircraft (which never
+        // touches group_id at all, going via set_agent_target_pos) all
+        // share the implicit "group 0" and apply phantom cohesion toward
+        // each other's centroid. The diagnostic case: a single unit walking
+        // forward to catch up to a stationary group wiggles, because the
+        // centroid of all group_id==0 noise across the map shifts laterally
+        // relative to its motion direction as it moves, and cohesion drags
+        // it sideways each tick. SEPARATE is unchanged (intentionally
+        // cross-group: physical bodies must not overlap regardless of
+        // cohesion membership).
         godot::Vector3 coh = {};
-        if (!at_goal_or_unreachable) {
+        if (!at_goal_or_unreachable && agents_.group_id[i] != 0) {
             godot::Vector3 centroid = {};
             int peers = 0;
             for (int j = 0; j < N; ++j) {
