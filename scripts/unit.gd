@@ -429,6 +429,18 @@ var _stride_speed: float = 0.0
 func _ready() -> void:
 	add_to_group("units")
 	add_to_group("owner_%d" % owner_id)
+	# CharacterBody3D floor handling. Default floor_snap_length=0
+	# means the body never auto-snaps to a slightly-lower / -higher
+	# floor — at ramp-top-to-plateau seams (or any small Y step in
+	# the navmesh stitching) the unit lifts off, gravity pulls it
+	# down, sometimes oscillates and stalls there. 0.5u of snap lets
+	# the body smoothly track a step up to 0.5m without losing floor
+	# contact. Matches the crawler pattern (1.0u snap there because
+	# the chassis is larger). floor_max_angle limits unintended
+	# climbing of near-vertical surfaces.
+	floor_snap_length = 0.5
+	floor_max_angle = deg_to_rad(45.0)
+	up_direction = Vector3.UP
 	# Random offset so idle-animation work is staggered across units.
 	_idle_anim_throttle = randi() % IDLE_ANIM_THROTTLE_FRAMES
 	_bob_raycast_throttle = randi() % BOB_RAYCAST_THROTTLE_FRAMES
