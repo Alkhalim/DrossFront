@@ -28,7 +28,12 @@ class FakeTarget extends Node3D:
 		damage_log.append(amount)
 
 
-func _init() -> void:
+func _initialize() -> void:
+	# _initialize fires when the main loop starts. Nodes added here are
+	# parented but `is_inside_tree()` returns false until the first frame
+	# tick — projectile.gd:914 calls `get_tree().current_scene` which then
+	# returns null and throws. Await one process_frame so the tree settles
+	# before running the assertions.
 	# ---- scene setup -------------------------------------------------------
 	# _spawn_impact uses get_tree().current_scene (without null guards on some
 	# paths: lines 914 and 924 in projectile.gd) for AudioManager /
@@ -42,17 +47,10 @@ func _init() -> void:
 	current_scene = scene_root
 
 	# _spawn_impact looks for AudioManager and ParticleEmitterManager under
-	# current_scene via get_node_or_null -- they must exist as named nodes or
-	# the lookups return null (which is safe).  Add empty stubs so the guard
-	# branches resolve without crashing even if the null-check pattern ever
-	# changes slightly.
-	var audio_stub := Node.new()
-	audio_stub.name = "AudioManager"
-	scene_root.add_child(audio_stub)
-
-	var pem_stub := Node.new()
-	pem_stub.name = "ParticleEmitterManager"
-	scene_root.add_child(pem_stub)
+	# current_scene via get_node_or_null. Leaving them absent is the safe
+	# path: get_node_or_null returns null, the `if pem:` / `if audio and
+	# audio.has_method(...)` guards skip the calls. A plain Node stub would
+	# fail the unguarded `pem.emit_flash(...)` call at projectile.gd:917.
 
 	# ---- test: no-payload Projectile does not damage on _spawn_impact ------
 	var fake_target := FakeTarget.new()
@@ -96,13 +94,15 @@ func _init() -> void:
 
 	print("OK: fresh Projectile.pending_damage == 0")
 
-	# Parent to the scene so get_tree() works inside _spawn_impact.
+	# Parent to the scene, then await one frame so the SceneTree fully
+	# attaches the node (data.tree pointer gets wired in NOTIFICATION_ENTERED_TREE,
+	# which only fires once the main loop ticks past _initialize).
 	scene_root.add_child(proj)
+	await process_frame
 
 	# Directly call _spawn_impact.  With pending_damage == 0 the damage branch
 	# is skipped entirely (guarded by `if pending_damage > 0`).
 	# With pending_splash_radius == 0 the splash branch is also skipped.
-	# AudioManager / ParticleEmitterManager stubs absorb any node lookups.
 	proj._spawn_impact()
 
 	# Assert: no damage reached the fake target.
