@@ -18,8 +18,10 @@ signal construction_finished(building: Building)
 const BUILD_BUFFER: float = 3.5
 
 var _target_building: Building = null
-## DEBUG (TEMP) — one-shot trace flag for the engineer-freeze report.
+## DEBUG (TEMP) — trace flags for the engineer-freeze diagnostic.
 var _debug_logged: bool = false
+var _debug_priority_logged: bool = false
+var _debug_transit_tick: int = 0
 ## Damaged friendly node (Building or Unit) the engineer is currently
 ## walking to / repairing. Independent from `_target_building` because
 ## repair targets stay registered until full HP, not until "constructed".
@@ -102,6 +104,11 @@ func _physics_process(delta: float) -> void:
 	if "_move_priority_until_ms" in _unit:
 		var prio_until: int = _unit.get("_move_priority_until_ms") as int
 		if prio_until > 0 and Time.get_ticks_msec() < prio_until:
+			if not _debug_priority_logged:
+				_debug_priority_logged = true
+				print_debug("[BC %s] gated by priority window; remaining=%d ms" % [
+					_unit.name, prio_until - Time.get_ticks_msec()
+				])
 			return
 	if not _target_building or not is_instance_valid(_target_building):
 		_target_building = null
@@ -160,6 +167,15 @@ func _physics_process(delta: float) -> void:
 	var dist: float = _unit.global_position.distance_to(_target_building.global_position)
 	var build_max: float = _build_max_distance()
 
+	# DEBUG (TEMP) — track engineer transit. Every 30 ticks (~1 sec) log
+	# dist and build_max so we can see whether the engineer is approaching
+	# or stuck. Resets when the engineer enters build range.
+	_debug_transit_tick += 1
+	if _debug_transit_tick % 30 == 0:
+		print_debug("[BC %s] transit: dist=%.2f build_max=%.2f goal=%s _is_arrived=%s" % [
+			_unit.name, dist, build_max, _target_building.name,
+			str(_unit.get_node_or_null("MovementComponent").get("_is_arrived")) if _unit.get_node_or_null("MovementComponent") else "no-mc"
+		])
 	if dist > build_max:
 		# Move toward an approach point just outside the building edge facing us,
 		# rather than the building center (which sits inside its nav obstacle and
