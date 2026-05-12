@@ -3203,6 +3203,22 @@ func _evacuate_foundation_blockers() -> void:
 		# Workers don't block construction — see _is_foundation_clear.
 		if node is SalvageWorker:
 			continue
+		# Engineers actively assigned to THIS foundation aren't blockers —
+		# they're the workers. With tighter engineer arrival_radius (1.5u)
+		# the engineer's stop position can land just inside the
+		# footprint+0.4 box for small/medium buildings, and the previous
+		# evacuation kicked them all the way out to extent+3.5u, restarting
+		# the build-approach loop. The BuilderComponent then re-issued
+		# command_move(approach_pt), the engineer came back inside the
+		# box, has_move_order cleared on the next _unit.stop(), and the
+		# engineer was evacuated again — visible as 'engineer freezes far
+		# from foundation and ignores closer commands'. Skipping the
+		# assigned engineer breaks the cycle.
+		if node is Unit:
+			var builder_node: Node = (node as Unit).get_node_or_null("BuilderComponent")
+			if builder_node and "_target_building" in builder_node:
+				if builder_node.get("_target_building") == self:
+					continue
 		var dx_signed: float = node3d.global_position.x - global_position.x
 		var dz_signed: float = node3d.global_position.z - global_position.z
 		if absf(dx_signed) >= half_x or absf(dz_signed) >= half_z:
