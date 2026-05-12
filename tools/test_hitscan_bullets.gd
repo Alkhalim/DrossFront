@@ -60,38 +60,26 @@ func _init() -> void:
 	fake_target.position = Vector3(10.0, 0.0, 0.0)
 	scene_root.add_child(fake_target)
 
-	# Projectile is registered via class_name Projectile (scripts/projectile.gd).
-	# The --path flag causes Godot to index global class names, so we can
-	# reference it directly.  Fallback to load() in case the headless harness
-	# hasn't indexed it yet.
-	var proj: Projectile = null
-	if ClassDB.class_exists("Projectile"):
-		# class_name registered -- call the static factory directly.
-		# Signature: create(from, to, role_tag, rof_tier, style_override, shooter_faction)
-		# &"fast" rof_tier resolves to "bullet" style via ROF_STYLES.
-		# No set_damage_payload call -- this simulates the hitscan path where
-		# CombatComponent fires damage instantly and spawns a cosmetic-only tracer.
-		proj = Projectile.create(
-				Vector3.ZERO,
-				Vector3(10.0, 0.0, 0.0),
-				&"AP",
-				&"fast",
-				&"",
-				0)
-	else:
-		# Fallback: load via resource path (slower but always works).
-		var ProjectileScript: GDScript = load("res://scripts/projectile.gd") as GDScript
-		if ProjectileScript == null:
-			push_error("FAIL: could not load res://scripts/projectile.gd")
-			quit(1)
-			return
-		proj = ProjectileScript.call("create",
-				Vector3.ZERO,
-				Vector3(10.0, 0.0, 0.0),
-				&"AP",
-				&"fast",
-				&"",
-				0) as Projectile
+	# Projectile is a GDScript class (class_name Projectile in scripts/projectile.gd).
+	# GDScript class_name declarations are NOT registered in ClassDB (that's for
+	# C++ / GDExtension types), so we load via the resource path and call the
+	# static factory through the GDScript reference.
+	# Signature: create(from, to, role_tag, rof_tier, style_override, shooter_faction)
+	# &"fast" rof_tier resolves to "bullet" style via ROF_STYLES.
+	# No set_damage_payload call -- this simulates the hitscan path where
+	# CombatComponent fires damage instantly and spawns a cosmetic-only tracer.
+	var ProjectileScript: GDScript = load("res://scripts/projectile.gd") as GDScript
+	if ProjectileScript == null:
+		push_error("FAIL: could not load res://scripts/projectile.gd")
+		quit(1)
+		return
+	var proj: Projectile = ProjectileScript.call("create",
+			Vector3.ZERO,
+			Vector3(10.0, 0.0, 0.0),
+			&"AP",
+			&"fast",
+			&"",
+			0) as Projectile
 
 	if proj == null:
 		push_error("FAIL: Projectile.create() returned null")
