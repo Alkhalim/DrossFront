@@ -18,10 +18,6 @@ signal construction_finished(building: Building)
 const BUILD_BUFFER: float = 3.5
 
 var _target_building: Building = null
-## DEBUG (TEMP) — trace flags for the engineer-freeze diagnostic.
-var _debug_logged: bool = false
-var _debug_priority_logged: bool = false
-var _debug_transit_tick: int = 0
 ## Damaged friendly node (Building or Unit) the engineer is currently
 ## walking to / repairing. Independent from `_target_building` because
 ## repair targets stay registered until full HP, not until "constructed".
@@ -104,11 +100,6 @@ func _physics_process(delta: float) -> void:
 	if "_move_priority_until_ms" in _unit:
 		var prio_until: int = _unit.get("_move_priority_until_ms") as int
 		if prio_until > 0 and Time.get_ticks_msec() < prio_until:
-			if not _debug_priority_logged:
-				_debug_priority_logged = true
-				print_debug("[BC %s] gated by priority window; remaining=%d ms" % [
-					_unit.name, prio_until - Time.get_ticks_msec()
-				])
 			return
 	if not _target_building or not is_instance_valid(_target_building):
 		_target_building = null
@@ -167,33 +158,6 @@ func _physics_process(delta: float) -> void:
 	var dist: float = _unit.global_position.distance_to(_target_building.global_position)
 	var build_max: float = _build_max_distance()
 
-	# DEBUG (TEMP) — track engineer transit. Every 30 ticks (~1 sec).
-	_debug_transit_tick += 1
-	if _debug_transit_tick % 30 == 0:
-		var mc_dbg: Node = _unit.get_node_or_null("MovementComponent")
-		var mc_target_dbg: Vector3 = Vector3.INF
-		var mc_arrived_dbg: bool = false
-		var mc_kh_dbg: int = 0
-		if mc_dbg:
-			mc_target_dbg = mc_dbg.get("target") as Vector3
-			mc_arrived_dbg = mc_dbg.get("_is_arrived") as bool
-			mc_kh_dbg = mc_dbg.get("kernel_handle") as int
-		var ap_dbg: Vector3 = _approach_point()
-		var center_dbg: Vector3 = _target_building.global_position
-		var unit_pos: Vector3 = _unit.global_position
-		var d_to_target: float = unit_pos.distance_to(mc_target_dbg)
-		var d_to_approach: float = unit_pos.distance_to(ap_dbg)
-		print_debug("[BC %s] tr: u=(%.1f,%.1f,%.1f) c=(%.1f,%.1f,%.1f) dist=%.2f bmax=%.2f mc.target=(%.1f,%.1f,%.1f) d_to_target=%.2f appr=(%.1f,%.1f,%.1f) d_to_appr=%.2f arr=%s kh=%d has_move=%s prio=%d" % [
-			_unit.name,
-			unit_pos.x, unit_pos.y, unit_pos.z,
-			center_dbg.x, center_dbg.y, center_dbg.z,
-			dist, build_max,
-			mc_target_dbg.x, mc_target_dbg.y, mc_target_dbg.z, d_to_target,
-			ap_dbg.x, ap_dbg.y, ap_dbg.z, d_to_approach,
-			str(mc_arrived_dbg), mc_kh_dbg,
-			str(_unit.get("has_move_order")),
-			(_unit.get("_move_priority_until_ms") as int) - Time.get_ticks_msec(),
-		])
 	if dist > build_max:
 		# Move toward an approach point just outside the building edge facing us,
 		# rather than the building center (which sits inside its nav obstacle and
@@ -234,15 +198,6 @@ func _physics_process(delta: float) -> void:
 	# progresses. Branch removed (commit 7fbf7fc).
 
 	# In range — stop moving and build
-	# DEBUG (TEMP) — diagnosing the persistent 'engineer freezes at
-	# foundation, construction stays at 0%' report. Remove after fix
-	# verified.
-	if not _debug_logged:
-		_debug_logged = true
-		print_debug("[BC] in-range: unit=%s building=%s dist=%.2f build_max=%.2f progress=%.3f" % [
-			_unit.name, _target_building.name, dist, build_max,
-			_target_building._construction_progress if "_construction_progress" in _target_building else -1.0
-		])
 	_unit.stop()
 	_target_building.advance_construction(build_rate * delta, _unit)
 	# Only animate when the foundation is actually progressing (it can be
