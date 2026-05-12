@@ -150,10 +150,15 @@ func _update_bank(delta: float) -> void:
 	var target_bank: float = 0.0
 	if heading_len > 0.5:
 		var heading_dir: Vector2 = heading / heading_len
-		# Aircraft scenes are oriented with the nose along -Z.
-		# atan2(x, -z) gives the Y rotation that points -Z toward
-		# (heading_dir.x, heading_dir.y).
-		desired_y = atan2(heading_dir.x, -heading_dir.y)
+		# Aircraft scenes are oriented with the nose along +Z (the
+		# V-formation builders place wingmen at local -Z behind the
+		# leader; see Aircraft._turn_toward and the look_at flip in
+		# Aircraft._process). atan2(x, z) gives the Y rotation that
+		# points +Z toward (heading_dir.x, heading_dir.y). The previous
+		# `-heading_dir.y` assumed -Z forward; symmetric on the X axis
+		# (left/right turns looked correct) but flipped 180° on the Z
+		# axis (north/south travel pointed the model's tail forward).
+		desired_y = atan2(heading_dir.x, heading_dir.y)
 		if _last_heading_xz.length() > 0.5:
 			var ang: float = _last_heading_xz.normalized().angle_to(heading_dir)
 			target_bank = clampf(ang / maxf(delta, 0.001) * 0.1,
