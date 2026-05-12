@@ -24,12 +24,14 @@ func _ready() -> void:
 	separate_min_distance = 5.0
 	avoid_min_distance = 6.0
 	avoid_repel = 36.0
-	# Default arrival_radius (3u) is smaller than the crawler's own
-	# agent radius (2.5u + chassis) — physically the chassis can't get
-	# within 3u of a target without overlapping. Wider arrival zone
-	# (6u) gives more distance for decel to bring the chassis to rest
-	# cleanly instead of overshooting and orbiting the goal.
-	arrival_radius = 6.0
+	# Crawler arrival_radius is tighter than the GroundMovement default
+	# (6.0u, sized for the outer ring of a 20-unit crowd). Crawlers are
+	# always solo, so 6u meant short click-orders inside the radius
+	# triggered immediate ARRIVED → SEEK suppressed → crawler didn't move.
+	# 3.0u is just over the chassis half-width (chassis is 3.8×5.2u, so
+	# centre→edge ~2.6u) and gives short clicks room to actually drive.
+	# Overshoot/orbit risk is minor at the slow crawler max_speed.
+	arrival_radius = 3.0
 
 
 ## PF-B — crawlers always use the large agent class regardless of what's
