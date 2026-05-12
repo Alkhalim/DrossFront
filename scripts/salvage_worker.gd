@@ -163,6 +163,28 @@ func _ready() -> void:
 		gm.max_turn_rate_rad_s = TAU * 0.5
 		gm.agent_profile = AgentProfile.new(0.5, 0.5, 35.0, &"worker")
 		add_child(gm)
+		# Mark worker as PASS_THROUGH so the C++ kernel skips it in the
+		# SEPARATE pairwise pass — both ways. Workers dock at the crawler
+		# chassis (collision_layer=0, no physics block) but without this
+		# flag the kernel pushed the crawler away from its own gatherer
+		# cloud every tick (the GDScript SalvageWorker filter at
+		# ground_movement.gd:389 is dead code under flowfield).
+		# add_child() already triggered gm._ready() which called
+		# register_agent and populated gm.kernel_handle.
+		const AGENT_FLAG_PASS_THROUGH_BIT: int = 128  # 1 << 7, mirrors types.h
+		var scene: Node = get_tree().current_scene if get_tree() else null
+		if scene != null:
+			var kernel: Object = MovementNativeBootstrap.get_kernel(scene)
+			if kernel != null and gm.kernel_handle != 0:
+				kernel.call("set_agent_flag", gm.kernel_handle, AGENT_FLAG_PASS_THROUGH_BIT, true)
+		# Workers physically dock with wrecks (harvest within ARRIVE_THRESHOLD=1.5)
+		# and the crawler (deposit within DROPOFF_RADIUS=5). The GroundMovement
+		# default arrival_radius of 6.0u is sized for the outer ring of a 20-unit
+		# combat crowd; for a docking solo worker it leaves the body frozen 6u
+		# from a wreck — well outside the harvest check. Tight 1.0u arrival lets
+		# the worker drive all the way to its target. Workers are PASS_THROUGH
+		# (above) so no peer separation jitter at the dock.
+		gm.arrival_radius = 1.0
 		gm.path_unreachable.connect(_on_movement_path_unreachable)
 
 	_build_visuals()
