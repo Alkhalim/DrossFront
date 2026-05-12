@@ -13,18 +13,18 @@ const MOVE_SPEED: float = 6.0
 # (it takes real time to recover lost gathering throughput).
 const HARVEST_RATE: float = 7.5
 const CARRY_CAPACITY: int = 30
-## Bumped 1.5 → 3.0: under the kernel-driven flowfield path, the worker
-## stops when its kernel target is within arrival_radius (1.0u) of the
-## body, NOT when the body is within 1.5u of the actual wreck. If the
-## wreck sits in a slightly dilated cell (near terrain props or another
-## building's dilation halo) the kernel's snap-to-nearest-open offsets
-## the goal cell from the wreck position by 1–2u, the worker stops at
-## the snapped cell, and the harvest gate (which checks raw
-## body→wreck distance) sees > 1.5u and never triggers. Worker idles
-## next to an available wreck. 3.0u absorbs the snap-offset jitter so
-## the harvest fires even when the worker can't physically reach the
-## wreck cell itself.
-const ARRIVE_THRESHOLD: float = 3.0
+## Harvest-proximity gate. Under the kernel-driven flowfield path the
+## worker stops when its kernel target is within arrival_radius (1.0u),
+## NOT when the body is within X of the actual wreck. If the wreck cell
+## falls in a dilation halo (near terrain props, in-construction
+## buildings, another wreck cluster) the kernel snaps the goal cell
+## 1–3u off the wreck's actual position; the worker stops at the snap
+## point and the harvest gate sees > harvest_threshold and never fires.
+## Initial bump 1.5 → 3.0 caught most cases but reports show edge
+## cases at 3.0–3.5u still freeze. 4.0u is the slack required to make
+## harvest reliable on dilated terrain; visually 4u is still 'docked'
+## at the wreck silhouette at typical RTS zoom (wrecks are 1–2u wide).
+const ARRIVE_THRESHOLD: float = 4.0
 ## Dropoff radius at the home crawler. Wider than ARRIVE_THRESHOLD
 ## because the crawler is a chunky chassis -- the worker can be
 ## physically touching the side of the crawler and still be 2.5u
