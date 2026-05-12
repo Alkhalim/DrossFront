@@ -69,7 +69,20 @@ const _OCTANT_MULTIPLIERS: Array = [
 # that path with O(R²) octant sweeps; per-stamp cost should fall
 # 5-10×, so we can return to a more responsive 2 Hz without the
 # spike-frame symptoms.
-const FOW_REFRESH_HZ: float = 2.0
+#
+# Dropped BACK to 1 Hz after profile 591 (200-unit heavy combat,
+# 5-min session): FogOfWar.* totalled 10.6 s of script time
+# (top-of-bucket consumer), with phase 0 spiking to 5.86 ms / call
+# and phase 1 at 2.5 ms / call. At 2 Hz cycle, the 4 Hz internal
+# fire rate spammed recompute on every other frame at 7 FPS,
+# starving the rest of the per-frame budget. 1 Hz cycle / 2 Hz
+# internal halves all FOW script time without changing the
+# split-phase shape -- spikes still divided across two ticks, just
+# fired half as often. Visual cost: a unit cresting cover takes
+# up to 1 s to reveal new terrain instead of 500 ms; barely
+# perceptible at RTS pacing (the player's eyes are tracking the
+# unit, not the fog edge).
+const FOW_REFRESH_HZ: float = 1.0
 
 ## Plateau-top elevation flag per cell. 1 = cell sits on top of a
 ## walkable plateau; 0 = ground / open. Set by the arena setup via
