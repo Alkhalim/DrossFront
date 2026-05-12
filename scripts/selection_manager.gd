@@ -1115,6 +1115,14 @@ func _command_attack(target: Node3D) -> void:
 		else:
 			# Non-combat units just move toward the target
 			unit.command_move(target.global_position)
+	# PF-B: route through GroupAura so attack-spread (per-squad arc-offset
+	# fields) runs. Without this, every unit independently chases the same
+	# target cell, the server's field cache collapses their fields, and
+	# they pile up on one side with only 1-2 firing. clear_combat=false
+	# preserves the combat targets we just set above AND signals is_attack
+	# so attack-spread fires.
+	if MovementFlags.use_new_system():
+		_dispatch_via_group_aura(target.global_position, false)
 
 
 func _command_attack_move(screen_pos: Vector2) -> void:
