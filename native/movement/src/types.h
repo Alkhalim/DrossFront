@@ -24,6 +24,7 @@ enum AgentFlag : uint8_t {
     AGENT_FLAG_ENGAGED_IN_COMBAT = 1 << 4,
     AGENT_FLAG_STUCK_PUSHOUT     = 1 << 5,  // L1 push-out is active
     AGENT_FLAG_ARRIVED           = 1 << 6,  // unit is within arrival zone; SEEK = 0, SEPARATE still applies
+    AGENT_FLAG_PASS_THROUGH      = 1 << 7,  // noncombat agent: skip in SEPARATE pair calc both ways
 };
 
 } // namespace drossfront

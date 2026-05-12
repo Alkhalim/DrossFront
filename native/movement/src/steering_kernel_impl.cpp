@@ -364,6 +364,11 @@ void SteeringKernelImpl::tick(float delta) {
         // (radius 2.4 each) only repelled within 2.5m even though their
         // physical bodies overlap until 4.8m+ apart — they constantly
         // bumped each other in mixed-size groups.
+        //
+        // PASS_THROUGH agents (e.g. salvage workers) are invisible to SEPARATE
+        // in both directions: they feel no sep force, and they don't push peers.
+        // Workers dock at the crawler chassis (no physics block), so including
+        // them was pushing the crawler away from its own gatherer cloud every tick.
         const float my_radius = agents_.radius[i];
         // Forward direction for parallel-reduction. Use current velocity
         // when moving, fall back to the seek vector (flow direction) when
@@ -388,8 +393,10 @@ void SteeringKernelImpl::tick(float delta) {
             }
         }
         godot::Vector3 sep = {};
+        if (!(agents_.flags[i] & AGENT_FLAG_PASS_THROUGH)) {
         for (int j = 0; j < N; ++j) {
             if (j == i || !agents_.alive[j]) continue;
+            if (agents_.flags[j] & AGENT_FLAG_PASS_THROUGH) continue;  // skip PASS_THROUGH neighbors
             godot::Vector3 dp = pos - agents_.pos[j];
             dp.y = 0.0f;
             float d = dp.length();
@@ -415,6 +422,7 @@ void SteeringKernelImpl::tick(float delta) {
         float sep_len = sep.length();
         float sep_cap = max_speed * SEPARATE_MAX_FRACTION;
         if (sep_len > sep_cap) sep *= (sep_cap / sep_len);
+        } // end if (!PASS_THROUGH) — PASS_THROUGH agents produce sep = zero
 
         // COHESION — toward same-group centroid (computed on the fly here;
         // GroupAura caches it later when wired up via group_id lookup tables).
