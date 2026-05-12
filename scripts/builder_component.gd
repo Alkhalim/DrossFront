@@ -162,7 +162,13 @@ func _physics_process(delta: float) -> void:
 		# Move toward an approach point just outside the building edge facing us,
 		# rather than the building center (which sits inside its nav obstacle and
 		# would trap the agent oscillating around the edge).
-		_unit.command_move(_approach_point())
+		# clear_combat=false: this is an internal builder-driven move, NOT a
+		# player command. Passing true would set _move_priority_until_ms = now+4s
+		# on the unit, which my own priority-window guard above would then
+		# read as 'player just clicked' and skip BuilderComponent for 4s —
+		# the engineer would arrive at approach_pt and sit idle for 4 seconds
+		# before construction started.
+		_unit.command_move(_approach_point(), false)
 		_set_build_anim(false)
 		# Track progress — if we don't shrink the distance for too long
 		# the build site is probably unreachable (e.g. the player placed
@@ -201,7 +207,8 @@ func _physics_process(delta: float) -> void:
 	# so the engineer doesn't always pick the same blocked one.
 	if _is_inside_foundation_footprint():
 		var escape: Vector3 = _pick_clear_escape_point()
-		_unit.command_move(escape)
+		# clear_combat=false — internal escape move, see other call above.
+		_unit.command_move(escape, false)
 		_set_build_anim(false)
 		return
 
@@ -340,7 +347,11 @@ func start_building(building: Building) -> void:
 	_approach_stuck_timer = 0.0
 	_approach_last_dist = INF
 	construction_started.emit(building)
-	_unit.command_move(_approach_point())
+	# clear_combat=false — internal builder-driven move (see active-build
+	# branch in _physics_process). Passing true sets _move_priority_until_ms
+	# on the unit, which would trip BuilderComponent's own priority guard
+	# and freeze the engineer at approach_pt for 4 s after every start_building.
+	_unit.command_move(_approach_point(), false)
 
 
 func _build_max_distance() -> float:
