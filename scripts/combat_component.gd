@@ -1829,12 +1829,13 @@ func _muzzle_color_for(weapon: WeaponResource) -> Color:
 
 
 func _spawn_squad_muzzle_flash(color: Color = Color(1.0, 0.7, 0.1, 1.0)) -> void:
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(color.r, color.g, color.b, 0.9)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.emission_enabled = true
-	mat.emission = color
-	mat.emission_energy_multiplier = 6.0
+	# Used to allocate a StandardMaterial3D per call just to extract
+	# .emission for the GPU particle + OmniLight color — pure waste,
+	# the material was never assigned to any mesh. Pass the color
+	# directly. At ~35 squad-flashes in a peak combat frame, this
+	# removes one StandardMaterial3D allocation per fire.
+	var emit_color: Color = color
+	emit_color.a = 0.95
 
 	# Prefer real barrel-tip positions; fall back to chest-height if none.
 	var positions: Array[Vector3] = []
@@ -1842,39 +1843,67 @@ func _spawn_squad_muzzle_flash(color: Color = Color(1.0, 0.7, 0.1, 1.0)) -> void
 		positions = _unit.get_muzzle_positions()
 
 	if positions.is_empty():
-		_create_flash_at(_unit.global_position + Vector3(0, 1.2, 0), mat)
+		_create_flash_at(_unit.global_position + Vector3(0, 1.2, 0), emit_color)
 		return
 
 	# Muzzle positions are already at the barrel tip — flash directly there.
 	for pos: Vector3 in positions:
-		_create_flash_at(pos, mat)
+		_create_flash_at(pos, emit_color)
 
 
-func _create_flash_at(pos: Vector3, mat: StandardMaterial3D) -> void:
-	# Muzzle flash → GPU particle emit. Color comes from the weapon's
-	# muzzle-color material. Extra OmniLight3D kept (light pop is the
-	# part that READS as muzzle flash from the ground), but the visible
-	# burst itself is now a GPU particle.
+## Per-fire OmniLight3Ds pooled across all CombatComponents. A typical
+## 35-fire peak frame spawned 35-105 OmniLight3D + Tween allocations
+## with a 0.09s lifetime; pooling reuses lights instead of allocating.
+## When the pool is empty (all in use), a fresh light is allocated.
+## Lights past the cap are silently dropped after their fade.
+static var _muzzle_light_pool: Array[OmniLight3D] = []
+const MAX_POOLED_MUZZLE_LIGHTS: int = 48
+
+
+static func _acquire_muzzle_light() -> OmniLight3D:
+	if not _muzzle_light_pool.is_empty():
+		return _muzzle_light_pool.pop_back()
+	return OmniLight3D.new()
+
+
+static func _release_muzzle_light(light: OmniLight3D) -> void:
+	if light == null or not is_instance_valid(light):
+		return
+	# Detach from current scene so the pool's stored light isn't bound
+	# to a tree that might unload during scene transitions.
+	if light.get_parent() != null:
+		light.get_parent().remove_child(light)
+	if _muzzle_light_pool.size() < MAX_POOLED_MUZZLE_LIGHTS:
+		_muzzle_light_pool.append(light)
+	else:
+		light.queue_free()
+
+
+func _create_flash_at(pos: Vector3, color: Color) -> void:
+	# Muzzle flash → GPU particle emit. The OmniLight is the part that
+	# READS as muzzle flash on the surrounding terrain / units (the
+	# GPU particle alone is invisible during day); kept on the CPU
+	# side because real lighting can't be reproduced by a GPU particle.
 	var _pem_scene: Node = get_tree().current_scene
 	var pem: Node = _pem_scene.get_node_or_null("ParticleEmitterManager") if _pem_scene else null
 	if pem:
-		var flash_color: Color = mat.emission if mat.emission_enabled else Color(1.0, 0.8, 0.3, 1.0)
-		flash_color.a = 0.95
-		pem.emit_flash(pos, flash_color)
+		pem.emit_flash(pos, color)
 
-	# Brief OmniLight3D — kept on the CPU side because its real-light
-	# contribution affects the unit + terrain shading, which can't be
-	# reproduced by a GPU particle. Single light per shot, lifetime
-	# 0.09s.
-	var light := OmniLight3D.new()
-	light.light_color = mat.emission if mat.emission_enabled else Color(1.0, 0.8, 0.3)
+	# Pooled OmniLight3D — pop from the static pool or allocate a fresh
+	# one on miss. Tween fades the energy to zero then routes the
+	# release-callback so the light goes BACK to the pool instead of
+	# queue_free (which would drop the allocation and force a new one
+	# on the next fire).
+	var light: OmniLight3D = _acquire_muzzle_light()
+	light.light_color = Color(color.r, color.g, color.b, 1.0)
 	light.light_energy = 3.5
 	light.omni_range = 4.5
-	get_tree().current_scene.add_child(light)
+	if _pem_scene != null:
+		_pem_scene.add_child(light)
 	light.global_position = pos
 	var ltween := light.create_tween()
 	ltween.tween_property(light, "light_energy", 0.0, 0.09).set_ease(Tween.EASE_OUT)
-	ltween.tween_callback(light.queue_free)
+	ltween.tween_callback(Callable(CombatComponent, "_release_muzzle_light").bind(light))
 
 
 func _get_target_armor() -> StringName:
