@@ -315,12 +315,18 @@ func _write_transform(idx: int) -> void:
 		return
 	var pos: Vector3 = _state_pos[idx]
 	var target: Vector3 = _state_target[idx]
-	# Orient the cylinder along the firing direction. Same logic the
-	# legacy bullet path used: looking_at toward target_pos with UP.
 	var t := Transform3D()
 	t.origin = pos
 	if pos.distance_squared_to(target) > 0.0001:
+		# looking_at orients the transform's local -Z toward the target.
+		# CylinderMesh's long axis is local Y, so the slug renders
+		# perpendicular to its travel direction unless we rotate the
+		# basis so Y aligns with -Z. Mirrors the legacy
+		# `_mesh.rotation.x = -PI / 2` trick the per-Projectile path used
+		# (see scripts/projectile.gd before commit c0da14f, the
+		# `_create_bullet_mesh` body).
 		t = t.looking_at(target, Vector3.UP)
+		t.basis = t.basis * Basis(Vector3.RIGHT, -PI * 0.5)
 	bucket.multimesh.set_instance_transform(_state_bucket_slot[idx], t)
 
 
@@ -381,7 +387,8 @@ func _spawn_impact_vfx(idx: int) -> void:
 func _update_arc(idx: int, delta: float) -> void:
 	# Parabolic arc — XZ lerp + height parabola, same math the legacy
 	# Projectile missile path used.
-	_state_life[idx] += delta
+	var prev_life: float = _state_life[idx]
+	_state_life[idx] = prev_life + delta
 	var t_norm: float = clampf(_state_life[idx] / _state_total_flight[idx], 0.0, 1.0)
 	var start: Vector3 = _state_start[idx]
 	var target: Vector3 = _state_target[idx]
@@ -390,10 +397,77 @@ func _update_arc(idx: int, delta: float) -> void:
 	var pos := Vector3(xz.x, xz.y + arc_y, xz.z)
 	_state_pos[idx] = pos
 	_write_transform(idx)
+	# Smoke trail — missiles only (not bombs / mortars). Spawn one puff
+	# every MISSILE_TRAIL_INTERVAL seconds via integer-bucket compare
+	# so we don't need per-projectile timer state. Mirrors the legacy
+	# Projectile._spawn_trail_puff cadence (~14 puffs/sec).
+	if _state_style[idx] == 1:  # missile
+		var prev_bucket: int = int(prev_life / MISSILE_TRAIL_INTERVAL)
+		var curr_bucket: int = int(_state_life[idx] / MISSILE_TRAIL_INTERVAL)
+		if curr_bucket > prev_bucket:
+			_spawn_trail_puff_at(pos)
 	if t_norm >= 1.0:
 		_apply_pending_damage(idx)
 		_spawn_impact_vfx(idx)
 		_free_slot(idx)
+
+
+## Trail-puff lifecycle. Mirrors the legacy Projectile per-puff path
+## (cap 60 concurrent so dense salvos don't snowball allocation, see
+## commit 9347126). Each puff is MeshInstance3D + SphereMesh +
+## StandardMaterial3D + 3-property Tween, free-standing under the
+## current scene root (NOT a MultiMesh — puffs need per-instance
+## tween-driven alpha/scale animation, which MultiMesh doesn't support
+## without a per-instance shader).
+const MISSILE_TRAIL_INTERVAL: float = 0.07
+const MAX_TRAIL_PUFFS: int = 60
+static var _alive_trail_puffs: int = 0
+
+
+static func _release_trail_puff(puff: Node) -> void:
+	if is_instance_valid(puff):
+		puff.queue_free()
+	_alive_trail_puffs = maxi(_alive_trail_puffs - 1, 0)
+
+
+func _spawn_trail_puff_at(pos: Vector3) -> void:
+	if _alive_trail_puffs >= MAX_TRAIL_PUFFS:
+		return
+	var scene: Node = get_tree().current_scene if get_tree() else null
+	if scene == null:
+		return
+	_alive_trail_puffs += 1
+	var puff := MeshInstance3D.new()
+	puff.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.18
+	sphere.height = 0.36
+	sphere.radial_segments = 8
+	sphere.rings = 4
+	puff.mesh = sphere
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.78, 0.62, 0.45, 0.65)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	puff.set_surface_override_material(0, mat)
+	scene.add_child(puff)
+	puff.global_position = pos + Vector3(
+		randf_range(-0.15, 0.15),
+		randf_range(-0.05, 0.05),
+		randf_range(-0.15, 0.15),
+	)
+	# Drift up + outward as the puff expands, fading to fully transparent.
+	var drift: Vector3 = puff.global_position + Vector3(
+		randf_range(-0.15, 0.15),
+		randf_range(0.4, 0.8),
+		randf_range(-0.15, 0.15),
+	)
+	var tween: Tween = puff.create_tween().set_parallel(true)
+	tween.tween_property(puff, "global_position", drift, 0.7)
+	tween.tween_property(puff, "scale", Vector3(2.4, 2.4, 2.4), 0.7)
+	tween.tween_property(mat, "albedo_color:a", 0.0, 0.7)
+	tween.chain().tween_callback(Callable(ProjectileManager, "_release_trail_puff").bind(puff))
 
 
 func _apply_pending_damage(idx: int) -> void:
