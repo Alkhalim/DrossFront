@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+building_name = "Intelligence Network"
+building_id = &"intelligence_network"
+hp = 900
+cost_salvage = 350
+cost_fuel = 30
+build_time = 35.0
+power_consumption = 22
+power_production = 0
+producible_units = []
+footprint_size = Vector3(4.0, 5.0, 4.0)
+placeholder_color = Color(0.30, 0.40, 0.55, 1)
+is_advanced = false
+prerequisites = []
+faction_lock = 2
+weapons = []

@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+building_name = "Sensor Array"
+building_id = &"sensor_array"
+hp = 450
+cost_salvage = 150
+cost_fuel = 0
+build_time = 18.0
+power_consumption = 6
+power_production = 0
+producible_units = []
+footprint_size = Vector3(2.4, 4.5, 2.4)
+placeholder_color = Color(0.28, 0.40, 0.50, 1)
+is_advanced = false
+prerequisites = []
+mesh_provider_radius = 14.0
+faction_lock = 2
+weapons = []

@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+building_name = "Drone Bay"
+building_id = &"drone_bay"
+hp = 700
+cost_salvage = 350
+cost_fuel = 30
+build_time = 28.0
+power_consumption = 18
+power_production = 0
+producible_units = []
+footprint_size = Vector3(5.0, 3.0, 5.0)
+placeholder_color = Color(0.32, 0.42, 0.55, 1)
+is_advanced = true
+prerequisites = [&"sensor_spine"]
+faction_lock = 2
+weapons = []
