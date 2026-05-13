@@ -115,6 +115,11 @@ func _ready() -> void:
 		var cnm: Node = cnm_script.new()
 		cnm.name = "ConveyorNetworkManager"
 		add_child(cnm)
+		if get_node_or_null("ConveyorNetworkRenderer") == null:
+			var cnr := preload("res://scripts/conveyor_network_renderer.gd").new()
+			cnr.name = "ConveyorNetworkRenderer"
+			add_child(cnr)
+			cnr.setup(cnm as ConveyorNetworkManager)
 
 	# V3 Pillar 2 — Neural Mesh provider tracker. Maintains a snapshot
 	# of every Sable Mesh provider (Black Pylon + Overseer Harbinger
