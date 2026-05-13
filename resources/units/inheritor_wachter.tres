@@ -1,0 +1,76 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_autocannons"]
+script = ExtResource("2")
+weapon_name = "Twin Universal Autocannons"
+role_tag = &"Universal"
+damage_tier = &"moderate"
+range_tier = &"medium"
+rof_tier = &"moderate"
+can_hit_air = true
+mult_vs_light = 0.40
+mult_vs_medium = 1.00
+mult_vs_heavy = 0.60
+
+damage = 10
+range = 15.0
+rof_seconds = 1.0
+use_explicit_air = false
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 0.8
+mult_vs_light_v2 = 0.8
+mult_vs_medium_v2 = 1.0
+mult_vs_heavy_v2 = 0.3
+mult_vs_structure_v2 = 0.3
+mult_vs_light_air_v2 = 0.4
+mult_vs_heavy_air_v2 = 0.3
+
+[sub_resource type="Resource" id="weapon_at_missiles"]
+script = ExtResource("2")
+weapon_name = "Shoulder AT Missile Rack"
+role_tag = &"AA"
+damage_tier = &"high"
+range_tier = &"medium"
+rof_tier = &"slow"
+
+damage = 33
+range = 15.0
+rof_seconds = 3.0
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 0.8
+mult_vs_light_v2 = 0.5
+mult_vs_medium_v2 = 0.8
+mult_vs_heavy_v2 = 1.0
+mult_vs_structure_v2 = 0.6
+mult_vs_light_air_v2 = 0.3
+mult_vs_heavy_air_v2 = 0.4
+
+[resource]
+script = ExtResource("1")
+unit_name = "Wächter"
+display_name = "Wächter"
+unit_class = &"medium"
+hp_total = 819
+hp_per_unit = 273
+armor_class = &"medium"
+speed_tier = &"moderate"
+speed_value = 7.2
+sight_tier = &"medium"
+squad_size = 3
+population = 11
+cost_salvage = 140
+cost_fuel = 9
+build_time = 22.0
+built_at = &"headquarters"
+primary_weapon = SubResource("weapon_autocannons")
+secondary_weapon = SubResource("weapon_at_missiles")
+special_description = "Medium tank. Requires Architect's Network Tier 1. Pair-produced."
+
+speed = 7.0
+sight_radius = 15.0
+armor_reduction = 0.3
