@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+building_name = "Reliquary"
+building_id = &"reliquary"
+hp = 400
+cost_salvage = 150
+cost_fuel = 0
+build_time = 25.0
+power_consumption = 0
+power_production = 0
+producible_units = []
+footprint_size = Vector3(2.5, 3.5, 2.5)
+placeholder_color = Color(0.30, 0.50, 0.32, 1)
+is_advanced = false
+prerequisites = []
+mesh_provider_radius = 0.0
+faction_lock = 2
+connection_range = 0.0
+requires_geothermic_vent = false

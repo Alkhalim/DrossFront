@@ -3349,6 +3349,11 @@ func _finish_construction() -> void:
 		var cnm: ConveyorNetworkManager = ConveyorNetworkManager.get_instance(scene_root)
 		if cnm != null:
 			cnm.register(self)
+	if stats != null and stats.building_id == &"reliquary":
+		var scene_root: Node = get_tree().current_scene
+		var ibm: InheritorBuildingManager = InheritorBuildingManager.get_instance(scene_root)
+		if ibm != null:
+			ibm.register_reliquary(self)
 	_construction_progress = stats.build_time
 	# Top up to full HP on completion. Damage taken during construction
 	# stays applied, but a clean build with no interference finishes
@@ -6627,3 +6632,9 @@ func _exit_tree() -> void:
 			var cnm: ConveyorNetworkManager = scene_root.get_node_or_null("ConveyorNetworkManager") as ConveyorNetworkManager
 			if cnm != null:
 				cnm.unregister(self)
+	if stats != null and stats.building_id == &"reliquary":
+		var scene_root: Node = get_tree().current_scene
+		if scene_root != null:
+			var ibm: InheritorBuildingManager = scene_root.get_node_or_null("InheritorBuildingManager") as InheritorBuildingManager
+			if ibm != null:
+				ibm.unregister_reliquary(self)

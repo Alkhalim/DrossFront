@@ -2488,6 +2488,15 @@ func _is_valid_build_position(pos: Vector3) -> bool:
 			if cnm.would_overfull_network(0, pos, _build_stats.building_id):
 				return false
 
+	# Reliquary cap — Inheritors may only have 4 constructed Reliquaries.
+	if _build_stats != null and _build_stats.building_id == &"reliquary":
+		var scene_root: Node = get_tree().current_scene
+		var ibm: InheritorBuildingManager = scene_root.get_node_or_null("InheritorBuildingManager") as InheritorBuildingManager
+		if ibm != null:
+			var local_owner_id: int = 0  # local player is always owner_id == 0 in this codebase
+			if not ibm.can_build_reliquary(local_owner_id):
+				return false
+
 	return true
 
 

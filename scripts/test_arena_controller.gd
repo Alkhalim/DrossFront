@@ -129,6 +129,14 @@ func _ready() -> void:
 		mcm.name = "MeridianContractsManager"
 		add_child(mcm)
 
+	# InheritorBuildingManager — per-player Inheritor faction state.
+	# Tracks Reliquary count cap (max 4) and passive salvage pile timers.
+	if get_node_or_null("InheritorBuildingManager") == null:
+		var ibm_script: GDScript = preload("res://scripts/inheritor_building_manager.gd")
+		var ibm: Node = ibm_script.new()
+		ibm.name = "InheritorBuildingManager"
+		add_child(ibm)
+
 	# V3 Pillar 2 — Neural Mesh provider tracker. Maintains a snapshot
 	# of every Sable Mesh provider (Black Pylon + Overseer Harbinger
 	# etc.) so combat can read the per-position Mesh strength cheaply.
