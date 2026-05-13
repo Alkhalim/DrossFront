@@ -52,7 +52,7 @@ mult_vs_heavy_air_v2 = 1.0
 [resource]
 script = ExtResource("1")
 unit_name = "Forgemaster (Reactor)"
-display_name = "Forgemaster (Reactor)"
+display_name = "Voron Walker (Reactor)"
 unit_class = &"heavy"
 hp_total = 1100
 hp_per_unit = 1100
@@ -73,7 +73,7 @@ ability_cooldown = 28.0
 ability_radius = 18.0
 ability_duration = 6.0
 ability_description = "Friendly mechs within 18u gain +30% damage for 6s."
-special_description = "Forgemaster Reactor branch — pulls the heal ring offline and overdrives nearby mechs' weapons instead. Riveter steps up to moderate damage; Skyspike AA stays. The frontline-DPS build."
+special_description = "Voron Walker Reactor branch — pulls the heal ring offline and overdrives nearby mechs' weapons instead. Riveter steps up to moderate damage; Skyspike AA stays. The frontline-DPS build."
 branch_summary = "Skyspike replaced with a Reactor Surge damage aura. The army-wide DPS amplifier; weaker against air, fragile if exposed."
 
 speed = 5.0

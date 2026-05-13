@@ -54,7 +54,7 @@ mult_vs_heavy_air_v2 = 0.5
 [resource]
 script = ExtResource("1")
 unit_name = "Hound — Ripper"
-display_name = "Hound (Ripper)"
+display_name = "Borzoi (Ripper)"
 unit_class = &"medium"
 hp_total = 1620
 hp_per_unit = 540

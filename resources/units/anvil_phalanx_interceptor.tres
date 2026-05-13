@@ -30,7 +30,7 @@ mult_vs_heavy_air_v2 = 1.0
 [resource]
 script = ExtResource("1")
 unit_name = "Phalanx (Interceptor)"
-display_name = "Phalanx (Interceptor)"
+display_name = "Sputnik (Interceptor)"
 unit_class = &"aircraft"
 hp_total = 720
 hp_per_unit = 90
@@ -47,7 +47,7 @@ primary_weapon = SubResource("weapon_intercept_aa")
 is_aircraft = true
 flight_altitude = 4.5
 flight_speed = 12.75
-special_description = "Phalanx Interceptor — drone MGs swapped for AAir mini-missiles. Anti-aircraft + anti-missile screen. Cannot threaten ground targets; pair with Bombers or ground escorts."
+special_description = "Sputnik Interceptor — drone MGs swapped for AAir mini-missiles. Anti-aircraft + anti-missile screen. Cannot threaten ground targets; pair with Bombers or ground escorts."
 passive_description = "AAir Mini-Missiles — anti-aircraft screen swarm. No ground capability; pair with bombers or ground escorts."
 branch_summary = "Drone MGs swapped for AAir mini-missiles and swept aerodynamics. Pure anti-aircraft screen; cannot threaten ground targets."
 

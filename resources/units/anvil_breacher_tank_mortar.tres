@@ -39,7 +39,7 @@ mult_vs_heavy_air_v2 = 0.5
 [resource]
 script = ExtResource("1")
 unit_name = "Breacher Tank (Mortar)"
-display_name = "Breacher (Mortar)"
+display_name = "Boyar (Mortar)"
 unit_class = &"transport"
 hp_total = 1380
 hp_per_unit = 460
@@ -53,7 +53,7 @@ cost_fuel = 40
 build_time = 34.0
 built_at = &"advanced_foundry"
 primary_weapon = SubResource("weapon_breacher_mortar")
-special_description = "Breacher Mortar branch — main gun replaced by a long-range high-arc Basilisk mortar. Strong vs light squads, decent vs medium, falls off vs heavy armour. Sit back and lob shells over enemy turret cover. 0.7x vs structures."
+special_description = "Boyar Mortar branch — main gun replaced by a long-range high-arc Basilisk mortar. Strong vs light squads, decent vs medium, falls off vs heavy armour. Sit back and lob shells over enemy turret cover. 0.7x vs structures."
 passive_description = "High-Arc Mortar — fires over cover and obstacles. Long reload, but the splash chews through light formations from beyond direct-fire range."
 branch_summary = "Mobile mortar platform. Trades raw AT damage for a high-arc anti-light shell that fires from outside return-fire range."
 

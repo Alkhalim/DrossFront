@@ -57,7 +57,7 @@ mult_vs_heavy_air_v2 = 0.4
 [resource]
 script = ExtResource("1")
 unit_name = "Hound"
-display_name = "Hound"
+display_name = "Borzoi"
 unit_class = &"medium"
 hp_total = 1260
 hp_per_unit = 420

@@ -43,7 +43,7 @@ mult_vs_heavy_air_v2 = 0.5
 [resource]
 script = ExtResource("1")
 unit_name = "Breacher Tank"
-display_name = "Breacher"
+display_name = "Boyar"
 unit_class = &"transport"
 hp_total = 1380
 hp_per_unit = 460
@@ -57,7 +57,7 @@ cost_fuel = 40
 build_time = 30.0
 built_at = &"advanced_foundry"
 primary_weapon = SubResource("weapon_breacher_cannon")
-special_description = "Combine tracked tank hunter. Casemate hull with twin forward-mounted heavy AT cannons fired in quick succession."
+special_description = "Combine tracked tank hunter — the Boyar. Casemate hull with twin forward-mounted heavy AT cannons fired in quick succession."
 branch_a_name = "Salvo"
 branch_b_name = "Mortar"
 branch_a_stats = ExtResource("3")

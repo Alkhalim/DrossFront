@@ -29,7 +29,7 @@ mult_vs_heavy_air_v2 = 0.5
 [resource]
 script = ExtResource("1")
 unit_name = "Phalanx (Shield)"
-display_name = "Phalanx (Shield)"
+display_name = "Sputnik (Shield)"
 unit_class = &"aircraft"
 hp_total = 920
 hp_per_unit = 115
@@ -53,7 +53,7 @@ ability_radius = 14.0
 ability_duration = 6.0
 ability_targeted = true
 ability_description = "Click to project a barrier dome at the target area. Friendly units inside take 45% less damage for 6s."
-special_description = "Phalanx Shield — drones reinforced with directional barrier projectors. Higher per-drone HP at the cost of speed. Reads as the screening swarm — soak hits in front of higher-value gunships."
+special_description = "Sputnik Shield — drones reinforced with directional barrier projectors. Higher per-drone HP at the cost of speed. Reads as the screening swarm — soak hits in front of higher-value gunships."
 branch_summary = "Tougher per-drone chassis with a directional Barrier Bloom area ability. Slower than baseline; soaks fire in front of higher-value gunships."
 
 speed = 8.0

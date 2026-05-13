@@ -34,7 +34,7 @@ mult_vs_heavy_air_v2 = 0.2
 [resource]
 script = ExtResource("1")
 unit_name = "Phalanx Drone"
-display_name = "Phalanx"
+display_name = "Sputnik Drones"
 unit_class = &"aircraft"
 hp_total = 720
 hp_per_unit = 90
@@ -48,7 +48,7 @@ cost_fuel = 21
 build_time = 22.0
 built_at = &"aerodrome"
 primary_weapon = SubResource("weapon_drone_mg")
-special_description = "Combine's standard air patrol — light interceptor drones flying close formation."
+special_description = "Combine's standard air patrol — Sputnik light interceptor drones flying close formation."
 passive_description = "Drone Pack — close-formation interceptor swarm. Light air armour, leans on numbers."
 branch_a_name = "Shield"
 branch_b_name = "Interceptor"
