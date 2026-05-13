@@ -1,4 +1,4 @@
-class_name CombatComponent
+﻿class_name CombatComponent
 extends Node
 ## Handles targeting, weapon firing, and damage calculation for a unit.
 ## Attached as a child of Unit by Unit._ready().
@@ -1547,15 +1547,21 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 					spread_dir = spread_dir.normalized()
 					var pellet_target: Vector3 = fire_pos + spread_dir * SHOTGUN_PELLET_RANGE
 					pellet_target.y = aim_pos.y
-					# Force "fast" tier so Projectile renders these as bullet
-					# slugs regardless of the parent weapon's classification.
-					var pellet: Projectile = Projectile.create(fire_pos, pellet_target, weapon.role_tag, &"fast", &"", _shooter_faction_id())
+					# Shotgun pellet — always bullet style (mirrors the legacy
+					# &"fast" rof_tier which ROF_STYLES maps to "bullet").
+					# Damage was applied at fire-tick (damage_is_instant), so
+					# pending_damage=0; the manager only renders the tracer.
+					var pellet_color: Color = _resolve_projectile_color(weapon, _shooter_faction_id())
 					if is_glowing_volley:
-						# Bright warning-yellow tint + 3x emission so the
-						# Heavy Volley salvo unmistakably reads as the
-						# buffed shot, not regular fire.
-						pellet.set_glow_boost(3.0, Color(1.0, 0.85, 0.20, 1.0))
-					get_tree().current_scene.add_child(pellet)
+						# Bright warning-yellow tint so the Heavy Volley salvo
+						# unmistakably reads as the buffed shot, not regular fire.
+						pellet_color = pellet_color.lerp(Color(1.0, 0.85, 0.20, 1.0), 0.7)
+					var pellet_pm: ProjectileManager = ProjectileManager.get_instance(get_tree().current_scene if get_tree() else null)
+					if pellet_pm != null:
+						pellet_pm.fire(fire_pos, pellet_target, "bullet", pellet_color, 150.0,
+								0,  # shotgun damage already applied at fire-tick
+								_current_target, _unit, 0.0, 0,
+								(_unit.get("owner_id") as int) if (_unit and "owner_id" in _unit) else -1)
 			else:
 				# Salvo stagger -- when the weapon ships salvo_stagger_sec
 				# > 0 (Bulwark triple cannon, Breacher twin cannon) the
@@ -1571,21 +1577,36 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 				var weapon_stagger: float = weapon.salvo_stagger_sec if "salvo_stagger_sec" in weapon else 0.0
 				var stagger_sec: float = weapon_stagger * float(i) if weapon_stagger > 0.0 else 0.0
 				if stagger_sec <= 0.0:
-					var proj: Node3D = Projectile.create(fire_pos, aim_pos, weapon.role_tag, weapon.rof_tier, weapon.projectile_style, _shooter_faction_id(), weapon.damage_tier)
-					if is_glowing_volley and not _glowing_pellet_mode and proj.has_method("set_glow_boost"):
-						proj.call("set_glow_boost", 3.0, Color(1.0, 0.85, 0.20, 1.0))
-					# Damage-on-impact: attach payload to the
-					# projectile so it lands when the visible
-					# round arrives, not at fire-time. Skipped
-					# for instant-style (beams / shotgun /
-					# drone-release) which already applied
-					# damage in the hit branch above.
-					if hit and not damage_is_instant and proj.has_method("set_damage_payload"):
-						var splash_dmg_int: int = 0
+					# Resolve effective style + speed + color the same way
+					# Projectile.create did (mirrors ROF_STYLES + ROLE_COLORS dispatch).
+					var p_style: String = _resolve_projectile_style(weapon)
+					var p_speed: float = _resolve_projectile_speed(p_style)
+					var p_color: Color = _resolve_projectile_color(weapon, _shooter_faction_id())
+					# Glowing-volley tint (Heavy Volley) -- baked into color so the
+					# bucket key captures the bright tint and it gets its own mesh.
+					if is_glowing_volley and not _glowing_pellet_mode:
+						p_color = p_color.lerp(Color(1.0, 0.85, 0.20, 1.0), 0.7)
+					# Hitscan styles (bullet) skip the deferred damage payload -- the
+					# damage_is_instant branch above already applied take_damage.
+					var p_dmg: int = 0
+					var p_splash_dmg: int = 0
+					if hit and not damage_is_instant:
+						p_dmg = per_member_dmg
 						if splash_r > 0.0:
-							splash_dmg_int = maxi(int(round(float(per_member_dmg) * weapon.splash_damage_mult)), 1)
-						proj.call("set_damage_payload", per_member_dmg, _current_target, _unit, splash_r, splash_dmg_int)
-					get_tree().current_scene.add_child(proj)
+							p_splash_dmg = maxi(int(round(float(per_member_dmg) * weapon.splash_damage_mult)), 1)
+					var p_owner: int = (_unit.get("owner_id") as int) if (_unit and "owner_id" in _unit) else -1
+					# Beams keep the legacy single-Node3D path -- single-frame,
+					# fades over ~125ms. MultiMesh refactor doesn't cover them.
+					if p_style == "beam":
+						var proj: Node3D = Projectile.create(fire_pos, aim_pos, weapon.role_tag,
+							weapon.rof_tier, weapon.projectile_style, _shooter_faction_id(),
+							weapon.damage_tier)
+						get_tree().current_scene.add_child(proj)
+					else:
+						var pm: ProjectileManager = ProjectileManager.get_instance(get_tree().current_scene if get_tree() else null)
+						if pm != null:
+							pm.fire(fire_pos, aim_pos, p_style, p_color, p_speed, p_dmg,
+								_current_target, _unit, splash_r, p_splash_dmg, p_owner)
 				else:
 					_spawn_staggered_projectile(stagger_sec, weapon, fire_pos, aim_pos, is_glowing_volley, per_member_dmg if (hit and not damage_is_instant) else 0, splash_r, weapon.splash_damage_mult)
 
@@ -1761,26 +1782,77 @@ func _spawn_staggered_projectile(delay_sec: float, weapon: WeaponResource, fire_
 	# the target has been freed, no log spam.
 	var target_ref: WeakRef = weakref(_current_target)
 	var shooter_ref: WeakRef = weakref(_unit)
+	# Resolve style/speed/color before the timer fires so the lambda
+	# captures values, not the weapon (which may be swapped later).
+	var p_style: String = _resolve_projectile_style(weapon)
+	var p_speed: float = _resolve_projectile_speed(p_style)
+	var p_color: Color = _resolve_projectile_color(weapon, faction)
+	if is_glowing_volley:
+		p_color = p_color.lerp(Color(1.0, 0.85, 0.20, 1.0), 0.7)
+	var p_owner: int = faction  # owner_id not available here; faction doubles as owner key
 	var timer: SceneTreeTimer = get_tree().create_timer(delay_sec)
 	timer.timeout.connect(func() -> void:
 		if not is_inside_tree():
 			return
-		var proj: Node3D = Projectile.create(fire_pos, aim_pos, role, rof_tier, style, faction, dmg_tier)
-		if is_glowing_volley and proj.has_method("set_glow_boost"):
-			proj.call("set_glow_boost", 3.0, Color(1.0, 0.85, 0.20, 1.0))
-		# Damage-on-impact payload for staggered shots. payload_damage
-		# 0 = caller didn't want this shot to deal damage (miss or
-		# instant-style), so the projectile flies as cosmetic.
-		if payload_damage > 0 and proj.has_method("set_damage_payload"):
-			var ct: Node3D = target_ref.get_ref() as Node3D
-			var cs: Node3D = shooter_ref.get_ref() as Node3D
-			if ct != null and is_instance_valid(ct):
-				var splash_dmg_int: int = 0
-				if payload_splash_r > 0.0:
-					splash_dmg_int = maxi(int(round(float(payload_damage) * payload_splash_mult)), 1)
-				proj.call("set_damage_payload", payload_damage, ct, cs, payload_splash_r, splash_dmg_int)
-		get_tree().current_scene.add_child(proj)
+		# Resolve the WeakRefs inside the timer callback -- the target
+		# may have been freed between scheduling and firing.
+		var ct: Node3D = target_ref.get_ref() as Node3D
+		var cs: Node3D = shooter_ref.get_ref() as Node3D
+		# Beams keep the legacy single-Node3D path.
+		if p_style == "beam":
+			var proj: Node3D = Projectile.create(fire_pos, aim_pos, role, rof_tier, style, faction, dmg_tier)
+			get_tree().current_scene.add_child(proj)
+		else:
+			var pm: ProjectileManager = ProjectileManager.get_instance(get_tree().current_scene if get_tree() else null)
+			if pm != null:
+				var p_dmg_resolved: int = 0
+				var p_splash_dmg: int = 0
+				# payload_damage is already 0 when caller passed (miss / instant-style).
+				if payload_damage > 0 and ct != null and is_instance_valid(ct):
+					p_dmg_resolved = payload_damage
+					if payload_splash_r > 0.0:
+						p_splash_dmg = maxi(int(round(float(payload_damage) * payload_splash_mult)), 1)
+				pm.fire(fire_pos, aim_pos, p_style, p_color, p_speed, p_dmg_resolved,
+					ct, cs, payload_splash_r, p_splash_dmg, p_owner)
 	)
+
+
+func _resolve_projectile_style(weapon: WeaponResource) -> String:
+	## Mirrors the dispatch in Projectile.ROF_STYLES + the style_override
+	## parameter — explicit projectile_style on the weapon wins, otherwise
+	## falls back to rof_tier mapping. Used by ProjectileManager.fire().
+	if "projectile_style" in weapon and weapon.projectile_style != &"":
+		return String(weapon.projectile_style)
+	match weapon.rof_tier:
+		&"continuous": return "beam"
+		&"single", &"slow", &"volley": return "missile"
+		_: return "bullet"
+
+
+func _resolve_projectile_speed(style: String) -> float:
+	## Matches the per-style speeds the legacy Projectile.create set.
+	## Arc-driven styles (missile/mortar/bomb) ignore speed — flight time
+	## is distance-based — so 0.0 is a safe sentinel.
+	match style:
+		"bullet": return 150.0  # commit 97a0b23: 250→150 tuning
+		"shell": return 70.0
+		"missile", "mortar", "bomb": return 0.0  # arc-driven, speed unused
+		"beam": return 999.0
+		_: return 95.0
+
+
+func _resolve_projectile_color(weapon: WeaponResource, faction: int) -> Color:
+	## Mirrors Projectile.ROLE_COLORS + the Sable lerp-toward-white tint.
+	## Faction 1 = Sable — tracers lerp 40% toward white to read colder
+	## and distinguishable from Anvil's warm orange.
+	var color: Color = Color(0.9, 0.6, 0.2, 1.0)
+	match weapon.role_tag:
+		&"AP": color = Color(1.0, 0.8, 0.2, 1.0)
+		&"AA": color = Color(0.3, 0.7, 1.0, 1.0)
+		&"Universal": color = Color(0.9, 0.6, 0.2, 1.0)
+	if faction == 1:
+		color = color.lerp(Color(1.0, 1.0, 1.0, color.a), 0.4)
+	return color
 
 
 func _shooter_faction_id() -> int:
