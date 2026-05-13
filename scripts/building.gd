@@ -3748,51 +3748,65 @@ func _meridian_hq_producible() -> Array[String]:
 
 func _faction_producible_list() -> Array[UnitStatResource]:
 	var faction_id: int = _resolve_faction_id()
-	# 0 = Anvil (default), 1 = Sable per MatchSettingsClass.FactionId.
-	if faction_id != 1:
+	# 0 = Anvil (default), 1 = Sable (Meridian Protocol),
+	# 2 = Inheritor — each faction has its own roster per building_id.
+	if faction_id == 0:
 		return stats.producible_units
 
-	# Sable lookup — keyed by building_id. Each entry is a list of
-	# resource paths that we lazy-load and resolve to UnitStatResources.
-	# Tech gates (Advanced Armory / Black Pylon) are applied by the
-	# caller via unit.unlock_prerequisite, so the lists below are the
-	# *full* roster — the gate filter hides what the player hasn't
-	# unlocked yet.
-	var sable_paths: Array[String] = []
-	# When true, an empty sable_paths is intentional (the building is an
-	# inert structure for Meridian) and must NOT fall back to Anvil units.
+	# Faction-keyed lookup. Each entry is a list of resource paths that we
+	# lazy-load and resolve to UnitStatResources. Tech gates are applied by
+	# the caller via unit.unlock_prerequisite so the lists here are the full
+	# unlocked roster; the gate filter hides what the player hasn't unlocked.
+	var paths: Array[String] = []
+	# When true an empty paths list is intentional (the building is an inert
+	# structure for this faction) and must NOT fall back to Anvil units.
 	var forced_empty: bool = false
-	match stats.building_id:
-		&"headquarters":
-			sable_paths = _meridian_hq_producible()
-		&"basic_foundry":
-			# Meridian Protocol rework: all production moved to the HQ. Pre-existing
-			# Sable Foundries on scenario maps remain as inert structures. New menu
-			# surfaces Sensor Spine / Drone Bay / Intelligence Network instead.
-			sable_paths = []
-			forced_empty = true
-		&"advanced_foundry":
-			sable_paths = []
-			forced_empty = true
-		&"aerodrome":
-			sable_paths = []
-			forced_empty = true
-		_:
-			# Building type without a Sable-specific roster — fall back
-			# to the default list (e.g., salvage_yard has no produced
-			# units, gun emplacements aren't producers, etc.).
-			return stats.producible_units
+
+	if faction_id == 1:
+		# Sable / Meridian Protocol
+		match stats.building_id:
+			&"headquarters":
+				paths = _meridian_hq_producible()
+			&"basic_foundry":
+				# Meridian Protocol rework: all production moved to the HQ.
+				# Pre-existing Sable Foundries on scenario maps remain as
+				# inert structures.
+				forced_empty = true
+			&"advanced_foundry":
+				forced_empty = true
+			&"aerodrome":
+				forced_empty = true
+			_:
+				# Building type without a Sable-specific roster — fall back
+				# to the default list (e.g., salvage_yard, gun emplacements).
+				return stats.producible_units
+
+	elif faction_id == 2:
+		# Inheritor — all production flows through the HQ; other buildings
+		# are field-constructed by Restorers (Task 5) and are inert producers.
+		match stats.building_id:
+			&"headquarters":
+				paths = ["res://resources/units/inheritor_restorer.tres"]
+			_:
+				# Reliquary, Architect's Network, etc. are handled in Tasks
+				# 7-12. Until then treat every non-HQ building as a
+				# non-producer so Anvil units don't leak through.
+				forced_empty = true
+
+	else:
+		# Unknown future faction — safe fallback.
+		return stats.producible_units
 
 	var out: Array[UnitStatResource] = []
-	for path: String in sable_paths:
+	for path: String in paths:
 		var s: UnitStatResource = load(path) as UnitStatResource
 		if s:
 			out.append(s)
 	if out.is_empty():
 		if forced_empty:
-			return out  # explicit empty for Meridian non-producers
-		# If every Sable path failed to load (file missing, typo) fall back
-		# rather than handing the player an empty production menu.
+			return out  # explicit empty — this faction doesn't produce here
+		# Every path failed to load (file missing / typo) — fall back rather
+		# than handing the player an empty production menu.
 		return stats.producible_units
 	return out
 
@@ -5438,6 +5452,27 @@ func _spawn_unit(unit_stats: UnitStatResource) -> void:
 	var audio: AudioManager = get_tree().current_scene.get_node_or_null("AudioManager") as AudioManager
 	if audio:
 		audio.play_production_complete(global_position)
+
+	# Inheritor pair-production: when the Inheritor HQ finishes a Restorer
+	# (unit_class == &"engineer") spawn a second Restorer side-by-side.
+	# The twin is offset +1.2 u perpendicular to the rally direction so the
+	# two units don't collide on exit. One queue completion = one pair.
+	if _resolve_faction_id() == 2 and actual_stats.unit_class == &"engineer":
+		var twin: Node3D = unit_scene.instantiate() as Node3D
+		twin.set("stats", actual_stats)
+		twin.set("owner_id", owner_id)
+		# Offset perpendicular to the exit direction (lateral is already
+		# computed as Vector3(-fwd.z, 0, fwd.x), the sideways axis).
+		var twin_pos: Vector3 = spawn_pos + lateral * 1.2
+		twin_pos = _find_clear_spawn_pos(twin_pos, fwd, safe_radius)
+		if units_node:
+			units_node.add_child(twin)
+		else:
+			get_tree().current_scene.add_child(twin)
+		twin.global_position = twin_pos
+		if twin.has_method("command_move") and rally_point != RALLY_UNSET:
+			twin.command_move(rally_point)
+		unit_produced.emit(unit_scene, twin_pos)
 
 
 ## Find a spawn position with clearance from obstacles. Tries the
