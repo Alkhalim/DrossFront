@@ -43,6 +43,7 @@ squad_size = 10
 population = 10
 cost_salvage = 180
 cost_fuel = 25
+contract_cost = 1
 build_time = 22.0
 built_at = &"aerodrome"
 primary_weapon = SubResource("weapon_harasser_repeater")

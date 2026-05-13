@@ -41,6 +41,7 @@ squad_size = 2
 population = 14
 cost_salvage = 295
 cost_fuel = 49
+contract_cost = 1
 build_time = 32.0
 built_at = &"aerodrome"
 primary_weapon = SubResource("weapon_dogfighter")

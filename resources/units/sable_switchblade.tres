@@ -44,6 +44,7 @@ squad_size = 2
 population = 12
 cost_salvage = 265
 cost_fuel = 42
+contract_cost = 1
 build_time = 28.0
 built_at = &"aerodrome"
 unlock_prerequisite = &"advanced_armory"

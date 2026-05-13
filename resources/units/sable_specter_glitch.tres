@@ -45,6 +45,7 @@ squad_size = 4
 population = 8
 cost_salvage = 155
 cost_fuel = 0
+contract_cost = 1
 build_time = 15.0
 built_at = &"basic_foundry"
 primary_weapon = SubResource("weapon_pulse_repeater_glitch")

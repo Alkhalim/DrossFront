@@ -41,6 +41,7 @@ squad_size = 5
 population = 5
 cost_salvage = 40
 cost_fuel = 0
+contract_cost = 1
 build_time = 11.5
 built_at = &"headquarters"
 primary_weapon = SubResource("weapon_welder")

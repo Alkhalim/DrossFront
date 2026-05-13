@@ -41,6 +41,7 @@ squad_size = 1
 population = 12
 cost_salvage = 335
 cost_fuel = 42
+contract_cost = 3
 build_time = 25.0
 built_at = &"advanced_foundry"
 unlock_prerequisite = &"advanced_armory"

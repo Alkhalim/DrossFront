@@ -40,6 +40,7 @@ squad_size = 3
 population = 10
 cost_salvage = 170
 cost_fuel = 18
+contract_cost = 2
 build_time = 24.0
 built_at = &"basic_foundry"
 primary_weapon = SubResource("weapon_courier_sensor_chaingun")
