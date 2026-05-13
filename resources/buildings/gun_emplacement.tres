@@ -57,7 +57,7 @@ mult_vs_heavy_air_v2 = 0.5
 
 [resource]
 script = ExtResource("1")
-building_name = "Anvil Gun Emplacement"
+building_name = "Combine Gun Emplacement"
 building_id = &"gun_emplacement"
 hp = 1172
 cost_salvage = 150

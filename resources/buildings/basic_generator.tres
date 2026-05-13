@@ -4,7 +4,7 @@
 
 [resource]
 script = ExtResource("1")
-building_name = "Generator"
+building_name = "Strakh Dynamo"
 building_id = &"basic_generator"
 hp = 400
 cost_salvage = 180
