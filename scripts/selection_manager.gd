@@ -1964,7 +1964,12 @@ func queue_unit_at_building(index: int) -> void:
 	if not resource_mgr.has_population(unit_stats.population):
 		return
 
-	resource_mgr.spend(unit_stats.cost_salvage, unit_stats.cost_fuel)
+	var scene_root: Node = get_tree().current_scene
+	var cnm: ConveyorNetworkManager = scene_root.get_node_or_null("ConveyorNetworkManager") as ConveyorNetworkManager
+	var cost: Dictionary = {"salvage": unit_stats.cost_salvage, "fuel": unit_stats.cost_fuel}
+	if cnm != null:
+		cost = cnm.compute_unit_cost(target, unit_stats)
+	resource_mgr.spend(cost.salvage, cost.fuel)
 	resource_mgr.add_population(unit_stats.population)
 	target.queue_unit(unit_stats)
 	if _audio:

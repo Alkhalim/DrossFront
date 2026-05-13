@@ -204,6 +204,18 @@ func get_bonuses_for_building(building: Node) -> Dictionary:
 	return out
 
 
+## Compute the salvage/fuel cost the player should be charged when
+## producing `unit_stats` at `target` building. Applies the network
+## salvage/fuel multipliers. Speed bonus is applied separately inside
+## Building._process via the speed_mult lookup.
+func compute_unit_cost(target: Node, unit_stats: UnitStatResource) -> Dictionary:
+	var b: Dictionary = get_bonuses_for_building(target)
+	return {
+		"salvage": int(round(float(unit_stats.cost_salvage) * b.salvage_mult)),
+		"fuel": int(round(float(unit_stats.cost_fuel) * b.fuel_mult)),
+	}
+
+
 ## Simulate placing a building with the given building_id at pos for
 ## owner_id. Returns true if doing so would create a connected component
 ## containing more than 3 production buildings (HQ + Foundries +

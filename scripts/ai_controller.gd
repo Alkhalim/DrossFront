@@ -1702,7 +1702,12 @@ func _maintain_engineers() -> void:
 	# example a Meridian HQ rejecting a Combine Mekh — and pre-spending
 	# would silently drain salvage every tick until the AI bankrupts.
 	if _hq.queue_unit(engineer_stats):
-		_ai_resource_manager.spend(engineer_stats.cost_salvage, engineer_stats.cost_fuel)
+		var scene_root: Node = get_tree().current_scene
+		var cnm: ConveyorNetworkManager = scene_root.get_node_or_null("ConveyorNetworkManager") as ConveyorNetworkManager
+		var cost: Dictionary = {"salvage": engineer_stats.cost_salvage, "fuel": engineer_stats.cost_fuel}
+		if cnm != null:
+			cost = cnm.compute_unit_cost(_hq, engineer_stats)
+		_ai_resource_manager.spend(cost.salvage, cost.fuel)
 
 
 func _maintain_crawlers() -> void:
@@ -1746,7 +1751,12 @@ func _maintain_crawlers() -> void:
 	# rosters, but the defensive check costs nothing and inoculates
 	# against future roster splits.
 	if _hq.queue_unit(crawler_stats):
-		_ai_resource_manager.spend(crawler_stats.cost_salvage, crawler_stats.cost_fuel)
+		var scene_root: Node = get_tree().current_scene
+		var cnm: ConveyorNetworkManager = scene_root.get_node_or_null("ConveyorNetworkManager") as ConveyorNetworkManager
+		var cost: Dictionary = {"salvage": crawler_stats.cost_salvage, "fuel": crawler_stats.cost_fuel}
+		if cnm != null:
+			cost = cnm.compute_unit_cost(_hq, crawler_stats)
+		_ai_resource_manager.spend(cost.salvage, cost.fuel)
 
 
 ## How fresh "took damage" must be to count as under-fire (seconds).
@@ -3082,7 +3092,12 @@ func _try_queue_at(foundry_node: Node) -> void:
 	# Queue first, spend only on success — see _maintain_engineers
 	# for the drain-prevention rationale.
 	if foundry_node.queue_unit(unit_stats):
-		_ai_resource_manager.spend(unit_stats.cost_salvage, unit_stats.cost_fuel)
+		var scene_root: Node = get_tree().current_scene
+		var cnm: ConveyorNetworkManager = scene_root.get_node_or_null("ConveyorNetworkManager") as ConveyorNetworkManager
+		var cost: Dictionary = {"salvage": unit_stats.cost_salvage, "fuel": unit_stats.cost_fuel}
+		if cnm != null:
+			cost = cnm.compute_unit_cost(foundry_node, unit_stats)
+		_ai_resource_manager.spend(cost.salvage, cost.fuel)
 		# Production-cadence counter -- bumped on a successful
 		# combat-unit queue. Builders / Crawlers go through
 		# _maintain_engineers / _maintain_crawlers respectively
