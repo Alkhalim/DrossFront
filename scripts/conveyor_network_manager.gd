@@ -89,13 +89,14 @@ func unregister(building: Node) -> void:
 
 func _recompute_for(owner_id: int) -> void:
 	# Implemented in Task 7. Stub here so register/unregister don't error.
-	emit_signal("network_changed", owner_id)
+	network_changed.emit(owner_id)
 
 
-## Stub returns — implemented in Task 8.
+## Stub — real implementation in Task 8.
 func get_bonuses_for_building(_building: Node) -> Dictionary:
 	return {"salvage_mult": 1.0, "fuel_mult": 1.0, "speed_mult": 1.0, "power_mult": 1.0}
 
 
+## Stub — real implementation in Task 9.
 func would_overfull_network(_owner_id: int, _pos: Vector3, _building_id: StringName) -> bool:
 	return false
