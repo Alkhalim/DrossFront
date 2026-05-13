@@ -3710,28 +3710,24 @@ func _faction_producible_list() -> Array[UnitStatResource]:
 	# *full* roster — the gate filter hides what the player hasn't
 	# unlocked yet.
 	var sable_paths: Array[String] = []
+	# When true, an empty sable_paths is intentional (the building is an
+	# inert structure for Meridian) and must NOT fall back to Anvil units.
+	var forced_empty: bool = false
 	match stats.building_id:
 		&"headquarters":
 			sable_paths = _meridian_hq_producible()
 		&"basic_foundry":
-			sable_paths = [
-				"res://resources/units/sable_specter.tres",
-				"res://resources/units/sable_jackal.tres",
-			]
+			# Meridian Protocol rework: all production moved to the HQ. Pre-existing
+			# Sable Foundries on scenario maps remain as inert structures. New menu
+			# surfaces Sensor Spine / Drone Bay / Intelligence Network instead.
+			sable_paths = []
+			forced_empty = true
 		&"advanced_foundry":
-			sable_paths = [
-				"res://resources/units/sable_harbinger.tres",
-				"res://resources/units/sable_pulsefont.tres",
-				# Relay Transport (Courier) belongs to the
-				# advanced foundry tier per spec.
-				"res://resources/units/sable_courier_tank.tres",
-			]
+			sable_paths = []
+			forced_empty = true
 		&"aerodrome":
-			sable_paths = [
-				"res://resources/units/sable_switchblade.tres",
-				"res://resources/units/sable_fang.tres",
-				"res://resources/units/sable_wraith.tres",
-			]
+			sable_paths = []
+			forced_empty = true
 		_:
 			# Building type without a Sable-specific roster — fall back
 			# to the default list (e.g., salvage_yard has no produced
@@ -3743,9 +3739,11 @@ func _faction_producible_list() -> Array[UnitStatResource]:
 		var s: UnitStatResource = load(path) as UnitStatResource
 		if s:
 			out.append(s)
-	# If every Sable path failed to load (file missing, typo) fall back
-	# rather than handing the player an empty production menu.
 	if out.is_empty():
+		if forced_empty:
+			return out  # explicit empty for Meridian non-producers
+		# If every Sable path failed to load (file missing, typo) fall back
+		# rather than handing the player an empty production menu.
 		return stats.producible_units
 	return out
 
