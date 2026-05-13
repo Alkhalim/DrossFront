@@ -22,6 +22,11 @@ const PILE_SPAWN_RADIUS: float = 3.0
 ## Per-Reliquary spawn timer + active piles. Keyed by Building instance.
 var _reliquary_state: Dictionary = {}  # Building -> {timer: float, piles: Array[Node3D]}
 
+## Per-owner Architect's Network tier. 0 = no Architect's Network built;
+## 1 = building exists (auto-derived); 2/3 = explicit upgrades from
+## Task 12 UI. Mirrors MeridianContractsManager._intel_tier.
+var _architect_tier: Dictionary = {}  # owner_id -> int
+
 static var _pending_instance: InheritorBuildingManager = null
 
 
@@ -62,6 +67,35 @@ func get_reliquary_count(owner_id: int) -> int:
 
 func can_build_reliquary(owner_id: int) -> bool:
 	return get_reliquary_count(owner_id) < MAX_RELIQUARIES
+
+
+## Returns the current Architect's Network tier for `owner_id`. If no
+## explicit upgrade has been recorded, auto-derives tier from whether the
+## owner has a constructed architect_network building at all (tier 1).
+func get_architect_tier(owner_id: int) -> int:
+	if owner_id in _architect_tier:
+		return _architect_tier[owner_id]
+	# Auto-derive: tier 1 if Architect's Network exists for this owner.
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return 0
+	for b: Node in tree.get_nodes_in_group("buildings"):
+		if not is_instance_valid(b):
+			continue
+		if int(b.get("owner_id")) != owner_id:
+			continue
+		var s: Resource = b.get("stats")
+		if s != null and s.get("building_id") == &"architect_network" and bool(b.get("is_constructed")):
+			return 1
+	return 0
+
+
+## Records an explicit Architect's Network tier — used by the upgrade UI
+## (Task 12) to bump tier from 1 → 2 → 3 when the player pays the upgrade
+## cost. Does not validate cost or building presence; the caller is
+## responsible.
+func set_architect_tier(owner_id: int, tier: int) -> void:
+	_architect_tier[owner_id] = clampi(tier, 0, 3)
 
 
 ## Called by Building.gd when a Reliquary finishes construction.

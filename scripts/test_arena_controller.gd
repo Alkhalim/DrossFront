@@ -5084,13 +5084,18 @@ func _setup_buildable_buildings() -> void:
 			"res://resources/buildings/molot_platform.tres",
 			"res://resources/buildings/echo_array.tres",
 			# Meridian Protocol authorization buildings (faction_lock = 2,
-			# so Combine players never see these). Each grants access to a
+			# so non-Meridian players never see these). Each grants access to a
 			# unit category at the HQ instead of producing units themselves.
 			"res://resources/buildings/sensor_spine.tres",
 			"res://resources/buildings/drone_bay.tres",
 			"res://resources/buildings/intelligence_network.tres",
 			"res://resources/buildings/sensor_array.tres",
 			"res://resources/buildings/mesh_relay.tres",
+			# Inheritor buildings (faction_lock = 3 = Inheritor only).
+			# Reliquary: passive salvage-pile generator (max 4 per player).
+			# Architect's Network: 3-tier tech hub replacing Armory + Annex.
+			"res://resources/buildings/reliquary.tres",
+			"res://resources/buildings/architect_network.tres",
 		]
 		var player_faction: int = _faction_id_for_player(0)
 		# Meridian Protocol rework: Foundries and Aerodrome are inert for
@@ -5102,16 +5107,27 @@ func _setup_buildable_buildings() -> void:
 			&"basic_generator", &"advanced_generator",
 			&"sam_site",
 		]
+		# Inheritor rework: Inheritors have no production buildings — all unit
+		# production is engineer-crafted in the field. Armories are replaced by
+		# the Architect's Network. Basic generator kept as Emitter equivalent
+		# until Phase 6 power buildings are implemented.
+		const _INHERITOR_OBSOLETE: Array[StringName] = [
+			&"basic_foundry", &"advanced_foundry", &"aerodrome",
+			&"basic_armory", &"advanced_armory",
+		]
 		for path: String in stat_paths:
 			var stat: BuildingStatResource = load(path) as BuildingStatResource
 			if not stat:
 				continue
-			# faction_lock 0 = universal, 1 = Anvil only, 2 = Sable only.
-			# Player faction id 0 = Anvil, 1 = Sable. Map: lock = (faction_id + 1).
+			# faction_lock 0 = universal, 1 = Anvil only, 2 = Sable/Meridian only,
+			# 3 = Inheritor only. Pattern: lock = faction_id + 1.
 			if stat.faction_lock != 0 and stat.faction_lock != (player_faction + 1):
 				continue
 			# Exclude legacy producer buildings from the Meridian build menu.
 			if player_faction == 1 and stat.building_id in _MERIDIAN_OBSOLETE:
+				continue
+			# Exclude legacy producer + armory buildings from the Inheritor build menu.
+			if player_faction == 2 and stat.building_id in _INHERITOR_OBSOLETE:
 				continue
 			buildable_buildings.append(stat)
 	selection_mgr.set_buildable_buildings(buildable_buildings)

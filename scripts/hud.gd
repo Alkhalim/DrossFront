@@ -4875,13 +4875,18 @@ func _update_unit_panel(units: Array[Node3D]) -> void:
 	# completed Basic Foundry unlocks the Advanced Foundry button on
 	# the same frame the construction finishes, without needing a
 	# selection change to trigger the redraw.
-	# Restorer unit buttons are static (no prerequisite gates in Task 5)
-	# so skip this rebuild when showing them.
-	if _showing_build_buttons and not _showing_restorer_buttons:
+	# Restorer unit buttons also respond to the prereq hash change: a
+	# newly-completed Architect's Network flips the hash and causes
+	# _rebuild_restorer_unit_buttons to re-query the tier, unlocking
+	# Wächter + Schwarm on the same frame construction finishes.
+	if _showing_build_buttons:
 		var prereq_hash: int = _compute_built_ids_hash()
 		if prereq_hash != _build_prereq_hash:
 			_build_prereq_hash = prereq_hash
-			_rebuild_build_buttons()
+			if _showing_restorer_buttons:
+				_rebuild_restorer_unit_buttons()
+			else:
+				_rebuild_build_buttons()
 
 	# Update text every frame
 	_queue_label.text = ""
@@ -5101,15 +5106,36 @@ func _on_build_tab_pressed(tab: String) -> void:
 
 ## --- Inheritor Restorer unit-production buttons ----------------------------
 ## Shown instead of building-placement buttons when the player's faction is
-## Inheritor and an engineer (Restorer) is selected. All 3 base units are
-## always shown (MVP — Architect's Network tech gating comes in Task 11).
+## Inheritor and an engineer (Restorer) is selected. Ashigaru is always
+## available; Wächter + Schwarm require Architect's Network Tier 1.
 
-const _RESTORER_UNIT_PATHS: Array[String] = [
-	"res://resources/units/inheritor_ashigaru.tres",
-	"res://resources/units/inheritor_wachter.tres",
-	"res://resources/units/inheritor_schwarm.tres",
-]
 const _RESTORER_UNIT_HOTKEYS: Array[String] = ["Q", "W", "E"]
+
+
+func _restorer_unit_paths() -> Array[String]:
+	## Returns the list of unit resource paths buildable by the Restorer,
+	## gated by Architect's Network tier. Ashigaru is always included;
+	## Wächter + Schwarm unlock at Tier 1.
+	var paths: Array[String] = ["res://resources/units/inheritor_ashigaru.tres"]
+	var scene_root: Node = get_tree().current_scene if get_tree() else null
+	var ibm: InheritorBuildingManager = null
+	if scene_root != null:
+		ibm = scene_root.get_node_or_null("InheritorBuildingManager") as InheritorBuildingManager
+	var tier: int = 0
+	if ibm != null:
+		# Owner id 0 = local player (Inheritor faction always plays as player 0
+		# in single-player; the Restorer's actual owner_id is queried below).
+		var restorer_owner: int = 0
+		for unit: Node3D in _selection_manager.get_selected_units() if _selection_manager and _selection_manager.has_method("get_selected_units") else []:
+			if unit.has_method("get_builder") and unit.get_builder():
+				restorer_owner = int(unit.get("owner_id"))
+				break
+		tier = ibm.get_architect_tier(restorer_owner)
+	if tier >= 1:
+		paths.append("res://resources/units/inheritor_wachter.tres")
+		paths.append("res://resources/units/inheritor_schwarm.tres")
+	# Tier 2/3 unlocks (evolution buildings, Apex/Elite) come in Phase 4/5.
+	return paths
 
 
 func _rebuild_restorer_unit_buttons() -> void:
@@ -5117,8 +5143,9 @@ func _rebuild_restorer_unit_buttons() -> void:
 	if not _selection_manager:
 		return
 	_action_label.text = "Craft Units  [Q/W/E]"
-	for i: int in _RESTORER_UNIT_PATHS.size():
-		var ustat: UnitStatResource = load(_RESTORER_UNIT_PATHS[i]) as UnitStatResource
+	var unit_paths: Array[String] = _restorer_unit_paths()
+	for i: int in unit_paths.size():
+		var ustat: UnitStatResource = load(unit_paths[i]) as UnitStatResource
 		if ustat == null:
 			continue
 		var hotkey: String = _RESTORER_UNIT_HOTKEYS[i] if i < _RESTORER_UNIT_HOTKEYS.size() else str(i + 1)

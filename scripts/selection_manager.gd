@@ -672,19 +672,28 @@ func _handle_build_hotkey(key: InputEventKey) -> void:
 
 	if _local_player_faction() == 2:
 		# Inheritor — hotkeys route to Restorer unit-build buttons.
-		const RESTORER_UNIT_PATHS_SM: Array[String] = [
-			"res://resources/units/inheritor_ashigaru.tres",
-			"res://resources/units/inheritor_wachter.tres",
-			"res://resources/units/inheritor_schwarm.tres",
-		]
+		# Ashigaru (Q/1) always available; Wächter (W/2) + Schwarm (E/3)
+		# require Architect's Network Tier 1 (Task 11 gate).
+		var restorer_paths: Array[String] = ["res://resources/units/inheritor_ashigaru.tres"]
+		var ibm_sm: InheritorBuildingManager = get_tree().current_scene.get_node_or_null(
+			"InheritorBuildingManager") as InheritorBuildingManager if get_tree() and get_tree().current_scene else null
+		var owner_id_sm: int = 0
+		for unit_sm: Node3D in _selected_units:
+			if unit_sm.has_method("get_builder") and unit_sm.get_builder():
+				owner_id_sm = int(unit_sm.get("owner_id"))
+				break
+		var arch_tier: int = ibm_sm.get_architect_tier(owner_id_sm) if ibm_sm != null else 0
+		if arch_tier >= 1:
+			restorer_paths.append("res://resources/units/inheritor_wachter.tres")
+			restorer_paths.append("res://resources/units/inheritor_schwarm.tres")
 		var unit_index: int = -1
 		match key.keycode:
 			KEY_Q, KEY_1: unit_index = 0
 			KEY_W, KEY_2: unit_index = 1
 			KEY_E, KEY_3: unit_index = 2
-		if unit_index < 0 or unit_index >= RESTORER_UNIT_PATHS_SM.size():
+		if unit_index < 0 or unit_index >= restorer_paths.size():
 			return
-		var ustat: UnitStatResource = load(RESTORER_UNIT_PATHS_SM[unit_index]) as UnitStatResource
+		var ustat: UnitStatResource = load(restorer_paths[unit_index]) as UnitStatResource
 		if ustat == null:
 			return
 		var hud_node: Node = _find_hud_for_visible_build_stats()

@@ -58,8 +58,9 @@ extends Resource
 ## and the strategic anchor.
 @export var mesh_provider_radius: float = 0.0
 
-## Faction lock. 0 = available to all, 1 = Anvil only, 2 = Sable
-## only. Used by HUD's build menu to filter the buildable list.
+## Faction lock. 0 = available to all, 1 = Anvil only, 2 = Sable/Meridian
+## only, 3 = Inheritor only. Pattern: lock = faction_id + 1.
+## Used by HUD's build menu to filter the buildable list.
 @export var faction_lock: int = 0
 
 ## Conveyor Network participation. Distance is edge-to-edge between
