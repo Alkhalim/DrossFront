@@ -92,7 +92,7 @@ func _process(delta: float) -> void:
 			continue
 		_regen_accum[owner_id] = _regen_accum[owner_id] + delta
 		var interval: float = get_regen_interval(owner_id)
-		while _regen_accum[owner_id] >= interval and _contracts[owner_id] < MAX_CONTRACTS:
+		while _regen_accum[owner_id] >= interval - 1e-6 and _contracts[owner_id] < MAX_CONTRACTS:
 			_contracts[owner_id] += 1
 			_regen_accum[owner_id] -= interval
 			contracts_changed.emit(owner_id, _contracts[owner_id], MAX_CONTRACTS)
