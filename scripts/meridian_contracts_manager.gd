@@ -65,6 +65,29 @@ func get_regen_interval(_owner_id: int) -> float:
 	return BASELINE_REGEN_INTERVAL
 
 
+## Fraction of the way to the next contract. 0.0 = just ticked, 1.0 =
+## about to grant. Used by the HUD to render a progress bar so the
+## player can see the regen ticking in real time.
+func get_regen_progress(owner_id: int) -> float:
+	_ensure_owner(owner_id)
+	if _contracts[owner_id] >= MAX_CONTRACTS:
+		return 0.0
+	var interval: float = get_regen_interval(owner_id)
+	if interval <= 0.0:
+		return 0.0
+	return clampf(_regen_accum[owner_id] / interval, 0.0, 1.0)
+
+
+## Seconds until the next contract regenerates. Returns 0.0 when the
+## pool is already at MAX_CONTRACTS.
+func get_seconds_to_next_contract(owner_id: int) -> float:
+	_ensure_owner(owner_id)
+	if _contracts[owner_id] >= MAX_CONTRACTS:
+		return 0.0
+	var interval: float = get_regen_interval(owner_id)
+	return maxf(interval - _regen_accum[owner_id], 0.0)
+
+
 ## True if `owner_id` has at least `cost` contracts. Used for build-menu
 ## affordability + order rejection. Does NOT deduct.
 func can_afford(owner_id: int, cost: int) -> bool:

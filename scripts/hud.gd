@@ -3183,6 +3183,17 @@ func _build_building_stat_sheet(building: Node3D, bstats: BuildingStatResource, 
 				var maxc: int = mcm.get_max_contracts(building.owner_id)
 				var interval: float = mcm.get_regen_interval(building.owner_id)
 				rows.append([_stat_chip("Contracts", "%d / %d  (1 every %.1f s)" % [cur, maxc, interval], STAT_LABEL_COLOR_RANGE)])
+				# Progress bar so the player can see regen ticking in real
+				# time. 8 segments, ▰ filled / ▱ empty. ETA alongside the
+				# bar gives a precise countdown.
+				if cur < maxc:
+					var prog: float = mcm.get_regen_progress(building.owner_id)
+					var eta: float = mcm.get_seconds_to_next_contract(building.owner_id)
+					var filled: int = clampi(int(round(prog * 8.0)), 0, 8)
+					var bar: String = ""
+					for seg_idx: int in 8:
+						bar += "▰" if seg_idx < filled else "▱"
+					rows.append([_stat_chip("Next +1", "%s  %.1fs" % [bar, eta], STAT_LABEL_COLOR_RANGE)])
 
 	return _build_stat_sheet(rows)
 
