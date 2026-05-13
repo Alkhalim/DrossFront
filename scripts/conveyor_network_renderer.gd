@@ -9,24 +9,30 @@ extends Node
 const BELT_RADIUS: float = 0.30
 const BELT_Y_OFFSET: float = 0.20  # slightly above ground
 
-## Scrolling-stripe shader so belts read as moving conveyors instead of
-## static glow capsules. UV.y is along the cylinder length, so subtracting
-## TIME * speed scrolls the stripe pattern toward whichever endpoint the
-## local +Y axis points at. Per-instance COLOR (set via
-## multimesh.set_instance_color) modulates the base color so network
-## fullness still affects brightness.
+## Scrolling-stripe shader so belts read as moving industrial conveyors,
+## not glow capsules. The belt body stays dark (rubber/metal) and a thin
+## bright pip travels along UV.y. Per-instance COLOR (from
+## set_instance_color) drives both the dark body and the pip accent, so
+## network fullness scales brightness without changing the dark/light
+## ratio. Slow scroll + thin pip + dark body together read as "industrial
+## belt with marker stripes," not "neon strip lighting."
 const BELT_SHADER_CODE: String = """
 shader_type spatial;
 render_mode unshaded, blend_mix, depth_draw_opaque, cull_disabled;
 
-uniform float scroll_speed = 1.5;
-uniform float stripe_density = 3.0;
+uniform float scroll_speed = 0.25;
+uniform float stripe_density = 1.5;
+uniform float body_dim = 0.30;     // darkness of the belt body
+uniform float pip_boost = 1.30;    // brightness of the marker pip
 
 void fragment() {
-	float v = UV.y - TIME * scroll_speed;
-	float stripe = fract(v * stripe_density);
-	float intensity = mix(0.55, 1.0, smoothstep(0.4, 0.5, stripe));
-	ALBEDO = COLOR.rgb * intensity;
+	float v = UV.y * stripe_density - TIME * scroll_speed * stripe_density;
+	float phase = fract(v);
+	// Thin bright pip (~10% of stripe period) with soft edges.
+	float pip = smoothstep(0.00, 0.04, phase) - smoothstep(0.10, 0.16, phase);
+	vec3 body = COLOR.rgb * body_dim;
+	vec3 accent = COLOR.rgb * pip_boost;
+	ALBEDO = mix(body, accent, pip);
 	ALPHA = COLOR.a;
 }
 """
@@ -100,6 +106,9 @@ func _on_network_changed(owner_id: int) -> void:
 		t.origin = (a + b) * 0.5
 		t.basis = Basis(x_axis, dir * length, z_axis)
 		mmi.multimesh.set_instance_transform(i, t)
-		# Color brightness scales with network fullness (1, 2, 3 prod buildings).
-		var bright: float = clampf(0.4 + 0.2 * float(e.fullness), 0.4, 1.0)
-		mmi.multimesh.set_instance_color(i, Color(0.95 * bright, 0.55 * bright, 0.15 * bright, 0.85))
+		# Per-instance COLOR feeds both belt body and pip in the shader.
+		# Base hue is a deep industrial orange; brightness scales with
+		# network fullness so a 3-prod-building network reads slightly
+		# warmer/more "alive" than a solo 1-prod link.
+		var bright: float = clampf(0.55 + 0.15 * float(e.fullness), 0.55, 0.90)
+		mmi.multimesh.set_instance_color(i, Color(0.80 * bright, 0.42 * bright, 0.10 * bright, 0.95))

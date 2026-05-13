@@ -173,11 +173,21 @@ func _extent_of(b: Node) -> float:
 
 
 ## Returns a multiplier dict for the network the building participates in.
-## All multipliers default to 1.0 (no effect). Spec tables (per 11_faction_mechanics.md):
-##   Basic Foundry      x1 → -5%, x2 → -10%, x3 → -15% salvage on units
-##   Advanced Foundry   x1 → -7%, x2 → -14%, x3 → -20% fuel on units
-##   Aerodrome          x1 → +7%, x2 → +14%, x3 → +20% production speed
-##   HQ in network      -15% Power consumption on OTHER buildings in net
+## All multipliers default to 1.0 (no effect). Bonus tables:
+##   Basic Foundry count   x1 → -5%, x2 → -10%, x3 → -15% salvage
+##   Advanced Foundry count x1 → -7%, x2 → -14%, x3 → -20% fuel
+##   Aerodrome count       x1 → +7%, x2 → +14%, x3 → +20% production speed
+##   HQ in network         -15% Power consumption on OTHER members
+##
+## ALL production buildings in a valid network receive ALL bonus types —
+## the bonus comes from the network as a whole, not the building's own
+## type. E.g., an Advanced Foundry in a 2× Basic Foundry network gets
+## the -10% salvage discount applied to its own unit production. This
+## diverges from the spec doc's per-type rule (`11_faction_mechanics.md`
+## says "bonuses apply only to the buildings of that type"); user
+## decision 2026-05-13 to make mixed networks universally rewarding.
+##
+## Conveyor Nodes are infrastructure and keep all defaults.
 ## Invalid (overfull) networks return all-1.0.
 func get_bonuses_for_building(building: Node) -> Dictionary:
 	var defaults: Dictionary = {"salvage_mult": 1.0, "fuel_mult": 1.0, "speed_mult": 1.0, "power_mult": 1.0}
@@ -194,20 +204,18 @@ func get_bonuses_for_building(building: Node) -> Dictionary:
 		return defaults
 	var bid: StringName = (building.stats as BuildingStatResource).building_id
 	var out: Dictionary = defaults.duplicate()
-	match bid:
-		&"basic_foundry":
-			out.salvage_mult = 1.0 - 0.05 * float(m.basic_foundry)  # x1=.95, x2=.90, x3=.85
-		&"advanced_foundry":
-			out.fuel_mult = 1.0 - 0.07 * float(m.advanced_foundry)
-			# Spec says x3 → -20% (not -21%); clamp to match table.
-			if m.advanced_foundry >= 3:
-				out.fuel_mult = 0.80
-		&"aerodrome":
-			out.speed_mult = 1.0 + 0.07 * float(m.aerodrome)
-			if m.aerodrome >= 3:
-				out.speed_mult = 1.20
-		&"headquarters":
-			pass  # HQ itself gets no own-type bonus; its bonus radiates outward.
+	# Production buildings (HQ + Foundries + Aerodrome) all receive every
+	# bonus type. Conveyor Nodes get nothing — they're relays, not factories.
+	if bid in [&"basic_foundry", &"advanced_foundry", &"aerodrome", &"headquarters"]:
+		out.salvage_mult = 1.0 - 0.05 * float(m.basic_foundry)
+		if m.basic_foundry >= 3:
+			out.salvage_mult = 0.85
+		out.fuel_mult = 1.0 - 0.07 * float(m.advanced_foundry)
+		if m.advanced_foundry >= 3:
+			out.fuel_mult = 0.80
+		out.speed_mult = 1.0 + 0.07 * float(m.aerodrome)
+		if m.aerodrome >= 3:
+			out.speed_mult = 1.20
 	# HQ Power discount on OTHER network members.
 	if m.hq > 0 and bid != &"headquarters":
 		out.power_mult = 0.85  # -15%
@@ -271,21 +279,25 @@ func describe_network_for_building(building: Node) -> Dictionary:
 			"bonuses": bonuses,
 			"production_total": int(m.production_total),
 		}
+	# All production buildings (HQ + Foundries + Aerodrome) receive every
+	# bonus type in this network. Describe each bonus the player will see.
 	if m.basic_foundry > 0:
 		var pct: int = m.basic_foundry * 5
-		bonuses.append("Basic Foundries: -%d%% salvage on produced units" % pct)
+		if m.basic_foundry >= 3:
+			pct = 15
+		bonuses.append("-%d%% salvage on produced units" % pct)
 	if m.advanced_foundry > 0:
 		var pct: int = m.advanced_foundry * 7
 		if m.advanced_foundry >= 3:
 			pct = 20
-		bonuses.append("Advanced Foundries: -%d%% fuel on produced units" % pct)
+		bonuses.append("-%d%% fuel on produced units" % pct)
 	if m.aerodrome > 0:
 		var pct: int = m.aerodrome * 7
 		if m.aerodrome >= 3:
 			pct = 20
-		bonuses.append("Aerodromes: +%d%% production speed" % pct)
+		bonuses.append("+%d%% production speed" % pct)
 	if m.hq > 0:
-		bonuses.append("HQ present: -15%% Power on non-HQ members")
+		bonuses.append("-15%% Power on non-HQ members (HQ in network)")
 	return {
 		"in_network": true,
 		"is_valid": true,
