@@ -140,6 +140,12 @@ func can_target_air() -> bool:
 ## Fuel cost to produce.
 @export var cost_fuel: int = 0
 
+## Meridian Protocol contract cost. Default 1 (Light units / Engineer);
+## Medium = 2, Heavy/Caster = 3, Apex/Elite = 5. Only matters when the
+## producing building is owned by Meridian — other factions ignore it
+## and pay only salvage/fuel.
+@export var contract_cost: int = 1
+
 ## Build time in seconds.
 @export var build_time: float = 0.0
 
