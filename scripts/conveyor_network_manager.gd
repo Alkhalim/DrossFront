@@ -204,6 +204,46 @@ func get_bonuses_for_building(building: Node) -> Dictionary:
 	return out
 
 
-## Stub — real implementation in Task 9.
-func would_overfull_network(_owner_id: int, _pos: Vector3, _building_id: StringName) -> bool:
-	return false
+## Simulate placing a building with the given building_id at pos for
+## owner_id. Returns true if doing so would create a connected component
+## containing more than 3 production buildings (HQ + Foundries +
+## Aerodrome count toward the cap; Conveyor Nodes do not).
+##
+## Used by SelectionManager to reject placements up-front. Cheap to call
+## because participants per owner is small (≤50 typically).
+func would_overfull_network(owner_id: int, pos: Vector3, building_id: StringName) -> bool:
+	var counts_as_production: bool = building_id in [&"basic_foundry", &"advanced_foundry", &"aerodrome", &"headquarters"]
+	# We need a connection_range and an extent for the hypothetical
+	# building. Foundries/HQ/Aerodrome all use 100m; Conveyor Node also
+	# uses 100m. Use 100m as the conservative assumption here — the
+	# function is only called for network-eligible buildings.
+	var hypo_range: float = 100.0
+	var hypo_extent: float = 3.0  # rough — exact footprint TBD per building; small enough not to falsely permit
+	var participants: Array = _participants.get(owner_id, [])
+	# Build adjacency for {participants ∪ hypo}.
+	var nearby: Array = []  # participants connected to hypo
+	for b in participants:
+		if not is_instance_valid(b):
+			continue
+		var b_extent: float = _extent_of(b)
+		var b_range: float = (b.stats as BuildingStatResource).connection_range
+		var center_dist: float = b.global_position.distance_to(pos)
+		var edge_dist: float = maxf(center_dist - b_extent - hypo_extent, 0.0)
+		var allowed: float = minf(b_range, hypo_range)
+		if edge_dist <= allowed:
+			nearby.append(b)
+	# Union the components of all nearby participants + the hypothetical.
+	var seen_components: Dictionary = {}
+	var production_count: int = 0
+	if counts_as_production:
+		production_count += 1
+	var mem: Dictionary = _membership.get(owner_id, {})
+	var meta: Dictionary = _network_meta.get(owner_id, {})
+	for n in nearby:
+		var net_id: int = mem.get(n, 0)
+		if net_id == 0 or net_id in seen_components:
+			continue
+		seen_components[net_id] = true
+		var m: Dictionary = meta.get(net_id, {})
+		production_count += int(m.get("production_total", 0))
+	return production_count > 3

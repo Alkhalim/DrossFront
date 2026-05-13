@@ -2319,6 +2319,15 @@ func _is_valid_build_position(pos: Vector3) -> bool:
 			if dx < (half_x + BUILD_OBSTACLE_MARGIN) and dz < (half_z + BUILD_OBSTACLE_MARGIN):
 				return false
 
+	# Conveyor Network overfull check — block placement of network-eligible
+	# buildings if they'd form a component with >3 production buildings.
+	if _build_stats != null and _build_stats.connection_range > 0.0:
+		var scene_root: Node = get_tree().current_scene
+		var cnm: ConveyorNetworkManager = scene_root.get_node_or_null("ConveyorNetworkManager") as ConveyorNetworkManager
+		if cnm != null:
+			if cnm.would_overfull_network(0, pos, _build_stats.building_id):
+				return false
+
 	return true
 
 
