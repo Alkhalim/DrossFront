@@ -422,33 +422,63 @@ func _pick_clear_escape_point() -> Vector3:
 	return first_candidate
 
 
+## Cached approach angle so the engineer commits to a single docking slot
+## per target instead of recomputing it every tick (which produced
+## oscillation when other engineers shifted nearby). Invalidated by
+## target change or free.
+var _cached_approach_angle: float = 0.0
+var _cached_approach_for: Building = null
+
+
 func _approach_point() -> Vector3:
-	## Approach target on the side facing the engineer. Tries a CLOSE
-	## point first (right at the edge of the foundation, +0.5u clearance);
-	## if another engineer is already there, falls back to the FAR point
-	## (one buffer-radius out). Lets multiple engineers cluster at a
-	## single foundation without stacking on the same spot — first one
-	## tucks in close, others fan out at full range.
+	## Approach target on the side facing the engineer, but if another
+	## engineer is already parked there, rotate around the foundation in
+	## 45° increments to find a clear slot. With 8 slots evenly spaced
+	## around the building, multiple cooperating engineers fan out and
+	## each gets a clean approach line — none of them blocks another's
+	## final docking step. The chosen angle is cached per-target so the
+	## engineer doesn't re-pick every tick and oscillate.
 	if not _target_building:
 		return _unit.global_position
+	if not is_instance_valid(_cached_approach_for) or _cached_approach_for != _target_building:
+		_cached_approach_angle = _pick_approach_angle()
+		_cached_approach_for = _target_building
 	var center: Vector3 = _target_building.global_position
-	var to_unit: Vector3 = _unit.global_position - center
-	to_unit.y = 0.0
-	if to_unit.length_squared() < 0.01:
-		# Engineer is already on top of the building — pick any side.
-		to_unit = Vector3(1, 0, 0)
-	var dir: Vector3 = to_unit.normalized()
 	var extent: float = 0.0
 	if _target_building.stats:
 		var fs: Vector3 = _target_building.stats.footprint_size
 		extent = maxf(fs.x, fs.z) * 0.5
-	var close_pt: Vector3 = center + dir * (extent + 0.5)
-	var far_pt: Vector3 = center + dir * (extent + BUILD_BUFFER * 0.5)
-	# If another engineer is already parked near the close spot, take
-	# the far spot instead. Self is excluded from the check.
-	if _spot_has_other_engineer(close_pt, 1.5):
-		return far_pt
-	return close_pt
+	var radius: float = extent + 0.5
+	return center + Vector3(cos(_cached_approach_angle), 0.0, sin(_cached_approach_angle)) * radius
+
+
+func _pick_approach_angle() -> float:
+	## Try 8 compass slots starting at the engineer's natural approach
+	## direction, alternating +1, -1, +2, -2... so the chosen slot is
+	## the nearest free one to the engineer's actual position. If every
+	## slot is occupied (heavy cooperation, ≥8 engineers), fall back to
+	## the natural direction and let _process_construction's stuck timer
+	## eventually drop the assignment.
+	var center: Vector3 = _target_building.global_position
+	var extent: float = 0.0
+	if _target_building.stats:
+		var fs: Vector3 = _target_building.stats.footprint_size
+		extent = maxf(fs.x, fs.z) * 0.5
+	var radius: float = extent + 0.5
+	var to_unit: Vector3 = _unit.global_position - center
+	to_unit.y = 0.0
+	if to_unit.length_squared() < 0.01:
+		to_unit = Vector3(1, 0, 0)
+	var base_angle: float = atan2(to_unit.z, to_unit.x)
+	for i in 8:
+		var sign_val: int = (1 if i % 2 == 0 else -1)
+		var step: int = (i + 1) / 2
+		var slot_offset: float = float(sign_val * step) * TAU / 8.0
+		var angle: float = base_angle + slot_offset
+		var pt: Vector3 = center + Vector3(cos(angle), 0.0, sin(angle)) * radius
+		if not _spot_has_other_engineer(pt, 1.5):
+			return angle
+	return base_angle
 
 
 func _spot_has_other_engineer(spot: Vector3, radius: float) -> bool:
