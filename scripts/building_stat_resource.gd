@@ -62,6 +62,12 @@ extends Resource
 ## only. Used by HUD's build menu to filter the buildable list.
 @export var faction_lock: int = 0
 
+## Conveyor Network participation. Distance is edge-to-edge between
+## footprints. 0.0 means this building does not participate in
+## Conveyor Networks. The Combine production buildings + HQ + Conveyor
+## Node set this to 100.0; everything else leaves it at 0.0.
+@export var connection_range: float = 0.0
+
 ## Geothermic-vent placement gate. When true, the building can ONLY
 ## be placed on top of a GeothermicVent (a steam fissure). Used by
 ## Generators -- power production is now tied to vent locations
