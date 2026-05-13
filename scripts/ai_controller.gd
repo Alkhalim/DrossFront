@@ -1701,6 +1701,19 @@ func _maintain_engineers() -> void:
 	# the unit isn't in the HQ's faction-resolved producible list — for
 	# example a Meridian HQ rejecting a Combine Mekh — and pre-spending
 	# would silently drain salvage every tick until the AI bankrupts.
+
+	# Meridian contracts gate — same logic as the player path. AI's
+	# Meridian instance plays under the same Contracts cap as the human
+	# player; without this the AI would out-pace the player's tempo.
+	var _mcm_scene_root_eng: Node = get_tree().current_scene
+	var _mcm_eng: MeridianContractsManager = _mcm_scene_root_eng.get_node_or_null("MeridianContractsManager") as MeridianContractsManager
+	var _ai_faction_eng: int = 0
+	if _hq != null and _hq.has_method("_resolve_faction_id"):
+		_ai_faction_eng = _hq.call("_resolve_faction_id") as int
+	if _mcm_eng != null and _ai_faction_eng == 1:
+		if not _mcm_eng.can_afford(_hq.owner_id, engineer_stats.contract_cost):
+			return
+
 	if _hq.queue_unit(engineer_stats):
 		var scene_root: Node = get_tree().current_scene
 		var cnm: ConveyorNetworkManager = scene_root.get_node_or_null("ConveyorNetworkManager") as ConveyorNetworkManager
@@ -1708,6 +1721,8 @@ func _maintain_engineers() -> void:
 		if cnm != null:
 			cost = cnm.compute_unit_cost(_hq, engineer_stats)
 		_ai_resource_manager.spend(cost.salvage, cost.fuel)
+		if _mcm_eng != null and _ai_faction_eng == 1:
+			_mcm_eng.spend(_hq.owner_id, engineer_stats.contract_cost)
 
 
 func _maintain_crawlers() -> void:
@@ -1750,6 +1765,17 @@ func _maintain_crawlers() -> void:
 	# as _maintain_engineers. Crawler is currently in both factions'
 	# rosters, but the defensive check costs nothing and inoculates
 	# against future roster splits.
+
+	# Meridian contracts gate — same logic as the player path.
+	var _mcm_scene_root_crl: Node = get_tree().current_scene
+	var _mcm_crl: MeridianContractsManager = _mcm_scene_root_crl.get_node_or_null("MeridianContractsManager") as MeridianContractsManager
+	var _ai_faction_crl: int = 0
+	if _hq != null and _hq.has_method("_resolve_faction_id"):
+		_ai_faction_crl = _hq.call("_resolve_faction_id") as int
+	if _mcm_crl != null and _ai_faction_crl == 1:
+		if not _mcm_crl.can_afford(_hq.owner_id, crawler_stats.contract_cost):
+			return
+
 	if _hq.queue_unit(crawler_stats):
 		var scene_root: Node = get_tree().current_scene
 		var cnm: ConveyorNetworkManager = scene_root.get_node_or_null("ConveyorNetworkManager") as ConveyorNetworkManager
@@ -1757,6 +1783,8 @@ func _maintain_crawlers() -> void:
 		if cnm != null:
 			cost = cnm.compute_unit_cost(_hq, crawler_stats)
 		_ai_resource_manager.spend(cost.salvage, cost.fuel)
+		if _mcm_crl != null and _ai_faction_crl == 1:
+			_mcm_crl.spend(_hq.owner_id, crawler_stats.contract_cost)
 
 
 ## How fresh "took damage" must be to count as under-fire (seconds).
@@ -3091,6 +3119,17 @@ func _try_queue_at(foundry_node: Node) -> void:
 		return
 	# Queue first, spend only on success — see _maintain_engineers
 	# for the drain-prevention rationale.
+
+	# Meridian contracts gate — same logic as the player path.
+	var _mcm_scene_root_fnd: Node = get_tree().current_scene
+	var _mcm_fnd: MeridianContractsManager = _mcm_scene_root_fnd.get_node_or_null("MeridianContractsManager") as MeridianContractsManager
+	var _ai_faction_fnd: int = 0
+	if foundry_node != null and foundry_node.has_method("_resolve_faction_id"):
+		_ai_faction_fnd = foundry_node.call("_resolve_faction_id") as int
+	if _mcm_fnd != null and _ai_faction_fnd == 1:
+		if not _mcm_fnd.can_afford(foundry_node.owner_id, unit_stats.contract_cost):
+			return
+
 	if foundry_node.queue_unit(unit_stats):
 		var scene_root: Node = get_tree().current_scene
 		var cnm: ConveyorNetworkManager = scene_root.get_node_or_null("ConveyorNetworkManager") as ConveyorNetworkManager
@@ -3098,6 +3137,8 @@ func _try_queue_at(foundry_node: Node) -> void:
 		if cnm != null:
 			cost = cnm.compute_unit_cost(foundry_node, unit_stats)
 		_ai_resource_manager.spend(cost.salvage, cost.fuel)
+		if _mcm_fnd != null and _ai_faction_fnd == 1:
+			_mcm_fnd.spend(foundry_node.owner_id, unit_stats.contract_cost)
 		# Production-cadence counter -- bumped on a successful
 		# combat-unit queue. Builders / Crawlers go through
 		# _maintain_engineers / _maintain_crawlers respectively
