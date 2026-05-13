@@ -23,6 +23,19 @@ var _contracts: Dictionary = {}  # owner_id -> int
 ## Per-owner regen accumulator (seconds since last +1).
 var _regen_accum: Dictionary = {}  # owner_id -> float
 
+## Per-owner Intelligence Network tier. 0 = no Intel Network built;
+## 1 = Intel Network constructed (default); 2/3 = upgrade tiers
+## researched (Task 14). Used by Task 13 to scale HQ parallel
+## production slots (2 / 3 / 4 slots at tier 0/1/2 — task spec used
+## to be 1/2/3 per the doc, but user decision 2026-05-13 bumped the
+## floor so even Meridian's pre-Intel-Network HQ has 2 slots).
+##
+## Persisted explicitly via `set_intel_network_tier` (Task 14 upgrade
+## UI). Reads call `get_intel_network_tier(owner_id)` which
+## auto-derives "tier 1 if Intel Network exists, else 0" when no
+## explicit upgrade has been recorded.
+var _intel_tier: Dictionary = {}  # owner_id -> int
+
 static var _pending_instance: MeridianContractsManager = null
 
 
@@ -105,6 +118,38 @@ func spend(owner_id: int, cost: int) -> bool:
 	_contracts[owner_id] -= cost
 	contracts_changed.emit(owner_id, _contracts[owner_id], MAX_CONTRACTS)
 	return true
+
+
+## Returns the current Intel Network tier for `owner_id`. If no
+## explicit upgrade has been recorded, auto-derives tier from whether
+## the owner has built an intelligence_network at all.
+func get_intel_network_tier(owner_id: int) -> int:
+	if owner_id in _intel_tier:
+		return _intel_tier[owner_id]
+	# No explicit set — auto-derive by scanning for intelligence_network
+	# in the buildings group. Walking the group is cheap (≤50 buildings)
+	# and only happens until set_intel_network_tier is called once.
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return 0
+	for b in tree.get_nodes_in_group("buildings"):
+		if not is_instance_valid(b):
+			continue
+		if int(b.get("owner_id")) != owner_id:
+			continue
+		var s: Resource = b.get("stats")
+		if s != null and s.get("building_id") == &"intelligence_network":
+			# Tier 1 once the building exists.
+			return 1
+	return 0
+
+
+## Records an explicit Intel Network tier — used by the upgrade UI
+## (Task 14) to bump tier from 1 → 2 → 3 when the player pays the
+## upgrade cost. Does not validate cost or building presence; the
+## caller is responsible.
+func set_intel_network_tier(owner_id: int, tier: int) -> void:
+	_intel_tier[owner_id] = clampi(tier, 0, 3)
 
 
 func _process(delta: float) -> void:
