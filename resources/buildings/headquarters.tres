@@ -40,5 +40,7 @@ producible_units = [ExtResource("2"), ExtResource("3")]
 footprint_size = Vector3(7, 5, 7)
 placeholder_color = Color(0.4, 0.35, 0.3, 1)
 
+faction_lock = 1
+connection_range = 100.0
 weapons = [SubResource("turret_headquarters_0_hq_defense")]
 default_weapon_index = 0
