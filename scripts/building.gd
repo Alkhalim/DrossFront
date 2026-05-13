@@ -5398,13 +5398,25 @@ func _process(delta: float) -> void:
 		if cnm != null:
 			net_speed = cnm.get_bonuses_for_building(self).speed_mult
 
+	# Inheritor construction site: gated on adjacent Restorer count.
+	# Zero engineers = no progress. 1+ engineers = scaled collaboration mult.
+	# 1 Restorer → 1.0x, 2 → 1.4x, 3+ → 1.8x (spec line 633).
+	var inheritor_collab_mult: float = 1.0
+	if stats != null and stats.building_id == &"inheritor_construction_site":
+		var n_restorers: int = _count_adjacent_restorers()
+		if n_restorers <= 0:
+			# No engineer in range — freeze progress until a Restorer arrives.
+			return
+		# [1.0, 1.0, 1.4, 1.8]: index 0 unused (guarded above), 1/2/3 per spec.
+		inheritor_collab_mult = ([1.0, 1.0, 1.4, 1.8] as Array)[mini(n_restorers, 3)]
+
 	# Advance each active slot. Iterate in reverse so removing an entry from
 	# _build_queue doesn't invalidate lower slot indices that we haven't
 	# visited yet.
 	var active_slots: int = mini(slot_count, _build_queue.size())
 	for slot_idx: int in range(active_slots - 1, -1, -1):
 		var slot_unit: UnitStatResource = _build_queue[slot_idx]
-		_build_progress_slots[slot_idx] += delta * efficiency * net_speed
+		_build_progress_slots[slot_idx] += delta * efficiency * net_speed * inheritor_collab_mult
 		if _build_progress_slots[slot_idx] >= slot_unit.build_time:
 			# Unit complete — spawn it, remove from queue, shift progress
 			# values down so slot indices still line up with queue indices.
@@ -5417,6 +5429,72 @@ func _process(delta: float) -> void:
 	# Keep the legacy float alias in sync with slot-0 so HUD / external
 	# readers that do building.get("_build_progress") still see slot-0 progress.
 	_build_progress = _build_progress_slots[0] if not _build_queue.is_empty() else 0.0
+
+
+func _count_adjacent_restorers() -> int:
+	## Counts Inheritor engineer units within BUILD_BUFFER (3.5u) of this
+	## building's edge that are owned by this building's owner_id and have
+	## a BuilderComponent targeting THIS building. Used to gate Inheritor
+	## construction-site progress and scale collaboration speed (spec §633).
+	##
+	## Uses SpatialIndex narrow-phase when available — the same pattern as
+	## BuilderComponent._spot_has_other_engineer — so the per-tick cost is
+	## proportional to entities in the local bucket, not the full unit list.
+	var fs: Vector3 = stats.footprint_size if stats != null else Vector3.ZERO
+	var extent: float = maxf(fs.x, fs.z) * 0.5
+	const _BUILD_BUFFER: float = 3.5  # mirror of BuilderComponent.BUILD_BUFFER
+	var radius: float = extent + _BUILD_BUFFER
+	var radius_sq: float = radius * radius
+	var count: int = 0
+	var idx: SpatialIndex = SpatialIndex.get_instance(get_tree().current_scene)
+	if idx == null:
+		# Fallback: walk the units group when SpatialIndex is unavailable.
+		for u: Node in get_tree().get_nodes_in_group("units"):
+			if not is_instance_valid(u):
+				continue
+			if int(u.get("owner_id")) != owner_id:
+				continue
+			var us: Resource = u.get("stats") as Resource
+			if us == null or us.get("unit_class") != &"engineer":
+				continue
+			var u3: Node3D = u as Node3D
+			if u3 == null:
+				continue
+			if u3.global_position.distance_squared_to(global_position) > radius_sq:
+				continue
+			# Verify the engineer is actively targeting this construction site.
+			if not u.has_method("get_builder"):
+				continue
+			var builder: Node = u.get_builder()
+			if builder != null and builder.get("_target_building") == self:
+				count += 1
+		return count
+	# Spatial-index narrow-phase: only iterates entities in nearby buckets.
+	for raw: Variant in idx.nearby(global_position, radius):
+		if raw == null or not is_instance_valid(raw):
+			continue
+		var node: Node = raw as Node
+		if node == null:
+			continue
+		if int(node.get("owner_id")) != owner_id:
+			continue
+		var ns: Resource = node.get("stats") as Resource
+		if ns == null or ns.get("unit_class") != &"engineer":
+			continue
+		var n3: Node3D = node as Node3D
+		if n3 == null:
+			continue
+		# XZ distance check against the search radius.
+		var dx: float = n3.global_position.x - global_position.x
+		var dz: float = n3.global_position.z - global_position.z
+		if dx * dx + dz * dz > radius_sq:
+			continue
+		if not node.has_method("get_builder"):
+			continue
+		var b: Node = node.get_builder()
+		if b != null and b.get("_target_building") == self:
+			count += 1
+	return count
 
 
 func _spawn_unit(unit_stats: UnitStatResource) -> void:
