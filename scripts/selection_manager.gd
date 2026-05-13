@@ -2122,13 +2122,22 @@ func _update_conveyor_preview(ghost_pos: Vector3, bstat: BuildingStatResource) -
 	if cnm == null:
 		return
 	var local_owner_id: int = 0  # local player is always owner_id == 0 in this codebase
-	var participants: Array = cnm._participants.get(local_owner_id, [])
+	var participants: Array = cnm.get_preview_candidates(local_owner_id)
 	var hypo_extent: float = maxf(bstat.footprint_size.x, bstat.footprint_size.z) * 0.5
+	var hypo_is_node: bool = bstat.building_id == &"conveyor_node"
 	var would_overfull: bool = cnm.would_overfull_network(local_owner_id, ghost_pos, bstat.building_id)
 	for b: Node in participants:
 		if not is_instance_valid(b):
 			continue
-		var b_extent: float = maxf((b.stats as BuildingStatResource).footprint_size.x, (b.stats as BuildingStatResource).footprint_size.z) * 0.5
+		var b_stats: BuildingStatResource = (b as Node).get("stats") as BuildingStatResource
+		if b_stats == null:
+			continue
+		# Conveyor Nodes are mandatory relays — preview line only when at
+		# least one endpoint is a Node. Two Foundries within range never
+		# get a phantom preview belt; same rule the runtime graph uses.
+		if not hypo_is_node and b_stats.building_id != &"conveyor_node":
+			continue
+		var b_extent: float = maxf(b_stats.footprint_size.x, b_stats.footprint_size.z) * 0.5
 		var center_dist: float = (b as Node3D).global_position.distance_to(ghost_pos)
 		var edge_dist: float = maxf(center_dist - b_extent - hypo_extent, 0.0)
 		if edge_dist > bstat.connection_range:

@@ -222,6 +222,41 @@ func get_bonuses_for_building(building: Node) -> Dictionary:
 	return out
 
 
+## Returns every network-eligible building this owner has on the field —
+## including foundations / under-construction buildings that haven't yet
+## called `register()`. Used by SelectionManager._update_conveyor_preview
+## so the player sees connection lines to buildings they're already in
+## the middle of constructing, not just finished ones.
+##
+## Iterates the "buildings" group rather than `_participants` because
+## registration happens at construction-complete, but the player wants
+## planning-tool feedback the moment they place a foundation.
+func get_preview_candidates(owner_id: int) -> Array:
+	var out: Array = []
+	# Registered participants (constructed).
+	for b in _participants.get(owner_id, []):
+		if is_instance_valid(b):
+			out.append(b)
+	# Scan for unregistered network-eligible buildings (foundations).
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return out
+	for b in tree.get_nodes_in_group("buildings"):
+		if not is_instance_valid(b):
+			continue
+		if b in out:
+			continue  # already registered
+		if b.get("is_ghost_preview"):
+			continue  # the placement cursor ghost itself
+		if int(b.get("owner_id")) != owner_id:
+			continue
+		var s: BuildingStatResource = b.get("stats") as BuildingStatResource
+		if s == null or s.connection_range <= 0.0:
+			continue
+		out.append(b)
+	return out
+
+
 ## Compute the salvage/fuel cost the player should be charged when
 ## producing `unit_stats` at `target` building. Applies the network
 ## salvage/fuel multipliers. Speed bonus is applied separately inside

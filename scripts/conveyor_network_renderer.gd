@@ -1,39 +1,69 @@
 class_name ConveyorNetworkRenderer
 extends Node
-## Draws belt segments between connected network members. One
-## MultiMeshInstance3D per owner_id, holding all of that owner's
-## belt segments as scaled/rotated capsules. Rebuilt on every
+## Draws belt segments between connected network members as a flat
+## textured strip on the ground. One MultiMeshInstance3D per owner_id,
+## one PlaneMesh instance per belt edge. Rebuilt on every
 ## network_changed signal — at realistic graph sizes (≤50 nodes,
-## ~80 edges) the rebuild is O(n²) ≈ <1 ms.
+## ~80 edges) the rebuild is O(n) ≈ <1 ms.
 
-const BELT_RADIUS: float = 0.30
-const BELT_Y_OFFSET: float = 0.20  # slightly above ground
+const BELT_WIDTH: float = 0.95   # world units across the belt
+const BELT_Y_OFFSET: float = 0.06  # sits just above ground decals
 
-## Scrolling-stripe shader so belts read as moving industrial conveyors,
-## not glow capsules. The belt body stays dark (rubber/metal) and a thin
-## bright pip travels along UV.y. Per-instance COLOR (from
-## set_instance_color) drives both the dark body and the pip accent, so
-## network fullness scales brightness without changing the dark/light
-## ratio. Slow scroll + thin pip + dark body together read as "industrial
-## belt with marker stripes," not "neon strip lighting."
+## Industrial belt shader: dark rubber-grey body, near-black side rails,
+## subtle perpendicular tread texture, and scrolling chevron arrows that
+## point in the flow direction. INSTANCE_CUSTOM.rgb feeds per-instance
+## tint (so fullness scales brightness without recoloring the whole
+## thing); INSTANCE_CUSTOM.a passes the belt's world-space length so
+## chevron spacing stays constant regardless of how long any one belt
+## is — without that, longer belts would have visually-sparser arrows.
 const BELT_SHADER_CODE: String = """
 shader_type spatial;
 render_mode unshaded, blend_mix, depth_draw_opaque, cull_disabled;
 
-uniform float scroll_speed = 0.25;
-uniform float stripe_density = 1.5;
-uniform float body_dim = 0.30;     // darkness of the belt body
-uniform float pip_boost = 1.30;    // brightness of the marker pip
+uniform float scroll_speed = 0.35;          // world units / sec
+uniform float chevron_world_period = 0.85;  // world units between chevron tips
+uniform float chevron_slope = 0.45;          // tail lag (0=horizontal bar, 1=sharp V)
+
+varying vec3 v_tint;
+varying float v_length;
+
+void vertex() {
+	v_tint = INSTANCE_CUSTOM.rgb;
+	v_length = INSTANCE_CUSTOM.a;
+}
 
 void fragment() {
-	float v = UV.y * stripe_density - TIME * scroll_speed * stripe_density;
-	float phase = fract(v);
-	// Thin bright pip (~10% of stripe period) with soft edges.
-	float pip = smoothstep(0.00, 0.04, phase) - smoothstep(0.10, 0.16, phase);
-	vec3 body = COLOR.rgb * body_dim;
-	vec3 accent = COLOR.rgb * pip_boost;
-	ALBEDO = mix(body, accent, pip);
-	ALPHA = COLOR.a;
+	// u_centered: -1 at left rail, 0 at belt center, +1 at right rail.
+	float u_centered = (UV.x - 0.5) * 2.0;
+	// World-space V coordinate so chevron pitch stays constant per belt.
+	float v_world = UV.y * v_length;
+	// Chevron phase: arms lag toward the edges so the line traces a V
+	// pointing in +UV.y direction. Subtract TIME so the V moves forward.
+	float v_chevron = (v_world + abs(u_centered) * chevron_slope * 0.5 - TIME * scroll_speed) / chevron_world_period;
+	float phase = fract(v_chevron);
+	// Thin chevron band — ~8% of period, soft edges.
+	float band = max(smoothstep(0.08, 0.00, phase), smoothstep(0.92, 1.00, phase));
+
+	// Side rails: darken the outer ~10% of the belt width.
+	float rail_outer = smoothstep(0.00, 0.08, UV.x) * smoothstep(1.00, 0.92, UV.x);
+
+	// Fine perpendicular tread texture across the belt surface.
+	float tread = 0.92 + 0.08 * sin(UV.x * 6.2831 * 7.0);
+
+	// Grey-brown rubber body, lightly tinted by per-instance fullness.
+	vec3 body = vec3(0.10, 0.09, 0.08) * tread;
+	// Chevron accent — muted safety orange, also fullness-tinted.
+	vec3 chev = vec3(0.55, 0.36, 0.10);
+	// Dark metal side rails.
+	vec3 rail = vec3(0.025, 0.025, 0.028);
+
+	vec3 surface = mix(body, chev, band * 0.75);
+	vec3 final_color = mix(rail, surface, rail_outer);
+	// Per-instance tint scales overall brightness without changing palette.
+	final_color *= v_tint;
+
+	ALBEDO = final_color;
+	ALPHA = 0.97;
 }
 """
 
@@ -69,46 +99,43 @@ func _on_network_changed(owner_id: int) -> void:
 		mmi = MultiMeshInstance3D.new()
 		mmi.name = "ConveyorBelts_p%d" % owner_id
 		var mm := MultiMesh.new()
-		var cyl := CylinderMesh.new()
-		cyl.top_radius = BELT_RADIUS
-		cyl.bottom_radius = BELT_RADIUS
-		cyl.height = 1.0  # scale on Y per-instance
-		mm.mesh = cyl
+		var plane := PlaneMesh.new()
+		plane.size = Vector2(1.0, 1.0)  # unit plane, basis scales per-instance
+		mm.mesh = plane
 		mm.transform_format = MultiMesh.TRANSFORM_3D
-		mm.use_colors = true
+		mm.use_custom_data = true
 		mmi.multimesh = mm
 		var shader := Shader.new()
 		shader.code = BELT_SHADER_CODE
 		var mat := ShaderMaterial.new()
 		mat.shader = shader
-		cyl.material = mat
+		plane.material = mat
 		add_child(mmi)
 		_mmi_by_owner[owner_id] = mmi
-	# Resize and populate transforms + colors.
+	# Resize and populate transforms + per-instance tint/length.
 	mmi.multimesh.instance_count = edges.size()
 	for i in range(edges.size()):
 		var e: Dictionary = edges[i]
 		var a: Vector3 = e.a + Vector3.UP * BELT_Y_OFFSET
 		var b: Vector3 = e.b + Vector3.UP * BELT_Y_OFFSET
 		var length: float = a.distance_to(b)
-		# Build the basis with the cylinder's long axis (local Y) directly
-		# baked to (dir * length). Important quirk: Basis.scaled(scale) in
-		# Godot 4 scales the basis by WORLD axes (it's b * Basis.from_scale),
-		# so `Basis(x, dir_unit, z).scaled(Vector3(1, length, 1))` with a
-		# horizontal dir multiplies the world-Y row by length — leaving the
-		# cylinder unit-long and standing upright. Putting the length on the
-		# y_axis vector itself sidesteps that entirely.
+		# PlaneMesh lies in its local XZ plane with normal +Y. We want:
+		#   - local X along the belt width (perpendicular to flow)
+		#   - local Y as the plane normal (world UP)
+		#   - local Z along the belt length (flow direction)
+		# Bake the per-instance width and length into the basis vectors
+		# directly — Basis.scaled() in Godot 4 scales by world axes and
+		# wouldn't stretch a tilted Z properly.
 		var dir: Vector3 = (b - a).normalized() if length > 0.0001 else Vector3.RIGHT
-		var up_hint: Vector3 = Vector3.UP if absf(dir.dot(Vector3.UP)) < 0.99 else Vector3.RIGHT
-		var x_axis: Vector3 = dir.cross(up_hint).normalized()
-		var z_axis: Vector3 = x_axis.cross(dir).normalized()
+		var width_dir: Vector3 = Vector3.UP.cross(dir).normalized()
+		if width_dir.length_squared() < 0.0001:
+			width_dir = Vector3.RIGHT  # degenerate (belt direction is vertical)
 		var t := Transform3D.IDENTITY
 		t.origin = (a + b) * 0.5
-		t.basis = Basis(x_axis, dir * length, z_axis)
+		t.basis = Basis(width_dir * BELT_WIDTH, Vector3.UP, dir * length)
 		mmi.multimesh.set_instance_transform(i, t)
-		# Per-instance COLOR feeds both belt body and pip in the shader.
-		# Base hue is a deep industrial orange; brightness scales with
-		# network fullness so a 3-prod-building network reads slightly
-		# warmer/more "alive" than a solo 1-prod link.
-		var bright: float = clampf(0.55 + 0.15 * float(e.fullness), 0.55, 0.90)
-		mmi.multimesh.set_instance_color(i, Color(0.80 * bright, 0.42 * bright, 0.10 * bright, 0.95))
+		# Per-instance custom data: rgb = tint, a = belt world length.
+		# Fullness scales brightness on a tight range so even a full
+		# network reads as belt material, not glow.
+		var bright: float = clampf(0.65 + 0.10 * float(e.fullness), 0.65, 0.95)
+		mmi.multimesh.set_instance_custom_data(i, Color(bright, bright, bright, length))
