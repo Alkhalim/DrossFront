@@ -3310,6 +3310,11 @@ func _topup_hp_if_pre_constructed() -> void:
 
 func _finish_construction() -> void:
 	is_constructed = true
+	if is_network_eligible():
+		var scene_root: Node = get_tree().current_scene
+		var cnm: ConveyorNetworkManager = ConveyorNetworkManager.get_instance(scene_root)
+		if cnm != null:
+			cnm.register(self)
 	_construction_progress = stats.build_time
 	# Top up to full HP on completion. Damage taken during construction
 	# stays applied, but a clean build with no interference finishes
@@ -3595,6 +3600,13 @@ func queue_unit(unit_stats: UnitStatResource) -> bool:
 ## Hammerhead / Wraith / etc. are hidden behind the Advanced Armory
 ## (or Black Pylon, for Wraith) — the building keeps the unit in its
 ## producible_units list and the unit's gate decides visibility.
+func is_network_eligible() -> bool:
+	## Building participates in Conveyor Networks if its resource has
+	## connection_range > 0. The Combine HQ + Foundries + Aerodrome
+	## + Conveyor Node set this; everything else leaves it 0.
+	return stats != null and stats.connection_range > 0.0
+
+
 func get_producible_units() -> Array[UnitStatResource]:
 	if not stats:
 		return []
@@ -5867,3 +5879,12 @@ func _spawn_building_wreck() -> void:
 		wreck.global_position = wreck_pos + Vector3(dx, 0.0, dz)
 		# Random Y rotation — handled by Wreck._build_wreck_visuals
 		# itself, but explicitly nudging position only matters here.
+
+
+func _exit_tree() -> void:
+	if is_network_eligible():
+		var scene_root: Node = get_tree().current_scene
+		if scene_root != null:
+			var cnm: ConveyorNetworkManager = scene_root.get_node_or_null("ConveyorNetworkManager") as ConveyorNetworkManager
+			if cnm != null:
+				cnm.unregister(self)
