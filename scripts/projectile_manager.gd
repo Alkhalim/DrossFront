@@ -149,9 +149,14 @@ func _ensure_bucket(style: String, color: Color) -> MultiMeshInstance3D:
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.use_colors = false
 	mm.use_custom_data = false
+	# CRITICAL: mesh MUST be set BEFORE instance_count. Setting
+	# instance_count first allocates the transform array against an
+	# empty mesh (Godot quirk) and the MultiMesh ends up rendering
+	# nothing — this was why no projectiles were visible in-game even
+	# though the manager's _process / fire path ran correctly.
+	mm.mesh = _build_mesh_for_style(style, color)
 	mm.instance_count = MAX_PROJECTILES_PER_BUCKET
 	mm.visible_instance_count = 0  # nothing in flight yet
-	mm.mesh = _build_mesh_for_style(style, color)
 	mmi.multimesh = mm
 	add_child(mmi)
 	_buckets[key] = mmi
@@ -170,7 +175,7 @@ func _build_mesh_for_style(style: String, color: Color) -> Mesh:
 			cyl.bottom_radius = 0.05
 			cyl.height = 0.34
 			mat.emission_energy_multiplier = 3.0
-			cyl.surface_set_material(0, mat)
+			cyl.material = mat
 			return cyl
 		"missile":
 			var cyl := CylinderMesh.new()
@@ -178,7 +183,7 @@ func _build_mesh_for_style(style: String, color: Color) -> Mesh:
 			cyl.bottom_radius = 0.10
 			cyl.height = 0.40
 			mat.emission_energy_multiplier = 2.5
-			cyl.surface_set_material(0, mat)
+			cyl.material = mat
 			return cyl
 		"shell":
 			var cyl := CylinderMesh.new()
@@ -187,7 +192,7 @@ func _build_mesh_for_style(style: String, color: Color) -> Mesh:
 			cyl.height = 0.62
 			cyl.radial_segments = 12
 			mat.emission_energy_multiplier = 2.4
-			cyl.surface_set_material(0, mat)
+			cyl.material = mat
 			return cyl
 		"mortar":
 			# Fidelity reduced — fins folded into the body silhouette
@@ -198,7 +203,7 @@ func _build_mesh_for_style(style: String, color: Color) -> Mesh:
 			cyl.height = 0.50
 			cyl.radial_segments = 12
 			mat.emission_energy_multiplier = 0.6
-			cyl.surface_set_material(0, mat)
+			cyl.material = mat
 			return cyl
 		"bomb":
 			var cyl := CylinderMesh.new()
@@ -207,7 +212,7 @@ func _build_mesh_for_style(style: String, color: Color) -> Mesh:
 			cyl.height = 0.65
 			cyl.radial_segments = 12
 			mat.emission_energy_multiplier = 0.4
-			cyl.surface_set_material(0, mat)
+			cyl.material = mat
 			return cyl
 		_:
 			# Unknown style — fall back to bullet visual.
@@ -216,7 +221,7 @@ func _build_mesh_for_style(style: String, color: Color) -> Mesh:
 			cyl.bottom_radius = 0.05
 			cyl.height = 0.34
 			mat.emission_energy_multiplier = 3.0
-			cyl.surface_set_material(0, mat)
+			cyl.material = mat
 			return cyl
 
 
