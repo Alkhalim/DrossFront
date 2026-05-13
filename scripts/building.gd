@@ -3607,6 +3607,22 @@ func is_network_eligible() -> bool:
 	return stats != null and stats.connection_range > 0.0
 
 
+func get_effective_power_consumption() -> int:
+	## Returns the building's Power consumption with the Combine Conveyor
+	## Network HQ-discount applied. When this building is in the same
+	## network as the HQ, returns 85% of base power_consumption. Otherwise
+	## returns base. Network manager handles the HQ-itself-exempt logic
+	## (HQ.power_mult stays 1.0).
+	var base: int = stats.power_consumption if stats != null else 0
+	if not is_network_eligible() or base == 0:
+		return base
+	var scene_root: Node = get_tree().current_scene
+	var cnm: ConveyorNetworkManager = scene_root.get_node_or_null("ConveyorNetworkManager") as ConveyorNetworkManager
+	if cnm == null:
+		return base
+	return int(round(float(base) * cnm.get_bonuses_for_building(self).power_mult))
+
+
 func get_producible_units() -> Array[UnitStatResource]:
 	if not stats:
 		return []

@@ -226,7 +226,7 @@ func update_power() -> void:
 		if b_owner != owner_id:
 			continue
 		total_production += building.stats.power_production
-		total_consumption += building.stats.power_consumption
+		total_consumption += building.get_effective_power_consumption()
 
 	power_production = total_production
 	power_consumption = total_consumption
