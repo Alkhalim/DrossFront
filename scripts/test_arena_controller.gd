@@ -95,6 +95,18 @@ func _ready() -> void:
 	pem.name = "ParticleEmitterManager"
 	add_child(pem)
 
+	# ProjectileManager — central rendering for all in-flight projectiles
+	# (bullets, missiles, shells, mortars, bombs). Replaces per-projectile
+	# Node3D + MeshInstance3D with one MultiMeshInstance3D per (style,
+	# color) pair. Singleton-style: combat looks it up via
+	# ProjectileManager.get_instance(scene_root). Beams stay on the
+	# legacy Projectile.create() per-Node3D path.
+	if get_node_or_null("ProjectileManager") == null:
+		var pm_script: GDScript = preload("res://scripts/projectile_manager.gd")
+		var pm: Node = pm_script.new()
+		pm.name = "ProjectileManager"
+		add_child(pm)
+
 	# V3 Pillar 2 — Neural Mesh provider tracker. Maintains a snapshot
 	# of every Sable Mesh provider (Black Pylon + Overseer Harbinger
 	# etc.) so combat can read the per-position Mesh strength cheaply.
