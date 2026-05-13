@@ -71,11 +71,95 @@ func get_max_contracts(_owner_id: int) -> int:
 	return MAX_CONTRACTS
 
 
+## Reduction (seconds) per surveilling building type.
+const SURVEILLANCE_REDUCTION: Dictionary = {
+	&"sensor_spine": 1.0,
+	&"mesh_relay": 0.5,
+	&"black_pylon": 2.0,
+	&"sensor_array": 0.5,
+}
+
+## Cached scan result to avoid re-walking groups for every owner every tick.
+## Map: owner_id -> {interval: float, expires_at_ms: int}
+var _interval_cache: Dictionary = {}
+const _INTERVAL_CACHE_MS: int = 250  # rescan ~4Hz; surveillance shifts slowly
+
+
 ## Returns the current regen interval in seconds for this owner —
 ## baseline minus surveillance reductions, clamped at MIN_REGEN_INTERVAL.
-## Implemented in Task 15; stubbed here at baseline.
-func get_regen_interval(_owner_id: int) -> float:
-	return BASELINE_REGEN_INTERVAL
+## Surveillance: each mesh provider building/unit owned by owner_id that
+## overlaps at least one enemy entity reduces the interval per
+## SURVEILLANCE_REDUCTION (buildings) or -0.5s (mobile mesh units).
+func get_regen_interval(owner_id: int) -> float:
+	var now: int = Time.get_ticks_msec()
+	var cached: Dictionary = _interval_cache.get(owner_id, {})
+	if not cached.is_empty() and cached.get("expires_at_ms", 0) > now:
+		return cached.interval
+	var interval: float = _scan_regen_interval(owner_id)
+	_interval_cache[owner_id] = {"interval": interval, "expires_at_ms": now + _INTERVAL_CACHE_MS}
+	return interval
+
+
+func _scan_regen_interval(owner_id: int) -> float:
+	var reduction: float = 0.0
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return BASELINE_REGEN_INTERVAL
+	# Snapshot enemies once; reused for every provider overlap check.
+	var enemies: Array = []
+	for u in tree.get_nodes_in_group("units"):
+		if is_instance_valid(u) and int(u.get("owner_id")) != owner_id:
+			enemies.append(u)
+	for b in tree.get_nodes_in_group("buildings"):
+		if is_instance_valid(b) and int(b.get("owner_id")) != owner_id:
+			enemies.append(b)
+	# Walk owner's buildings — buildings use SURVEILLANCE_REDUCTION by building_id.
+	for b in tree.get_nodes_in_group("buildings"):
+		if not is_instance_valid(b) or int(b.get("owner_id")) != owner_id:
+			continue
+		var s: Resource = b.get("stats")
+		if s == null:
+			continue
+		var bid: StringName = s.get("building_id")
+		var per_provider: float = SURVEILLANCE_REDUCTION.get(bid, 0.0)
+		if per_provider <= 0.0:
+			continue
+		var radius: float = float(s.get("mesh_provider_radius"))
+		if radius <= 0.0:
+			continue
+		if _provider_surveils_any(b as Node3D, radius, enemies):
+			reduction += per_provider
+	# Walk owner's units — any unit with mesh_provider_radius > 0 contributes -0.5s.
+	# This covers all mobile mesh providers (Specter Glitch, Sensor Carrier,
+	# Harbinger Overseer, Pulsefont) without relying on unit_class, which
+	# stores generic roles (light/transport/heavy/medium) not unique identifiers.
+	for u in tree.get_nodes_in_group("units"):
+		if not is_instance_valid(u) or int(u.get("owner_id")) != owner_id:
+			continue
+		var us: Resource = u.get("stats")
+		if us == null:
+			continue
+		var radius_unit: float = float(us.get("mesh_provider_radius"))
+		if radius_unit <= 0.0:
+			continue
+		if _provider_surveils_any(u as Node3D, radius_unit, enemies):
+			reduction += 0.5
+	var interval: float = BASELINE_REGEN_INTERVAL - reduction
+	return maxf(interval, MIN_REGEN_INTERVAL)
+
+
+func _provider_surveils_any(provider: Node3D, radius: float, enemies: Array) -> bool:
+	var p_pos: Vector3 = provider.global_position
+	var r2: float = radius * radius
+	for e in enemies:
+		if not is_instance_valid(e):
+			continue
+		var e3: Node3D = e as Node3D
+		if e3 == null:
+			continue
+		if p_pos.distance_squared_to(e3.global_position) <= r2:
+			return true
+	return false
 
 
 ## Fraction of the way to the next contract. 0.0 = just ticked, 1.0 =
