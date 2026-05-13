@@ -33,6 +33,25 @@ var _approach_last_dist: float = INF
 const APPROACH_GIVEUP_SEC: float = 20.0
 const APPROACH_PROGRESS_EPSILON: float = 0.5
 
+## Hysteresis on the "in build range" check. Once the engineer has
+## docked, allow it to drift this much past build_max before re-issuing
+## an approach — separation forces from peer engineers or units walking
+## past can nudge a docked builder ~1 u outward, and without hysteresis
+## we'd kick it back to approach for that tiny drift, then back to build
+## the next tick. The user-visible symptom was engineers bouncing back
+## and forth a metre or two from the foundation.
+const BUILD_RANGE_HYSTERESIS: float = 1.5
+var _was_in_build_range: bool = false
+
+## Cached approach point so we don't re-issue the same command_move every
+## physics frame. command_move's idempotency check only fires when the
+## caller passes clear_combat=true; BuilderComponent passes false (so the
+## priority window isn't tripped), so the kernel ends up replanning every
+## tick. Track the last destination here and skip re-issues that move
+## the target less than the threshold.
+var _last_command_move_dest: Vector3 = Vector3.INF
+const COMMAND_MOVE_REISSUE_DIST: float = 0.5
+
 
 func _ready() -> void:
 	_unit = get_parent() as Unit
@@ -157,8 +176,13 @@ func _physics_process(delta: float) -> void:
 
 	var dist: float = _unit.global_position.distance_to(_target_building.global_position)
 	var build_max: float = _build_max_distance()
+	# Hysteresis: once we've docked, require a larger drift before going
+	# back to approach. Stops the "bounce in and out of build range" loop
+	# when separation force nudges a docked engineer ~1 u outward.
+	var range_threshold: float = build_max + (BUILD_RANGE_HYSTERESIS if _was_in_build_range else 0.0)
 
-	if dist > build_max:
+	if dist > range_threshold:
+		_was_in_build_range = false
 		# Move toward an approach point just outside the building edge facing us,
 		# rather than the building center (which sits inside its nav obstacle and
 		# would trap the agent oscillating around the edge).
@@ -168,7 +192,14 @@ func _physics_process(delta: float) -> void:
 		# read as 'player just clicked' and skip BuilderComponent for 4s —
 		# the engineer would arrive at approach_pt and sit idle for 4 seconds
 		# before construction started.
-		_unit.command_move(_approach_point(), false)
+		# Idempotency: only re-issue command_move when the approach point
+		# has actually moved (cached angle + a small movement threshold).
+		# Without this the kernel replans every tick and the engineer can
+		# stutter on approach.
+		var approach_pt: Vector3 = _approach_point()
+		if approach_pt.distance_squared_to(_last_command_move_dest) > COMMAND_MOVE_REISSUE_DIST * COMMAND_MOVE_REISSUE_DIST:
+			_unit.command_move(approach_pt, false)
+			_last_command_move_dest = approach_pt
 		_set_build_anim(false)
 		# Track progress — if we don't shrink the distance for too long
 		# the build site is probably unreachable (e.g. the player placed
@@ -183,12 +214,15 @@ func _physics_process(delta: float) -> void:
 				_target_building = null
 				_approach_stuck_timer = 0.0
 				_approach_last_dist = INF
+				_last_command_move_dest = Vector3.INF
 				_unit.stop()
 		return
 
 	# Reset the stuck tracker once we're inside the build perimeter.
+	_was_in_build_range = true
 	_approach_stuck_timer = 0.0
 	_approach_last_dist = INF
+	_last_command_move_dest = Vector3.INF
 
 	# Foundation-block self-rescue was the workaround for "engineer
 	# inside the foundation footprint blocks its own construction".
@@ -331,12 +365,24 @@ func start_building(building: Building) -> void:
 	_target_building = building
 	_approach_stuck_timer = 0.0
 	_approach_last_dist = INF
+	_was_in_build_range = false
+	_last_command_move_dest = Vector3.INF
+	# Player just explicitly assigned this engineer to a build site.
+	# Clear any prior priority window — if the player had right-clicked
+	# the engineer somewhere else seconds ago and it set _move_priority_
+	# until_ms = now+4s, the BuilderComponent tick guard would skip the
+	# entire _physics_process for that 4 s window and the new
+	# assignment would just sit there doing nothing. Player-driven
+	# start_building should take effect immediately.
+	if "_move_priority_until_ms" in _unit:
+		_unit.set("_move_priority_until_ms", 0)
 	construction_started.emit(building)
 	# clear_combat=false — internal builder-driven move (see active-build
 	# branch in _physics_process). Passing true sets _move_priority_until_ms
 	# on the unit, which would trip BuilderComponent's own priority guard
 	# and freeze the engineer at approach_pt for 4 s after every start_building.
 	_unit.command_move(_approach_point(), false)
+	_last_command_move_dest = _approach_point()
 
 
 func _build_max_distance() -> float:

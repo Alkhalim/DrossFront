@@ -6490,12 +6490,21 @@ func _per_frame_bookkeeping(delta: float) -> void:
 	# invisible at typical RTS zoom. Selection / damage indicators
 	# still feel responsive — a click waits at most ~150 ms for the
 	# bar to pop in, well under perceptual threshold.
+	# HP bar position MUST update every physics frame: the bar is
+	# top_level, so it does not inherit the parent transform, and at
+	# 20 Hz the unit moves ~0.3 u per frame. Letting the bar position
+	# update only every 3rd frame (~7 Hz) lags the unit by up to 0.9 u,
+	# which reads as visible jitter at typical zoom. The assignment is
+	# a few µs — cheap vs the avoid/build/combat work below.
+	if _hp_bar and is_instance_valid(_hp_bar) and _hp_bar.visible:
+		var pos_h: float = (_cached_total_height if _cached_total_height > 0.0 else _mech_total_height()) + 0.4
+		_hp_bar.global_position = global_position + Vector3(0, pos_h, 0)
+
 	if (_physics_frame_counter % 3) != _walk_bob_phase:
 		return
 
-	# HP bar + reload bar — moved INSIDE the stagger gate (was
-	# unconditionally at full 20 Hz). Drops bar update cost by 2/3
-	# without changing the visible behaviour at typical zoom.
+	# HP bar visibility / fill + reload bar — staggered (cheap work
+	# that doesn't need every-frame accuracy).
 	if _hp_bar and is_instance_valid(_hp_bar):
 		var smooth_damaged: bool = false
 		if stats:
@@ -6503,9 +6512,12 @@ func _per_frame_bookkeeping(delta: float) -> void:
 		var smooth_should_show: bool = is_selected or smooth_damaged or hp_bar_hovered
 		if _hp_bar.visible != smooth_should_show:
 			_hp_bar.visible = smooth_should_show
+			# Snap position on the visibility-on edge so a freshly
+			# revealed bar doesn't sit at the last cached position.
+			if smooth_should_show:
+				var pos_h2: float = (_cached_total_height if _cached_total_height > 0.0 else _mech_total_height()) + 0.4
+				_hp_bar.global_position = global_position + Vector3(0, pos_h2, 0)
 		if smooth_should_show:
-			var smooth_h: float = (_cached_total_height if _cached_total_height > 0.0 else _mech_total_height()) + 0.4
-			_hp_bar.global_position = global_position + Vector3(0, smooth_h, 0)
 			_update_reload_bar()
 
 	# Camera-distance cull flag. AI / pathing / combat still run; only
