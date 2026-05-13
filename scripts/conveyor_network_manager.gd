@@ -98,13 +98,23 @@ func _recompute_for(owner_id: int) -> void:
 		if not is_instance_valid(a):
 			continue
 		var a_extent: float = _extent_of(a)
-		var a_range: float = (a.stats as BuildingStatResource).connection_range
+		var a_stats: BuildingStatResource = a.stats as BuildingStatResource
+		var a_range: float = a_stats.connection_range
+		var a_is_node: bool = a_stats.building_id == &"conveyor_node"
 		for j in range(i + 1, participants.size()):
 			var c: Node = participants[j]
 			if not is_instance_valid(c):
 				continue
+			var c_stats: BuildingStatResource = c.stats as BuildingStatResource
+			# Conveyor Nodes are mandatory relays: a production building
+			# (Foundry / HQ / Aerodrome) can only link to another via a
+			# Node, never directly. So at least one endpoint of any edge
+			# must be a Conveyor Node — otherwise factories within range
+			# of each other would form unintended free networks.
+			if not a_is_node and c_stats.building_id != &"conveyor_node":
+				continue
 			var c_extent: float = _extent_of(c)
-			var c_range: float = (c.stats as BuildingStatResource).connection_range
+			var c_range: float = c_stats.connection_range
 			var center_dist: float = a.global_position.distance_to(c.global_position)
 			var edge_dist: float = maxf(center_dist - a_extent - c_extent, 0.0)
 			# Each side must reach within its own connection_range. Use
@@ -294,6 +304,7 @@ func describe_network_for_building(building: Node) -> Dictionary:
 ## because participants per owner is small (≤50 typically).
 func would_overfull_network(owner_id: int, pos: Vector3, building_id: StringName) -> bool:
 	var counts_as_production: bool = building_id in [&"basic_foundry", &"advanced_foundry", &"aerodrome", &"headquarters"]
+	var hypo_is_node: bool = building_id == &"conveyor_node"
 	# All network-eligible buildings share connection_range = 10 (set on
 	# the four production buildings + the Conveyor Node). 10 world units is
 	# roughly 1.5× a Basic Foundry's longest footprint axis, which keeps
@@ -302,13 +313,19 @@ func would_overfull_network(owner_id: int, pos: Vector3, building_id: StringName
 	var hypo_range: float = 10.0
 	var hypo_extent: float = 3.0  # rough — exact footprint TBD per building; small enough not to falsely permit
 	var participants: Array = _participants.get(owner_id, [])
-	# Build adjacency for {participants ∪ hypo}.
+	# Build adjacency for {participants ∪ hypo}. Match `_recompute_for`'s
+	# "edges require a Conveyor Node endpoint" rule — when placing a
+	# Foundry/HQ/Aerodrome we only consider existing Nodes as potential
+	# neighbors; when placing a Node we consider every participant.
 	var nearby: Array = []  # participants connected to hypo
 	for b in participants:
 		if not is_instance_valid(b):
 			continue
+		var b_stats: BuildingStatResource = b.stats as BuildingStatResource
+		if not hypo_is_node and b_stats.building_id != &"conveyor_node":
+			continue
 		var b_extent: float = _extent_of(b)
-		var b_range: float = (b.stats as BuildingStatResource).connection_range
+		var b_range: float = b_stats.connection_range
 		var center_dist: float = b.global_position.distance_to(pos)
 		var edge_dist: float = maxf(center_dist - b_extent - hypo_extent, 0.0)
 		var allowed: float = minf(b_range, hypo_range)

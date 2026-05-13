@@ -238,7 +238,13 @@ func _ready() -> void:
 			current_hp = stats.hp
 		else:
 			current_hp = maxi(int(float(stats.hp) * 0.2), 1)
-			call_deferred("_topup_hp_if_pre_constructed")
+		# Always defer the topup-and-register check. For already-constructed
+		# buildings (HQ on .tscn load) it does the Conveyor Network
+		# registration that `_finish_construction` normally handles; for
+		# foundation-state buildings it covers the case where parent setup
+		# flips `is_constructed` after our _ready ran. Idempotent on both
+		# axes (cnm.register dedupes, HP topup gates on hp < stats.hp).
+		call_deferred("_topup_hp_if_pre_constructed")
 		# rally_point intentionally stays at RALLY_UNSET at
 		# construction. The previous default placed an auto-rally
 		# just outside the building's footprint, which felt
@@ -3306,6 +3312,17 @@ func _topup_hp_if_pre_constructed() -> void:
 		return
 	if is_constructed and stats and current_hp < stats.hp:
 		current_hp = stats.hp
+	# Same window — register with the Conveyor Network manager for any
+	# building that was flagged constructed AFTER our _ready (the .tscn-
+	# placed HQ is the canonical case). `_finish_construction` covers the
+	# player-built path; this covers the scenario-seeded path.
+	# `cnm.register` dedupes if the building is already registered, so the
+	# rare overlap where both paths fire is harmless.
+	if is_constructed and is_network_eligible():
+		var scene_root: Node = get_tree().current_scene
+		var cnm: ConveyorNetworkManager = ConveyorNetworkManager.get_instance(scene_root)
+		if cnm != null:
+			cnm.register(self)
 
 
 func _finish_construction() -> void:
