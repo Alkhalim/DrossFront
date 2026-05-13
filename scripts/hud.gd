@@ -3143,6 +3143,21 @@ func _build_building_stat_sheet(building: Node3D, bstats: BuildingStatResource, 
 			net_text = "(none)"
 		rows.append([_stat_chip("Conveyor Network", net_text, STAT_LABEL_COLOR_RANGE)])
 
+	# Meridian Contracts — show only when the selected building is an HQ
+	# owned by Meridian. Counts toward the HQ's role as production gate.
+	if bstats != null and bstats.building_id == &"headquarters":
+		var mcm_faction: int = 0
+		if building.has_method("_resolve_faction_id"):
+			mcm_faction = building.call("_resolve_faction_id") as int
+		if mcm_faction == 1:  # 1 = Sable / Meridian
+			var mcm_scene_root: Node = get_tree().current_scene
+			var mcm: MeridianContractsManager = mcm_scene_root.get_node_or_null("MeridianContractsManager") as MeridianContractsManager
+			if mcm != null:
+				var cur: int = mcm.get_contracts(building.owner_id)
+				var maxc: int = mcm.get_max_contracts(building.owner_id)
+				var interval: float = mcm.get_regen_interval(building.owner_id)
+				rows.append([_stat_chip("Contracts", "%d / %d  (1 every %.1f s)" % [cur, maxc, interval], STAT_LABEL_COLOR_RANGE)])
+
 	return _build_stat_sheet(rows)
 
 
