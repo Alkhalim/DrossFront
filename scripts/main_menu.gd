@@ -446,6 +446,14 @@ const _PLAYABLE_FACTIONS: Array[Dictionary] = [
 	  "icon_id": 1,  # FactionIconScript.Faction.SABLE
 	  "label": "Meridian Protocol",
 	  "tagline": "Information warfare — fast, fragile, plays the whole map." },
+	{ "value": MatchSettingsClass.FactionId.INHERITOR,
+	  "icon_id": 2,  # FactionIconScript.Faction.INHERITOR (placeholder)
+	  "label": "Inheritors",
+	  "tagline": "Coming soon." },
+	{ "value": MatchSettingsClass.FactionId.HELIARCH,
+	  "icon_id": 3,  # FactionIconScript.Faction.HELIARCH (placeholder)
+	  "label": "Heliarch",
+	  "tagline": "Coming soon." },
 ]
 
 
@@ -671,8 +679,10 @@ func _build_ai_row(player_id: int, label_text: String, team: int) -> void:
 	var fac_dropdown := OptionButton.new()
 	fac_dropdown.custom_minimum_size = Vector2(110, 32)
 	for fac_entry: Dictionary in [
-		{"label": "Combine", "value": MatchSettingsClass.FactionId.ANVIL},
-		{"label": "Meridian", "value": MatchSettingsClass.FactionId.SABLE},
+		{"label": "Combine",   "value": MatchSettingsClass.FactionId.ANVIL},
+		{"label": "Meridian",  "value": MatchSettingsClass.FactionId.SABLE},
+		{"label": "Inheritors","value": MatchSettingsClass.FactionId.INHERITOR},
+		{"label": "Heliarch",  "value": MatchSettingsClass.FactionId.HELIARCH},
 	]:
 		fac_dropdown.add_item(fac_entry["label"] as String, fac_entry["value"] as int)
 	# Default selection mirrors the team-based fallback so the player

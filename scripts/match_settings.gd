@@ -20,7 +20,7 @@ enum MapId { FOUNDRY_BELT, ASHPLAINS_CROSSING, IRON_GATE_CROSSING, SCHWARZWALD }
 ## V3 introduces Sable as the second playable faction. Two factions are
 ## enough to validate the asymmetric architecture (Pillar 1 of the V3
 ## scope); Synod / Inheritors come later.
-enum FactionId { ANVIL, SABLE }
+enum FactionId { ANVIL, SABLE, INHERITOR, HELIARCH }
 ## AI build / behaviour archetypes. RANDOM picks one of the four
 ## non-random options on match start (per-AI). Other values force the
 ## archetype, e.g. for the menu's "AI Charlie: Turret Heavy" picker.
