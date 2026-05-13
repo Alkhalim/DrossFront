@@ -2505,6 +2505,17 @@ func _rebuild_production_buttons(building: Building) -> void:
 			_append_intel_upgrade_buttons(building)
 			return
 
+	# Architect's Network upgrade panel — Inheritor tech building, mirrors Intel
+	# Network. No producible units; show tier upgrade buttons instead.
+	if bstats != null and bstats.building_id == &"architect_network":
+		var owner_faction: int = 0
+		if building.has_method("_resolve_faction_id"):
+			owner_faction = building.call("_resolve_faction_id") as int
+		if owner_faction == 2:
+			_action_label.text = "Network Tier"
+			_append_architect_upgrade_buttons(building)
+			return
+
 	if producible_all.is_empty():
 		_action_label.text = "No production"
 		return
@@ -2827,6 +2838,79 @@ func _on_intel_upgrade_pressed(building: Building, target_tier: int, cost_s: int
 	var mcm: MeridianContractsManager = get_tree().current_scene.get_node_or_null("MeridianContractsManager") as MeridianContractsManager
 	if mcm != null:
 		mcm.set_intel_network_tier(building.owner_id, target_tier)
+	# Force panel rebuild so the button reflects the new tier immediately.
+	_last_building_id = -1
+
+
+## --- Architect's Network tier upgrade panel ------------------------------
+## Renders 0, 1, or 2 upgrade buttons for the selected Architect's Network.
+## Tier 1 → 2: 500 salvage / 60 fuel
+## Tier 2 → 3: 700 salvage / 80 fuel
+## Tier 3: fully upgraded, no button shown.
+
+const ARCHITECT_TIER2_COST_SALVAGE: int = 500
+const ARCHITECT_TIER2_COST_FUEL: int = 60
+const ARCHITECT_TIER3_COST_SALVAGE: int = 700
+const ARCHITECT_TIER3_COST_FUEL: int = 80
+
+
+func _append_architect_upgrade_buttons(building: Building) -> void:
+	## Renders tier upgrade buttons for the Architect's Network selection
+	## panel. InheritorBuildingManager is the source of truth for the
+	## current tier; set_architect_tier bumps it immediately (no
+	## construction time — instant upgrade).
+	var scene_root: Node = get_tree().current_scene
+	var ibm: InheritorBuildingManager = InheritorBuildingManager.get_instance(scene_root)
+	if ibm == null:
+		return
+	var tier: int = ibm.get_architect_tier(building.owner_id)
+	if tier == 1:
+		_button_grid.add_child(_make_architect_upgrade_button(
+			building,
+			"Upgrade to Tier 2",
+			"Bump Architect's Network to Tier 2. Unlocks Tier 2 units at the Restorer pads.",
+			2,
+			ARCHITECT_TIER2_COST_SALVAGE,
+			ARCHITECT_TIER2_COST_FUEL,
+		))
+	elif tier == 2:
+		_button_grid.add_child(_make_architect_upgrade_button(
+			building,
+			"Upgrade to Tier 3",
+			"Bump Architect's Network to Tier 3. Unlocks Tier 3 (Apex / Elite) units at the Restorer pads.",
+			3,
+			ARCHITECT_TIER3_COST_SALVAGE,
+			ARCHITECT_TIER3_COST_FUEL,
+		))
+	# Tier 3: fully upgraded — no button rendered.
+
+
+func _make_architect_upgrade_button(building: Building, title: String, blurb: String, target_tier: int, cost_s: int, cost_f: int) -> Button:
+	var btn := _StyledTooltipButton.new()
+	btn.custom_minimum_size = Vector2(160, 80)
+	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn.size_flags_vertical = Control.SIZE_FILL
+	_set_label_button(btn, "", title)
+	btn.tooltip_text = title
+	btn.tooltip_builder = func() -> Control:
+		return make_styled_upgrade_tooltip(title, blurb, cost_s, cost_f, _ROLE_COLOR_TECH)
+	btn.pressed.connect(_on_architect_upgrade_pressed.bind(building, target_tier, cost_s, cost_f))
+	var chip_refs: Dictionary = _attach_cost_widget(btn, cost_s, cost_f, 0)
+	_action_buttons.append({ "button": btn, "kind": "architect_upgrade", "cost_s": cost_s, "cost_f": cost_f, "chips": chip_refs })
+	return btn
+
+
+func _on_architect_upgrade_pressed(building: Building, target_tier: int, cost_s: int, cost_f: int) -> void:
+	if not is_instance_valid(building) or not _resource_manager:
+		return
+	if not _resource_manager.can_afford(cost_s, cost_f):
+		return
+	if not _resource_manager.spend(cost_s, cost_f):
+		return
+	var scene_root: Node = get_tree().current_scene
+	var ibm: InheritorBuildingManager = InheritorBuildingManager.get_instance(scene_root)
+	if ibm != null:
+		ibm.set_architect_tier(building.owner_id, target_tier)
 	# Force panel rebuild so the button reflects the new tier immediately.
 	_last_building_id = -1
 
