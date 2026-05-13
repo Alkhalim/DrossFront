@@ -19,5 +19,4 @@ footprint_size = Vector3(6.5, 4.5, 5)
 placeholder_color = Color(0.32, 0.30, 0.34, 1)
 is_advanced = true
 prerequisites = [&"basic_foundry"]
-faction_lock = 1
 connection_range = 100.0
