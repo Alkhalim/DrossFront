@@ -4773,7 +4773,13 @@ func _process(delta: float) -> void:
 
 	var current_unit: UnitStatResource = _build_queue[0]
 	var efficiency: float = get_power_efficiency()
-	_build_progress += delta * efficiency
+	var net_speed: float = 1.0
+	if is_network_eligible():
+		var scene_root: Node = get_tree().current_scene
+		var cnm: ConveyorNetworkManager = scene_root.get_node_or_null("ConveyorNetworkManager") as ConveyorNetworkManager
+		if cnm != null:
+			net_speed = cnm.get_bonuses_for_building(self).speed_mult
+	_build_progress += delta * efficiency * net_speed
 
 	if _build_progress >= current_unit.build_time:
 		_build_progress = 0.0
