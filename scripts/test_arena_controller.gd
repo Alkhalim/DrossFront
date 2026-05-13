@@ -107,6 +107,15 @@ func _ready() -> void:
 		pm.name = "ProjectileManager"
 		add_child(pm)
 
+	# ConveyorNetworkManager — per-player Conveyor Network graph owner.
+	# Tracks connected components of Conveyor Nodes + production buildings
+	# and emits network_changed(owner_id) when topology changes.
+	if get_node_or_null("ConveyorNetworkManager") == null:
+		var cnm_script: GDScript = preload("res://scripts/conveyor_network_manager.gd")
+		var cnm: Node = cnm_script.new()
+		cnm.name = "ConveyorNetworkManager"
+		add_child(cnm)
+
 	# V3 Pillar 2 — Neural Mesh provider tracker. Maintains a snapshot
 	# of every Sable Mesh provider (Black Pylon + Overseer Harbinger
 	# etc.) so combat can read the per-position Mesh strength cheaply.
