@@ -1,26 +1,31 @@
 class_name ConveyorNetworkRenderer
 extends Node
-## Draws belt segments + support posts between connected network
-## members. Two MultiMeshInstance3Ds per owner_id:
-##   - "belts_p{N}": flat textured strip on the ground (PlaneMesh)
-##   - "posts_p{N}": small vertical pillars on each side at intervals
-##                  (CylinderMesh) so the belt reads as a raised object
+## Draws belt segments + structural frame (posts + side rails) between
+## connected network members. Two MultiMeshInstance3Ds per owner_id:
+##   - "ConveyorBelts_p{N}":  PlaneMesh, scrolling-chevron belt surface
+##   - "ConveyorStruct_p{N}": BoxMesh, shared by posts (vertical square
+##                            pillars) and side rails (horizontal beams
+##                            connecting the post tops along the belt
+##                            edge). Both use the same dark unshaded
+##                            material so they share an instance pool.
 ## Rebuilt on every network_changed signal. At realistic graph sizes
-## (≤50 nodes, ~80 edges, ~400 posts) the rebuild is O(n) and <1 ms.
+## (≤50 nodes, ~80 edges, ~600 struct pieces) the rebuild is O(n) and
+## comfortably under 1 ms.
 
 const BELT_WIDTH: float = 0.95     # world units across the belt
-const BELT_Y_OFFSET: float = 0.22  # raised above ground; posts hold it up
+const BELT_Y_OFFSET: float = 0.22  # belt height above ground; posts hold it
 const POST_SPACING: float = 2.0    # one post-pair every N world units
-const POST_RADIUS: float = 0.10
-const POST_SIDE_OFFSET: float = BELT_WIDTH * 0.55  # just outside the belt edge
+const POST_XY_SIZE: float = 0.08   # square post footprint
+const POST_SIDE_OFFSET: float = BELT_WIDTH * 0.5  # at the belt edge
+const RAIL_THICKNESS: float = 0.06  # rail square cross-section
 
-## Industrial belt shader: dark rubber-grey body, near-black side rails,
-## subtle perpendicular tread texture, and scrolling safety-orange
-## chevron arrows that point in the flow direction. INSTANCE_CUSTOM.rgb
-## feeds per-instance tint (fullness scales brightness); INSTANCE_CUSTOM.a
-## passes the belt's world-space length so chevron pitch stays constant
-## regardless of belt length. Edge darkening near UV.x = 0 and 1 gives
-## the belt a softly-AO'd 3D feel without needing real lighting.
+
+## Industrial belt shader: dark rubber-grey body, near-black side rails
+## via UV.x masking, subtle perpendicular tread texture, and scrolling
+## safety-orange chevron arrows that point in the flow direction.
+## INSTANCE_CUSTOM.rgb feeds per-instance tint (fullness scales
+## brightness); INSTANCE_CUSTOM.a passes the belt's world-space length
+## so chevron pitch stays constant regardless of belt length.
 const BELT_SHADER_CODE: String = """
 shader_type spatial;
 render_mode unshaded, blend_mix, depth_draw_opaque, cull_disabled;
@@ -40,20 +45,12 @@ void vertex() {
 void fragment() {
 	float u_centered = (UV.x - 0.5) * 2.0;
 	float v_world = UV.y * v_length;
-	// Reversed: chevrons now travel in the +flow direction (matches the
-	// player's mental model of belts moving "forward" along a→b).
 	float v_chevron = (v_world + abs(u_centered) * chevron_slope * 0.5 + TIME * scroll_speed) / chevron_world_period;
 	float phase = fract(v_chevron);
 	float band = max(smoothstep(0.08, 0.00, phase), smoothstep(0.92, 1.00, phase));
 
-	// Side rails: darken the outer ~10% of the belt width.
 	float rail_outer = smoothstep(0.00, 0.08, UV.x) * smoothstep(1.00, 0.92, UV.x);
-
-	// Belt-center to belt-edge ambient gradient — fake AO that makes
-	// the belt sit "inside" the side rails instead of floating flat.
 	float ao = 1.0 - 0.35 * abs(u_centered);
-
-	// Fine perpendicular tread texture across the belt surface.
 	float tread = 0.92 + 0.08 * sin(UV.x * 6.2831 * 7.0);
 
 	vec3 body = vec3(0.10, 0.09, 0.08) * tread * ao;
@@ -69,23 +66,25 @@ void fragment() {
 }
 """
 
-## Support-post shader: dark metal cylinders, plain unshaded but with a
-## vertical gradient (slightly brighter at top, near-black at bottom) so
-## the post reads as a 3D object rather than a flat dark spot.
-const POST_SHADER_CODE: String = """
+
+## Structural-frame shader (posts + side rails). Subtle vertical
+## gradient: near-black at the base, slightly brighter at the top,
+## so a square post reads as 3D rather than as a flat black sticker.
+const STRUCT_SHADER_CODE: String = """
 shader_type spatial;
 render_mode unshaded, blend_mix, depth_draw_opaque, cull_disabled;
 
 void fragment() {
 	float top_lit = clamp(UV.y, 0.0, 1.0);
-	vec3 base = mix(vec3(0.04, 0.04, 0.05), vec3(0.18, 0.17, 0.16), top_lit);
+	vec3 base = mix(vec3(0.05, 0.05, 0.06), vec3(0.20, 0.19, 0.18), top_lit);
 	ALBEDO = base;
 	ALPHA = 1.0;
 }
 """
 
-var _belts_by_owner: Dictionary = {}  # owner_id -> MultiMeshInstance3D (belts)
-var _posts_by_owner: Dictionary = {}  # owner_id -> MultiMeshInstance3D (posts)
+
+var _belts_by_owner: Dictionary = {}    # owner_id -> MultiMeshInstance3D (belts)
+var _struct_by_owner: Dictionary = {}   # owner_id -> MultiMeshInstance3D (posts + rails)
 
 
 func setup(cnm: ConveyorNetworkManager) -> void:
@@ -99,7 +98,7 @@ func _on_network_changed(owner_id: int) -> void:
 	var adj: Dictionary = cnm._adjacency.get(owner_id, {})
 	var meta: Dictionary = cnm._network_meta.get(owner_id, {})
 	var mem: Dictionary = cnm._membership.get(owner_id, {})
-	# Collect unique edges (a→b only when id(a) < id(b)).
+	# Unique edges (a→b only when id(a) < id(b)).
 	var edges: Array = []
 	for a in adj.keys():
 		if not is_instance_valid(a):
@@ -113,7 +112,7 @@ func _on_network_changed(owner_id: int) -> void:
 				edges.append({"a": a.global_position, "b": b.global_position, "fullness": int(m.get("production_total", 0))})
 
 	_rebuild_belts(owner_id, edges)
-	_rebuild_posts(owner_id, edges)
+	_rebuild_struct(owner_id, edges)
 
 
 func _rebuild_belts(owner_id: int, edges: Array) -> void:
@@ -123,7 +122,7 @@ func _rebuild_belts(owner_id: int, edges: Array) -> void:
 		mmi.name = "ConveyorBelts_p%d" % owner_id
 		var mm := MultiMesh.new()
 		var plane := PlaneMesh.new()
-		plane.size = Vector2(1.0, 1.0)  # unit plane, basis scales per-instance
+		plane.size = Vector2(1.0, 1.0)
 		mm.mesh = plane
 		mm.transform_format = MultiMesh.TRANSFORM_3D
 		mm.use_custom_data = true
@@ -141,9 +140,6 @@ func _rebuild_belts(owner_id: int, edges: Array) -> void:
 		var a: Vector3 = e.a + Vector3.UP * BELT_Y_OFFSET
 		var b: Vector3 = e.b + Vector3.UP * BELT_Y_OFFSET
 		var length: float = a.distance_to(b)
-		# PlaneMesh local-Y is its normal; local-X is across; local-Z is
-		# along. Set X = width_dir * BELT_WIDTH and Z = dir * length so
-		# the plane covers exactly the a→b strip at the right size.
 		var dir: Vector3 = (b - a).normalized() if length > 0.0001 else Vector3.RIGHT
 		var width_dir: Vector3 = Vector3.UP.cross(dir).normalized()
 		if width_dir.length_squared() < 0.0001:
@@ -156,38 +152,35 @@ func _rebuild_belts(owner_id: int, edges: Array) -> void:
 		mmi.multimesh.set_instance_custom_data(i, Color(bright, bright, bright, length))
 
 
-func _rebuild_posts(owner_id: int, edges: Array) -> void:
-	## One pair of support posts (left + right) every POST_SPACING units
-	## along each belt, plus an endpoint pair at each side. Gives the
-	## belt a visible "raised on legs" silhouette from any camera angle.
-	var post_count_total: int = 0
+func _rebuild_struct(owner_id: int, edges: Array) -> void:
+	## Posts + side rails share a unit BoxMesh and one ShaderMaterial.
+	## Each instance scales the basis to either a square post (tall thin
+	## box) or a long horizontal rail (thin box along the flow axis).
+	var total: int = 0
 	for e in edges:
 		var dist: float = (e.a as Vector3).distance_to(e.b as Vector3)
-		# 2 posts per spacing point + 2 at each end (4 endpoint posts).
-		# At minimum 4 posts per belt (just the endpoints).
-		var spans: int = int(ceil(dist / POST_SPACING))
-		post_count_total += (spans - 1) * 2 + 4
-	var mmi: MultiMeshInstance3D = _posts_by_owner.get(owner_id, null)
+		var fractions_count: int = int(ceil(dist / POST_SPACING)) + 1  # endpoints + intermediate
+		total += 2 * fractions_count  # left + right post per fraction
+		total += 2                    # left + right rail per belt
+	var mmi: MultiMeshInstance3D = _struct_by_owner.get(owner_id, null)
 	if mmi == null:
 		mmi = MultiMeshInstance3D.new()
-		mmi.name = "ConveyorPosts_p%d" % owner_id
+		mmi.name = "ConveyorStruct_p%d" % owner_id
 		var mm := MultiMesh.new()
-		var cyl := CylinderMesh.new()
-		cyl.top_radius = POST_RADIUS
-		cyl.bottom_radius = POST_RADIUS
-		cyl.height = 1.0  # scaled per-instance via basis
-		mm.mesh = cyl
+		var box := BoxMesh.new()
+		box.size = Vector3.ONE  # unit cube; basis does the sizing
+		mm.mesh = box
 		mm.transform_format = MultiMesh.TRANSFORM_3D
 		mmi.multimesh = mm
 		var shader := Shader.new()
-		shader.code = POST_SHADER_CODE
+		shader.code = STRUCT_SHADER_CODE
 		var mat := ShaderMaterial.new()
 		mat.shader = shader
-		cyl.material = mat
+		box.material = mat
 		add_child(mmi)
-		_posts_by_owner[owner_id] = mmi
-	mmi.multimesh.instance_count = post_count_total
-	var post_idx: int = 0
+		_struct_by_owner[owner_id] = mmi
+	mmi.multimesh.instance_count = total
+	var idx: int = 0
 	for e in edges:
 		var a: Vector3 = e.a as Vector3
 		var b: Vector3 = e.b as Vector3
@@ -196,23 +189,40 @@ func _rebuild_posts(owner_id: int, edges: Array) -> void:
 		var side: Vector3 = Vector3.UP.cross(dir).normalized()
 		if side.length_squared() < 0.0001:
 			side = Vector3.RIGHT
-		var spans: int = int(ceil(length / POST_SPACING))
-		# Emit posts at each fractional point along the belt + both
-		# endpoints. Endpoints are at f=0 and f=1; intermediate posts
-		# at i/spans for i in 1..spans-1.
-		var fractions: PackedFloat32Array = PackedFloat32Array([0.0, 1.0])
-		for i in range(1, spans):
-			fractions.append(float(i) / float(spans))
-		for f in fractions:
+
+		# --- Rails: thin horizontal beam along each side of the belt,
+		# sitting at belt height so the chevron strip visually rests on
+		# top of them.
+		var rail_y: float = BELT_Y_OFFSET - RAIL_THICKNESS * 0.5
+		for side_sign in [1.0, -1.0]:
+			var rail_center_xz: Vector3 = (a + b) * 0.5 + side * (side_sign * POST_SIDE_OFFSET)
+			var t_rail := Transform3D.IDENTITY
+			t_rail.origin = Vector3(rail_center_xz.x, rail_y, rail_center_xz.z)
+			# Local X across the side (thin), local Y vertical (thin),
+			# local Z along the belt (full length).
+			t_rail.basis = Basis(side * RAIL_THICKNESS, Vector3.UP * RAIL_THICKNESS, dir * length)
+			mmi.multimesh.set_instance_transform(idx, t_rail)
+			idx += 1
+
+		# --- Posts: square pillars at intervals (incl. both endpoints).
+		# Top of post = bottom of rail (BELT_Y_OFFSET - RAIL_THICKNESS).
+		var post_height: float = BELT_Y_OFFSET - RAIL_THICKNESS
+		var post_y_center: float = post_height * 0.5
+		var fractions_count: int = int(ceil(length / POST_SPACING)) + 1
+		for fi in range(fractions_count):
+			# Even distribution: f=0 at a, f=1 at b, and (fractions_count-2)
+			# intermediate points evenly between them.
+			var f: float = float(fi) / float(maxi(fractions_count - 1, 1))
 			var pt: Vector3 = a.lerp(b, f)
 			for side_sign in [1.0, -1.0]:
 				var post_pos: Vector3 = pt + side * (side_sign * POST_SIDE_OFFSET)
-				# CylinderMesh long axis is local Y. We want it standing
-				# vertical, height = BELT_Y_OFFSET so the top meets the
-				# bottom of the belt. Center the cylinder at half-height
-				# above ground so its base sits at y=0.
-				var t := Transform3D.IDENTITY
-				t.origin = Vector3(post_pos.x, BELT_Y_OFFSET * 0.5, post_pos.z)
-				t.basis = Basis().scaled(Vector3(1.0, BELT_Y_OFFSET, 1.0))
-				mmi.multimesh.set_instance_transform(post_idx, t)
-				post_idx += 1
+				var t_post := Transform3D.IDENTITY
+				t_post.origin = Vector3(post_pos.x, post_y_center, post_pos.z)
+				# Identity-basis scaled in world coords by (xy, height, xy)
+				# is correct here precisely because the basis IS identity —
+				# world axes line up with local axes. For tilted bases see
+				# the belt renderer comment about Basis.scaled scaling
+				# world axes.
+				t_post.basis = Basis().scaled(Vector3(POST_XY_SIZE, post_height, POST_XY_SIZE))
+				mmi.multimesh.set_instance_transform(idx, t_post)
+				idx += 1
