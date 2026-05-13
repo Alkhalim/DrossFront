@@ -1969,6 +1969,16 @@ func queue_unit_at_building(index: int) -> void:
 		return
 
 	var scene_root: Node = get_tree().current_scene
+
+	# Meridian contracts gate. Only applies when the producing building's
+	# owner is Meridian (faction_id == 1). For other factions the contract
+	# cost field is ignored (Task 11 adds UI affordability / button greying).
+	var mcm: MeridianContractsManager = scene_root.get_node_or_null("MeridianContractsManager") as MeridianContractsManager
+	var owner_faction_id: int = _resolve_owner_faction_id(target)
+	if mcm != null and owner_faction_id == 1:
+		if not mcm.can_afford(target.owner_id, unit_stats.contract_cost):
+			return
+
 	var cnm: ConveyorNetworkManager = scene_root.get_node_or_null("ConveyorNetworkManager") as ConveyorNetworkManager
 	var cost: Dictionary = {"salvage": unit_stats.cost_salvage, "fuel": unit_stats.cost_fuel}
 	if cnm != null:
@@ -1976,6 +1986,8 @@ func queue_unit_at_building(index: int) -> void:
 	resource_mgr.spend(cost.salvage, cost.fuel)
 	resource_mgr.add_population(unit_stats.population)
 	target.queue_unit(unit_stats)
+	if mcm != null and owner_faction_id == 1:
+		mcm.spend(target.owner_id, unit_stats.contract_cost)
 	if _audio:
 		_audio.play_production_started()
 
@@ -2003,6 +2015,19 @@ func _pick_lowest_queue_target() -> Building:
 			best_q = q
 			best = b
 	return best if best else primary
+
+
+func _resolve_owner_faction_id(building: Node) -> int:
+	## Returns the faction id (0=Anvil/Combine, 1=Sable/Meridian) of the
+	## building's owner. Delegates to Building._resolve_faction_id() when
+	## available (which reads MatchSettings.player_faction / enemy_faction),
+	## so the faction lookup stays consistent with how Building itself resolves
+	## it. Falls back to 0 (Anvil/no-gate) on any unexpected path.
+	if building == null:
+		return 0
+	if building.has_method("_resolve_faction_id"):
+		return building.call("_resolve_faction_id") as int
+	return 0
 
 
 func _crawler_count_for_owner(owner_id: int) -> int:
