@@ -250,6 +250,25 @@ var _deflect_until_msec: int = 0
 var _deflect_sign: float = 0.0
 var _deflect_angle_deg: float = 50.0
 
+## Heliarch Heat HP drain + Emergency Cooldown.
+## Heat drain accumulates floating-point damage and applies whole-HP chunks
+## so self-damage respects the integer take_damage path. Only active on
+## Heliarch units (_faction_id() == HELIARCH) — all branches are gated.
+var _heat_drain_accum: float = 0.0
+## Seconds remaining in Emergency Cooldown. While > 0 the unit is:
+##   - immobile (EMP-paralysis mechanism re-used)
+##   - fire-suppressed (silence re-applied each tick as a watchdog)
+##   - draining EMERGENCY_COOLDOWN_DRAIN_PER_SEC HP/sec
+## When it hits 0 the unit's heat resets to 0% via _on_emergency_cooldown_end.
+var _emergency_cooldown_remaining: float = 0.0
+const EMERGENCY_COOLDOWN_DURATION: float = 6.0
+const EMERGENCY_COOLDOWN_DRAIN_PER_SEC: float = 8.0
+## Set for one physics tick after heat first reaches 100%, cleared immediately.
+## If meltdown (player-triggered ability that kills the unit) fires before
+## the per-tick check, the meltdown path sets this flag so the auto-cooldown
+## does not ALSO trigger on the same frame.
+var _meltdown_triggered_this_cycle: bool = false
+
 ## Player colors.
 const PLAYER_COLOR := Color(0.08, 0.25, 0.85, 1.0)
 const ENEMY_COLOR := Color(0.80, 0.10, 0.10, 1.0)
@@ -5783,6 +5802,164 @@ func apply_emp_paralysis(duration: float) -> void:
 		combat.call("apply_silence", duration)
 
 
+## --- Heliarch: Heat HP drain + Emergency Cooldown ---
+## Spec §11_faction_mechanics.md lines 451-465.
+
+func _tick_heliarch_heat_drain(delta: float) -> void:
+	## Per-physics-tick heat HP drain for Heliarch units (faction_id == 3).
+	## Called from _per_frame_bookkeeping so it runs under BOTH the new
+	## GroundMovement path and the legacy path.
+	##
+	## Emergency Cooldown phase — this takes priority over Tier 2/3 drain:
+	## while _emergency_cooldown_remaining > 0, the unit is paralysed (via
+	## the emp mechanism) and drains EMERGENCY_COOLDOWN_DRAIN_PER_SEC HP/sec.
+	## When the timer expires the unit's heat resets to 0.
+	##
+	## Normal Tier 2/3 drain runs only when NOT in Emergency Cooldown and
+	## the unit is fully alive.
+	if _emergency_cooldown_remaining > 0.0:
+		_emergency_cooldown_remaining -= delta
+		# Watchdog: keep the EMP paralysis alive and the combat component
+		# silenced for the full cooldown window. apply_emp_paralysis uses
+		# maxf so if EC is 5.8 s remaining but emp is down to 0.4 s, this
+		# re-arms it to 5.8 s each tick, effectively keeping it pegged.
+		# Small epsilon (0.1 s) avoids one stutter frame at the very end.
+		if _emergency_cooldown_remaining > 0.0:
+			var remaining_clamp: float = _emergency_cooldown_remaining + 0.1
+			_emp_paralysis_remaining = maxf(_emp_paralysis_remaining, remaining_clamp)
+			var ec_combat: Node = get_combat()
+			if ec_combat and ec_combat.has_method("apply_silence"):
+				ec_combat.call("apply_silence", remaining_clamp)
+		# HP drain at 8 HP/sec. Accumulate fractional HP to avoid losing
+		# damage to truncation on high-frequency ticks.
+		_heat_drain_accum += EMERGENCY_COOLDOWN_DRAIN_PER_SEC * delta
+		var drain_int: int = int(_heat_drain_accum)
+		if drain_int >= 1:
+			_heat_drain_accum -= float(drain_int)
+			take_damage(drain_int, null)
+		if _emergency_cooldown_remaining <= 0.0:
+			_emergency_cooldown_remaining = 0.0
+			_on_emergency_cooldown_end()
+		return
+
+	# Normal Tier 2/3 passive drain. Not active during Emergency Cooldown.
+	# Heat gauge values are placeholder 0-100 percents stored in the
+	# Heliarch unit stats (Phase 3); for now we read from the stat resource.
+	# Until Heliarch units exist this branch never fires because _faction_id()
+	# will never return 3 for the current unit roster.
+	var heat_pct: float = _read_heat_pct()
+	var tier: int = _heat_tier(heat_pct)
+	if tier == 2:
+		_heat_drain_accum += 2.0 * delta
+	elif tier == 3:
+		_heat_drain_accum += 5.0 * delta
+	var drain_t23: int = int(_heat_drain_accum)
+	if drain_t23 >= 1:
+		_heat_drain_accum -= float(drain_t23)
+		take_damage(drain_t23, null)
+
+	# Emergency Cooldown trigger: if we just crossed 100% Heat and no
+	# meltdown was triggered this cycle, enter cooldown.
+	if tier == 3 and _emergency_cooldown_remaining <= 0.0 and not _meltdown_triggered_this_cycle:
+		_enter_emergency_cooldown()
+	# Reset the per-cycle meltdown flag so it doesn't latch across frames.
+	_meltdown_triggered_this_cycle = false
+
+
+func _read_heat_pct() -> float:
+	## Read this unit's current Heat percentage (0.0-1.0).
+	## Heat is a Heliarch-faction stat. Until Heliarch unit resources
+	## exist (Phase 3) the stat resource won't have a `heat_pct` field,
+	## so this safely returns 0.0. Phase 3 will add a `heat_pct: float`
+	## member variable to Heliarch units and wire it here.
+	if has_meta("heat_pct"):
+		return get_meta("heat_pct") as float
+	return 0.0
+
+
+func _set_heat_pct(value: float) -> void:
+	## Write this unit's Heat percentage. Clamped to [0, 1].
+	## Uses the same meta-property path as _read_heat_pct so Phase 3
+	## can swap to a typed field without touching the call sites.
+	set_meta("heat_pct", clampf(value, 0.0, 1.0))
+
+
+func _heat_tier(heat_pct: float) -> int:
+	## Returns the Heat tier (0-3) from a 0-1 fraction.
+	## Spec §11_faction_mechanics.md lines 446-449:
+	##   Tier 0: 0-32 %   Tier 1: 33-65 %   Tier 2: 66-99 %   Tier 3: 100 %
+	if heat_pct >= 1.0:
+		return 3
+	if heat_pct >= 0.66:
+		return 2
+	if heat_pct >= 0.33:
+		return 1
+	return 0
+
+
+func _enter_emergency_cooldown() -> void:
+	## Transition into Emergency Cooldown state.
+	## Immobilises + silences the unit for EMERGENCY_COOLDOWN_DURATION
+	## seconds; _tick_heliarch_heat_drain handles the HP drain and
+	## termination logic while the timer runs.
+	_emergency_cooldown_remaining = EMERGENCY_COOLDOWN_DURATION
+	_heat_drain_accum = 0.0  # Fresh accumulator for the EC drain phase.
+	# stop() zeroes velocity and clears move_target/has_move_order.
+	stop()
+	# apply_emp_paralysis handles both movement and fire suppression via
+	# the same mechanism Meridian's EChO uses — no duplicate code.
+	apply_emp_paralysis(EMERGENCY_COOLDOWN_DURATION + 0.2)
+	# Visual feedback: tint all chassis materials deep orange-red to signal
+	# the unit is overheating and locked. Cleared by _on_emergency_cooldown_end.
+	_apply_emergency_cooldown_tint(true)
+
+
+func _on_emergency_cooldown_end() -> void:
+	## Called when Emergency Cooldown timer expires.
+	## Resets Heat to 0 % and restores the unit's visual state.
+	_set_heat_pct(0.0)
+	_heat_drain_accum = 0.0
+	_apply_emergency_cooldown_tint(false)
+	# Movement and firing resume naturally: _emp_paralysis_remaining has
+	# already counted down to 0 (the watchdog pegged it to the EC timer,
+	# which just expired), and the silence timer on the combat component
+	# also expires at the same cadence.
+
+
+func _apply_emergency_cooldown_tint(active: bool) -> void:
+	## Visual feedback for Emergency Cooldown. Sets (or clears) an
+	## intense orange-red emission on the unit's chassis members.
+	## This is MVP — spec line 591-592 calls for steam VFX in Phase 3.
+	##
+	## Safety: we only operate on surface OVERRIDE materials (set per-unit
+	## in the mesh build helpers). If no override is set for a surface we
+	## skip it — we never mutate the shared mesh material, which would
+	## tint every unit using the same resource.
+	for member: Node3D in _member_meshes:
+		if not is_instance_valid(member):
+			continue
+		# Walk the member's children to find surface MeshInstance3Ds.
+		for child: Node in member.get_children():
+			var mi: MeshInstance3D = child as MeshInstance3D
+			if not mi:
+				continue
+			var n_surfs: int = mi.get_surface_override_material_count()
+			for surf: int in range(n_surfs):
+				var mat: Material = mi.get_surface_override_material(surf)
+				var std: StandardMaterial3D = mat as StandardMaterial3D
+				if not std:
+					continue  # No per-unit override — skip to avoid touching shared resource.
+				if active:
+					std.emission_enabled = true
+					std.emission = Color(1.0, 0.2, 0.05)
+					std.emission_energy_multiplier = 3.5
+				else:
+					# Restore: clear the forced emission. The material's normal
+					# emission state (if any) was already set by the build helper;
+					# we only clear emission_enabled when it was the EC override.
+					std.emission_enabled = false
+
+
 ## --- Active abilities ---
 
 func has_ability() -> bool:
@@ -5833,6 +6010,8 @@ func trigger_ability(target_pos: Vector3 = Vector3.INF) -> bool:
 			fired = _ability_barrier_bloom()
 		"Plant Charge":
 			fired = _ability_plant_charge()
+		"Meltdown":
+			fired = _ability_meltdown()
 		_:
 			# Unknown ability name on stats — don't crash, just
 			# refuse to fire so the player notices.
@@ -6065,6 +6244,19 @@ func _resolve_plant_charge(at_pos: Vector3, radius: float, src_owner: int) -> vo
 		if b.has_method("take_damage"):
 			b.call("take_damage", 480, null)
 	_spawn_pulse_visual_at(at_pos, radius, Color(1.0, 0.5, 0.15))
+
+
+func _ability_meltdown() -> bool:
+	## Heliarch Meltdown — player-triggered self-destruct at 100% Heat.
+	## Phase 3 will implement the full area-damage effect (the unit sacrifices
+	## itself for a large AOE hit). For now this is a stub: it sets the
+	## _meltdown_triggered_this_cycle flag (preventing Emergency Cooldown from
+	## also triggering on the same tick) and kills the unit.
+	## Spec §11_faction_mechanics.md lines 457-465.
+	_meltdown_triggered_this_cycle = true
+	# TODO(Phase 3): deal area damage proportional to remaining HP before dying.
+	_die()
+	return true
 
 
 func _spawn_pulse_visual_at(at_pos: Vector3, radius: float, tint: Color) -> void:
@@ -6431,6 +6623,17 @@ func _per_frame_bookkeeping(delta: float) -> void:
 	# Active-ability cooldown tick.
 	if _ability_cd_remaining > 0.0:
 		_ability_cd_remaining = maxf(0.0, _ability_cd_remaining - delta)
+
+	# Heliarch Heat HP drain + Emergency Cooldown. Faction-gated to
+	# MatchSettingsClass.FactionId.HELIARCH (== 3). The inner function
+	# checks heat tiers and runs the Emergency Cooldown state machine;
+	# it no-ops harmlessly for non-Heliarch units because _read_heat_pct()
+	# returns 0.0 (Tier 0 — no drain) until Heliarch unit resources exist.
+	# alive_count guard: a dying unit (alive_count == 0) is in _die() and
+	# take_damage calls inside _tick_heliarch_heat_drain would be no-ops
+	# anyway, but skip the entire block to be safe.
+	if alive_count > 0 and _faction_id() == 3:  # 3 == MatchSettingsClass.FactionId.HELIARCH
+		_tick_heliarch_heat_drain(delta)
 
 	# Courier track-rib scrolling — slide the per-tread plate
 	# strip along its segment when the tank's actually moving, so
