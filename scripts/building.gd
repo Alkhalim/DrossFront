@@ -4840,6 +4840,14 @@ func _spawn_unit(unit_stats: UnitStatResource) -> void:
 	# jitter could pull the spawn back inside the obstacle.
 	var lateral: Vector3 = Vector3(-fwd.z, 0.0, fwd.x)
 	spawn_pos += lateral * randf_range(-1.0, 1.0)
+	# Clearance check — if the chosen spawn lands inside another
+	# obstacle (rock placed close to the foundry, neighbouring building's
+	# collision lane, etc.) the new unit ends up wedged with no way out.
+	# Try the original spot first, then fan around the building in 45°
+	# increments, then push out further along the rally direction.
+	# Returns the original position as a worst-case fallback so spawn
+	# always succeeds even on a fully-packed map.
+	spawn_pos = _find_clear_spawn_pos(spawn_pos, fwd, safe_radius)
 
 	var units_node: Node = get_tree().current_scene.get_node_or_null("Units")
 	if units_node:
@@ -4853,6 +4861,65 @@ func _spawn_unit(unit_stats: UnitStatResource) -> void:
 	var audio: AudioManager = get_tree().current_scene.get_node_or_null("AudioManager") as AudioManager
 	if audio:
 		audio.play_production_complete(global_position)
+
+
+## Find a spawn position with clearance from obstacles. Tries the
+## initial spot, then 7 alternate angles (45° increments) around the
+## building at the same radius, then pushes out further along the
+## original rally direction. Returns initial_pos as a worst-case
+## fallback so spawn always succeeds (physics depenetration will sort
+## minor overlaps; this only catches the catastrophic
+## 'spawn-inside-a-rock' case).
+func _find_clear_spawn_pos(initial_pos: Vector3, fwd: Vector3, base_radius: float) -> Vector3:
+	const UNIT_CLEARANCE_RADIUS: float = 1.5  # generic ground-unit body radius
+	if _is_spawn_clear(initial_pos, UNIT_CLEARANCE_RADIUS):
+		return initial_pos
+	# Try 7 alternate angles around the building at the same safe_radius.
+	for i: int in range(1, 8):
+		var angle_rad: float = float(i) * PI / 4.0
+		var rotated_fwd: Vector3 = fwd.rotated(Vector3.UP, angle_rad)
+		var alt_pos: Vector3 = global_position + rotated_fwd * base_radius
+		if _is_spawn_clear(alt_pos, UNIT_CLEARANCE_RADIUS):
+			return alt_pos
+	# All angles around the building blocked — push out further along
+	# the original rally direction.
+	for ext: float in [1.5, 3.0, 5.0]:
+		var farther: Vector3 = initial_pos + fwd * ext
+		if _is_spawn_clear(farther, UNIT_CLEARANCE_RADIUS):
+			return farther
+	# Worst case — return original. Physics will sort minor overlap;
+	# severe wedging means the player packed the base too tight, which
+	# is a level-design issue not a code one.
+	return initial_pos
+
+
+func _is_spawn_clear(pos: Vector3, radius: float) -> bool:
+	## Sphere-overlap query against the obstacle layer (3 = bit value 4).
+	## Returns false if any non-self body overlaps the sphere.
+	var world: World3D = get_world_3d()
+	if world == null:
+		return true  # headless context — no physics, assume clear
+	var space: PhysicsDirectSpaceState3D = world.direct_space_state
+	if space == null:
+		return true
+	var query := PhysicsShapeQueryParameters3D.new()
+	var shape := SphereShape3D.new()
+	shape.radius = radius
+	query.shape = shape
+	query.transform = Transform3D(Basis(), pos)
+	# Layer 3 = obstacle (buildings, terrain props, rocks). Bit value
+	# 1 << 2 = 4. Matches the collision layer the static-body
+	# obstacles are placed on (see salvage_crawler.gd:142-150 for
+	# the project's layer convention).
+	query.collision_mask = 4
+	# Exclude this building's own collision body so the spawn position
+	# isn't reported as 'blocked by its own building'. _collision is
+	# the building's CollisionShape3D — we want the StaticBody3D RID,
+	# which is `self`'s RID since Building extends StaticBody3D.
+	if self is StaticBody3D:
+		query.exclude = [(self as StaticBody3D).get_rid()]
+	var hits: Array = space.intersect_shape(query, 1)
+	return hits.is_empty()
 
 
 func get_queue_size() -> int:
