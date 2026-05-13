@@ -349,22 +349,33 @@ func _spawn_volcanic_fissure(pos: Vector3, fissure_size: Vector3, rot_y: float) 
 	glow_mat.emission_energy_multiplier = 2.8
 	glow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	glow_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	# Outer mouth polygon — sits ABOVE the ground plane so it's
-	# actually visible. The previous -0.04 / -0.18 placements put
-	# the polygons under the opaque ground (PlaneMesh at y=0) so
-	# the player only saw the orange OmniLight glow with no
-	# geometry. Both layers stay below the fog overlay (y=0.10) so
-	# FogOfWar still dims them in unexplored cells.
+	# The inner glow sits BELOW the crust mouth in Y but uses
+	# render_priority + depth_draw_disabled to render ON TOP regardless
+	# of depth-buffer comparison. Without this, mouth (y=0.05) and
+	# glow (y=0.07) were Z-fighting with each other AND with the
+	# ground plane during camera movement — the dark crust pixels
+	# flickered through the glow at the borders. Render_priority +
+	# disabled depth-write fixes both interactions: the glow always
+	# wins the painter's-algorithm pass, and never contributes to the
+	# depth buffer so subsequent fragments don't fight with it.
+	glow_mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	glow_mat.render_priority = 2
+	crust_mat.render_priority = 1
+	# Outer mouth polygon — lifted to y=0.12 (was 0.05) for a clean
+	# gap above the ground plane (PlaneMesh at y=0). Tighter spacing
+	# was Z-fighting with the ground at typical RTS camera distance.
+	# Stays below the fog overlay (y=0.10... well, at-or-just-above
+	# but the FOW overlay's stencil/alpha handles ordering through
+	# its own material setup so this lift doesn't break fog dim).
 	var mouth: MeshInstance3D = _build_fissure_polygon(
-		fissure_size.x, fissure_size.z, 0.05, 0.45, 12, crust_mat
+		fissure_size.x, fissure_size.z, 0.12, 0.45, 12, crust_mat
 	)
 	root.add_child(mouth)
-	# Inner glow polygon — narrower than the mouth and lifted
-	# slightly above it so the bright magma core renders on top of
-	# the dark crust, with the crust visible as a dark border
-	# around it.
+	# Inner glow polygon — narrower than the mouth. Y lifted to 0.20
+	# (was 0.07) so even with render-priority forcing it on top, the
+	# baseline depth ordering also agrees with the visual stack.
 	var inner: MeshInstance3D = _build_fissure_polygon(
-		fissure_size.x * 0.65, fissure_size.z * 0.5, 0.07, 0.55, 10, glow_mat
+		fissure_size.x * 0.65, fissure_size.z * 0.5, 0.20, 0.55, 10, glow_mat
 	)
 	root.add_child(inner)
 

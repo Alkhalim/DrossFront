@@ -12,13 +12,28 @@ const MAX_PROJECTILES_PER_BUCKET: int = 256
 ## Singleton lookup. Mirrors the SpatialIndex / NavRouter / FogOfWar
 ## pattern — find the manager under the current scene root, fall back
 ## to null for headless contexts.
+##
+## Lazy-attach: if the scene root has no ProjectileManager, create
+## one and add it. Mirrors SpatialIndex / NavRouter pattern so every
+## arena scene picks up combat rendering automatically — the test
+## arenas under scenes/test_arenas/ each have their own controller
+## script that doesn't wire infrastructure singletons explicitly,
+## so without this fallback Borzoi (and all other units) silently
+## skip projectile rendering when CombatComponent gets back a null
+## manager.
 static func get_instance(scene_root: Node) -> ProjectileManager:
 	if scene_root == null:
 		return null
 	var found: Node = scene_root.get_node_or_null("ProjectileManager")
-	if found == null:
-		return null
-	return found as ProjectileManager
+	if found != null:
+		return found as ProjectileManager
+	# Lazy-create. Use call_deferred so we don't trip the
+	# 'Parent node is busy setting up children' guard if get_instance
+	# is called during scene init from a child's _ready.
+	var pm := ProjectileManager.new()
+	pm.name = "ProjectileManager"
+	scene_root.add_child.call_deferred(pm)
+	return pm
 
 
 ## Per-(style, color) MultiMeshInstance3D bucket.
