@@ -39,7 +39,14 @@ var _construction_progress: float = 0.0
 
 ## Production queue — array of UnitStatResource.
 var _build_queue: Array[UnitStatResource] = []
+## Slot-0 progress kept as a plain float for backward-compat with HUD / any
+## other reader that does building.get("_build_progress"). Always kept in
+## sync with _build_progress_slots[0].
 var _build_progress: float = 0.0
+## Per-slot progress counters. Slot i tracks _build_queue[i]. Resized lazily
+## by the build tick each frame to match _resolve_build_slots(). Single-slot
+## buildings (all non-Meridian-HQ) keep size 1 — no behaviour change.
+var _build_progress_slots: PackedFloat32Array = PackedFloat32Array([0.0])
 
 ## Rally point for produced units.
 ## Sentinel value used during _ready before rally is initialised so a
@@ -3589,8 +3596,15 @@ func cancel_queue_at(index: int) -> bool:
 	if resource_manager and resource_manager.has_method("remove_population"):
 		resource_manager.remove_population(unit_stats.population)
 	_build_queue.remove_at(index)
-	if index == 0:
-		_build_progress = 0.0
+	# Shift per-slot progress values down from the cancelled index so slot
+	# indices stay aligned with queue indices after the removal.
+	var slots_size: int = _build_progress_slots.size()
+	if index < slots_size:
+		for shift_idx: int in range(index, slots_size - 1):
+			_build_progress_slots[shift_idx] = _build_progress_slots[shift_idx + 1]
+		_build_progress_slots[slots_size - 1] = 0.0
+	# Keep the legacy alias in sync.
+	_build_progress = _build_progress_slots[0] if not _build_queue.is_empty() else 0.0
 	return true
 
 
@@ -3636,6 +3650,27 @@ func is_network_eligible() -> bool:
 	# headquarters.tres has connection_range = 10 for Combine's sake.
 	var faction: int = _resolve_faction_id()
 	return faction == 0  # 0 = Anvil/Combine; 1 = Sable/Meridian
+
+
+func _resolve_build_slots() -> int:
+	## Returns the number of units that can advance in parallel from this
+	## building's queue. Default 1 (every faction / building type). Meridian
+	## HQ scales 2 / 3 / 4 with Intelligence Network tier:
+	##   Tier 0 (no Intel Network) → 2 slots
+	##   Tier 1 (Intel Network built) → 3 slots
+	##   Tier 2+ (upgraded) → 4 slots  (cap)
+	## Formula: slot_count = min(2 + tier, 4).
+	if stats == null or stats.building_id != &"headquarters":
+		return 1
+	var faction: int = _resolve_faction_id()
+	if faction != 1:  # 1 = Sable / Meridian
+		return 1
+	var scene_root: Node = get_tree().current_scene
+	var mcm: MeridianContractsManager = scene_root.get_node_or_null("MeridianContractsManager") as MeridianContractsManager
+	if mcm == null:
+		return 2  # safe Meridian baseline when manager isn't attached yet
+	var tier: int = mcm.get_intel_network_tier(owner_id)
+	return mini(2 + tier, 4)
 
 
 func get_effective_power_consumption() -> int:
@@ -5267,7 +5302,21 @@ func _process(delta: float) -> void:
 	if _build_queue.is_empty():
 		return
 
-	var current_unit: UnitStatResource = _build_queue[0]
+	# ---- Multi-slot build tick ----
+	# _resolve_build_slots() returns 1 for every faction / building type
+	# except Meridian HQ, which returns 2-4 based on Intel Network tier.
+	var slot_count: int = _resolve_build_slots()
+
+	# Lazily resize the per-slot progress array, preserving existing entries
+	# and zero-filling any newly added slots.
+	var prev_size: int = _build_progress_slots.size()
+	if prev_size != slot_count:
+		_build_progress_slots.resize(slot_count)
+		for fill_idx: int in range(prev_size, slot_count):
+			_build_progress_slots[fill_idx] = 0.0
+
+	# Resolve speed modifiers once — all slots share the same efficiency /
+	# conveyor-network speed for this building.
 	var efficiency: float = get_power_efficiency()
 	var net_speed: float = 1.0
 	if is_network_eligible():
@@ -5275,12 +5324,26 @@ func _process(delta: float) -> void:
 		var cnm: ConveyorNetworkManager = scene_root.get_node_or_null("ConveyorNetworkManager") as ConveyorNetworkManager
 		if cnm != null:
 			net_speed = cnm.get_bonuses_for_building(self).speed_mult
-	_build_progress += delta * efficiency * net_speed
 
-	if _build_progress >= current_unit.build_time:
-		_build_progress = 0.0
-		_build_queue.remove_at(0)
-		_spawn_unit(current_unit)
+	# Advance each active slot. Iterate in reverse so removing an entry from
+	# _build_queue doesn't invalidate lower slot indices that we haven't
+	# visited yet.
+	var active_slots: int = mini(slot_count, _build_queue.size())
+	for slot_idx: int in range(active_slots - 1, -1, -1):
+		var slot_unit: UnitStatResource = _build_queue[slot_idx]
+		_build_progress_slots[slot_idx] += delta * efficiency * net_speed
+		if _build_progress_slots[slot_idx] >= slot_unit.build_time:
+			# Unit complete — spawn it, remove from queue, shift progress
+			# values down so slot indices still line up with queue indices.
+			_spawn_unit(slot_unit)
+			_build_queue.remove_at(slot_idx)
+			for shift_idx: int in range(slot_idx, _build_progress_slots.size() - 1):
+				_build_progress_slots[shift_idx] = _build_progress_slots[shift_idx + 1]
+			_build_progress_slots[_build_progress_slots.size() - 1] = 0.0
+
+	# Keep the legacy float alias in sync with slot-0 so HUD / external
+	# readers that do building.get("_build_progress") still see slot-0 progress.
+	_build_progress = _build_progress_slots[0] if not _build_queue.is_empty() else 0.0
 
 
 func _spawn_unit(unit_stats: UnitStatResource) -> void:
