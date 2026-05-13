@@ -222,9 +222,30 @@ func fire(
 	_state_pending_splash_radius[idx] = splash_radius
 	_state_pending_splash_damage[idx] = splash_damage
 	_state_pending_shooter_owner_id[idx] = shooter_owner_id
-	# Missile flight time + arc — set later in Task 5; bullets ignore.
-	_state_total_flight[idx] = 0.0
-	_state_arc_height[idx] = 0.0
+	# Per-style flight-time + arc-height setup. Bullet/shell are
+	# straight-line, total_flight=0 unused. Missile/mortar/bomb arc
+	# parabolically — total_flight scales with distance so the arc
+	# always lands on target regardless of fire-to-target distance.
+	var dist_to_target: float = start_pos.distance_to(target_pos)
+	match style:
+		"missile":
+			_state_total_flight[idx] = maxf(dist_to_target / 12.0, 0.5)
+			_state_arc_height[idx] = clampf(dist_to_target * 0.25, 2.0, 8.0)
+		"bomb":
+			_state_total_flight[idx] = maxf(dist_to_target / 9.0, 0.7)
+			_state_arc_height[idx] = clampf(dist_to_target * 0.10, 0.5, 3.0)
+		"mortar":
+			_state_total_flight[idx] = maxf(dist_to_target / 11.0, 0.6)
+			_state_arc_height[idx] = clampf(dist_to_target * 0.55, 6.0, 14.0)
+		"shell":
+			# Slower than bullet but straight-line.
+			if speed <= 0.0:
+				_state_speed[idx] = 70.0
+			_state_total_flight[idx] = 0.0
+			_state_arc_height[idx] = 0.0
+		_:
+			_state_total_flight[idx] = 0.0
+			_state_arc_height[idx] = 0.0
 	# Initial transform write so the projectile is visible on frame 0.
 	_write_transform(idx)
 	return true
@@ -267,12 +288,10 @@ func _process(delta: float) -> void:
 			i += 1
 			continue
 		var style_int: int = _state_style[i]
-		if style_int == 0:  # bullet
-			_update_bullet(i, delta)
-		# Other styles: stub for now, freed immediately to keep the
-		# manager from leaking slots until Tasks 5/6 land them.
-		else:
-			_free_slot(i)
+		match style_int:
+			0: _update_bullet(i, delta)
+			1, 3, 4: _update_arc(i, delta)  # missile, mortar, bomb
+			2: _update_shell(i, delta)
 		i += 1
 
 
@@ -311,3 +330,102 @@ func _spawn_impact_vfx(idx: int) -> void:
 	var audio: Node = scene.get_node_or_null("AudioManager")
 	if audio != null and audio.has_method("play_weapon_impact"):
 		audio.call("play_weapon_impact", pos)
+
+
+func _update_arc(idx: int, delta: float) -> void:
+	# Parabolic arc — XZ lerp + height parabola, same math the legacy
+	# Projectile missile path used.
+	_state_life[idx] += delta
+	var t_norm: float = clampf(_state_life[idx] / _state_total_flight[idx], 0.0, 1.0)
+	var start: Vector3 = _state_start[idx]
+	var target: Vector3 = _state_target[idx]
+	var xz: Vector3 = start.lerp(target, t_norm)
+	var arc_y: float = _state_arc_height[idx] * 4.0 * t_norm * (1.0 - t_norm)
+	var pos := Vector3(xz.x, xz.y + arc_y, xz.z)
+	_state_pos[idx] = pos
+	_write_transform(idx)
+	if t_norm >= 1.0:
+		_apply_pending_damage(idx)
+		_spawn_impact_vfx(idx)
+		_free_slot(idx)
+
+
+func _apply_pending_damage(idx: int) -> void:
+	# Deferred damage — missile/shell/mortar/bomb apply on impact (not
+	# at fire-tick like bullets). Mirrors Projectile._spawn_impact's
+	# pending_damage path.
+	var dmg: int = _state_pending_damage[idx]
+	if dmg <= 0:
+		return
+	var target: Node3D = _state_pending_target[idx]
+	if target != null and is_instance_valid(target):
+		var alive: bool = true
+		if "alive_count" in target:
+			alive = (target.get("alive_count") as int) > 0
+		if alive and target.has_method("take_damage"):
+			var shooter: Node3D = _state_pending_shooter[idx]
+			var attacker: Node3D = shooter if (shooter != null and is_instance_valid(shooter)) else null
+			target.call("take_damage", dmg, attacker)
+	# Splash. Mirrors the splash branch in Projectile._spawn_impact —
+	# SpatialIndex narrow-phase, friend/foe filter, edge-case handling
+	# for freed-mid-flight shooter.
+	var splash_r: float = _state_pending_splash_radius[idx]
+	var splash_d: int = _state_pending_splash_damage[idx]
+	if splash_r > 0.0 and splash_d > 0:
+		_apply_splash(_state_pos[idx], splash_r, splash_d, _state_pending_target[idx],
+				_state_pending_shooter[idx], _state_pending_shooter_owner_id[idx])
+
+
+func _apply_splash(pos: Vector3, radius: float, dmg: int, primary: Node3D,
+		shooter: Node3D, shooter_owner_id: int) -> void:
+	var scene: Node = get_tree().current_scene if get_tree() else null
+	if scene == null:
+		return
+	var idx: SpatialIndex = SpatialIndex.get_instance(scene)
+	if idx == null:
+		return
+	var registry: Node = scene.get_node_or_null("PlayerRegistry")
+	var owner_unknown: bool = shooter_owner_id < 0
+	var splash_attacker: Node3D = shooter if (shooter != null and is_instance_valid(shooter)) else null
+	for raw: Variant in idx.nearby(pos, radius):
+		if raw == null or not is_instance_valid(raw):
+			continue
+		var ent: Node = raw as Node
+		if ent == null or ent == primary:
+			continue
+		if not ent.has_method("take_damage"):
+			continue
+		var ent_owner: int = (ent.get("owner_id") as int) if "owner_id" in ent else 0
+		var hostile: bool = true
+		if not owner_unknown and registry != null and registry.has_method("are_enemies"):
+			hostile = registry.call("are_enemies", shooter_owner_id, ent_owner)
+		elif not owner_unknown:
+			hostile = ent_owner != shooter_owner_id
+		if not hostile:
+			continue
+		if "alive_count" in ent and (ent.get("alive_count") as int) <= 0:
+			continue
+		if pos.distance_to((ent as Node3D).global_position) <= radius:
+			ent.call("take_damage", dmg, splash_attacker)
+
+
+func _update_shell(idx: int, delta: float) -> void:
+	# Heavy AP shell — same straight-line movement as bullet but
+	# slower. Damage applies at impact (deferred path, like missile).
+	_state_life[idx] += delta
+	if _state_life[idx] > 1.5:
+		_free_slot(idx)
+		return
+	var pos: Vector3 = _state_pos[idx]
+	var target: Vector3 = _state_target[idx]
+	var to_target: Vector3 = target - pos
+	var dist: float = to_target.length()
+	var step: float = _state_speed[idx] * delta
+	if step >= dist or dist < 0.1:
+		_apply_pending_damage(idx)
+		_spawn_impact_vfx(idx)
+		_free_slot(idx)
+		return
+	pos += (to_target / dist) * step
+	_state_pos[idx] = pos
+	_write_transform(idx)
