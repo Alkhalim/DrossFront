@@ -159,24 +159,65 @@ func _ensure_bucket(style: String, color: Color) -> MultiMeshInstance3D:
 
 
 func _build_mesh_for_style(style: String, color: Color) -> Mesh:
-	# Reuse the cached meshes Projectile already builds. Each style's
-	# mesh shape stays the same as the legacy per-Projectile path; only
-	# the rendering path changes (one shared MultiMesh instead of one
-	# MeshInstance3D per projectile).
-	# For now, return a placeholder cylinder. Style-specific meshes
-	# land in Task 6 (shell, mortar, bomb each have multi-surface
-	# meshes that need to fold into one ArrayMesh for MultiMesh).
-	var cyl := CylinderMesh.new()
-	cyl.top_radius = 0.04
-	cyl.bottom_radius = 0.05
-	cyl.height = 0.34
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = color
 	mat.emission_enabled = true
 	mat.emission = color
-	mat.emission_energy_multiplier = 3.0
-	cyl.surface_set_material(0, mat)
-	return cyl
+	match style:
+		"bullet":
+			var cyl := CylinderMesh.new()
+			cyl.top_radius = 0.04
+			cyl.bottom_radius = 0.05
+			cyl.height = 0.34
+			mat.emission_energy_multiplier = 3.0
+			cyl.surface_set_material(0, mat)
+			return cyl
+		"missile":
+			var cyl := CylinderMesh.new()
+			cyl.top_radius = 0.04
+			cyl.bottom_radius = 0.10
+			cyl.height = 0.40
+			mat.emission_energy_multiplier = 2.5
+			cyl.surface_set_material(0, mat)
+			return cyl
+		"shell":
+			var cyl := CylinderMesh.new()
+			cyl.top_radius = 0.06
+			cyl.bottom_radius = 0.16
+			cyl.height = 0.62
+			cyl.radial_segments = 12
+			mat.emission_energy_multiplier = 2.4
+			cyl.surface_set_material(0, mat)
+			return cyl
+		"mortar":
+			# Fidelity reduced — fins folded into the body silhouette
+			# at ~3× radial extent to read as fin-stabilized.
+			var cyl := CylinderMesh.new()
+			cyl.top_radius = 0.07
+			cyl.bottom_radius = 0.18
+			cyl.height = 0.50
+			cyl.radial_segments = 12
+			mat.emission_energy_multiplier = 0.6
+			cyl.surface_set_material(0, mat)
+			return cyl
+		"bomb":
+			var cyl := CylinderMesh.new()
+			cyl.top_radius = 0.05
+			cyl.bottom_radius = 0.18
+			cyl.height = 0.65
+			cyl.radial_segments = 12
+			mat.emission_energy_multiplier = 0.4
+			cyl.surface_set_material(0, mat)
+			return cyl
+		_:
+			# Unknown style — fall back to bullet visual.
+			var cyl := CylinderMesh.new()
+			cyl.top_radius = 0.04
+			cyl.bottom_radius = 0.05
+			cyl.height = 0.34
+			mat.emission_energy_multiplier = 3.0
+			cyl.surface_set_material(0, mat)
+			return cyl
 
 
 ## Public entry point — replaces Projectile.create() for non-beam styles.
