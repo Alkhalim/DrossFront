@@ -2516,6 +2516,11 @@ func _rebuild_production_buttons(building: Building) -> void:
 	# Conveyor Network Manager — used to show discounted costs on each unit
 	# button so the player can see what they'll actually be charged.
 	var cnm_prod: Node = get_tree().current_scene.get_node_or_null("ConveyorNetworkManager") if get_tree() else null
+	# Meridian Protocol — determine producer faction once so each button
+	# can show a contract-cost chip and the affordability pass can gate on it.
+	var producer_faction_id: int = 0
+	if building.has_method("_resolve_faction_id"):
+		producer_faction_id = building.call("_resolve_faction_id") as int
 	var unlocked_idx: int = 0
 	for unit_stat: UnitStatResource in producible_all:
 		var unlocked: bool = building.is_unit_unlocked(unit_stat) if building.has_method("is_unit_unlocked") else true
@@ -2548,10 +2553,26 @@ func _rebuild_production_buttons(building: Building) -> void:
 				net_salvage = int(net_cost.get("salvage", unit_stat.cost_salvage))
 				net_fuel = int(net_cost.get("fuel", unit_stat.cost_fuel))
 			var chip_refs: Dictionary = _attach_cost_widget(btn, net_salvage, net_fuel, unit_stat.population)
+			# Meridian Protocol: append a contract-cost chip to the same
+			# cost strip. We reach the HBox added by _attach_cost_widget
+			# via the button's last child (always the cost strip hbox).
+			if producer_faction_id == 1 and unit_stat.contract_cost > 0:
+				var cost_strip: Node = btn.get_child(btn.get_child_count() - 1)
+				if cost_strip is HBoxContainer:
+					const RES_COLOR_CONTRACTS: Color = Color(1.0, 0.85, 0.2, 1.0)  # gold
+					chip_refs["contract"] = _add_cost_chip(
+						cost_strip as HBoxContainer,
+						unit_stat.contract_cost,
+						RES_COLOR_CONTRACTS,
+						-1,
+						"Contracts"
+					)
 			_action_buttons.append({
 				"button": btn, "kind": "produce", "stat": display_stat,
 				"chips": chip_refs,
 				"net_cost_salvage": net_salvage, "net_cost_fuel": net_fuel,
+				"producer_faction_id": producer_faction_id,
+				"producer_owner_id": building.owner_id,
 			})
 			if construction_locked:
 				btn.disabled = true
@@ -5085,8 +5106,18 @@ func _update_button_affordability() -> void:
 		var lack_salvage: bool = false
 		var lack_fuel: bool = false
 		var lack_pop: bool = false
+		var lack_contract: bool = false
 		if kind == "produce":
 			var stat: UnitStatResource = entry["stat"] as UnitStatResource
+			# Meridian Protocol contract gate — fires first so either gate
+			# can disable the button; strictest-wins semantics.
+			var prod_faction: int = int(entry.get("producer_faction_id", 0))
+			if prod_faction == 1:
+				var prod_owner: int = int(entry.get("producer_owner_id", 0))
+				var mcm_root: Node = get_tree().current_scene
+				var mcm: MeridianContractsManager = mcm_root.get_node_or_null("MeridianContractsManager") as MeridianContractsManager
+				if mcm != null:
+					lack_contract = not mcm.can_afford(prod_owner, stat.contract_cost)
 			# Use network-discounted cost when available (stored at button-build
 			# time by _rebuild_production_buttons); fall back to raw stat cost.
 			var eff_salvage: int = int(entry.get("net_cost_salvage", stat.cost_salvage))
@@ -5094,7 +5125,7 @@ func _update_button_affordability() -> void:
 			lack_salvage = _resource_manager.salvage < eff_salvage
 			lack_fuel = _resource_manager.fuel < eff_fuel
 			lack_pop = not _resource_manager.has_population(stat.population)
-			affordable = not (lack_salvage or lack_fuel or lack_pop)
+			affordable = not (lack_salvage or lack_fuel or lack_pop or lack_contract)
 		elif kind == "build":
 			var bstat: BuildingStatResource = entry["stat"] as BuildingStatResource
 			lack_salvage = _resource_manager.salvage < bstat.cost_salvage
@@ -5125,6 +5156,9 @@ func _update_button_affordability() -> void:
 		_paint_cost_chip(chips.get("salvage", {}) as Dictionary, lack_salvage)
 		_paint_cost_chip(chips.get("fuel", {}) as Dictionary, lack_fuel)
 		_paint_cost_chip(chips.get("pop", {}) as Dictionary, lack_pop)
+		# contract chip only present on Meridian "produce" buttons; no-op
+		# for Combine (chips dict has no "contract" key).
+		_paint_cost_chip(chips.get("contract", {}) as Dictionary, lack_contract)
 
 
 func _refresh_ability_button(entry: Dictionary) -> void:
