@@ -121,6 +121,14 @@ func _ready() -> void:
 			add_child(cnr)
 			cnr.setup(cnm as ConveyorNetworkManager)
 
+	# MeridianContractsManager — per-player Meridian contract pool.
+	# Contracts gate Meridian unit orders; pool regenerates over time.
+	if get_node_or_null("MeridianContractsManager") == null:
+		var mcm_script: GDScript = preload("res://scripts/meridian_contracts_manager.gd")
+		var mcm: Node = mcm_script.new()
+		mcm.name = "MeridianContractsManager"
+		add_child(mcm)
+
 	# V3 Pillar 2 — Neural Mesh provider tracker. Maintains a snapshot
 	# of every Sable Mesh provider (Black Pylon + Overseer Harbinger
 	# etc.) so combat can read the per-position Mesh strength cheaply.
