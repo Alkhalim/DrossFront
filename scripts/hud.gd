@@ -2513,6 +2513,9 @@ func _rebuild_production_buttons(building: Building) -> void:
 	# the queue keeps using the base stats and the cost chip stays
 	# accurate to what the queue actually charges.
 	var bcm: Node = get_tree().current_scene.get_node_or_null("BranchCommitManager")
+	# Conveyor Network Manager — used to show discounted costs on each unit
+	# button so the player can see what they'll actually be charged.
+	var cnm_prod: Node = get_tree().current_scene.get_node_or_null("ConveyorNetworkManager") if get_tree() else null
 	var unlocked_idx: int = 0
 	for unit_stat: UnitStatResource in producible_all:
 		var unlocked: bool = building.is_unit_unlocked(unit_stat) if building.has_method("is_unit_unlocked") else true
@@ -2534,12 +2537,22 @@ func _rebuild_production_buttons(building: Building) -> void:
 			btn.tooltip_text = _unit_tooltip(display_stat)
 			var capture_idx: int = unlocked_idx
 			btn.pressed.connect(_on_production_button.bind(capture_idx))
-			# Cost chip uses the BASE stats: that's what queue_unit
-			# actually charges, regardless of what the variant
-			# advertises. Avoids misleading the player when the
-			# variant happens to list a different cost.
-			var chip_refs: Dictionary = _attach_cost_widget(btn, unit_stat.cost_salvage, unit_stat.cost_fuel, unit_stat.population)
-			_action_buttons.append({ "button": btn, "kind": "produce", "stat": display_stat, "chips": chip_refs })
+			# Cost chip shows the network-discounted cost (salvage/fuel) so the
+			# player can see exactly what they'll be charged. Falls back to the
+			# raw stat cost when no CNM is available (test scenes / non-Combine
+			# factions). Population is never discounted by the network.
+			var net_salvage: int = unit_stat.cost_salvage
+			var net_fuel: int = unit_stat.cost_fuel
+			if cnm_prod and cnm_prod.has_method("compute_unit_cost"):
+				var net_cost: Dictionary = cnm_prod.call("compute_unit_cost", building, unit_stat)
+				net_salvage = int(net_cost.get("salvage", unit_stat.cost_salvage))
+				net_fuel = int(net_cost.get("fuel", unit_stat.cost_fuel))
+			var chip_refs: Dictionary = _attach_cost_widget(btn, net_salvage, net_fuel, unit_stat.population)
+			_action_buttons.append({
+				"button": btn, "kind": "produce", "stat": display_stat,
+				"chips": chip_refs,
+				"net_cost_salvage": net_salvage, "net_cost_fuel": net_fuel,
+			})
 			if construction_locked:
 				btn.disabled = true
 				btn.tooltip_text = "%s — building is still under construction." % u_display
@@ -3106,6 +3119,30 @@ func _build_building_stat_sheet(building: Node3D, bstats: BuildingStatResource, 
 			_stat_chip("Salvage", "%d" % nearby_s, STAT_LABEL_COLOR_COST_S),
 			_stat_chip("Harvest", "%dm" % int(hr), STAT_LABEL_COLOR_RANGE),
 		])
+
+	# Conveyor Network summary — only for network-eligible buildings
+	# (connection_range > 0 means this building participates in the Combine
+	# Conveyor Network mechanic).
+	if building and bstats and bstats.connection_range > 0.0:
+		var cnm: Node = get_tree().current_scene.get_node_or_null("ConveyorNetworkManager") if get_tree() else null
+		var net_text: String
+		if cnm and cnm.has_method("describe_network_for_building"):
+			var info: Dictionary = cnm.call("describe_network_for_building", building)
+			if not info.get("in_network", false):
+				net_text = "(none)"
+			elif not info.get("is_valid", true):
+				net_text = "invalid (>3 production buildings) — no bonuses\n  %s" % info.get("composition", "")
+			else:
+				var bonuses: Array = info.get("bonuses", []) as Array
+				if bonuses.is_empty():
+					net_text = info.get("composition", "")
+				else:
+					var bonus_lines: String = "\n".join(bonuses)
+					net_text = "%s\n%s" % [info.get("composition", ""), bonus_lines]
+		else:
+			net_text = "(none)"
+		rows.append([_stat_chip("Conveyor Network", net_text, STAT_LABEL_COLOR_RANGE)])
+
 	return _build_stat_sheet(rows)
 
 
@@ -5035,8 +5072,12 @@ func _update_button_affordability() -> void:
 		var lack_pop: bool = false
 		if kind == "produce":
 			var stat: UnitStatResource = entry["stat"] as UnitStatResource
-			lack_salvage = _resource_manager.salvage < stat.cost_salvage
-			lack_fuel = _resource_manager.fuel < stat.cost_fuel
+			# Use network-discounted cost when available (stored at button-build
+			# time by _rebuild_production_buttons); fall back to raw stat cost.
+			var eff_salvage: int = int(entry.get("net_cost_salvage", stat.cost_salvage))
+			var eff_fuel: int = int(entry.get("net_cost_fuel", stat.cost_fuel))
+			lack_salvage = _resource_manager.salvage < eff_salvage
+			lack_fuel = _resource_manager.fuel < eff_fuel
 			lack_pop = not _resource_manager.has_population(stat.population)
 			affordable = not (lack_salvage or lack_fuel or lack_pop)
 		elif kind == "build":

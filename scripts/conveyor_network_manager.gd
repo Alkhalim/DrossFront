@@ -216,6 +216,75 @@ func compute_unit_cost(target: Node, unit_stats: UnitStatResource) -> Dictionary
 	}
 
 
+## Returns a human-readable summary of the network containing `building`.
+## Keys:
+##   - in_network: bool
+##   - is_valid: bool                       (false when overfull)
+##   - composition: String                  ("2× Basic Foundry, 1× Conveyor Node")
+##   - bonuses: Array[String]               (one line per bonus, e.g., "Basic Foundries: -10% salvage")
+##   - production_total: int
+## Returns {in_network: false} if the building isn't part of any network yet.
+func describe_network_for_building(building: Node) -> Dictionary:
+	if building == null or not is_instance_valid(building):
+		return {"in_network": false}
+	var owner_id: int = building.get("owner_id")
+	var mem: Dictionary = _membership.get(owner_id, {})
+	if not (building in mem):
+		return {"in_network": false}
+	var net_id: int = mem[building]
+	var meta_dict: Dictionary = _network_meta.get(owner_id, {})
+	var m: Dictionary = meta_dict.get(net_id, {})
+	if m.is_empty():
+		return {"in_network": false}
+
+	# Build composition string from non-zero type counts.
+	var parts: PackedStringArray = PackedStringArray()
+	if m.basic_foundry > 0:
+		parts.append("%d× Basic Foundry" % m.basic_foundry)
+	if m.advanced_foundry > 0:
+		parts.append("%d× Advanced Foundry" % m.advanced_foundry)
+	if m.aerodrome > 0:
+		parts.append("%d× Aerodrome" % m.aerodrome)
+	if m.hq > 0:
+		parts.append("%d× HQ" % m.hq)
+	if m.conveyor_node > 0:
+		parts.append("%d× Conveyor Node" % m.conveyor_node)
+	var composition: String = "  ".join(parts)
+
+	# Build bonuses list using same math as get_bonuses_for_building.
+	var bonuses: Array[String] = []
+	if not m.is_valid:
+		return {
+			"in_network": true,
+			"is_valid": false,
+			"composition": composition,
+			"bonuses": bonuses,
+			"production_total": int(m.production_total),
+		}
+	if m.basic_foundry > 0:
+		var pct: int = m.basic_foundry * 5
+		bonuses.append("Basic Foundries: -%d%% salvage on produced units" % pct)
+	if m.advanced_foundry > 0:
+		var pct: int = m.advanced_foundry * 7
+		if m.advanced_foundry >= 3:
+			pct = 20
+		bonuses.append("Advanced Foundries: -%d%% fuel on produced units" % pct)
+	if m.aerodrome > 0:
+		var pct: int = m.aerodrome * 7
+		if m.aerodrome >= 3:
+			pct = 20
+		bonuses.append("Aerodromes: +%d%% production speed" % pct)
+	if m.hq > 0:
+		bonuses.append("HQ present: -15%% Power on non-HQ members")
+	return {
+		"in_network": true,
+		"is_valid": true,
+		"composition": composition,
+		"bonuses": bonuses,
+		"production_total": int(m.production_total),
+	}
+
+
 ## Simulate placing a building with the given building_id at pos for
 ## owner_id. Returns true if doing so would create a connected component
 ## containing more than 3 production buildings (HQ + Foundries +
