@@ -567,6 +567,54 @@ func _spot_has_other_engineer(spot: Vector3, radius: float) -> bool:
 	return false
 
 
+func start_field_unit_build(unit_stats: UnitStatResource, world_pos: Vector3) -> void:
+	## Inheritor Restorer field-build entry point. Spawns a construction-site
+	## Building at world_pos with the chosen unit on its _build_queue, then
+	## routes the Restorer to it via the existing start_building approach loop.
+	## Cost has already been paid by the caller (HUD / SelectionManager) before
+	## this is invoked. If the Restorer is killed mid-construction the unit is
+	## lost with no refund per spec line 631.
+	var site_stats: BuildingStatResource = load(
+		"res://resources/buildings/inheritor_construction_site.tres"
+	) as BuildingStatResource
+	if site_stats == null:
+		push_error("BuilderComponent: could not load inheritor_construction_site.tres")
+		return
+	var building_scene: PackedScene = load("res://scenes/building.tscn") as PackedScene
+	if building_scene == null:
+		push_error("BuilderComponent: could not load scenes/building.tscn")
+		return
+	var site: Building = building_scene.instantiate() as Building
+	site.stats = site_stats
+	if _unit:
+		site.owner_id = _unit.owner_id
+	# The construction site itself is "instantly constructed" — what takes
+	# time is the unit on its queue. Mark is_constructed=true so the site's
+	# production tick fires immediately once it enters the scene.
+	site.is_constructed = true
+
+	var scene_root: Node = get_tree().current_scene
+	var units_node: Node = scene_root.get_node_or_null("Units")
+	# Construction sites are added under the same parent as Units so the
+	# SpatialIndex and BuilderComponent.start_building's scan find them.
+	# They register themselves in the "buildings" group inside _ready via
+	# Building._ready, which is what the approach loop queries.
+	if units_node:
+		units_node.add_child(site)
+	else:
+		scene_root.add_child(site)
+	site.global_position = world_pos
+
+	# Queue the unit AFTER add_child so _ready has run (which sets up the
+	# stats, HP, and group membership). We bypass queue_unit()'s
+	# producible_units gate (the site's list is intentionally empty —
+	# the unit to build is injected per-instance by this method).
+	site._build_queue.append(unit_stats)
+
+	# Route the Restorer to the site using the existing approach loop.
+	start_building(site)
+
+
 func cancel_build() -> void:
 	## Called by the player issuing a non-build command (move/attack) so the
 	## builder doesn't immediately drag the unit back to the construction

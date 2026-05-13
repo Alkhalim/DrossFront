@@ -61,6 +61,17 @@ var _suppress_next_release: bool = false
 ## interact with movement / attack commands; it's pure info display.
 var _inspected_enemy: Node3D = null
 
+## Inheritor Restorer "place unit construction site" mode.
+## Active when the player clicks a Restorer unit-build button. The next
+## LEFT-click on the world spawns a construction-site building and routes
+## the Restorer to it. Right-click / Escape cancels and refunds the cost.
+var _unit_build_mode: bool = false
+var _unit_build_stats: UnitStatResource = null
+var _unit_build_ghost: Node3D = null
+## ResourceManager reference cached at the time start_unit_build_placement is
+## called; used for the refund-on-cancel path.
+var _unit_build_resource_mgr: ResourceManager = null
+
 ## Attack-move mode: next right-click issues attack-move instead of move.
 var _attack_move_mode: bool = false
 ## Active superweapon waiting for a target. Set when the player
@@ -119,6 +130,11 @@ func _update_hover() -> void:
 		return
 	if _build_mode:
 		_set_hover(null)
+		_update_cursor_kind_for_build_mode()
+		return
+	if _unit_build_mode:
+		_set_hover(null)
+		_update_unit_build_ghost()
 		_update_cursor_kind_for_build_mode()
 		return
 	# Skip when the mouse hasn't moved AND the throttle window
@@ -268,6 +284,9 @@ func _set_hover(unit: Unit) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if _build_mode:
 		_handle_build_mode_input(event)
+		return
+	if _unit_build_mode:
+		_handle_unit_build_mode_input(event)
 		return
 	if event is InputEventMouseButton:
 		_handle_mouse_button(event as InputEventMouseButton)
@@ -618,6 +637,14 @@ func _delete_selected_owned_entities() -> bool:
 	return killed_any
 
 
+func _local_player_faction() -> int:
+	## Returns the local player's faction id. 0=Anvil, 1=Sable, 2=Inheritor.
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if settings and "player_faction" in settings:
+		return settings.get("player_faction") as int
+	return 0
+
+
 func _handle_build_hotkey(key: InputEventKey) -> void:
 	# Production hotkeys when a building is selected (Q, W, E for units 1-3)
 	if _selected_building and _selected_building.stats:
@@ -631,12 +658,9 @@ func _handle_build_hotkey(key: InputEventKey) -> void:
 			get_viewport().set_input_as_handled()
 			return
 
-	# Build placement hotkeys when an engineer is selected. Both
-	# Q/W/E/R/T/Y/U (matching the unit-train hotkey flavour) and
-	# 1-7 (legacy / power-user) work. The keys index the
-	# CURRENTLY-VISIBLE build buttons in the HUD's tab order, not
-	# the unfiltered _buildable_stats list -- otherwise pressing
-	# 'Q' on the Advanced tab would build the wrong thing.
+	# Inheritor Restorer: Q/W/E trigger unit construction site placement
+	# instead of building placement. Check faction before walking the
+	# selection so non-Inheritor hotkeys fall through correctly.
 	_prune_selection()
 	var has_engineer: bool = false
 	for unit: Node3D in _selected_units:
@@ -645,6 +669,39 @@ func _handle_build_hotkey(key: InputEventKey) -> void:
 			break
 	if not has_engineer:
 		return
+
+	if _local_player_faction() == 2:
+		# Inheritor — hotkeys route to Restorer unit-build buttons.
+		const RESTORER_UNIT_PATHS_SM: Array[String] = [
+			"res://resources/units/inheritor_ashigaru.tres",
+			"res://resources/units/inheritor_wachter.tres",
+			"res://resources/units/inheritor_schwarm.tres",
+		]
+		var unit_index: int = -1
+		match key.keycode:
+			KEY_Q, KEY_1: unit_index = 0
+			KEY_W, KEY_2: unit_index = 1
+			KEY_E, KEY_3: unit_index = 2
+		if unit_index < 0 or unit_index >= RESTORER_UNIT_PATHS_SM.size():
+			return
+		var ustat: UnitStatResource = load(RESTORER_UNIT_PATHS_SM[unit_index]) as UnitStatResource
+		if ustat == null:
+			return
+		var hud_node: Node = _find_hud_for_visible_build_stats()
+		if hud_node and hud_node.has_method("_on_restorer_unit_button"):
+			hud_node.call("_on_restorer_unit_button", ustat)
+		else:
+			# Fallback: call placement directly without affordability check
+			start_unit_build_placement(ustat)
+		get_viewport().set_input_as_handled()
+		return
+
+	# Build placement hotkeys when an Anvil/Sable engineer is selected. Both
+	# Q/W/E/R/T/Y/U (matching the unit-train hotkey flavour) and
+	# 1-7 (legacy / power-user) work. The keys index the
+	# CURRENTLY-VISIBLE build buttons in the HUD's tab order, not
+	# the unfiltered _buildable_stats list -- otherwise pressing
+	# 'Q' on the Advanced tab would build the wrong thing.
 
 	# Build hotkeys arranged as Q W E R / A S D F across two rows
 	# so the player's left hand mirrors the on-screen 4x2 button
@@ -2658,3 +2715,136 @@ func _dispatch_via_group_aura(ground_pos: Vector3, clear_combat: bool = true) ->
 	# regular move clears combat (clear_combat=true). Invert to detect attack.
 	var is_attack: bool = not clear_combat
 	aura.setup(_selected_units.duplicate(), ground_pos, 0, is_attack)
+
+
+## --- Inheritor Restorer "place unit construction site" mode ---
+
+func start_unit_build_placement(unit_stat: UnitStatResource) -> void:
+	## Called by the HUD when the player clicks a Restorer unit-build button.
+	## Resources are NOT spent here — they are spent in _confirm_unit_build_placement
+	## at click time so a cancellation before the world-click refunds correctly.
+	if _unit_build_mode:
+		cancel_unit_build_placement()
+	_unit_build_mode = true
+	_unit_build_stats = unit_stat
+
+	# Spawn a ghost building so the player can see the footprint they're about
+	# to create. Reuses the Building ghost system (is_ghost_preview = true).
+	var site_stats: BuildingStatResource = load(
+		"res://resources/buildings/inheritor_construction_site.tres"
+	) as BuildingStatResource
+	if site_stats:
+		var scene: PackedScene = load("res://scenes/building.tscn") as PackedScene
+		if scene:
+			var ghost: Building = scene.instantiate() as Building
+			ghost.is_ghost_preview = true
+			ghost.stats = site_stats
+			ghost.owner_id = 0
+			get_tree().current_scene.add_child(ghost)
+			_apply_ghost_tint(ghost, Color(0.25, 0.85, 0.3, 0.45))
+			_unit_build_ghost = ghost as Node3D
+
+
+func cancel_unit_build_placement(_refund_cost: bool = false) -> void:
+	## Cancel unit-build placement mode. Resources are spent only at world-click
+	## confirmation time (_confirm_unit_build_placement), so there is nothing to
+	## refund when the player cancels before clicking — _refund_cost is accepted
+	## for API symmetry but is currently always a no-op.
+	_unit_build_mode = false
+	if _unit_build_ghost and is_instance_valid(_unit_build_ghost):
+		_unit_build_ghost.queue_free()
+	_unit_build_ghost = null
+	_unit_build_stats = null
+	_unit_build_resource_mgr = null
+
+
+func _update_unit_build_ghost() -> void:
+	## Move the construction-site ghost to follow the cursor.
+	if not _unit_build_ghost or not is_instance_valid(_unit_build_ghost):
+		return
+	var screen_pos: Vector2 = get_viewport().get_mouse_position()
+	var ground_pos: Vector3 = _raycast_ground(screen_pos)
+	if ground_pos != Vector3.INF:
+		_unit_build_ghost.global_position = ground_pos
+
+
+func _handle_unit_build_mode_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		# Ghost position updated by _update_unit_build_ghost in _update_hover.
+		pass
+	elif event is InputEventMouseButton:
+		var mb: InputEventMouseButton = event as InputEventMouseButton
+		if mb.pressed:
+			if mb.button_index == MOUSE_BUTTON_LEFT:
+				var gui_control: Control = get_viewport().gui_get_hovered_control()
+				if gui_control:
+					return
+				_confirm_unit_build_placement(mb.position)
+				get_viewport().set_input_as_handled()
+			elif mb.button_index == MOUSE_BUTTON_RIGHT:
+				cancel_unit_build_placement(true)
+				get_viewport().set_input_as_handled()
+	elif event is InputEventKey:
+		var key: InputEventKey = event as InputEventKey
+		if key.pressed and key.keycode == KEY_ESCAPE:
+			cancel_unit_build_placement(true)
+			get_viewport().set_input_as_handled()
+
+
+func _confirm_unit_build_placement(screen_pos: Vector2) -> void:
+	var ground_pos: Vector3 = _raycast_ground(screen_pos)
+	if ground_pos == Vector3.INF:
+		return
+
+	if not _unit_build_stats:
+		cancel_unit_build_placement()
+		return
+
+	# Find the first selected Inheritor Restorer.
+	_prune_selection()
+	var builder_unit: Unit = null
+	for unit: Node3D in _selected_units:
+		if not is_instance_valid(unit):
+			continue
+		var b: Node = unit.get_builder() if unit.has_method("get_builder") else null
+		if b:
+			builder_unit = unit as Unit
+			break
+
+	if not builder_unit:
+		cancel_unit_build_placement()
+		return
+
+	var builder: BuilderComponent = builder_unit.get_builder()
+	if not builder or not builder.has_method("start_field_unit_build"):
+		cancel_unit_build_placement()
+		return
+
+	# Resources were pre-checked by the HUD before entering placement mode,
+	# but re-validate now in case the player stalled in placement while
+	# salvage was spent elsewhere.
+	var resource_mgr: ResourceManager = get_tree().current_scene.get_node("ResourceManager") as ResourceManager
+	if not resource_mgr:
+		cancel_unit_build_placement()
+		return
+	if not resource_mgr.can_afford(_unit_build_stats.cost_salvage, _unit_build_stats.cost_fuel):
+		if _audio:
+			_audio.play_error()
+		cancel_unit_build_placement()
+		return
+	if not resource_mgr.has_population(_unit_build_stats.population):
+		if _audio:
+			_audio.play_error()
+		cancel_unit_build_placement()
+		return
+
+	resource_mgr.spend(_unit_build_stats.cost_salvage, _unit_build_stats.cost_fuel)
+	resource_mgr.add_population(_unit_build_stats.population)
+
+	# Spin up the construction site and route the Restorer to it.
+	builder.start_field_unit_build(_unit_build_stats, ground_pos)
+	if _audio and _audio.has_method("play_building_placed"):
+		_audio.play_building_placed(ground_pos)
+
+	_suppress_next_release = true
+	cancel_unit_build_placement(false)  # false = no refund; resources already spent

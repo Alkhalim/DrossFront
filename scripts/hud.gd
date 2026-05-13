@@ -37,6 +37,10 @@ var _hq_tab_defense: Button = null
 var _last_building_id: int = -1
 var _last_unit_ids: Array[int] = []
 var _showing_build_buttons: bool = false
+## True when the action panel is showing Inheritor Restorer unit-build buttons
+## (a subset of the _showing_build_buttons state). When true, the building-tab
+## prereq rebuild does NOT fire so Restorer buttons stay in place.
+var _showing_restorer_buttons: bool = false
 
 ## Pool of buttons + cached metadata so we can update affordability tint each frame.
 ## Each entry: { button: Button, kind: "produce"|"build", index: int }
@@ -4844,16 +4848,25 @@ func _update_unit_panel(units: Array[Node3D]) -> void:
 
 		if has_builder and not _showing_build_buttons:
 			_showing_build_buttons = true
-			# Default a freshly-opened build menu back to the Basic
-			# tab. Otherwise a player who placed an Advanced building
-			# (Advanced Foundry, Aerodrome, Black Pylon ...) and then
-			# clicked their engineer again would land on the Advanced
-			# tab — visually unhelpful and pushes the common build
-			# choices off-screen behind the prereq-locked entries.
-			_build_tab = "basic"
-			_rebuild_build_buttons()
+			# Inheritor Restorer: show unit-production buttons instead
+			# of building-placement buttons. Other factions' engineers
+			# keep the standard building menu.
+			if _local_player_faction() == 2:
+				_showing_restorer_buttons = true
+				_rebuild_restorer_unit_buttons()
+			else:
+				_showing_restorer_buttons = false
+				# Default a freshly-opened build menu back to the Basic
+				# tab. Otherwise a player who placed an Advanced building
+				# (Advanced Foundry, Aerodrome, Black Pylon ...) and then
+				# clicked their engineer again would land on the Advanced
+				# tab — visually unhelpful and pushes the common build
+				# choices off-screen behind the prereq-locked entries.
+				_build_tab = "basic"
+				_rebuild_build_buttons()
 		elif not has_builder:
 			_showing_build_buttons = false
+			_showing_restorer_buttons = false
 			_clear_buttons()
 			_rebuild_unit_command_buttons()
 
@@ -4862,7 +4875,9 @@ func _update_unit_panel(units: Array[Node3D]) -> void:
 	# completed Basic Foundry unlocks the Advanced Foundry button on
 	# the same frame the construction finishes, without needing a
 	# selection change to trigger the redraw.
-	if _showing_build_buttons:
+	# Restorer unit buttons are static (no prerequisite gates in Task 5)
+	# so skip this rebuild when showing them.
+	if _showing_build_buttons and not _showing_restorer_buttons:
 		var prereq_hash: int = _compute_built_ids_hash()
 		if prereq_hash != _build_prereq_hash:
 			_build_prereq_hash = prereq_hash
@@ -4884,7 +4899,10 @@ func _update_unit_panel(units: Array[Node3D]) -> void:
 			if hp_pct < 0.25: hp_color = Color(1.0, 0.4, 0.35, 0.95)
 			_show_progress(hp_pct, hp_color)
 			if unit.has_method("get_builder") and unit.get_builder():
-				_action_label.text = "Build  [1-6]"
+				if _local_player_faction() == 2:
+					_action_label.text = "Craft Units  [Q/W/E]"
+				else:
+					_action_label.text = "Build  [1-6]"
 		else:
 			_name_label.text = "Unit"
 			_stats_label.text = ""
@@ -5081,6 +5099,66 @@ func _on_build_tab_pressed(tab: String) -> void:
 	_rebuild_build_buttons()
 
 
+## --- Inheritor Restorer unit-production buttons ----------------------------
+## Shown instead of building-placement buttons when the player's faction is
+## Inheritor and an engineer (Restorer) is selected. All 3 base units are
+## always shown (MVP — Architect's Network tech gating comes in Task 11).
+
+const _RESTORER_UNIT_PATHS: Array[String] = [
+	"res://resources/units/inheritor_ashigaru.tres",
+	"res://resources/units/inheritor_wachter.tres",
+	"res://resources/units/inheritor_schwarm.tres",
+]
+const _RESTORER_UNIT_HOTKEYS: Array[String] = ["Q", "W", "E"]
+
+
+func _rebuild_restorer_unit_buttons() -> void:
+	_clear_buttons()
+	if not _selection_manager:
+		return
+	_action_label.text = "Craft Units  [Q/W/E]"
+	for i: int in _RESTORER_UNIT_PATHS.size():
+		var ustat: UnitStatResource = load(_RESTORER_UNIT_PATHS[i]) as UnitStatResource
+		if ustat == null:
+			continue
+		var hotkey: String = _RESTORER_UNIT_HOTKEYS[i] if i < _RESTORER_UNIT_HOTKEYS.size() else str(i + 1)
+		var btn := Button.new()
+		btn.custom_minimum_size = Vector2(124, 80)
+		btn.size_flags_horizontal = Control.SIZE_FILL
+		btn.size_flags_vertical = Control.SIZE_FILL
+		_set_label_button(btn, "[%s]" % hotkey, ustat.get_display_name() if ustat.has_method("get_display_name") else ustat.unit_name)
+		btn.tooltip_text = ustat.unit_name
+		var chip_refs: Dictionary = _attach_cost_widget(btn, ustat.cost_salvage, ustat.cost_fuel, ustat.population)
+		var stat_ref: UnitStatResource = ustat
+		btn.pressed.connect(func() -> void:
+			_on_restorer_unit_button(stat_ref)
+		)
+		_button_grid.add_child(btn)
+		_action_buttons.append({
+			"button": btn,
+			"kind": "produce_restorer_site",
+			"stat": ustat,
+			"chips": chip_refs,
+			"hotkey_index": i,
+		})
+
+
+func _on_restorer_unit_button(unit_stat: UnitStatResource) -> void:
+	if not _selection_manager or not unit_stat:
+		return
+	var resource_mgr: ResourceManager = (
+		get_tree().current_scene.get_node("ResourceManager") as ResourceManager
+		if get_tree() else null
+	)
+	if resource_mgr:
+		if not resource_mgr.can_afford(unit_stat.cost_salvage, unit_stat.cost_fuel):
+			return
+		if not resource_mgr.has_population(unit_stat.population):
+			return
+	if _selection_manager.has_method("start_unit_build_placement"):
+		_selection_manager.call("start_unit_build_placement", unit_stat)
+
+
 func _on_build_button_for_stat(bstat: BuildingStatResource) -> void:
 	if not _selection_manager or not bstat:
 		return
@@ -5235,6 +5313,13 @@ func _update_button_affordability() -> void:
 			# whether the player has the salvage to pay for them.
 			if entry.get("locked", false):
 				affordable = false
+		elif kind == "produce_restorer_site":
+			# Inheritor Restorer unit-build button. Cost = unit's salvage + fuel.
+			var ustat: UnitStatResource = entry["stat"] as UnitStatResource
+			lack_salvage = _resource_manager.salvage < ustat.cost_salvage
+			lack_fuel = _resource_manager.fuel < ustat.cost_fuel
+			lack_pop = not _resource_manager.has_population(ustat.population)
+			affordable = not (lack_salvage or lack_fuel or lack_pop)
 		elif kind == "build_tab_row":
 			# Tab row container — never tinted as un-affordable.
 			continue

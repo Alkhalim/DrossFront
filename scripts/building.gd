@@ -386,6 +386,8 @@ func _add_building_details() -> void:
 		&"intelligence_network": _detail_intelligence_network()
 		&"sensor_array": _detail_sensor_array()
 		&"mesh_relay": _detail_mesh_relay()
+		# Inheritor field construction
+		&"inheritor_construction_site": _detail_inheritor_construction_site()
 	# Mesh-provider aura ring (V3 §Pillar 2). Drawn after the type
 	# detail layer so the ring sits on top of the ground markings.
 	if stats.mesh_provider_radius > 0.0:
@@ -5027,6 +5029,63 @@ func _detail_mesh_relay() -> void:
 	_team_collar_ring(tc.bottom_radius * 1.15, 0.08, Vector3(0.0, fs.y + 0.04, 0.0))
 
 
+func _detail_inheritor_construction_site() -> void:
+	## Inheritor field construction site: a skeletal scaffolding frame with
+	## restoration-green emissive accents so the player can identify at a glance
+	## that the Restorer is building a unit here. MVP visual — four corner uprights
+	## + a roof frame + a green emissive core orb.
+	if not stats:
+		return
+	var fs: Vector3 = stats.footprint_size
+	var half_x: float = fs.x * 0.5
+	var half_z: float = fs.z * 0.5
+
+	# Four corner upright posts.
+	for xi: int in 2:
+		for zi: int in 2:
+			var post := MeshInstance3D.new()
+			var pb := BoxMesh.new()
+			pb.size = Vector3(0.12, fs.y * 0.9, 0.12)
+			post.mesh = pb
+			post.position = Vector3(
+				(half_x - 0.10) * (1.0 if xi == 0 else -1.0),
+				fs.y * 0.45,
+				(half_z - 0.10) * (1.0 if zi == 0 else -1.0),
+			)
+			post.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.14, 0.14, 0.16)))
+			_attach_visual(post)
+
+	# Top horizontal frame bars (X-axis).
+	for zi: int in 2:
+		var bar := MeshInstance3D.new()
+		var bb := BoxMesh.new()
+		bb.size = Vector3(fs.x, 0.10, 0.10)
+		bar.mesh = bb
+		bar.position = Vector3(0.0, fs.y * 0.90, (half_z - 0.10) * (1.0 if zi == 0 else -1.0))
+		bar.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.14, 0.14, 0.16)))
+		_attach_visual(bar)
+
+	# Top horizontal frame bars (Z-axis).
+	for xi: int in 2:
+		var bar := MeshInstance3D.new()
+		var bb := BoxMesh.new()
+		bb.size = Vector3(0.10, 0.10, fs.z)
+		bar.mesh = bb
+		bar.position = Vector3((half_x - 0.10) * (1.0 if xi == 0 else -1.0), fs.y * 0.90, 0.0)
+		bar.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.14, 0.14, 0.16)))
+		_attach_visual(bar)
+
+	# Central emissive restoration-green orb.
+	var orb := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.28
+	sphere.height = 0.56
+	orb.mesh = sphere
+	orb.position = Vector3(0.0, fs.y * 0.50, 0.0)
+	orb.set_surface_override_material(0, _detail_emissive_mat(Color(0.20, 0.90, 0.35), 2.2))
+	_attach_visual(orb)
+
+
 func _add_mesh_aura_ring(radius: float) -> void:
 	## Flat ground ring marking this building's Mesh aura coverage.
 	## Always visible to the controlling player; opponents see it
@@ -5453,11 +5512,13 @@ func _spawn_unit(unit_stats: UnitStatResource) -> void:
 	if audio:
 		audio.play_production_complete(global_position)
 
-	# Inheritor pair-production: when the Inheritor HQ finishes a Restorer
-	# (unit_class == &"engineer") spawn a second Restorer side-by-side.
-	# The twin is offset +1.2 u perpendicular to the rally direction so the
-	# two units don't collide on exit. One queue completion = one pair.
-	if _resolve_faction_id() == 2 and actual_stats.unit_class == &"engineer":
+	# Inheritor pair-production: every Inheritor unit (HQ Restorers AND
+	# field-site combat units) spawns as a pair. The twin is offset +1.2 u
+	# perpendicular to the exit direction so the two units don't collide on
+	# exit. One queue completion = one pair.
+	# Apex/Elite units (Oni Frame, Raijin — Phase 5) are singular per spec
+	# line 753 but don't exist yet, so no exclusion is needed now.
+	if _resolve_faction_id() == 2:
 		var twin: Node3D = unit_scene.instantiate() as Node3D
 		twin.set("stats", actual_stats)
 		twin.set("owner_id", owner_id)
