@@ -9,7 +9,7 @@ extends Control
 ##   - Plateau footprints as octagons (cool grey), labelled "high"
 ##   - Plateau ramps as small wedges
 ##   - Fuel deposits as gold dots with capture-radius rings
-##   - Volcanic fissures (Ashplains only) as jagged orange streaks
+##   - Volcanic fissures (The Ashline only) as jagged orange streaks
 ##   - Player HQ corners marked with team colour squares
 ##
 ## Used by the match-setup screen below the map dropdown so the player
@@ -173,7 +173,7 @@ func _draw_schwarzwald() -> void:
 		var sx: float = cr_x + rng.randf() * (pad + w - cr_x)
 		var sy: float = pad + rng.randf() * h
 		draw_circle(Vector2(sx, sy), 1.6, dot_color)
-	# HQ corners + the Foundry Belt deposit set (Schwarzwald
+	# HQ corners + the Corridor 7 deposit set (Schwarzwald
 	# inherits these positions for now).
 	for d: Vector3 in [
 		Vector3(28, 0, 80), Vector3(-28, 0, -80),

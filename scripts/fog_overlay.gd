@@ -102,7 +102,7 @@ render_mode unshaded, blend_mix, depth_draw_never, cull_disabled;
 // without this, every cell is a hard square block and the
 // VISIBLE↔EXPLORED↔UNEXPLORED transitions show as stair-step
 // artefacts where the fog crosses a biome (especially the bright
-// Iron Gate snow zones, where dimmed cells produced a very
+// Gatepoint Rhin snow zones, where dimmed cells produced a very
 // visible step pattern).
 uniform sampler2D fog_texture : filter_linear, repeat_disable;
 

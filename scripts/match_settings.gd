@@ -6,11 +6,11 @@ extends Node
 
 enum Difficulty { EASY, NORMAL, HARD }
 enum Mode { ONE_V_ONE, TWO_V_TWO }
-## V2 ships two hand-crafted maps. Foundry Belt is the original cluttered
-## industrial map (the v1 test arena, kept and expanded). Ashplains
-## Crossing is the new wide-open ash-flats map with a single ridgeline
+## V2 ships two hand-crafted maps. Corridor 7 is the original cluttered
+## industrial map (the v1 test arena, kept and expanded). The Ashline
+## is the new wide-open ash-flats map with a single ridgeline
 ## and minimal cover — tests heavy mech / ranged combat.
-## V3 §"Pillar 6" — Iron Gate Crossing is the asymmetric-test map
+## V3 §"Pillar 6" — Gatepoint Rhin is the asymmetric-test map
 ## with mixed terrain emphasising concealment and flanking.
 ## SCHWARZWALD adds a dense-forest map (V3 §"Pillar 6" addendum).
 ## Trees act as nav obstacles + LOS occluders, fellable by heavy /
@@ -30,9 +30,9 @@ enum AiPersonality { RANDOM, BALANCED, TURRET_HEAVY, ECONOMY_HEAVY, RUSH, AIR }
 ## arena controller post-processes its standard setup with extra base
 ## construction, seeded units, and resource pre-loads to match the
 ## scenario brief. Drives the Campaigns -> Special Operations menu.
-##   SPECOPS_SABLE_PROVING : player Sable, established base + economy,
-##                           three AI Anvil opponents with parity setup
-##   SPECOPS_ANVIL_PROVING : mirror image -- player Anvil, three Sable
+##   SPECOPS_SABLE_PROVING : player Meridian, established base + economy,
+##                           three AI Combine opponents with parity setup
+##   SPECOPS_ANVIL_PROVING : mirror image -- player Combine, three Meridian
 ##   SPECOPS_STRESS_TEST   : 250-pop army on each side, scattered
 ##                           battlefield, player + AI ally vs 2 AI
 enum Scenario {
@@ -45,7 +45,7 @@ enum Scenario {
 	## scenes directly. disable_match_end is set by these to suppress
 	## auto-defeat on HQ loss (some tests involve combat without an HQ).
 	PATH_TEST_FLOWFIELD_SMOKE,
-	## 2-player perf scratchpad: 20 Anvil Hound squads per side, no win
+	## 2-player perf scratchpad: 20 Combine Borzoi squads per side, no win
 	## conditions, no other unit types. Used to eyeball FPS under
 	## simultaneous mass-movement orders.
 	PATH_TEST_FLOWFIELD_PERF,

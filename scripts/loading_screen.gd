@@ -41,12 +41,12 @@ const HARD_TIMEOUT_SEC: float = 18.0
 ## SCHWARZWALD=3.
 ## Per-map zoom + focal lat/lon. `zoom` is a multiplier on top of
 ## the default ZOOM_FACTOR -- 1.0 keeps the default; >1 frames the
-## region tighter (use for compact areas like the Iron Gate);
+## region tighter (use for compact areas like Gatepoint Rhin);
 ## <1 pulls back (use for sprawling regions like the Steppe).
 const MAP_TARGETS: Array[Dictionary] = [
-	{"lon":  7.4, "lat": 51.4, "name": "FOUNDRY BELT", "zoom": 1.20},   # Ruhr industrial cluster (Essen / Dortmund)
-	{"lon": 35.5, "lat": 48.0, "name": "ASHPLAINS",    "zoom": 0.85},   # Ukrainian steppe -- pulled back, region is big
-	{"lon": 22.6, "lat": 44.6, "name": "IRON GATE CROSSING", "zoom": 1.40},  # narrow Danube gorge -- tighter framing
+	{"lon":  7.4, "lat": 51.4, "name": "CORRIDOR 7",    "zoom": 1.20},   # Ruhr industrial cluster (Essen / Dortmund)
+	{"lon": 35.5, "lat": 48.0, "name": "THE ASHLINE",   "zoom": 0.85},   # Ukrainian steppe -- pulled back, region is big
+	{"lon": 22.6, "lat": 44.6, "name": "GATEPOINT RHIN","zoom": 1.40},  # narrow Danube gorge -- tighter framing
 	{"lon":  8.0, "lat": 48.2, "name": "SCHWARZWALD",  "zoom": 1.25},   # Black Forest -- mid-tight
 ]
 
@@ -242,7 +242,7 @@ func _start_zoom() -> void:
 	# Final zoom -- pin the target lat/lon pixel to screen centre
 	# at ZOOM_FACTOR * per-map override magnification, kicked off
 	# after the pan lands. Per-map override (`zoom` in MAP_TARGETS)
-	# tightens compact theatres (Iron Gate gorge) and pulls back on
+	# tightens compact theatres (Gatepoint Rhin gorge) and pulls back on
 	# sprawling ones (Steppe).
 	var final_scale: float = fit_scale * ZOOM_FACTOR * _resolve_target_zoom()
 	var final_offset: Vector2 = screen_centre - target_pixel * final_scale
