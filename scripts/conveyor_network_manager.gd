@@ -162,9 +162,46 @@ func _extent_of(b: Node) -> float:
 	return maxf(fs.x, fs.z) * 0.5
 
 
-## Stub — real implementation in Task 8.
-func get_bonuses_for_building(_building: Node) -> Dictionary:
-	return {"salvage_mult": 1.0, "fuel_mult": 1.0, "speed_mult": 1.0, "power_mult": 1.0}
+## Returns a multiplier dict for the network the building participates in.
+## All multipliers default to 1.0 (no effect). Spec tables (per 11_faction_mechanics.md):
+##   Basic Foundry      x1 → -5%, x2 → -10%, x3 → -15% salvage on units
+##   Advanced Foundry   x1 → -7%, x2 → -14%, x3 → -20% fuel on units
+##   Aerodrome          x1 → +7%, x2 → +14%, x3 → +20% production speed
+##   HQ in network      -15% Power consumption on OTHER buildings in net
+## Invalid (overfull) networks return all-1.0.
+func get_bonuses_for_building(building: Node) -> Dictionary:
+	var defaults: Dictionary = {"salvage_mult": 1.0, "fuel_mult": 1.0, "speed_mult": 1.0, "power_mult": 1.0}
+	if building == null or not is_instance_valid(building):
+		return defaults
+	var owner_id: int = building.get("owner_id")
+	var mem: Dictionary = _membership.get(owner_id, {})
+	if not (building in mem):
+		return defaults
+	var net_id: int = mem[building]
+	var meta_dict: Dictionary = _network_meta.get(owner_id, {})
+	var m: Dictionary = meta_dict.get(net_id, {})
+	if m.is_empty() or not m.is_valid:
+		return defaults
+	var bid: StringName = (building.stats as BuildingStatResource).building_id
+	var out: Dictionary = defaults.duplicate()
+	match bid:
+		&"basic_foundry":
+			out.salvage_mult = 1.0 - 0.05 * float(m.basic_foundry)  # x1=.95, x2=.90, x3=.85
+		&"advanced_foundry":
+			out.fuel_mult = 1.0 - 0.07 * float(m.advanced_foundry)
+			# Spec says x3 → -20% (not -21%); clamp to match table.
+			if m.advanced_foundry >= 3:
+				out.fuel_mult = 0.80
+		&"aerodrome":
+			out.speed_mult = 1.0 + 0.07 * float(m.aerodrome)
+			if m.aerodrome >= 3:
+				out.speed_mult = 1.20
+		&"headquarters":
+			pass  # HQ itself gets no own-type bonus; its bonus radiates outward.
+	# HQ Power discount on OTHER network members.
+	if m.hq > 0 and bid != &"headquarters":
+		out.power_mult = 0.85  # -15%
+	return out
 
 
 ## Stub — real implementation in Task 9.
