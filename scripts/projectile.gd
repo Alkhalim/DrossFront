@@ -54,20 +54,21 @@ static func create(from: Vector3, to: Vector3, role_tag: StringName,
 	## line-fades that don't benefit from MultiMesh batching —
 	## keeping them on a one-off Node3D is simpler than building
 	## a separate beam-aware path in the manager.
-	var style: String = String(style_override) if style_override != &"" else "beam"
-	if style == &"" or style_override == &"":
-		# Fall back to rof_tier mapping for backwards compat.
-		# Only "continuous" maps to beam; everything else should
-		# have been routed through ProjectileManager already.
-		const ROF_STYLES: Dictionary = {
-			&"single": "missile",
-			&"slow": "missile",
-			&"moderate": "bullet",
-			&"fast": "bullet",
-			&"volley": "missile",
-			&"continuous": "beam",
-		}
-		style = ROF_STYLES.get(rof_tier, "bullet") as String
+	# Mirror original ROF_STYLES dispatch: rof_tier is the base style;
+	# explicit style_override wins if provided. Only "continuous" maps
+	# to beam — all other tiers should have been routed through
+	# ProjectileManager already.
+	const ROF_STYLES: Dictionary = {
+		&"single": "missile",
+		&"slow": "missile",
+		&"moderate": "bullet",
+		&"fast": "bullet",
+		&"volley": "missile",
+		&"continuous": "beam",
+	}
+	var style: String = ROF_STYLES.get(rof_tier, "bullet") as String
+	if style_override != &"":
+		style = String(style_override)
 	if style != "beam":
 		push_error("Projectile.create called with non-beam style '%s' (rof_tier=%s) — should route through ProjectileManager" % [style, rof_tier])
 	var proj := Projectile.new()
