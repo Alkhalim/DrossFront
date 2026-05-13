@@ -3667,6 +3667,36 @@ func is_unit_unlocked(u: UnitStatResource) -> bool:
 	return _unit_unlock_prerequisite_met(u)
 
 
+func _meridian_hq_producible() -> Array[String]:
+	## Meridian HQ's producible-unit roster — the union of categories
+	## authorized by buildings the owner has constructed. Engineer
+	## (Rigger) and Crawler are always available. Sensor Spine →
+	## Light/Medium; Drone Bay → Air; Black Pylon → Heavy/Caster.
+	## Phase 3 (Intelligence Network tiers) further gates Heavy/Apex
+	## by tech tier; that gate lives on the units' unlock_prerequisite,
+	## not here.
+	var paths: Array[String] = [
+		"res://resources/units/sable_rigger.tres",
+		# Crawler stays shared with Anvil for now.
+		"res://resources/units/anvil_crawler.tres",
+	]
+	if _local_player_has_built(&"sensor_spine"):
+		paths.append("res://resources/units/sable_specter.tres")
+		paths.append("res://resources/units/sable_jackal.tres")
+	if _local_player_has_built(&"drone_bay"):
+		paths.append("res://resources/units/sable_switchblade.tres")
+		paths.append("res://resources/units/sable_fang.tres")
+	if _local_player_has_built(&"black_pylon"):
+		paths.append("res://resources/units/sable_harbinger.tres")
+		paths.append("res://resources/units/sable_wraith.tres")
+		paths.append("res://resources/units/sable_pulsefont.tres")
+	# Couriers — keep the transport branch reachable. Spec ties Courier
+	# to medium-tier authorization (Sensor Spine territory).
+	if _local_player_has_built(&"sensor_spine"):
+		paths.append("res://resources/units/sable_courier_tank.tres")
+	return paths
+
+
 func _faction_producible_list() -> Array[UnitStatResource]:
 	var faction_id: int = _resolve_faction_id()
 	# 0 = Anvil (default), 1 = Sable per MatchSettingsClass.FactionId.
@@ -3682,11 +3712,7 @@ func _faction_producible_list() -> Array[UnitStatResource]:
 	var sable_paths: Array[String] = []
 	match stats.building_id:
 		&"headquarters":
-			sable_paths = [
-				"res://resources/units/sable_rigger.tres",
-				# Crawler is shared across factions for now.
-				"res://resources/units/anvil_crawler.tres",
-			]
+			sable_paths = _meridian_hq_producible()
 		&"basic_foundry":
 			sable_paths = [
 				"res://resources/units/sable_specter.tres",
