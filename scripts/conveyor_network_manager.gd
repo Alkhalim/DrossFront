@@ -88,8 +88,78 @@ func unregister(building: Node) -> void:
 
 
 func _recompute_for(owner_id: int) -> void:
-	# Implemented in Task 7. Stub here so register/unregister don't error.
+	var participants: Array = _participants.get(owner_id, [])
+	# Build adjacency: O(n²) edge-to-edge distance check.
+	var adj: Dictionary = {}
+	for b in participants:
+		adj[b] = []
+	for i in range(participants.size()):
+		var a: Node = participants[i]
+		if not is_instance_valid(a):
+			continue
+		var a_extent: float = _extent_of(a)
+		var a_range: float = (a.stats as BuildingStatResource).connection_range
+		for j in range(i + 1, participants.size()):
+			var c: Node = participants[j]
+			if not is_instance_valid(c):
+				continue
+			var c_extent: float = _extent_of(c)
+			var c_range: float = (c.stats as BuildingStatResource).connection_range
+			var center_dist: float = a.global_position.distance_to(c.global_position)
+			var edge_dist: float = maxf(center_dist - a_extent - c_extent, 0.0)
+			# Each side must reach within its own connection_range. Use
+			# the min of the two ranges so an asymmetric pair (if ever
+			# introduced) only connects when BOTH sides allow it.
+			var allowed: float = minf(a_range, c_range)
+			if edge_dist <= allowed:
+				adj[a].append(c)
+				adj[c].append(a)
+	_adjacency[owner_id] = adj
+
+	# Connected components via flood fill. Tag each participant with a
+	# network_id; compute per-network composition meta.
+	var membership: Dictionary = {}
+	var meta: Dictionary = {}
+	var next_id: int = 1
+	for b in participants:
+		if b in membership:
+			continue
+		var stack: Array = [b]
+		var component: Array = []
+		while not stack.is_empty():
+			var n: Node = stack.pop_back()
+			if n in membership:
+				continue
+			membership[n] = next_id
+			component.append(n)
+			for neighbor in adj.get(n, []):
+				if not (neighbor in membership):
+					stack.append(neighbor)
+		# Build meta for this component.
+		var m: Dictionary = {
+			"basic_foundry": 0, "advanced_foundry": 0, "aerodrome": 0,
+			"hq": 0, "conveyor_node": 0, "production_total": 0,
+			"is_valid": true,
+		}
+		for n in component:
+			var bid: StringName = (n.stats as BuildingStatResource).building_id
+			match bid:
+				&"basic_foundry": m.basic_foundry += 1; m.production_total += 1
+				&"advanced_foundry": m.advanced_foundry += 1; m.production_total += 1
+				&"aerodrome": m.aerodrome += 1; m.production_total += 1
+				&"headquarters": m.hq += 1; m.production_total += 1
+				&"conveyor_node": m.conveyor_node += 1
+		m.is_valid = m.production_total <= 3
+		meta[next_id] = m
+		next_id += 1
+	_membership[owner_id] = membership
+	_network_meta[owner_id] = meta
 	network_changed.emit(owner_id)
+
+
+func _extent_of(b: Node) -> float:
+	var fs: Vector3 = (b.stats as BuildingStatResource).footprint_size
+	return maxf(fs.x, fs.z) * 0.5
 
 
 ## Stub — real implementation in Task 8.
