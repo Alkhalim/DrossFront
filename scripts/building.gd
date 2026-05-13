@@ -3621,7 +3621,13 @@ func is_network_eligible() -> bool:
 	## Building participates in Conveyor Networks if its resource has
 	## connection_range > 0. The Combine HQ + Foundries + Aerodrome
 	## + Conveyor Node set this; everything else leaves it 0.
-	return stats != null and stats.connection_range > 0.0
+	if stats == null or stats.connection_range <= 0.0:
+		return false
+	# Conveyor Network is a Combine-exclusive mechanic. Other factions'
+	# HQs share the resource but must not join the network — the shared
+	# headquarters.tres has connection_range = 10 for Combine's sake.
+	var faction: int = _resolve_faction_id()
+	return faction == 0  # 0 = Anvil/Combine; 1 = Sable/Meridian
 
 
 func get_effective_power_consumption() -> int:

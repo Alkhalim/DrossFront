@@ -2705,14 +2705,19 @@ const HQ_PLATING_HP_MULT: float = 1.25
 
 func _append_hq_upgrade_buttons(building: Building) -> void:
 	## Renders the HQ Upgrades tab. Crawler Anchor research is shown
-	## for both factions; HQ Plating + HQ Battery are Anvil-only
-	## (faction check inline so the tab itself stays available to
-	## Sable for the Anchor row).
+	## for Combine only; HQ Plating + HQ Battery are also Anvil-only
+	## (Anchor Mode is a Combine Salvage Crawler upgrade — Meridian
+	## doesn't deploy crawlers the same way).
+	# Anchor Mode is Combine-exclusive. Resolve the building's faction
+	# and skip the row entirely for Meridian HQs.
+	var hq_owner_faction: int = 0
+	if building != null and building.has_method("_resolve_faction_id"):
+		hq_owner_faction = building.call("_resolve_faction_id") as int
 	# Crawler Anchor research -- moved here from the basic armory
 	# per the upgrade-tier reorg. Shows the same row the armory
 	# used to render so the player gets a consistent UI.
 	var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
-	if rm:
+	if rm and hq_owner_faction == 0:
 		_button_grid.add_child(_make_anchor_research_row(rm, ""))
 	# Anvil-only HQ upgrades.
 	var settings: Node = get_node_or_null("/root/MatchSettings")
@@ -5615,6 +5620,11 @@ func _building_role_hint(stat: BuildingStatResource) -> String:
 		&"advanced_armory": return "Tech"
 		&"salvage_yard": return "Economy"
 		&"conveyor_node": return "Economy"
+		&"sensor_spine": return "Authorization"
+		&"drone_bay": return "Authorization"
+		&"intelligence_network": return "Tech"
+		&"sensor_array": return "Defense"
+		&"mesh_relay": return "Power"
 		&"gun_emplacement": return "Defense"
 		&"gun_emplacement_basic": return "Defense"
 		&"aerodrome": return "Production"
@@ -5776,6 +5786,16 @@ func _building_description(id: StringName) -> String:
 			return "Stationary harvester. Pulls salvage from wrecks inside its work radius."
 		&"conveyor_node":
 			return "Combine logistics relay. Links production buildings into the conveyor network, enabling salvage transfer between nodes."
+		&"sensor_spine":
+			return "Authorizes the Operations Center to build Light and Medium units (Specter, Jackal, Courier). Also a Mesh provider — surveilling enemies accelerates contract regen."
+		&"drone_bay":
+			return "Authorizes the Operations Center to build Air units (Switchblade, Fang). Requires Sensor Spine."
+		&"intelligence_network":
+			return "Meridian tech progression. Tier upgrades unlock Heavy / Apex unit categories and increase the HQ's concurrent production slots."
+		&"sensor_array":
+			return "Defensive structure with surveillance — surveilling enemies accelerates contract regen."
+		&"mesh_relay":
+			return "Tier 1 power building for Meridian. Generates Power and projects a basic Mesh aura — surveilling enemies accelerates contract regen."
 		&"gun_emplacement":
 			return "Combine mode-switchable emplacement: Balanced / Anti-Light / Anti-Heavy. Ground only. +15% HP / damage vs the baseline turret."
 		&"gun_emplacement_basic":

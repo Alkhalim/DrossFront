@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+building_name = "Mesh Relay"
+building_id = &"mesh_relay"
+hp = 400
+cost_salvage = 180
+build_time = 21.0
+power_consumption = 0
+power_production = 30
+footprint_size = Vector3(2.5, 4, 2.5)
+placeholder_color = Color(0.30, 0.45, 0.55, 1)
+requires_geothermic_vent = true
+mesh_provider_radius = 16.0
+faction_lock = 2

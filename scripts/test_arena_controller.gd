@@ -5082,6 +5082,7 @@ func _setup_buildable_buildings() -> void:
 			"res://resources/buildings/drone_bay.tres",
 			"res://resources/buildings/intelligence_network.tres",
 			"res://resources/buildings/sensor_array.tres",
+			"res://resources/buildings/mesh_relay.tres",
 		]
 		var player_faction: int = _faction_id_for_player(0)
 		# Meridian Protocol rework: Foundries and Aerodrome are inert for
@@ -5089,6 +5090,9 @@ func _setup_buildable_buildings() -> void:
 		# Combine still builds them normally (faction_lock remains 0).
 		const _MERIDIAN_OBSOLETE: Array[StringName] = [
 			&"basic_foundry", &"advanced_foundry", &"aerodrome",
+			&"basic_armory", &"advanced_armory",
+			&"basic_generator", &"advanced_generator",
+			&"sam_site",
 		]
 		for path: String in stat_paths:
 			var stat: BuildingStatResource = load(path) as BuildingStatResource
