@@ -357,15 +357,24 @@ func _fire_one_shot(damage: int) -> void:
 	var building_faction: int = 0
 	if _building and _building.has_method("_resolve_faction_id"):
 		building_faction = _building.call("_resolve_faction_id") as int
-	var proj: Node3D = Projectile.create(
-		fire_origin,
-		_target.global_position,
-		get_role(),
-		&"moderate",
-		&"",
-		building_faction,
-	)
-	get_tree().current_scene.add_child(proj)
+	# Cosmetic tracer through ProjectileManager. Damage was already
+	# applied above (_target.take_damage at the top of _fire_one_shot
+	# is hitscan), so pending_damage=0 and the manager only renders
+	# the bullet visual.
+	var role: StringName = get_role()
+	var p_color: Color = Color(0.9, 0.6, 0.2, 1.0)
+	match role:
+		&"AP": p_color = Color(1.0, 0.8, 0.2, 1.0)
+		&"AA": p_color = Color(0.3, 0.7, 1.0, 1.0)
+		&"Universal": p_color = Color(0.9, 0.6, 0.2, 1.0)
+	if building_faction == 1:
+		p_color = p_color.lerp(Color(1.0, 1.0, 1.0, p_color.a), 0.4)
+	var pm: ProjectileManager = ProjectileManager.get_instance(get_tree().current_scene if get_tree() else null)
+	if pm != null:
+		pm.fire(fire_origin, _target.global_position, "bullet", p_color, 150.0,
+				0,  # hitscan: damage already applied
+				_target as Node3D, _building as Node3D, 0.0, 0,
+				(_building.get("owner_id") as int) if (_building and "owner_id" in _building) else -1)
 	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
 	if audio and audio.has_method("play_weapon_fire"):
 		var sfx_pos: Vector3 = _building.global_position

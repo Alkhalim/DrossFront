@@ -2638,15 +2638,15 @@ func _fire_barrage_missile(target: Node3D, damage: int, side_x: float, spread_of
 	var pod_world_offset: Vector3 = transform.basis.x * side_x
 	var spawn_pos: Vector3 = global_position + pod_world_offset + Vector3(0, -0.25, 0)
 	var aim_pos: Vector3 = target.global_position + spread_offset
-	var proj: Projectile = Projectile.create(
-		spawn_pos,
-		aim_pos,
-		role_tag,
-		&"slow",
-		&"missile",
-	)
-	if proj:
-		get_tree().current_scene.add_child(proj)
+	# Cosmetic missile through ProjectileManager. Damage was already
+	# applied above (target.take_damage), so pending_damage=0.
+	var p_color: Color = Color(0.3, 0.7, 1.0, 1.0) if role_tag == &"AA" or role_tag == &"AAir" else Color(0.9, 0.6, 0.2, 1.0)
+	var pm: ProjectileManager = ProjectileManager.get_instance(get_tree().current_scene if get_tree() else null)
+	if pm != null:
+		pm.fire(spawn_pos, aim_pos, "missile", p_color, 0.0,
+				0,  # damage already applied
+				target as Node3D, self, 0.0, 0,
+				(get("owner_id") as int) if "owner_id" in self else -1)
 
 
 func _ability_carpet_bombard() -> bool:
@@ -2703,16 +2703,17 @@ func _ability_carpet_bombard() -> bool:
 		# the target, so the visual line of impacts crosses the
 		# target.
 		var aim_pos: Vector3 = target.global_position + heading * t * STICK_LENGTH * 0.5
-		var proj: Projectile = Projectile.create(
-			spawn_pos,
-			aim_pos,
-			&"AS",
-			&"slow",
-			&"bomb",
-			faction,
-		)
-		if proj:
-			get_tree().current_scene.add_child(proj)
+		# Cosmetic bomb through ProjectileManager. Damage is applied
+		# below via _apply_carpet_bomb_splash, so pending_damage=0.
+		var bomb_color: Color = Color(0.9, 0.6, 0.2, 1.0)  # AS = generic warm
+		if faction == 1:
+			bomb_color = bomb_color.lerp(Color(1.0, 1.0, 1.0, bomb_color.a), 0.4)
+		var pm_bomb: ProjectileManager = ProjectileManager.get_instance(get_tree().current_scene if get_tree() else null)
+		if pm_bomb != null:
+			pm_bomb.fire(spawn_pos, aim_pos, "bomb", bomb_color, 0.0,
+					0,  # damage applied via _apply_carpet_bomb_splash
+					target as Node3D, self, 0.0, 0,
+					(get("owner_id") as int) if "owner_id" in self else -1)
 		# Splash damage per bomb. Mirrors the regular AS bomb math --
 		# structures take the full hit, units take the AS-vs-armor
 		# fraction. Targets caught in multiple impact circles take
