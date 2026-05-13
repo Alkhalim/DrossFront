@@ -177,3 +177,137 @@ func _build_mesh_for_style(style: String, color: Color) -> Mesh:
 	mat.emission_energy_multiplier = 3.0
 	cyl.surface_set_material(0, mat)
 	return cyl
+
+
+## Public entry point — replaces Projectile.create() for non-beam styles.
+## Returns true if the projectile was successfully spawned, false if
+## the bucket was full (silently dropped — combat doesn't need to know).
+func fire(
+		from: Vector3,
+		to: Vector3,
+		style: String,
+		color: Color,
+		speed: float,
+		damage: int,
+		target: Node3D,
+		shooter: Node3D,
+		splash_radius: float,
+		splash_damage: int,
+		shooter_owner_id: int) -> bool:
+	var bucket_key: String = _bucket_key(style, color)
+	_ensure_bucket(style, color)
+	var bucket_slot: int = _alloc_bucket_slot(bucket_key)
+	if bucket_slot < 0:
+		return false  # bucket full
+	var idx: int = _alloc_slot()
+	# Lift fire_y just like the legacy Projectile.create did — barrel-tip
+	# y when caller passed a >=0.5 muzzle position; +1u above ground when
+	# caller passed a low-y unit-center position.
+	var fire_y: float = from.y if from.y >= 0.5 else from.y + 1.0
+	var start_pos := Vector3(from.x, fire_y, from.z)
+	var target_pos := Vector3(to.x, to.y + 0.8, to.z)
+	# Slight random target offset so squad volleys don't perfectly stack.
+	target_pos += Vector3(randf_range(-0.3, 0.3), 0.0, randf_range(-0.3, 0.3))
+	_state_pos[idx] = start_pos
+	_state_start[idx] = start_pos
+	_state_target[idx] = target_pos
+	_state_speed[idx] = speed
+	_state_life[idx] = 0.0
+	_state_style[idx] = _style_to_int(style)
+	_state_bucket_key[idx] = bucket_key
+	_state_bucket_slot[idx] = bucket_slot
+	_state_pending_damage[idx] = damage
+	_state_pending_target[idx] = target
+	_state_pending_shooter[idx] = shooter
+	_state_pending_splash_radius[idx] = splash_radius
+	_state_pending_splash_damage[idx] = splash_damage
+	_state_pending_shooter_owner_id[idx] = shooter_owner_id
+	# Missile flight time + arc — set later in Task 5; bullets ignore.
+	_state_total_flight[idx] = 0.0
+	_state_arc_height[idx] = 0.0
+	# Initial transform write so the projectile is visible on frame 0.
+	_write_transform(idx)
+	return true
+
+
+func _style_to_int(style: String) -> int:
+	# Compact int encoding for the style. Used by _process to branch to
+	# the right per-style update code.
+	match style:
+		"bullet": return 0
+		"missile": return 1
+		"shell": return 2
+		"mortar": return 3
+		"bomb": return 4
+		_: return 0
+
+
+func _write_transform(idx: int) -> void:
+	var bucket: MultiMeshInstance3D = _buckets.get(_state_bucket_key[idx]) as MultiMeshInstance3D
+	if bucket == null or bucket.multimesh == null:
+		return
+	var pos: Vector3 = _state_pos[idx]
+	var target: Vector3 = _state_target[idx]
+	# Orient the cylinder along the firing direction. Same logic the
+	# legacy bullet path used: looking_at toward target_pos with UP.
+	var t := Transform3D()
+	t.origin = pos
+	if pos.distance_squared_to(target) > 0.0001:
+		t = t.looking_at(target, Vector3.UP)
+	bucket.multimesh.set_instance_transform(_state_bucket_slot[idx], t)
+
+
+func _process(delta: float) -> void:
+	# Per-projectile update. Bullet path only in this task; missile arc,
+	# shell ballistic, mortar, bomb land in later tasks.
+	var n: int = _state_pos.size()
+	var i: int = 0
+	while i < n:
+		if _state_style[i] == SLOT_FREE:
+			i += 1
+			continue
+		var style_int: int = _state_style[i]
+		if style_int == 0:  # bullet
+			_update_bullet(i, delta)
+		# Other styles: stub for now, freed immediately to keep the
+		# manager from leaking slots until Tasks 5/6 land them.
+		else:
+			_free_slot(i)
+		i += 1
+
+
+func _update_bullet(idx: int, delta: float) -> void:
+	# Lifetime cap (matches legacy Projectile bullet 0.7s cap).
+	_state_life[idx] += delta
+	if _state_life[idx] > 0.7:
+		_free_slot(idx)
+		return
+	var pos: Vector3 = _state_pos[idx]
+	var target: Vector3 = _state_target[idx]
+	var to_target: Vector3 = target - pos
+	var dist: float = to_target.length()
+	var step: float = _state_speed[idx] * delta
+	if step >= dist or dist < 0.1:
+		_spawn_impact_vfx(idx)
+		_free_slot(idx)
+		return
+	pos += (to_target / dist) * step
+	_state_pos[idx] = pos
+	_write_transform(idx)
+
+
+func _spawn_impact_vfx(idx: int) -> void:
+	# Hitscan damage already applied at fire-tick by CombatComponent.
+	# This function only plays the impact VFX (PEM emit_flash) + audio.
+	# For deferred-damage styles (missile/shell/mortar/bomb — landing in
+	# later tasks), this also applies the pending_damage payload.
+	var pos: Vector3 = _state_pos[idx]
+	var scene: Node = get_tree().current_scene if get_tree() else null
+	if scene == null:
+		return
+	var pem: Node = scene.get_node_or_null("ParticleEmitterManager")
+	if pem != null:
+		pem.call("emit_flash", pos, Color(1.0, 0.6, 0.18, 0.9))
+	var audio: Node = scene.get_node_or_null("AudioManager")
+	if audio != null and audio.has_method("play_weapon_impact"):
+		audio.call("play_weapon_impact", pos)
