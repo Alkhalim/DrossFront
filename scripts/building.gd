@@ -371,6 +371,14 @@ func _add_building_details() -> void:
 		&"black_pylon": _detail_black_pylon()
 		&"molot_platform": _detail_molot_platform()
 		&"echo_array": _detail_echo_array()
+		# Combine logistics
+		&"conveyor_node": _detail_conveyor_node()
+		# Meridian intelligence / sensor / mesh buildings
+		&"sensor_spine": _detail_sensor_spine()
+		&"drone_bay": _detail_drone_bay()
+		&"intelligence_network": _detail_intelligence_network()
+		&"sensor_array": _detail_sensor_array()
+		&"mesh_relay": _detail_mesh_relay()
 	# Mesh-provider aura ring (V3 §Pillar 2). Drawn after the type
 	# detail layer so the ring sits on top of the ground markings.
 	if stats.mesh_provider_radius > 0.0:
@@ -4543,6 +4551,431 @@ func _detail_black_pylon() -> void:
 	glow.omni_range = 6.0
 	glow.position.y = fs.y * 0.6
 	_attach_visual(glow)
+
+
+## ---- Conveyor Node (Combine logistics) ----
+
+func _detail_conveyor_node() -> void:
+	## Small junction box with corner posts and a cable-spool hub.
+	## Footprint: 1.6 × 2.0 × 1.6.  The tight footprint means every
+	## element must pull its weight for the top-down read.
+	var fs: Vector3 = stats.footprint_size
+	# Four corner posts — vertical slim boxes at each foot of the box.
+	# From top-down these four dots immediately distinguish this from a
+	# plain box even at minimal zoom.
+	var post_half_x: float = fs.x * 0.40
+	var post_half_z: float = fs.z * 0.40
+	var post_h: float = fs.y * 0.35
+	var post_positions: Array[Vector3] = [
+		Vector3( post_half_x, fs.y + post_h * 0.5,  post_half_z),
+		Vector3(-post_half_x, fs.y + post_h * 0.5,  post_half_z),
+		Vector3( post_half_x, fs.y + post_h * 0.5, -post_half_z),
+		Vector3(-post_half_x, fs.y + post_h * 0.5, -post_half_z),
+	]
+	for pp: Vector3 in post_positions:
+		var post := MeshInstance3D.new()
+		var pb := BoxMesh.new()
+		pb.size = Vector3(0.14, post_h, 0.14)
+		post.mesh = pb
+		post.position = pp
+		post.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.18, 0.14)))
+		_attach_visual(post)
+	# Electronics box on the roof — slightly wider than the placeholder
+	# top, amber emissive face panel.  Reads as "active junction" from
+	# any oblique camera angle.
+	var ebox := MeshInstance3D.new()
+	var eb := BoxMesh.new()
+	eb.size = Vector3(fs.x * 0.60, 0.20, fs.z * 0.60)
+	ebox.mesh = eb
+	ebox.position = Vector3(0.0, fs.y + 0.10, 0.0)
+	ebox.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.28, 0.22, 0.14)))
+	_attach_visual(ebox)
+	# Amber emissive face on the top of the electronics box — the
+	# distinctive orange glow matches the Combine belt-body colour.
+	var face := MeshInstance3D.new()
+	var fb := BoxMesh.new()
+	fb.size = Vector3(fs.x * 0.50, 0.04, fs.z * 0.50)
+	face.mesh = fb
+	face.position = Vector3(0.0, fs.y + 0.21, 0.0)
+	face.set_surface_override_material(0, _detail_emissive_mat(Color(0.95, 0.55, 0.15), 1.6))
+	_attach_visual(face)
+	# Cable-spool hub — horizontal cylinder in the centre of the box top.
+	# The spool shape is unmistakable from above: a short fat disc.
+	var spool := MeshInstance3D.new()
+	var sc := CylinderMesh.new()
+	sc.top_radius = fs.x * 0.18
+	sc.bottom_radius = fs.x * 0.18
+	sc.height = 0.28
+	sc.radial_segments = 14
+	spool.mesh = sc
+	spool.position = Vector3(0.0, fs.y + 0.34, 0.0)
+	spool.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.16, 0.14)))
+	_attach_visual(spool)
+	# Spool flanges — two thin discs sandwiching the drum so the
+	# spool reads as a real wound coil rather than just a cylinder.
+	for flange_i: int in 2:
+		var flange := MeshInstance3D.new()
+		var fc := CylinderMesh.new()
+		fc.top_radius = fs.x * 0.25
+		fc.bottom_radius = fs.x * 0.25
+		fc.height = 0.04
+		fc.radial_segments = 14
+		flange.mesh = fc
+		flange.position = Vector3(0.0, fs.y + 0.22 + float(flange_i) * 0.24, 0.0)
+		flange.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.26, 0.22, 0.18)))
+		_attach_visual(flange)
+	# Team collar around the electronics box base.
+	_team_collar(fs.x * 0.62, 0.06, fs.z * 0.62, Vector3(0.0, fs.y + 0.04, 0.0))
+
+
+## ---- Meridian sensor / intelligence / relay buildings ----
+
+func _detail_sensor_spine() -> void:
+	## Tall antenna spire with three cross-bar arms and a tilted radar
+	## dish at the tip.  Footprint: 3 × 4 × 3.  Dominant silhouette
+	## from above: a thin vertical line with horizontal wings.
+	const MERIDIAN_BLUE := Color(0.30, 0.55, 0.70, 1.0)
+	var fs: Vector3 = stats.footprint_size
+	# Central spine — tall thin cylinder rising from the roof.
+	var spine := MeshInstance3D.new()
+	var spine_cyl := CylinderMesh.new()
+	spine_cyl.top_radius = fs.x * 0.05
+	spine_cyl.bottom_radius = fs.x * 0.09
+	spine_cyl.height = fs.y * 1.30
+	spine_cyl.radial_segments = 10
+	spine.mesh = spine_cyl
+	spine.position = Vector3(0.0, fs.y + spine_cyl.height * 0.5, 0.0)
+	spine.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.16, 0.18, 0.22)))
+	_attach_visual(spine)
+	# Three horizontal cross-bar arms at different heights along the
+	# spine — read as radar/antenna arms from above and side-on.
+	var arm_widths: Array[float] = [fs.x * 0.95, fs.x * 0.70, fs.x * 0.45]
+	var arm_heights: Array[float] = [
+		fs.y + spine_cyl.height * 0.25,
+		fs.y + spine_cyl.height * 0.55,
+		fs.y + spine_cyl.height * 0.78,
+	]
+	for arm_i: int in 3:
+		var arm := MeshInstance3D.new()
+		var ab := BoxMesh.new()
+		ab.size = Vector3(arm_widths[arm_i], 0.06, 0.08)
+		arm.mesh = ab
+		arm.position = Vector3(0.0, arm_heights[arm_i], 0.0)
+		arm.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.20, 0.22, 0.26)))
+		_attach_visual(arm)
+		# Small blue emissive tip on each arm end.
+		for tip_side: int in 2:
+			var tip_x: float = (arm_widths[arm_i] * 0.5 + 0.06) * (-1.0 if tip_side == 0 else 1.0)
+			var tip := MeshInstance3D.new()
+			var tb := BoxMesh.new()
+			tb.size = Vector3(0.08, 0.08, 0.08)
+			tip.mesh = tb
+			tip.position = Vector3(tip_x, arm_heights[arm_i], 0.0)
+			tip.set_surface_override_material(0, _detail_emissive_mat(MERIDIAN_BLUE, 1.4))
+			_attach_visual(tip)
+	# Radar dish at the top — flat cylinder tilted ~25° to one side.
+	var dish := MeshInstance3D.new()
+	var dc := CylinderMesh.new()
+	dc.top_radius = fs.x * 0.28
+	dc.bottom_radius = 0.04
+	dc.height = 0.14
+	dc.radial_segments = 16
+	dish.mesh = dc
+	dish.rotation.x = deg_to_rad(-25.0)
+	dish.rotation.z = deg_to_rad(12.0)
+	dish.position = Vector3(fs.x * 0.10, fs.y + spine_cyl.height + 0.15, 0.0)
+	dish.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.26, 0.30)))
+	_attach_visual(dish)
+	# Dish hub — small glowing sphere at the focus point.
+	var hub := MeshInstance3D.new()
+	var hs := SphereMesh.new()
+	hs.radius = 0.12
+	hs.height = 0.24
+	hub.mesh = hs
+	hub.position = Vector3(fs.x * 0.10, fs.y + spine_cyl.height + 0.10, 0.0)
+	var hub_mat := StandardMaterial3D.new()
+	hub_mat.albedo_color = MERIDIAN_BLUE
+	hub_mat.emission_enabled = true
+	hub_mat.emission = MERIDIAN_BLUE
+	hub_mat.emission_energy_multiplier = 2.6
+	hub.set_surface_override_material(0, hub_mat)
+	_attach_visual(hub)
+	# Ambient glow from the dish hub.
+	var light := OmniLight3D.new()
+	light.light_color = MERIDIAN_BLUE
+	light.light_energy = 1.6
+	light.omni_range = fs.x * 1.4 + 2.0
+	light.position = hub.position
+	_attach_visual(light)
+	# Team collar at the spine base.
+	_team_collar_ring(spine_cyl.bottom_radius * 1.15, 0.08, Vector3(0.0, fs.y + 0.04, 0.0))
+
+
+func _detail_drone_bay() -> void:
+	## Wide low hangar with a circular landing pad on the roof.
+	## Footprint: 5 × 3 × 5.  Top-down silhouette: a large disc on a
+	## wide flat box — immediately distinct from any other building.
+	const MERIDIAN_BLUE := Color(0.30, 0.55, 0.70, 1.0)
+	var fs: Vector3 = stats.footprint_size
+	var pad_r: float = fs.x * 0.40
+	# Circular landing pad — flat CylinderMesh on the roof.
+	var pad := MeshInstance3D.new()
+	var pc := CylinderMesh.new()
+	pc.top_radius = pad_r
+	pc.bottom_radius = pad_r
+	pc.height = 0.10
+	pc.radial_segments = 24
+	pad.mesh = pc
+	pad.position = Vector3(0.0, fs.y + 0.05, 0.0)
+	pad.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.20, 0.22, 0.26)))
+	_attach_visual(pad)
+	# Inner concentric ring marking — a slightly raised disc.
+	var inner_ring := MeshInstance3D.new()
+	var ir := CylinderMesh.new()
+	ir.top_radius = pad_r * 0.52
+	ir.bottom_radius = pad_r * 0.52
+	ir.height = 0.06
+	ir.radial_segments = 24
+	inner_ring.mesh = ir
+	inner_ring.position = Vector3(0.0, fs.y + 0.11, 0.0)
+	inner_ring.set_surface_override_material(0, _detail_emissive_mat(MERIDIAN_BLUE, 0.7))
+	_attach_visual(inner_ring)
+	# Three landing-light boxes around the pad rim.
+	for li: int in 3:
+		var ang: float = float(li) / 3.0 * TAU
+		var lx: float = sin(ang) * (pad_r * 0.88)
+		var lz: float = cos(ang) * (pad_r * 0.88)
+		var light_box := MeshInstance3D.new()
+		var lb := BoxMesh.new()
+		lb.size = Vector3(0.14, 0.12, 0.14)
+		light_box.mesh = lb
+		light_box.position = Vector3(lx, fs.y + 0.16, lz)
+		light_box.set_surface_override_material(0, _detail_emissive_mat(MERIDIAN_BLUE, 1.8))
+		_attach_visual(light_box)
+	# Two hangar-door strips on the front face (-Z side) — raised strips
+	# that break up the blank wall and suggest a real opening mechanism.
+	for door_i: int in 2:
+		var dz_off: float = -0.02 if door_i == 0 else 0.02
+		var door_strip := MeshInstance3D.new()
+		var db := BoxMesh.new()
+		db.size = Vector3(fs.x * 0.44, fs.y * 0.70, 0.06)
+		door_strip.mesh = db
+		door_strip.position = Vector3(
+			(float(door_i) - 0.5) * fs.x * 0.44,
+			fs.y * 0.35,
+			-fs.z * 0.5 - 0.03 + dz_off,
+		)
+		door_strip.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.24, 0.28)))
+		_attach_visual(door_strip)
+	# Door seam emissive line — a thin strip down the centre join.
+	var seam := MeshInstance3D.new()
+	var sb := BoxMesh.new()
+	sb.size = Vector3(0.04, fs.y * 0.68, 0.04)
+	seam.mesh = sb
+	seam.position = Vector3(0.0, fs.y * 0.34, -fs.z * 0.5 - 0.04)
+	seam.set_surface_override_material(0, _detail_emissive_mat(MERIDIAN_BLUE, 1.2))
+	_attach_visual(seam)
+	# Team collar around the pad.
+	_team_collar_ring(pad_r * 1.06, 0.06, Vector3(0.0, fs.y + 0.01, 0.0))
+
+
+func _detail_intelligence_network() -> void:
+	## Tiered command tower with three stacked floors tapering upward
+	## and a dome beacon at the top.  Footprint: 4 × 5 × 4.  Top-down:
+	## concentric squares tapering toward a circle — unmistakably tiered.
+	const MERIDIAN_BLUE := Color(0.30, 0.55, 0.70, 1.0)
+	var fs: Vector3 = stats.footprint_size
+	# Second floor — 0.7× footprint, sits on top of the placeholder.
+	var floor2 := MeshInstance3D.new()
+	var f2b := BoxMesh.new()
+	f2b.size = Vector3(fs.x * 0.70, fs.y * 0.35, fs.z * 0.70)
+	floor2.mesh = f2b
+	floor2.position = Vector3(0.0, fs.y + f2b.size.y * 0.5, 0.0)
+	floor2.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.20, 0.26)))
+	_attach_visual(floor2)
+	# Third floor — 0.4× footprint.
+	var floor3 := MeshInstance3D.new()
+	var f3b := BoxMesh.new()
+	f3b.size = Vector3(fs.x * 0.40, fs.y * 0.22, fs.z * 0.40)
+	floor3.mesh = f3b
+	floor3.position = Vector3(0.0, fs.y + f2b.size.y + f3b.size.y * 0.5, 0.0)
+	floor3.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.20, 0.22, 0.30)))
+	_attach_visual(floor3)
+	# Dome cap on the top floor — SphereMesh read as command antenna dome.
+	var dome_base_y: float = fs.y + f2b.size.y + f3b.size.y
+	var dome := MeshInstance3D.new()
+	var ds := SphereMesh.new()
+	ds.radius = fs.x * 0.16
+	ds.height = fs.x * 0.22
+	dome.mesh = ds
+	dome.position = Vector3(0.0, dome_base_y + ds.radius * 0.5, 0.0)
+	var dome_mat := StandardMaterial3D.new()
+	dome_mat.albedo_color = MERIDIAN_BLUE
+	dome_mat.emission_enabled = true
+	dome_mat.emission = MERIDIAN_BLUE
+	dome_mat.emission_energy_multiplier = 2.2
+	dome.set_surface_override_material(0, dome_mat)
+	_attach_visual(dome)
+	# Ambient glow from the dome.
+	var dome_light := OmniLight3D.new()
+	dome_light.light_color = MERIDIAN_BLUE
+	dome_light.light_energy = 1.8
+	dome_light.omni_range = fs.x * 1.2 + 3.0
+	dome_light.position = dome.position
+	_attach_visual(dome_light)
+	# Four antenna spires angling outward from the top floor corners.
+	var spire_base_y: float = dome_base_y
+	var spire_corners: Array[Vector2] = [
+		Vector2( fs.x * 0.16,  fs.z * 0.16),
+		Vector2(-fs.x * 0.16,  fs.z * 0.16),
+		Vector2( fs.x * 0.16, -fs.z * 0.16),
+		Vector2(-fs.x * 0.16, -fs.z * 0.16),
+	]
+	for sc: Vector2 in spire_corners:
+		var spire := MeshInstance3D.new()
+		var spc := CylinderMesh.new()
+		spc.top_radius = 0.02
+		spc.bottom_radius = 0.04
+		spc.height = fs.y * 0.40
+		spc.radial_segments = 6
+		spire.mesh = spc
+		spire.position = Vector3(sc.x, spire_base_y + spc.height * 0.5, sc.y)
+		spire.rotation.z = deg_to_rad(signf(sc.x) * 10.0)
+		spire.rotation.x = deg_to_rad(signf(sc.y) * 10.0)
+		spire.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.20, 0.22, 0.28)))
+		_attach_visual(spire)
+	# Team collar at the second-floor base.
+	_team_collar(fs.x * 0.72, 0.06, fs.z * 0.72, Vector3(0.0, fs.y + 0.02, 0.0))
+
+
+func _detail_sensor_array() -> void:
+	## Small radar pedestal — a central column with a tilted dish and
+	## three tripod legs at the base.  Footprint: 2.4 × 4.5 × 2.4.
+	## Top-down: a circle (dish) plus three angled stubs (legs).
+	const MERIDIAN_BLUE := Color(0.30, 0.55, 0.70, 1.0)
+	var fs: Vector3 = stats.footprint_size
+	# Central pedestal column rising from the placeholder roof.
+	var col := MeshInstance3D.new()
+	var cc := CylinderMesh.new()
+	cc.top_radius = fs.x * 0.10
+	cc.bottom_radius = fs.x * 0.14
+	cc.height = fs.y * 0.75
+	cc.radial_segments = 10
+	col.mesh = cc
+	col.position = Vector3(0.0, fs.y + cc.height * 0.5, 0.0)
+	col.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.20, 0.24)))
+	_attach_visual(col)
+	# Radar dish on top — flat cone (top_radius small, bottom_radius large)
+	# tilted ~30° to suggest it's aimed at the horizon.
+	var dish := MeshInstance3D.new()
+	var dc := CylinderMesh.new()
+	dc.top_radius = 0.06
+	dc.bottom_radius = fs.x * 0.42
+	dc.height = 0.16
+	dc.radial_segments = 18
+	dish.mesh = dc
+	dish.rotation.x = deg_to_rad(-30.0)
+	dish.position = Vector3(fs.x * 0.06, fs.y + cc.height + 0.14, 0.0)
+	dish.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.24, 0.26, 0.32)))
+	_attach_visual(dish)
+	# Junction box at the dish base — small emissive cube where the
+	# dish meets the column.
+	var jbox := MeshInstance3D.new()
+	var jb := BoxMesh.new()
+	jb.size = Vector3(0.22, 0.18, 0.22)
+	jbox.mesh = jb
+	jbox.position = Vector3(0.0, fs.y + cc.height + 0.06, 0.0)
+	jbox.set_surface_override_material(0, _detail_emissive_mat(MERIDIAN_BLUE, 1.6))
+	_attach_visual(jbox)
+	# Three tripod legs radiating outward from the base of the
+	# placeholder down to the ground.  Reads as a sturdy tripod mount
+	# from any camera angle.
+	for leg_i: int in 3:
+		var ang: float = float(leg_i) / 3.0 * TAU + PI / 6.0
+		var lx: float = sin(ang) * (fs.x * 0.42)
+		var lz: float = cos(ang) * (fs.x * 0.42)
+		var leg := MeshInstance3D.new()
+		var lb := BoxMesh.new()
+		lb.size = Vector3(0.10, fs.y * 0.70, 0.10)
+		leg.mesh = lb
+		leg.position = Vector3(lx * 0.55, fs.y * 0.35, lz * 0.55)
+		leg.rotation.x = -atan2(lz, fs.y * 0.55) * 0.40
+		leg.rotation.z = atan2(lx, fs.y * 0.55) * 0.40
+		leg.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.18, 0.20)))
+		_attach_visual(leg)
+	# Team collar at the column base.
+	_team_collar_ring(cc.bottom_radius * 1.15, 0.08, Vector3(0.0, fs.y + 0.04, 0.0))
+
+
+func _detail_mesh_relay() -> void:
+	## Projector tower with stacked coil rings and a glowing orb tip.
+	## Footprint: 2.5 × 4 × 2.5.  Top-down: concentric rings on a thin
+	## vertical shaft — clear "broadcast tower" read.
+	const MERIDIAN_BLUE := Color(0.30, 0.55, 0.70, 1.0)
+	var fs: Vector3 = stats.footprint_size
+	# Vertical antenna tower — thin CylinderMesh rising above the hull.
+	var tower := MeshInstance3D.new()
+	var tc := CylinderMesh.new()
+	tc.top_radius = fs.x * 0.06
+	tc.bottom_radius = fs.x * 0.10
+	tc.height = fs.y * 1.20
+	tc.radial_segments = 10
+	tower.mesh = tc
+	tower.position = Vector3(0.0, fs.y + tc.height * 0.5, 0.0)
+	tower.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.16, 0.18, 0.22)))
+	_attach_visual(tower)
+	# Three coil rings encircling the tower at evenly spaced heights.
+	# Godot ships TorusMesh — use it here for the rings.
+	var ring_mat := StandardMaterial3D.new()
+	ring_mat.albedo_color = MERIDIAN_BLUE
+	ring_mat.emission_enabled = true
+	ring_mat.emission = MERIDIAN_BLUE
+	ring_mat.emission_energy_multiplier = 1.4
+	ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	for coil_i: int in 3:
+		var coil := MeshInstance3D.new()
+		var ct := TorusMesh.new()
+		ct.inner_radius = fs.x * 0.14
+		ct.outer_radius = fs.x * 0.28
+		ct.rings = 18
+		ct.ring_segments = 6
+		coil.mesh = ct
+		coil.rotation.x = PI * 0.5
+		coil.position = Vector3(0.0, fs.y + 0.30 + float(coil_i) * (tc.height * 0.32), 0.0)
+		coil.set_surface_override_material(0, ring_mat)
+		_attach_visual(coil)
+	# Glowing orb at the tower tip.
+	var orb := MeshInstance3D.new()
+	var os := SphereMesh.new()
+	os.radius = fs.x * 0.14
+	os.height = fs.x * 0.28
+	orb.mesh = os
+	orb.position = Vector3(0.0, fs.y + tc.height + 0.15, 0.0)
+	var orb_mat := StandardMaterial3D.new()
+	orb_mat.albedo_color = MERIDIAN_BLUE
+	orb_mat.emission_enabled = true
+	orb_mat.emission = MERIDIAN_BLUE
+	orb_mat.emission_energy_multiplier = 3.2
+	orb.set_surface_override_material(0, orb_mat)
+	_attach_visual(orb)
+	# Ambient glow from the orb — casts the relay's blue onto the ground.
+	var orb_light := OmniLight3D.new()
+	orb_light.light_color = MERIDIAN_BLUE
+	orb_light.light_energy = 2.0
+	orb_light.omni_range = fs.x * 1.8 + 3.0
+	orb_light.position = orb.position
+	_attach_visual(orb_light)
+	# Power conduit from the front base to the hull — short horizontal
+	# BoxMesh read as "cable running into the building".
+	var conduit := MeshInstance3D.new()
+	var cb := BoxMesh.new()
+	cb.size = Vector3(0.12, 0.12, fs.z * 0.35)
+	conduit.mesh = cb
+	conduit.position = Vector3(0.0, fs.y * 0.18, -fs.z * 0.32)
+	conduit.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.20, 0.22, 0.28)))
+	_attach_visual(conduit)
+	# Team collar at the tower base.
+	_team_collar_ring(tc.bottom_radius * 1.15, 0.08, Vector3(0.0, fs.y + 0.04, 0.0))
 
 
 func _add_mesh_aura_ring(radius: float) -> void:
