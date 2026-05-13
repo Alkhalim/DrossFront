@@ -225,11 +225,12 @@ func compute_unit_cost(target: Node, unit_stats: UnitStatResource) -> Dictionary
 ## because participants per owner is small (≤50 typically).
 func would_overfull_network(owner_id: int, pos: Vector3, building_id: StringName) -> bool:
 	var counts_as_production: bool = building_id in [&"basic_foundry", &"advanced_foundry", &"aerodrome", &"headquarters"]
-	# We need a connection_range and an extent for the hypothetical
-	# building. Foundries/HQ/Aerodrome all use 100m; Conveyor Node also
-	# uses 100m. Use 100m as the conservative assumption here — the
-	# function is only called for network-eligible buildings.
-	var hypo_range: float = 100.0
+	# All network-eligible buildings share connection_range = 10 (set on
+	# the four production buildings + the Conveyor Node). 10 world units is
+	# roughly 1.5× a Basic Foundry's longest footprint axis, which keeps
+	# Combine bases compact per the user's intent. If the per-building stat
+	# diverges in the future, look it up here from the resource instead.
+	var hypo_range: float = 10.0
 	var hypo_extent: float = 3.0  # rough — exact footprint TBD per building; small enough not to falsely permit
 	var participants: Array = _participants.get(owner_id, [])
 	# Build adjacency for {participants ∪ hypo}.

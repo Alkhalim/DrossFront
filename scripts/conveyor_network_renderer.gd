@@ -63,13 +63,20 @@ func _on_network_changed(owner_id: int) -> void:
 		var e: Dictionary = edges[i]
 		var a: Vector3 = e.a + Vector3.UP * BELT_Y_OFFSET
 		var b: Vector3 = e.b + Vector3.UP * BELT_Y_OFFSET
-		var mid: Vector3 = (a + b) * 0.5
 		var length: float = a.distance_to(b)
+		# Build the basis explicitly: CylinderMesh's long axis is local Y, so
+		# we set Y = (a→b).normalized() and pick X/Z perpendicular to it.
+		# Using Basis.looking_at + an X-axis fixup (the pattern ProjectileManager
+		# uses for in-tree projectile nodes) produces the wrong orientation here
+		# — the belts ended up standing vertically. Explicit cross-products
+		# avoid the Basis/Transform3D.looking_at API ambiguity entirely.
+		var dir: Vector3 = (b - a).normalized() if length > 0.0001 else Vector3.RIGHT
+		var up_hint: Vector3 = Vector3.UP if absf(dir.dot(Vector3.UP)) < 0.99 else Vector3.RIGHT
+		var x_axis: Vector3 = dir.cross(up_hint).normalized()
+		var z_axis: Vector3 = x_axis.cross(dir).normalized()
 		var t := Transform3D.IDENTITY
-		t.origin = mid
-		t.basis = Basis().looking_at((b - a).normalized(), Vector3.UP)
-		t.basis = t.basis * Basis(Vector3.RIGHT, -PI * 0.5)  # CylinderMesh Y → -Z (matches ProjectileManager._write_transform)
-		t.basis = t.basis.scaled(Vector3(1.0, length, 1.0))
+		t.origin = (a + b) * 0.5
+		t.basis = Basis(x_axis, dir, z_axis).scaled(Vector3(1.0, length, 1.0))
 		mmi.multimesh.set_instance_transform(i, t)
 		# Color brightness scales with network fullness (1, 2, 3 prod buildings).
 		var bright: float = clampf(0.4 + 0.2 * float(e.fullness), 0.4, 1.0)

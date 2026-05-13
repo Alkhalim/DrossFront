@@ -2141,10 +2141,11 @@ func _update_conveyor_preview(ghost_pos: Vector3, bstat: BuildingStatResource) -
 
 func _make_preview_line(a: Vector3, b: Vector3, blocked: bool) -> Node3D:
 	var line := MeshInstance3D.new()
+	var length: float = a.distance_to(b)
 	var mesh := CylinderMesh.new()
 	mesh.top_radius = 0.15
 	mesh.bottom_radius = 0.15
-	mesh.height = a.distance_to(b)
+	mesh.height = length
 	line.mesh = mesh
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(1, 0.3, 0.2) if blocked else Color(0.3, 1, 0.4)
@@ -2152,10 +2153,15 @@ func _make_preview_line(a: Vector3, b: Vector3, blocked: bool) -> Node3D:
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.albedo_color.a = 0.55
 	mesh.material = mat
-	# Orient: midpoint, looking at axis (cylinder Y aligned to a→b after fixup).
-	line.global_position = (a + b) * 0.5
-	line.look_at(b, Vector3.UP)
-	line.rotate_object_local(Vector3.RIGHT, PI * 0.5)  # CylinderMesh Y → -Z alignment
+	# Orient: CylinderMesh's long axis is local Y, so build the basis so
+	# Y = (a→b).normalized(). Use explicit cross-products instead of look_at
+	# — the node isn't in the tree yet so look_at would error or read a
+	# stale global transform, which is what produced the north-south lines.
+	var dir: Vector3 = (b - a).normalized() if length > 0.0001 else Vector3.RIGHT
+	var up_hint: Vector3 = Vector3.UP if absf(dir.dot(Vector3.UP)) < 0.99 else Vector3.RIGHT
+	var x_axis: Vector3 = dir.cross(up_hint).normalized()
+	var z_axis: Vector3 = x_axis.cross(dir).normalized()
+	line.transform = Transform3D(Basis(x_axis, dir, z_axis), (a + b) * 0.5)
 	return line
 
 
