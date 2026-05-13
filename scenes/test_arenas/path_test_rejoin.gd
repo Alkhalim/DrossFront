@@ -10,15 +10,15 @@ extends Node3D
 ##   Issue an attack-move to a distant destination.
 ##
 ## Expected outcome:
-##   The hound(s) nearest the enemy building engage, kill it, then resume march
+##   The Borzoi(s) nearest the enemy building engage, kill it, then resume march
 ##   and rejoin the group (SquadGroup auto-rejoin, spec §10). The building
-##   should die within a reasonable time given Hound AP damage. No permanent
+##   should die within a reasonable time given Borzoi AP damage. No permanent
 ##   drop (unit rejoins rather than being abandoned).
 ##
 ## Console markers:
-##   [PA-20] STARTED — 5 hounds spawned, attack-move issued.
+##   [PA-20] STARTED — 5 Borzoi spawned, attack-move issued.
 ##   [PA-20] Enemy building destroyed at t=X.XX
-##   [PA-20] ARRIVED — all hounds within threshold at t=X.XX  (success)
+##   [PA-20] ARRIVED — all Borzoi within threshold at t=X.XX  (success)
 ##   [PA-20] TIMEOUT — not all hounds reached destination.
 
 const DEST: Vector3 = Vector3(50.0, 0.0, 0.0)
@@ -146,8 +146,8 @@ func _spawn_unit(stats_path: String, pos: Vector3, owner_id: int) -> Node3D:
 
 func _spawn_neutral_building(pos: Vector3) -> Node:
 	## Spawns a fully-constructed neutral building at pos.
-	## gun_emplacement_basic has ~1010 HP — weak enough that a Hound squad
-	## (twin MGs, rapid fire) kills it within ~10-15s at full strength.
+	## gun_emplacement_basic has ~1010 HP — weak enough that a Borzoi squad
+	## (twin autocannons, moderate fire) kills it within ~10-15s at full strength.
 	var stats: BuildingStatResource = load(
 		"res://resources/buildings/gun_emplacement_basic.tres"
 	) as BuildingStatResource

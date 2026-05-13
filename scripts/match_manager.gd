@@ -183,7 +183,7 @@ func _on_hq_destroyed(destroyed_node: Node) -> void:
 
 
 func _on_unit_died(owner_id: int) -> void:
-	# Counts squads (a Hound dying = +1, not +2) so the end-screen totals
+	# Counts squads (a Borzoi dying = +1, not +2) so the end-screen totals
 	# read at-a-glance rather than ballooning into per-member numbers.
 	var local_team_id: int = _local_team()
 	var their_team: int = (_registry.get_team(owner_id) as int) if _registry else (0 if owner_id == 0 else 1)

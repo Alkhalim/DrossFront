@@ -8,7 +8,7 @@ extends Node3D
 ##   Spawn 5 mixed-AG-range ground squads (and ideally one AA-only ground unit).
 ##   Select all and issue a move command. The SelectionManager routes them
 ##   through a SquadGroup with range_rank_sort applied. Observe:
-##     - Low-AG-range squads (Hound/Specter, ~17u) are in the front slots.
+##     - Low-AG-range squads (Borzoi/Specter, ~17u) are in the front slots.
 ##     - Long-AG-range squads (Bulwark, ~25u) are in the rear slots.
 ##     - AA-only (if present) goes to the middle slot.
 ##     - Convoy speed cap = slowest unit's speed.

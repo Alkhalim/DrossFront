@@ -426,7 +426,7 @@ var _ally_follow_accum: float = 0.0
 var _ally_attack_committed: bool = false
 
 ## First-building-completion raid trigger. Once the player
-## finishes their first non-HQ structure, two Sable Courier Tank
+## finishes their first non-HQ structure, two Meridian Courier
 ## squads spawn at the northern enclave edge and march south
 ## toward the player base — a small early scare that introduces
 ## the "enemy is in the north" concept before the climax push.
@@ -554,7 +554,7 @@ func _stage_ally_enter() -> void:
 	#
 	# Layout (rows of staggered units, from south to north):
 	#   Row 1 (z = spawn_z)        : 4 Wraith bombers, X spread
-	#   Row 2 (z = spawn_z + 10)   : 2 Courier Tank squads
+	#   Row 2 (z = spawn_z + 10)   : 2 Courier squads
 	#   Row 3 (z = spawn_z + 20)   : 3 Jackal squads
 	for i: int in 4:
 		var px: float = ALLY_SPAWN_X + (float(i) - 1.5) * 8.0
@@ -798,7 +798,7 @@ func _player_combat_count_only() -> int:
 func _tick_first_building_raid() -> void:
 	## Fires once when the player finishes their first non-HQ
 	## structure (Foundry, Salvage Yard, Generator, etc). Spawns
-	## two Courier Tank squads at the northern enclave edge with
+	## two Courier squads at the northern enclave edge with
 	## a move command toward the player base — a small early
 	## raid to telegraph "enemy is in the north" before the
 	## climax push.
@@ -826,7 +826,7 @@ func _spawn_first_building_raid() -> void:
 	# northern enclave edge (-Z) and march south toward the
 	# player base. Owner 2 (NEUTRAL pseudo-player) so they read
 	# as enemy — same slot the enclave defenders use. Light
-	# infantry instead of Courier Tanks because the player is
+	# infantry instead of Couriers because the player is
 	# still building up early-economy and a tank squad was
 	# punching above the player's defensive weight.
 	var raid_z: float = -110.0

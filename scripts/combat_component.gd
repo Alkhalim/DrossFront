@@ -40,7 +40,7 @@ var _silence_remaining: float = 0.0
 var _damage_mult_remaining: float = 0.0
 var _damage_mult_value: float = 1.0
 
-## Incoming-damage reduction buff (Phalanx Shield's Barrier Bloom).
+## Incoming-damage reduction buff (Sputnik Shield's Barrier Bloom).
 ## While > 0, every incoming damage application is multiplied by
 ## (1 - _damage_taken_reduction). 0.0 = no shield, 0.5 = take half
 ## damage. Cleared on expiry so a stale shield can't leak into the
@@ -48,7 +48,7 @@ var _damage_mult_value: float = 1.0
 var _damage_taken_reduction_remaining: float = 0.0
 var _damage_taken_reduction: float = 0.0
 
-## Garrison passive — set by Courier Tank's Garrison ability and
+## Garrison passive — set by Courier's Garrison ability and
 ## any future "passenger-buff" hook. When true, outgoing damage
 ## scales by GARRISON_DAMAGE_MULT and fire cooldowns shrink by
 ## GARRISON_FIRE_RATE_MULT (faster fire). Cleared on disembark.
@@ -64,7 +64,7 @@ const GARRISON_FIRE_RATE_MULT: float = 1.2
 ## First-strike per-target tracking. Stores the instance_id of the
 ## target this combat last opened fire on; the next time the unit
 ## fires at a DIFFERENT target, the shot picks up the
-## stats.first_strike_bonus multiplier. Used by Hound (Ripper) to
+## stats.first_strike_bonus multiplier. Used by Borzoi (Ripper) to
 ## sell the close-range alpha-strike identity. 0 = haven't fired
 ## at anything yet, so the first ever shot also takes the bonus.
 var _first_strike_target_id: int = 0
@@ -81,7 +81,7 @@ var _ramp_hit_count: int = 0
 var _glowing_volley_mult: float = 0.0
 ## When true, the queued glowing volley fires as a 5-pellet shotgun
 ## salvo (Harbinger Heavy Volley). When false, it fires as a SINGLE
-## buffed primary shot with the glow VFX (Hound Ripper Glowing Shot
+## buffed primary shot with the glow VFX (Borzoi Ripper Glowing Shot
 ## -- the autocannon doesn't make sense as buckshot). Default true
 ## for back-compat with the Heavy Volley callers.
 var _glowing_pellet_mode: bool = true
@@ -99,7 +99,7 @@ func queue_glowing_volley(damage_mult: float, pellet_mode: bool = true) -> void:
 	## out as a glowing salvo at `damage_mult` damage. pellet_mode
 	## true splits the buffed shot across 5 shotgun pellets (Heavy
 	## Volley); pellet_mode false keeps the existing shot count and
-	## just buffs the damage + adds the glow VFX (Hound Ripper
+	## just buffs the damage + adds the glow VFX (Borzoi Ripper
 	## Glowing Shot autocannon).
 	_glowing_volley_mult = damage_mult
 	_glowing_pellet_mode = pellet_mode
@@ -361,7 +361,7 @@ func _is_movement_priority_active() -> bool:
 ## distance, so AA-capable units would walk into XZ-range, halt, and
 ## never satisfy `dist <= primary_range` because the aircraft's altitude
 ## inflated `dist` past the weapon range. Visible bug: Bulwark missile
-## pods / Forgemaster Skyspike / Jackal Widow approach an aircraft on
+## pods / Voron Walker Skyspike / Jackal Widow approach an aircraft on
 ## attack-move, stop in detection range, never fire.
 func _engagement_distance(unit_pos: Vector3, target_pos: Vector3, shooter_is_air: bool, target_is_air: bool = false) -> float:
 	if shooter_is_air or target_is_air:
@@ -399,7 +399,7 @@ func _chase_position(target: Node3D, primary_range: float) -> Vector3:
 
 
 func apply_damage_buff(multiplier: float, duration: float) -> void:
-	## Called by friendly damage-aura abilities (Forgemaster Reactor
+	## Called by friendly damage-aura abilities (Voron Walker Reactor
 	## Surge). Stacks by MAX on both axes so re-casting an aura
 	## mid-fight doesn't shrink an already-running stronger one.
 	_damage_mult_value = maxf(_damage_mult_value, multiplier)
@@ -414,7 +414,7 @@ func get_damage_buff_mult() -> float:
 
 
 func apply_damage_reduction(reduction: float, duration: float) -> void:
-	## Called by friendly shield-aura abilities (Phalanx Shield's
+	## Called by friendly shield-aura abilities (Sputnik Shield's
 	## Barrier Bloom). `reduction` is the fraction of incoming damage
 	## absorbed (0.5 = take half damage). Stacks by MAX so re-casting
 	## a weaker shield over an already-running stronger one doesn't
@@ -802,9 +802,9 @@ func _physics_process(delta: float) -> void:
 
 		# Per-weapon air gating: when the current target is in the
 		# aircraft group, only fire weapons whose engages_air()
-		# returns true. Lets a Hound's Universal autocannons engage
+		# returns true. Lets a Borzoi's Universal autocannons engage
 		# air while its AT missile rack stays ground-only, and a
-		# Forgemaster's Skyspike fire at air while its Riveter
+		# Voron Walker's Skyspike fire at air while its Riveter
 		# autocannon ignores aircraft.
 		var target_is_air: bool = _current_target.is_in_group("aircraft")
 
@@ -1110,7 +1110,7 @@ func _is_valid_target(target: Node3D) -> bool:
 		var alive: int = target.get("alive_count")
 		if alive <= 0:
 			return false
-	# Garrisoned units (riding inside a Courier Tank) aren't on the
+	# Garrisoned units (riding inside a Courier) aren't on the
 	# board for combat purposes — they don't have a position the
 	# enemy can shoot at, and snapping fire to the carrier's pos
 	# would let one tank "tank" all the incoming AI shots away from
@@ -1203,7 +1203,7 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	# RoF-ramp passive (UnitStatResource.rof_ramp_*): each
 	# consecutive shot at the same target shortens the next cycle.
 	# Reuses _ramp_hit_count from the damage-ramp tracker so a unit
-	# carrying both ramps shares one counter (e.g. Breacher Salvo
+	# carrying both ramps shares one counter (e.g. Boyar Salvo
 	# could ramp both damage and rof on the same target). Cap is
 	# applied to the multiplier, not the cycle, so 0.6 max ramp
 	# means cycles never drop below 40% of the base rof.
@@ -1564,7 +1564,7 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 								(_unit.get("owner_id") as int) if (_unit and "owner_id" in _unit) else -1)
 			else:
 				# Salvo stagger -- when the weapon ships salvo_stagger_sec
-				# > 0 (Bulwark triple cannon, Breacher twin cannon) the
+				# > 0 (Bulwark triple cannon, Boyar twin cannon) the
 				# i-th projectile in the salvo is deferred so the
 				# barrels visibly fire one-after-another instead of all
 				# spawning on the same physics frame. Damage was
@@ -1758,7 +1758,7 @@ func _apply_instant_splash(per_shot_dmg: int, primary_target: Node3D, splash_r: 
 func _spawn_staggered_projectile(delay_sec: float, weapon: WeaponResource, fire_pos: Vector3, aim_pos: Vector3, is_glowing_volley: bool, payload_damage: int = 0, payload_splash_r: float = 0.0, payload_splash_mult: float = 0.0) -> void:
 	## Schedules a single projectile spawn after `delay_sec`. Used by
 	## salvo_stagger weapons so multi-barrel cannons (Bulwark triple,
-	## Breacher twin) can fire their barrels in quick succession
+	## Boyar twin) can fire their barrels in quick succession
 	## while the next reload still measures from the FIRST barrel's
 	## fire time. The closure captures the spawn parameters by value
 	## via `bind`, so a later weapon swap on the unit doesn't

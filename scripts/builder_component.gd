@@ -51,7 +51,7 @@ const AUTO_REPAIR_RADIUS: float = 22.0
 ## Repair feels best at a fraction of the unit's `repair_rate` so a single
 ## engineer is meaningful but not nearly as fast as the construction itself
 ## would have been at full strength. Engineers in a squad stack — three
-## Ratchets repairing the same building still bring it back fast.
+## Mekh engineers repairing the same building still bring it back fast.
 const REPAIR_RATE_FACTOR: float = 0.5
 
 

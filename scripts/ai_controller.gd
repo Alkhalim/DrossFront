@@ -80,7 +80,7 @@ const REBUILD_DURATION: float = 20.0
 const ATTACK_MAX_DURATION: float = 75.0
 ## Bumped from 4 to 7 — the v2 1v1 map has neutral patrols sitting on
 ## every deposit lane, and a 4-unit wave reliably gets ground down by
-## one Hound + one Bulwark before reaching the player. 7 gives the AI
+## one Borzoi + one Bulwark before reaching the player. 7 gives the AI
 ## enough mass to actually push through and start hitting structures.
 const INITIAL_WAVE_SIZE: int = 7
 const DEFENDERS: int = 2
@@ -743,7 +743,7 @@ func _process_economy() -> void:
 			# then go straight into 2 aerodromes, THEN add a second
 			# basic foundry as ground-defence backup. Never builds
 			# advanced_foundry. First aerodrome comes BEFORE basic
-			# armory so Phalanx drones (no tech gate) start
+			# armory so Sputnik drones (no tech gate) start
 			# producing ~75s into the match instead of waiting on
 			# the armory's ~50s build first. Adv armory still in
 			# the chain so Hammerhead unlocks for the second wave.
@@ -1643,7 +1643,7 @@ func notify_pre_seeded_building(key: String, building: Node) -> void:
 
 
 func _maintain_engineers() -> void:
-	## Keep three USABLE Ratchet engineers alive. The cap counts only
+	## Keep three USABLE Mekh engineers alive. The cap counts only
 	## engineers actually available for placement -- garrisoned ones
 	## (riding inside a transport) are excluded so a fully-loaded
 	## Courier Tank doesn't trick the cap into thinking the AI is
@@ -1699,7 +1699,7 @@ func _maintain_engineers() -> void:
 		return
 	# Queue first, spend only on success. queue_unit returns false when
 	# the unit isn't in the HQ's faction-resolved producible list — for
-	# example a Sable HQ rejecting an Anvil Ratchet — and pre-spending
+	# example a Meridian HQ rejecting a Combine Mekh — and pre-spending
 	# would silently drain salvage every tick until the AI bankrupts.
 	if _hq.queue_unit(engineer_stats):
 		_ai_resource_manager.spend(engineer_stats.cost_salvage, engineer_stats.cost_fuel)
@@ -2581,7 +2581,7 @@ func _refresh_engineer_diagnostics() -> void:
 
 
 func _find_free_engineer() -> Node:
-	## Returns the first AI engineer (Ratchet) eligible for a new
+	## Returns the first AI engineer (Mekh) eligible for a new
 	## build assignment. Eligibility tiers, in priority order:
 	##   1. Idle (no target, no move order).
 	##   2. Moving (has move order but no target -- finishing or
@@ -3049,9 +3049,9 @@ func _try_queue_at(foundry_node: Node) -> void:
 		return
 	# Use the foundry's OWN producibility list as the source of
 	# truth -- this resolves through Building._faction_producible_list
-	# so a Sable adv_foundry returns Harbinger / Pulsefont, an Anvil
-	# basic returns Rook / Hound, an Aerodrome returns aircraft, etc.
-	# Avoids the previous trap where the AI hardcoded Rook+Hound for
+	# so a Meridian adv_foundry returns Harbinger / Pulsefont, a Combine
+	# basic returns Strelet / Borzoi, an Aerodrome returns aircraft, etc.
+	# Avoids the previous trap where the AI hardcoded Strelet+Borzoi for
 	# every foundry kind and adv_foundry / aerodrome silently
 	# rejected 80% of attempts (no spend, but a wasted tick + a
 	# silent 'why isn't the AI building anything').
@@ -3061,7 +3061,7 @@ func _try_queue_at(foundry_node: Node) -> void:
 	if roster.is_empty():
 		return
 	# Strategy + foundry-kind weighting. Heavies live at adv tier
-	# (Bulwark, Forgemaster); the basic tier is light/medium only.
+	# (Bulwark, Voron Walker); the basic tier is light/medium only.
 	# The picker's job here is just 'roll within the foundry's
 	# actual roster' -- we no longer try to fish a Bulwark out of
 	# a basic foundry that never had one.

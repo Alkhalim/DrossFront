@@ -1,13 +1,13 @@
 extends Node3D
-## PF-A pilot smoke test — flag-on Anvil Hound through a minimal flow field.
+## PF-A pilot smoke test — flag-on Combine Borzoi through a minimal flow field.
 ##
-## Spawns three hound squads at (-30, 0, 0) / (-30, 0, -5) / (-30, 0, +5)
+## Spawns three Borzoi squads at (-30, 0, 0) / (-30, 0, -5) / (-30, 0, +5)
 ## and orders them to (30, 0, 0). Watch console: GroupAura prints field
-## build counts; movement orchestrator drives kernel.tick. Expected: hounds
+## build counts; movement orchestrator drives kernel.tick. Expected: Borzoi
 ## navigate to the destination smoothly with mild flock cohesion.
 ##
-## Pre-PF-A: hounds use SquadGroup slot logic (formation slots).
-## Post-PF-A (with flag on): hounds use flow field + flock forces.
+## Pre-PF-A: Borzoi use SquadGroup slot logic (formation slots).
+## Post-PF-A (with flag on): Borzoi use flow field + flock forces.
 
 const SPAWN: Vector3 = Vector3(-30, 0, 0)
 const DEST: Vector3 = Vector3(30, 0, 0)

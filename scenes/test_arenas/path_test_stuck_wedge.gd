@@ -1,13 +1,13 @@
 extends Node3D
 ## PF-B-A10 — kernel stuck detector smoke (in-game).
 ##
-## Spawns one Anvil Hound at (-30, 0, 0) and orders it to (30, 0, 0).
+## Spawns one Combine Borzoi at (-30, 0, 0) and orders it to (30, 0, 0).
 ## Programmatically inserts two box-collider walls forming a V-wedge with
-## a closed throat at (5, 0, 0) — narrow enough that the hound cannot
+## a closed throat at (5, 0, 0) — narrow enough that the Borzoi cannot
 ## squeeze through. Expected timeline:
 ##
-##   t = 0 : hound spawned, move issued
-##   t ≈ 4 s : hound reaches the wedge throat, can't progress
+##   t = 0 : Borzoi spawned, move issued
+##   t ≈ 4 s : Borzoi reaches the wedge throat, can't progress
 ##   t ≈ 6 s : displacement window full + ratio < 0.10 → L1 push-out
 ##             (visible perpendicular kick for ~1 s)
 ##   t ≈ 9 s : L1 cooldown elapses + still no progress → L2 abandon

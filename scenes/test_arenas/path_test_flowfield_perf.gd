@@ -1,8 +1,8 @@
 extends Node3D
-## PF perf scratchpad — 2 players, 20+ Anvil Hound squads per side, no win
+## PF perf scratchpad — 2 players, 20+ Combine Borzoi squads per side, no win
 ## conditions. Boots empty with a HUD slider so you can pick the squad
 ## count, hit Spawn, eyeball perf, hit Clear, pick a new count, repeat.
-## Pre-placed Ratchet/Rook/Hound and PlayerHQ are stripped on scene load
+## Pre-placed Mekh/Strelet/Borzoi and PlayerHQ are stripped on scene load
 ## so the arena starts clean.
 
 const MIN_SQUADS: int = 1
@@ -36,7 +36,7 @@ func _ready() -> void:
 		push_warning("[PF-PERF] Units node not found")
 		return
 
-	# Strip pre-placed Ratchet/Rook/Hound — perf test is hounds-only.
+	# Strip pre-placed Mekh/Strelet/Borzoi — perf test is Borzoi-only.
 	for child: Node in _units_node.get_children():
 		child.queue_free()
 	# Strip PlayerHQ for player-symmetry — neither side has an HQ.

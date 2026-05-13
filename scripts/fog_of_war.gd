@@ -101,7 +101,7 @@ var _plateau_cells: PackedByteArray = PackedByteArray()
 var _occluder_cells: PackedByteArray = PackedByteArray()
 ## True iff at least one occluder cell is currently set. Lets
 ## _stamp_visibility skip the Bresenham line walk entirely when no
-## terrain has registered as an LOS blocker (Foundry Belt + most v1
+## terrain has registered as an LOS blocker (Corridor 7 + most v1
 ## maps), saving ~80% of the recompute cost on those maps.
 var _has_any_occluders: bool = false
 ## Bumped whenever the occluder grid changes (tree felled, building
@@ -291,7 +291,7 @@ func _apply_fog_dim_recursive(node: Node, overlay: Material) -> void:
 	for child: Node in node.get_children():
 		_apply_fog_dim_recursive(child, overlay)
 
-## Hound Tracker recon-support aura. Friendly units inside this
+## Borzoi Tracker recon-support aura. Friendly units inside this
 ## radius of a Tracker get a sight bonus, mirroring the Tracker's
 ## "this branch makes the army see further" identity. Cheap to
 ## scan -- trackers are sparse on the field.
@@ -661,7 +661,7 @@ func _stamp_friendly(node3d: Node3D) -> void:
 	if is_elevated and not is_air:
 		radius *= ELEVATED_SIGHT_BONUS
 	# Tracker aura: any friendly unit within TRACKER_AURA_RADIUS
-	# of a Hound Tracker gains +15% sight. The tracker_positions
+	# of a Borzoi Tracker gains +15% sight. The tracker_positions
 	# array was collected once in phase 0 and reused across both
 	# phases.
 	if not _phase_tracker_positions.is_empty():

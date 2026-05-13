@@ -42,7 +42,7 @@ const ARMOR_MAP: Dictionary = {
 	&"medium": 0.30,
 	&"heavy": 0.45,
 	# Structures bumped 0.30 -> 0.45 so a packed early-rush of light
-	# AP fire (Rooks / Specters / Hounds) takes appreciably longer to
+	# AP fire (Strelet / Specters / Borzoi) takes appreciably longer to
 	# eat through a Foundry or HQ. Structure-class buildings already
 	# have role-tag protection vs AP (0.4 ROLE_VS_ARMOR multiplier);
 	# the armor-reduction bump compounds it so the early-game
@@ -106,7 +106,7 @@ const ROLE_VS_ARMOR: Dictionary = {
 	&"AAir_Light": {
 		# Light anti-air with token ground capability. Used by units
 		# whose role is "shoot down aircraft, can chip ground" --
-		# Phalanx Drone is the canonical case: 1.0x vs LtAir cleanly,
+		# Sputnik Drone is the canonical case: 1.0x vs LtAir cleanly,
 		# 0.2x vs HvAir (heavy gunships shrug it off), low ground
 		# multipliers so the unit's ground DPS reads as token
 		# self-defense rather than a real ground threat.
@@ -128,7 +128,7 @@ const ROLE_VS_ARMOR: Dictionary = {
 	},
 	&"AS": {
 		# Anti-structure -- the dedicated building cracker (Wraith
-		# bombs, Hammerhead Bomber payload, Rook Sapper charges,
+		# bombs, Hammerhead Bomber payload, Strelet Sapper charges,
 		# Bulwark Siegebreaker). Bumped structure multiplier
 		# 1.5 -> 2.5 per balance request: AS units were eating their
 		# anti-building punch against the recently-buffed structure

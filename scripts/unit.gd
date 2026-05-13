@@ -154,13 +154,13 @@ var _ability_cd_remaining: float = 0.0
 ## a partial top-up adds to the next.
 var _heal_overflow_accum: int = 0
 
-## Courier Tank passenger list — populated when this unit casts
+## Courier passenger list — populated when this unit casts
 ## Garrison and emptied on the second press (disembark). Each entry
 ## is the passenger Unit. Empty when the tank isn't carrying anyone
 ## or when this unit isn't a transport at all.
 var _garrison_passengers: Array[Unit] = []
 
-## Courier Tank track ribs — flat list of MeshInstance3D nodes
+## Courier track ribs — flat list of MeshInstance3D nodes
 ## across all squad members. Each entry is { node, length } where
 ## length is the track segment they wrap around. Scrolled per
 ## frame in _process when the tank is moving.
@@ -390,7 +390,7 @@ const CLASS_SHAPES: Dictionary = {
 		"torso_lean": 0.0,
 	},
 	&"transport": {
-		# Courier Tank — tracked transport, custom mesh built via
+		# Courier — tracked transport, custom mesh built via
 		# _build_courier_tank_member. Most of these fields are
 		# unused (the dedicated builder ignores leg / torso / cannon
 		# placeholders), but formation_spacing IS read by
@@ -502,9 +502,9 @@ func _ready() -> void:
 		if _faction_id() == 0:
 			_move_speed *= 0.95
 
-		# The Courier Tank is the FACTION transport for Sable, so the
-		# speed gap "on foot vs in the tank" needs to live on Sable's
-		# side of the roster. Sable infantry / engineers eat a small
+		# The Courier is the FACTION transport for Meridian, so the
+		# speed gap "on foot vs in the tank" needs to live on Meridian's
+		# side of the roster. Meridian infantry / engineers eat a small
 		# nerf so embarking actually saves travel time, but the cuts
 		# stay small enough that Sable still outpaces Anvil's
 		# equivalents (Sable light goes from 12.0 -> 11.52 vs Anvil
@@ -517,7 +517,7 @@ func _ready() -> void:
 			elif stats.unit_class == &"engineer":
 				_move_speed *= 0.90
 
-		# Transports (Courier Tank) get a small speed bump on top of
+		# Transports (Courier) get a small speed bump on top of
 		# their tier so the embark loop reads as a real upgrade over
 		# walking. Applies regardless of faction since "transport" is
 		# a unit-class concept, but in practice only Sable ships one
@@ -914,8 +914,8 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 		# Per-name dispatch within transport class so different
 		# tracked vehicles get distinct silhouettes. Breacher Tank
 		# uses a casemate (no-turret) tank-destroyer build that
-		# diverges from the Sable Courier Tank's turreted
-		# transport silhouette; defaults route to Courier Tank.
+		# diverges from the Meridian Courier's turreted
+		# transport silhouette; defaults route to Courier.
 		var tank_result: Dictionary
 		if stats.unit_name.findn("Breacher") >= 0:
 			# Branch variants get distinct silhouettes -- Mortar
@@ -2450,7 +2450,7 @@ func _apply_forgemaster_overlay(
 
 
 func _build_courier_tank_member(index: int, offset: Vector3, team_color: Color) -> Dictionary:
-	## Sable Courier Tank — tracked transport with a twin-MG turret.
+	## Meridian Courier — tracked transport with a twin-MG turret.
 	## Replaces the standard mech build for the "transport" unit_class.
 	## Returns the same per-member dict shape so the squad-visuals
 	## bookkeeping in _build_squad_visuals stays compatible (legs +
@@ -2466,8 +2466,8 @@ func _build_courier_tank_member(index: int, offset: Vector3, team_color: Color) 
 	var sable_mid: Color = _faction_tint_chassis(Color(0.28, 0.28, 0.32))
 	# Accent colour swings to Anvil amber for the Breacher Tank
 	# variants so a player using both factions doesn't see two
-	# tracked tanks share the same Sable-violet seam read. Sable
-	# Courier Tank keeps its violet identity.
+	# tracked tanks share the same Meridian-violet seam read. Meridian
+	# Courier keeps its violet identity.
 	var is_breacher: bool = stats != null and stats.unit_name.findn("Breacher") >= 0
 	var sable_violet: Color = Color(1.00, 0.55, 0.18) if is_breacher else Color(0.78, 0.42, 1.0)
 
@@ -2661,7 +2661,7 @@ func _build_courier_tank_member(index: int, offset: Vector3, team_color: Color) 
 		cannon_pivot.add_child(mg)
 		mats.append(mg_mat)
 
-	# Branch variant overlays for the Courier Tank. Infiltrator gets
+	# Branch variant overlays for the Courier. Infiltrator gets
 	# a stealth tarp draped over the hull (matte mottled colour);
 	# Sensor Carrier gets a dish array on the rear deck. Combat
 	# geometry stays put; overlays attach to `member`.
@@ -3550,14 +3550,14 @@ func _maybe_override_shape_for_unit(base: Dictionary) -> Dictionary:
 
 
 func _build_breacher_tank_member(index: int, offset: Vector3, team_color: Color) -> Dictionary:
-	## Anvil VA-9 Breacher Tank — casemate-style tank destroyer with
+	## Combine VA-9 Boyar — casemate-style tank destroyer with
 	## a fixed forward-mounted heavy gun (no turret). Lower + wider
-	## silhouette than the Bulwark biped, longer than the Sable
-	## Courier Tank's turreted hull. Distinct visual identity:
+	## silhouette than the Bulwark biped, longer than the Meridian
+	## Courier's turreted hull. Distinct visual identity:
 	##   - twin track rails like the Courier
 	##   - sloped forward casemate hosting a single heavy cannon
 	##   - twin exhaust stacks on the rear deck
-	##   - Anvil amber side stripe instead of Sable violet
+	##   - Combine amber side stripe instead of Meridian violet
 	var member := Node3D.new()
 	member.name = "Member_%d" % index
 	member.position = offset
@@ -3588,7 +3588,7 @@ func _build_breacher_tank_member(index: int, offset: Vector3, team_color: Color)
 		member.add_child(track)
 		mats.append(track_mat)
 		# Six visible rib stripes per side -- consistent with the
-		# Courier Tank read so tracked vehicles share a visual
+		# Courier read so tracked vehicles share a visual
 		# language even with different chassis above. Each rib
 		# registered with _courier_track_ribs so _process scrolls
 		# them along the track Z axis proportional to ground speed.
@@ -3838,8 +3838,8 @@ func _build_breacher_tank_member(index: int, offset: Vector3, team_color: Color)
 		member.add_child(heat)
 		mats.append(heat_mat)
 
-	# --- Amber side stripes (Anvil identity, opposite of Sable
-	# Courier Tank's violet seams).
+	# --- Amber side stripes (Combine identity, opposite of Meridian
+	# Courier's violet seams).
 	for as_i: int in 2:
 		var asx: float = -hull_w * 0.5 + 0.04 if as_i == 0 else hull_w * 0.5 - 0.04
 		var accent := MeshInstance3D.new()
@@ -4419,10 +4419,10 @@ func _build_breacher_salvo_member(index: int, offset: Vector3, team_color: Color
 
 
 func _build_grinder_tank_member(index: int, offset: Vector3, team_color: Color) -> Dictionary:
-	## Anvil VA-5 Grinder Tank — medium tracked tank with a normal
+	## Combine VA-5 Boyar (base hull) — medium tracked tank with a normal
 	## rotating turret and a dozer prow on the front. Distinct from
-	## the Breacher Tank (no casemate, has a turret) and the Sable
-	## Courier Tank (Anvil amber stripe + dozer blade out front).
+	## the Boyar casemate (no turret) and the Meridian
+	## Courier (Combine amber stripe + dozer blade out front).
 	var member := Node3D.new()
 	member.name = "Member_%d" % index
 	member.position = offset
@@ -5338,7 +5338,7 @@ func _mech_total_height() -> float:
 	if stats.unit_class == &"transport":
 		if stats.unit_name.findn("Breacher") >= 0:
 			return 1.95
-		# Sable Courier Tank default.
+		# Meridian Courier default.
 		return 1.40
 	var shape: Dictionary = CLASS_SHAPES.get(stats.unit_class, CLASS_SHAPES[&"medium"])
 	var hip_y: float = shape["hip_y"] as float
@@ -6115,8 +6115,8 @@ func _ability_glowing_shot() -> bool:
 
 
 func _ability_garrison() -> bool:
-	## Courier Tank embark / disembark toggle.
-	##   No passengers loaded -> board the nearest 3 friendly Anvil
+	## Courier embark / disembark toggle.
+	##   No passengers loaded -> board the nearest 3 friendly Combine
 	##     light mechs / engineers within stats.ability_radius. Each
 	##     boarded unit hides, suppresses combat + movement, and
 	##     points _garrisoned_in at this tank. Tank's CombatComponent
@@ -6337,7 +6337,7 @@ func _spawn_system_crash_visual(radius: float) -> void:
 
 func _physics_process(delta: float) -> void:
 	# Garrisoned passenger short-circuit. While riding inside a
-	# Courier Tank, the passenger snaps to the carrier's position
+	# Courier, the passenger snaps to the carrier's position
 	# every tick and skips its own movement, combat, stuck-rescue,
 	# stealth, and damage-flash logic. The carrier dying clears
 	# _garrisoned_in (see take_damage / _die path) and the
@@ -6432,7 +6432,7 @@ func _per_frame_bookkeeping(delta: float) -> void:
 	if _ability_cd_remaining > 0.0:
 		_ability_cd_remaining = maxf(0.0, _ability_cd_remaining - delta)
 
-	# Courier Tank track-rib scrolling — slide the per-tread plate
+	# Courier track-rib scrolling — slide the per-tread plate
 	# strip along its segment when the tank's actually moving, so
 	# the tracks read as turning over rather than painted-on
 	# stripes. Multiplier ~1.4 on top of ground speed sells the
@@ -7902,9 +7902,9 @@ func _faction_tint_chassis(c: Color) -> Color:
 		return _scrappy_neutral_tint(c)
 	if _faction_id() != 1:  # not Sable → no change
 		return c
-	# Sable per-class palette. The Anvil unit base colors all collapsed
-	# to a single near-black after the desaturate pass, making a Sable
-	# squad of Riggers look identical to a squad of Specters. Shift the
+	# Meridian per-class palette. The Combine unit base colors all collapsed
+	# to a single near-black after the desaturate pass, making a Meridian
+	# squad of Field Technicians look identical to a squad of Specters. Shift the
 	# tone per class so the squads can be told apart at a glance:
 	#   engineer = warm graphite (slight bronze undercoat)
 	#   light    = blued steel (cool, slightly brighter)

@@ -547,7 +547,7 @@ func play_weapon_fire(weapon: WeaponResource = null, at: Vector3 = Vector3.INF) 
 	var stream: AudioStream = _pick_weapon_fire_stream(weapon)
 	if stream:
 		# Volume offset roughly tracks weapon weight so heavy artillery
-		# is louder than a Ratchet pistol crack. Tuned by ear within
+		# is louder than a Mekh pistol crack. Tuned by ear within
 		# the recorded samples' loudness range.
 		var weight: float = _weapon_weight(weapon)
 		var volume_db: float = lerp(-10.0, -3.0, weight) + randf_range(-2.0, 1.0)
@@ -583,9 +583,9 @@ func _pick_weapon_fire_stream(weapon: WeaponResource) -> AudioStream:
 	## Maps weapon characteristics to a recorded bank:
 	## - Continuous-RoF or AA → laser (zippy energy weapons read here).
 	## - Heavy + slow / single → artillery (Bulwark cannon).
-	## - High-damage moderate → cannon (Hound autocannons / Tracker
+	## - High-damage moderate → cannon (Borzoi autocannons / Tracker
 	##   long guns).
-	## - Rapid + AP → machine gun (Rook bursts, Ratchet pistols).
+	## - Rapid + AP → machine gun (Strelet bursts, Mekh pistols).
 	## - Plasma kept available as a "weird energy" option for future
 	##   weapons; not currently used by any base unit.
 	if not weapon:
@@ -604,7 +604,7 @@ func _pick_weapon_fire_stream(weapon: WeaponResource) -> AudioStream:
 	var pstyle: StringName = weapon.get("projectile_style") if "projectile_style" in weapon else &""
 	# Kinetic overrides: bullet, shell, mortar all read as cannon /
 	# artillery shots rather than missile launches. Without 'mortar'
-	# in this list, the Mortar Breacher's 'single' rof_tier routed
+	# in this list, the Mortar Boyar's 'single' rof_tier routed
 	# to the missile-launch SFX bank, giving the player a 'rocket
 	# sound + mortar shell visual' mismatch (perceived as two
 	# different projectiles fired at once).
@@ -625,7 +625,7 @@ func _pick_weapon_fire_stream(weapon: WeaponResource) -> AudioStream:
 	if rapid >= 0.55:
 		return _pick(_sfx_machine_gun)
 	# Mid-weight, moderate-RoF default — cannon reads as "decent
-	# punch but not artillery" which fits Hound autocannons.
+	# punch but not artillery" which fits Borzoi autocannons.
 	return _pick(_sfx_cannon)
 
 

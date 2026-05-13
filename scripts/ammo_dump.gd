@@ -4,7 +4,7 @@ extends StaticBody3D
 ## obstacle — units bump into it like terrain — but it has HP and any
 ## weapon hit reduces it. When destroyed it detonates for splash damage
 ## across a 6u radius, knocking any nearby units / buildings down with
-## it. Designed for Foundry Belt's contested mid: turns a stray missile
+## it. Designed for Corridor 7's contested mid: turns a stray missile
 ## into a tactical play (bait the enemy past it, then shoot the dump).
 
 const MAX_HP: int = 220

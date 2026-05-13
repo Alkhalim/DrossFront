@@ -1310,8 +1310,8 @@ func _is_attack_target(target_owner: int, registry: PlayerRegistry) -> bool:
 func _select_all_of_type(unit_name: String) -> void:
 	## Double-click cohort. Picks up both ground Units AND Aircraft --
 	## the previous strict `as Unit` cast silently dropped Aircraft so
-	## a player double-clicking a Phalanx got a single-aircraft
-	## selection instead of every on-screen Phalanx.
+	## a player double-clicking a Sputnik got a single-aircraft
+	## selection instead of every on-screen Sputnik.
 	_clear_selection()
 	_deselect_building()
 	var viewport_rect := get_viewport().get_visible_rect()

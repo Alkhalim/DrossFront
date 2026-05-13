@@ -37,7 +37,7 @@ var velocity: Vector3 = Vector3.ZERO
 
 var _combat: Node = null
 var _hp_bar: Node3D = null
-## Per-drone roots for swarm aircraft (Phalanx, Fang). Each entry is a
+## Per-drone roots for swarm aircraft (Sputnik, Fang). Each entry is a
 ## Node3D that holds one drone's mesh; we bob them slightly via
 ## `_process` so the swarm reads as alive instead of a frozen formation.
 var _drone_meshes: Array[Node3D] = []
@@ -179,7 +179,7 @@ func _build_click_collider() -> void:
 	var col := CollisionShape3D.new()
 	var sphere := SphereShape3D.new()
 	# Generous selection sphere so clicks register reliably even on the
-	# small Phalanx drones — gameplay readability over visual exactness.
+	# small Sputnik drones — gameplay readability over visual exactness.
 	sphere.radius = 1.6
 	col.shape = sphere
 	area.add_child(col)
@@ -480,8 +480,8 @@ func _build_drone_swarm(count: int, team: Color, body_color: Color, drone_size: 
 	## Renders a swarm as `count` small drone meshes in a tight V-formation
 	## around the aircraft origin. Drones bob slightly via per-frame
 	## update in `_process` (registered via _drone_meshes for animation).
-	## `is_anvil_blocky` selects the drone silhouette style: Anvil drones
-	## are squat boxes with stubby wings (Phalanx); Sable drones are
+	## `is_anvil_blocky` selects the drone silhouette style: Combine drones
+	## are squat boxes with stubby wings (Sputnik); Meridian drones are
 	## sharper, slimmer angular shapes with forward-pointing nose
 	## (Fang).
 	var ring_offsets: Array[Vector3] = _v_formation_offsets(count, drone_size * 1.6)
@@ -2534,7 +2534,7 @@ func trigger_ability(target_pos: Vector3 = Vector3.INF) -> bool:
 
 
 func _ability_barrier_bloom(target_pos: Vector3) -> bool:
-	## Phalanx Shield's area-target ability. Mirrors Unit's
+	## Sputnik Shield's area-target ability. Mirrors Unit's
 	## _ability_barrier_bloom: every friendly unit (ground or air)
 	## inside stats.ability_radius of the targeted ground point gets
 	## a 45% damage reduction for stats.ability_duration. The Shield

@@ -1606,20 +1606,20 @@ func _faction_summary(faction_id: int) -> String:
 	## Keep these honest -- they should read like a "what am I
 	## actually getting" summary, not flavor copy.
 	if faction_id == 0:
-		return ("ANVIL DIRECTIVE — Industrial doctrine. Tougher static "
+		return ("THE COMBINE — Industrial doctrine. Tougher static "
 			+ "defenses (specialised Gun Emplacement: +15% HP, +15% "
 			+ "damage, switchable Balanced / Anti-Light / Anti-Heavy "
 			+ "profiles vs the baseline ground turret). Standard "
 			+ "production tempo, mid-tier mobility. Heavy ground "
-			+ "lineup (Bulwark + Forgemaster) leans on sustain and "
-			+ "slow advance; air tier (Phalanx + Hammerhead) is "
+			+ "lineup (Bulwark + Voron Walker) leans on sustain and "
+			+ "slow advance; air tier (Sputnik Drones + Hammerhead) is "
 			+ "gunship-doctrine — punchy, expensive, slower. Best "
 			+ "when you want to anchor a position and grind forward.")
 	elif faction_id == 1:
-		return ("SABLE CONCORD — Shadow-ops doctrine. Standard ground "
+		return ("MERIDIAN PROTOCOL — Shadow-ops doctrine. Standard ground "
 			+ "turret (no profile swap, ground only -- pair with a SAM "
 			+ "Site for air). Larger overall unit roster, including "
-			+ "the Courier Tank transport and the Pulsefont caster, "
+			+ "the Courier transport and the Pulsefont caster, "
 			+ "and faster / lighter aircraft (Switchblade + Fang "
 			+ "drone swarm). Unique structure: Black Pylon (Mesh "
 			+ "anchor + unlocks the Wraith stealth bomber). Best "
@@ -1870,14 +1870,14 @@ func _build_scenarios_panel() -> void:
 	var path_test_defs: Array[Dictionary] = [
 		{
 			"id": MatchSettingsClass.Scenario.PATH_TEST_FLOWFIELD_SMOKE,
-			"title": "Flow-Field Smoke (Hound Pilot)",
-			"blurb": "PF-A pilot. Three Anvil Hound squads spawn at (-30, ±5)\nand move-order to (30, 0). Toggle drossfront/movement/\nuse_flowfield in project.godot to compare paths.",
+			"title": "Flow-Field Smoke (Borzoi Pilot)",
+			"blurb": "PF-A pilot. Three Combine Borzoi squads spawn at (-30, ±5)\nand move-order to (30, 0). Toggle drossfront/movement/\nuse_flowfield in project.godot to compare paths.",
 			"scene": "res://scenes/test_arenas/path_test_flowfield_smoke.tscn",
 		},
 		{
 			"id": MatchSettingsClass.Scenario.PATH_TEST_FLOWFIELD_PERF,
-			"title": "Flow-Field Perf (Hound Stress)",
-			"blurb": "Two players, no win cons. Boots empty; in-scene\nslider picks 1-200 hound squads per side, then Spawn.\nClear and re-spawn to sweep the count vs. FPS.",
+			"title": "Flow-Field Perf (Borzoi Stress)",
+			"blurb": "Two players, no win cons. Boots empty; in-scene\nslider picks 1-200 Borzoi squads per side, then Spawn.\nClear and re-spawn to sweep the count vs. FPS.",
 			"scene": "res://scenes/test_arenas/path_test_flowfield_perf.tscn",
 		},
 	]

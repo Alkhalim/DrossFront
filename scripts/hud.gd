@@ -1545,7 +1545,7 @@ func _update_building_panel(building: Building) -> void:
 		_queue_label.text = ""
 		_show_progress(building.get_build_progress_percent(), Color(0.4, 0.85, 1.0, 0.95))
 		# Build-queue ETA tooltip — hover the bar to see "Currently:
-		# Hound — 14s" plus the queue tail. Implemented via the
+		# Borzoi — 14s" plus the queue tail. Implemented via the
 		# bar's tooltip_text rather than a custom popup so it picks
 		# up the same fast tooltip delay as everything else.
 		_progress_bar.tooltip_text = _build_queue_tooltip(building)
@@ -2171,7 +2171,7 @@ func _rebuild_unit_command_buttons() -> void:
 	# in the current selection (capped to ABILITY_BUTTON_LIMIT so a
 	# mixed mass-select doesn't paper over the move-command row).
 	# Used to require every selected unit to share the same ability;
-	# a mixed Pulsefont + Forgemaster selection then showed nothing.
+	# a mixed Pulsefont + Voron Walker selection then showed nothing.
 	# The new behaviour mirrors classic RTS HUDs: each ability the
 	# selection contains gets its own slot, pressing it fires the
 	# ability on the subset of units that own it. Tinted violet to
@@ -2508,7 +2508,7 @@ func _rebuild_production_buttons(building: Building) -> void:
 	var construction_locked: bool = not building.is_constructed
 	# After a branch commit, swap each base unit's display stats for
 	# the committed variant so the train button reads "Tracker" /
-	# "Ripper" instead of the base "Hound" name + tooltip. Spawn-
+	# "Ripper" instead of the base "Borzoi" name + tooltip. Spawn-
 	# time substitution still happens in Building._spawn_unit, so
 	# the queue keeps using the base stats and the cost chip stays
 	# accurate to what the queue actually charges.
@@ -3703,8 +3703,8 @@ func _emit_passive_ability_deltas(
 	## Surface passive / role-defining stat changes that aren't an
 	## active ability but functionally ARE the branch upgrade --
 	## stealth-detection radius (Spotter), Mesh aura range,
-	## repair_rate (Forgemaster), is_stealth_capable (Specter
-	## Ghost), first_strike_bonus (Hound Ripper), etc. Only
+	## repair_rate (Voron Walker), is_stealth_capable (Specter
+	## Ghost), first_strike_bonus (Borzoi Ripper), etc. Only
 	## emits a line when the delta is meaningful so identical
 	## branches stay quiet.
 	# Stealth-detection radius gain / change.
@@ -3734,7 +3734,7 @@ func _emit_passive_ability_deltas(
 			pros.append(line3)
 		else:
 			cons.append(line3)
-	# First-strike opener bonus (Hound Ripper +50% on first shot).
+	# First-strike opener bonus (Borzoi Ripper +50% on first shot).
 	var fs_b: float = (base_stats.get("first_strike_bonus") as float) if "first_strike_bonus" in base_stats else 1.0
 	var fs_n: float = (branch_stats.get("first_strike_bonus") as float) if "first_strike_bonus" in branch_stats else 1.0
 	if absf(fs_n - fs_b) > 0.01:
@@ -4314,7 +4314,7 @@ class _QuickSelectGlyph:
 			"wrench":
 				_draw_wrench(sz, tint)
 	func _draw_mech(sz: Vector2, tint: Color) -> void:
-		# Side profile of a chicken-legged mech (Hound silhouette):
+		# Side profile of a chicken-legged mech (Borzoi silhouette):
 		# small cockpit pod up front, top-mounted cannon, single
 		# digitigrade leg with a knee that pitches BACKWARD then a
 		# shin pitching FORWARD onto a planted foot. Reads as
@@ -5176,7 +5176,7 @@ func _compute_dps_vs(stat: UnitStatResource, armor_class: StringName) -> float:
 	## armor reads the reduced value, etc.
 	##
 	## When asking about an air armor class, only weapons whose
-	## engages_air() is true contribute -- a Hound's AT-missile
+	## engages_air() is true contribute -- a Borzoi's AT-missile
 	## secondary doesn't pad the DPS Air number even though its AA
 	## tag has a token air multiplier. Mirrors the per-weapon
 	## firing gate in CombatComponent so what you see is what fires.
@@ -5377,7 +5377,7 @@ func _role_hint_for(stat: UnitStatResource) -> String:
 	if cls == "engineer":
 		return "Engineer / Builder"
 	# Tracked vehicles read as 'All-Rounder' regardless of weapon
-	# role -- Breacher Tank, Grinder Tank, Courier Tank all have
+	# role -- Boyar, Grinder Tank, Courier all have
 	# explicit per-class mults that distribute damage broadly
 	# rather than punishing one armour class.
 	if cls == "transport":
@@ -5385,7 +5385,7 @@ func _role_hint_for(stat: UnitStatResource) -> String:
 	var role: StringName = &"Universal"
 	if stat.primary_weapon:
 		role = stat.primary_weapon.role_tag
-	# Anti-medium override: medium-class chicken walkers (Hound,
+	# Anti-medium override: medium-class chicken walkers (Borzoi,
 	# Jackal + branches) now carry a per-weapon mult profile that
 	# peaks vs medium armour, so the role label needs to follow
 	# the actual numbers instead of returning the legacy 'Anti-
@@ -5664,19 +5664,19 @@ func _building_description(id: StringName) -> String:
 	## here.
 	match id:
 		&"headquarters":
-			return "Command building. Trains Engineers and Salvage Crawlers. Grants +25 population cap. Anvil HQs can buy defensive upgrades."
+			return "Command building. Trains Engineers and Salvage Crawlers. Grants +25 population cap. Combine HQs can buy defensive upgrades."
 		&"basic_foundry":
 			if _local_player_faction() == 1:
 				return "Light-mech assembly line. Trains Specters and Jackals. Grants +25 population cap."
-			return "Light-mech assembly line. Trains Rooks and Hounds. Grants +25 population cap."
+			return "Light-mech assembly line. Trains Strelet and Borzoi. Grants +25 population cap."
 		&"advanced_foundry":
 			if _local_player_faction() == 1:
-				return "Heavy-mech foundry. Trains Harbingers; Adv Armory unlocks Pulsefont and Courier Tank. Grants +25 population cap."
-			return "Heavy-mech foundry. Trains Bulwarks; Adv Armory unlocks Forgemaster. Grants +25 population cap."
+				return "Heavy-mech foundry. Trains Harbingers; Adv Armory unlocks Pulsefont and Courier. Grants +25 population cap."
+			return "Heavy-mech foundry. Trains Bulwarks; Adv Armory unlocks Voron Walker. Grants +25 population cap."
 		&"basic_generator":
-			return "Power source. Adds capacity so additional production buildings stay at full output."
+			return "Power source (Strakh Dynamo). Adds capacity so additional production buildings stay at full output."
 		&"advanced_generator":
-			return "Reactor -- 75 power for less salvage-per-watt than two generators. Requires Basic Foundry and costs fuel."
+			return "Prometei Instytut — 75 power for less salvage-per-watt than two dynamos. Requires Basic Foundry and costs fuel."
 		&"basic_armory":
 			return "Branch-upgrade workshop for baseline units. Commits are irreversible."
 		&"advanced_armory":
@@ -5690,7 +5690,7 @@ func _building_description(id: StringName) -> String:
 		&"aerodrome":
 			if _local_player_faction() == 1:
 				return "Aircraft hangar. Trains Switchblade; Adv Armory unlocks Fang, Black Pylon unlocks Wraith. Grants +25 population cap."
-			return "Aircraft hangar. Trains Phalanx; Adv Armory unlocks Hammerhead. Grants +25 population cap."
+			return "Aircraft hangar. Trains Sputnik Drones; Adv Armory unlocks Hammerhead. Grants +25 population cap."
 		&"sam_site":
 			return "Anti-air missile rack. Strong against aircraft, near-zero against ground."
 		&"black_pylon":

@@ -1377,8 +1377,8 @@ func _spawn_ai_player(player_id: int, _display_name: String) -> void:
 	# the building). Forward/right space puts every starter clearly out
 	# in open ground regardless of HQ corner.
 	# Faction-aware starter army — pick the engineer + medium mechs from
-	# whichever faction this AI plays. Sable AIs ship Riggers and Jackals
-	# instead of Ratchets and Rooks; Anvil AIs unchanged.
+	# whichever faction this AI plays. Meridian AIs ship Field Technicians and Jackals
+	# instead of Mekh and Strelet; Combine AIs unchanged.
 	var ai_faction: int = _faction_id_for_player(player_id)
 	var ratchet_stats: UnitStatResource = _unit_for_role(ai_faction, "engineer")
 	var rook_stats: UnitStatResource = _unit_for_role(ai_faction, "medium")

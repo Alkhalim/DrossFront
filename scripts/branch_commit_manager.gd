@@ -28,7 +28,7 @@ const COMMIT_DURATION: float = 20.0
 ## token nudge so the player has paid into all three pools. These
 ## are the SAME for every branch in v1 — the upgrade IS the
 ## investment, regardless of unit class. Tier-specific scaling can
-## come later if the cheap-Rook / expensive-Bulwark branches feel
+## come later if the cheap-Strelet / expensive-Bulwark branches feel
 ## too uniform.
 const COMMIT_COST_MICROCHIPS: int = 2
 const COMMIT_COST_FUEL: int = 60
@@ -200,7 +200,7 @@ func _upgrade_existing_units(base_stats: UnitStatResource, branch_stats: UnitSta
 		var unit_stats: UnitStatResource = node.get("stats") as UnitStatResource
 		if not unit_stats:
 			continue
-		# Match by unit_name (base Hound → upgrade to Tracker/Ripper)
+		# Match by unit_name (base Borzoi → upgrade to Tracker/Ripper)
 		if unit_stats.unit_name == base_stats.unit_name:
 			node.set("stats", branch_stats)
 			# Re-init HP with new stats (heal to new max)

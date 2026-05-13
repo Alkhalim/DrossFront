@@ -1208,7 +1208,7 @@ func get_total_hp() -> int:
 
 
 func is_damaged() -> bool:
-	## Used by Ratchet auto-repair (BuilderComponent._find_repair_target).
+	## Used by Mekh auto-repair (BuilderComponent._find_repair_target).
 	## Crawlers want repair the same as buildings or mech squads.
 	return alive_count > 0 and stats != null and current_hp < stats.hp_total
 

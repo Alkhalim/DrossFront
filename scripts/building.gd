@@ -1528,10 +1528,10 @@ func _detail_generator() -> void:
 	stripe.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.7, 0.1), 1.0))
 	_attach_visual(stripe)
 
-	# Advanced Generator (Reactor) support structures -- a ring of
+	# Prometei Instytut support structures -- a ring of
 	# external coolant towers + radial pylon supports + a stout
 	# secondary stack so the upgraded tier reads as 'industrial
-	# reactor', not just a bigger basic generator.
+	# reactor', not just a bigger Strakh Dynamo.
 	if is_advanced:
 		_apply_reactor_support_structures(fs)
 
@@ -3591,7 +3591,7 @@ func queue_unit(unit_stats: UnitStatResource) -> bool:
 ##
 ## After the faction lookup runs we apply unit-side tech gates: any
 ## UnitStatResource with unlock_prerequisite set is filtered out unless
-## the owner has constructed that building. This is how Forgemaster /
+## the owner has constructed that building. This is how Voron Walker /
 ## Hammerhead / Wraith / etc. are hidden behind the Advanced Armory
 ## (or Black Pylon, for Wraith) — the building keeps the unit in its
 ## producible_units list and the unit's gate decides visibility.
@@ -3651,7 +3651,7 @@ func _faction_producible_list() -> Array[UnitStatResource]:
 			sable_paths = [
 				"res://resources/units/sable_harbinger.tres",
 				"res://resources/units/sable_pulsefont.tres",
-				# Relay Transport (Courier Tank) belongs to the
+				# Relay Transport (Courier) belongs to the
 				# advanced foundry tier per spec.
 				"res://resources/units/sable_courier_tank.tres",
 			]
@@ -5320,7 +5320,7 @@ const _HEAL_TICK_MS: int = 250
 
 
 func heal(amount: float, healer: Node = null) -> void:
-	## Restore HP up to the building's max — used by Ratchet auto-repair.
+	## Restore HP up to the building's max — used by Mekh auto-repair.
 	## Floats so a 0.5/sec accumulation works across frames; we cast back
 	## to int when applying. Multiple engineers healing in the same
 	## tick get diminishing returns (1 / 0.9 / 0.8 / ... floor 0.1).
@@ -5363,7 +5363,7 @@ func is_damaged() -> bool:
 
 func take_damage(amount: int, _attacker: Node3D = null) -> void:
 	# HQ-specific damage reduction vs light-class attackers: an
-	# additional 20% off so a Rook / Jackal squad's small-arms fire
+	# additional 20% off so a Strelet / Jackal squad's small-arms fire
 	# can't credibly threaten the Headquarters. Heavies, aircraft,
 	# and superweapons still deal their full computed damage.
 	if (
