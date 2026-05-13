@@ -38,6 +38,10 @@ var _build_mode: bool = false
 var _build_stats: BuildingStatResource = null
 ## Now a full Building scene (in ghost mode) so the preview shows real geometry.
 var _build_ghost: Node3D = null
+## Conveyor Node placement-preview line container. One MeshInstance3D
+## per drawn line, kept in this array and freed when the ghost moves
+## or placement completes. Sized at most ~10 (max neighbors in 100m).
+var _conveyor_preview_lines: Array[Node3D] = []
 
 ## Currently selected building (if any).
 var _selected_building: Building = null
@@ -2099,6 +2103,60 @@ func cancel_build_placement() -> void:
 		_build_ghost.queue_free()
 	_build_ghost = null
 	_clear_yard_wreck_highlights()
+	for line: Node3D in _conveyor_preview_lines:
+		if is_instance_valid(line):
+			line.queue_free()
+	_conveyor_preview_lines.clear()
+
+
+func _update_conveyor_preview(ghost_pos: Vector3, bstat: BuildingStatResource) -> void:
+	# Clear previous frame's lines.
+	for line: Node3D in _conveyor_preview_lines:
+		if is_instance_valid(line):
+			line.queue_free()
+	_conveyor_preview_lines.clear()
+	if bstat == null or bstat.connection_range <= 0.0:
+		return
+	var scene_root: Node = get_tree().current_scene
+	var cnm: ConveyorNetworkManager = scene_root.get_node_or_null("ConveyorNetworkManager") as ConveyorNetworkManager
+	if cnm == null:
+		return
+	var local_owner_id: int = 0  # local player is always owner_id == 0 in this codebase
+	var participants: Array = cnm._participants.get(local_owner_id, [])
+	var hypo_extent: float = maxf(bstat.footprint_size.x, bstat.footprint_size.z) * 0.5
+	var would_overfull: bool = cnm.would_overfull_network(local_owner_id, ghost_pos, bstat.building_id)
+	for b: Node in participants:
+		if not is_instance_valid(b):
+			continue
+		var b_extent: float = maxf((b.stats as BuildingStatResource).footprint_size.x, (b.stats as BuildingStatResource).footprint_size.z) * 0.5
+		var center_dist: float = (b as Node3D).global_position.distance_to(ghost_pos)
+		var edge_dist: float = maxf(center_dist - b_extent - hypo_extent, 0.0)
+		if edge_dist > bstat.connection_range:
+			continue
+		# Spawn a thin cylinder mesh from ghost_pos to b.global_position.
+		var line: Node3D = _make_preview_line(ghost_pos, (b as Node3D).global_position, would_overfull)
+		scene_root.add_child(line)
+		_conveyor_preview_lines.append(line)
+
+
+func _make_preview_line(a: Vector3, b: Vector3, blocked: bool) -> Node3D:
+	var line := MeshInstance3D.new()
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = 0.15
+	mesh.bottom_radius = 0.15
+	mesh.height = a.distance_to(b)
+	line.mesh = mesh
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1, 0.3, 0.2) if blocked else Color(0.3, 1, 0.4)
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color.a = 0.55
+	mesh.material = mat
+	# Orient: midpoint, looking at axis (cylinder Y aligned to a→b after fixup).
+	line.global_position = (a + b) * 0.5
+	line.look_at(b, Vector3.UP)
+	line.rotate_object_local(Vector3.RIGHT, PI * 0.5)  # CylinderMesh Y → -Z alignment
+	return line
 
 
 ## --- Salvage Yard wreck highlighting -----------------------------------------
@@ -2404,6 +2462,9 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 			# moves so the player can see which clusters fall in range.
 			if _build_stats and _build_stats.building_id == &"salvage_yard":
 				_refresh_yard_wreck_highlights(_build_ghost.global_position, SalvageYardComponent.COLLECTION_RADIUS)
+			# Conveyor-eligible ghosts — draw green/red lines to in-range
+			# network participants so the player sees which buildings would link.
+			_update_conveyor_preview(_build_ghost.global_position, _build_stats)
 
 	elif event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
