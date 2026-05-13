@@ -5524,6 +5524,7 @@ func _building_role_hint(stat: BuildingStatResource) -> String:
 		&"basic_armory": return "Tech"
 		&"advanced_armory": return "Tech"
 		&"salvage_yard": return "Economy"
+		&"conveyor_node": return "Economy"
 		&"gun_emplacement": return "Defense"
 		&"gun_emplacement_basic": return "Defense"
 		&"aerodrome": return "Production"
@@ -5683,6 +5684,8 @@ func _building_description(id: StringName) -> String:
 			return "Unlocks the gated unit slots at Advanced Foundry and Aerodrome, and hosts their branch upgrades."
 		&"salvage_yard":
 			return "Stationary harvester. Pulls salvage from wrecks inside its work radius."
+		&"conveyor_node":
+			return "Combine logistics relay. Links production buildings into the conveyor network, enabling salvage transfer between nodes."
 		&"gun_emplacement":
 			return "Combine mode-switchable emplacement: Balanced / Anti-Light / Anti-Heavy. Ground only. +15% HP / damage vs the baseline turret."
 		&"gun_emplacement_basic":
