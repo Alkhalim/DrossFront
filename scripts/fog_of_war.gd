@@ -64,25 +64,26 @@ const _OCTANT_MULTIPLIERS: Array = [
 	[ 1,  0,  0, -1],
 ]
 
-# Refresh rate. Was dropped to 1 Hz when per-stamp cost was the
-# bottleneck (per-cell Bresenham LOS). Shadowcasting replaced
-# that path with O(R²) octant sweeps; per-stamp cost should fall
-# 5-10×, so we can return to a more responsive 2 Hz without the
-# spike-frame symptoms.
+# Refresh rate. History:
+#   - 5 Hz (original)
+#   - 2 Hz (after shadowcasting replaced per-cell Bresenham)
+#   - 1 Hz (after profile 591: 200-unit combat made FOW the top script
+#     consumer at 10.6 s; spiked to 5.86 ms phase-0 / 2.5 ms phase-1)
+#   - 4 Hz (current — user reports 1 Hz lag is jarring at normal RTS
+#     pacing: a unit moving 6 u/s crosses a 2 u cell every ~330 ms,
+#     so 1 Hz reveal lags noticeably behind the unit silhouette).
 #
-# Dropped BACK to 1 Hz after profile 591 (200-unit heavy combat,
-# 5-min session): FogOfWar.* totalled 10.6 s of script time
-# (top-of-bucket consumer), with phase 0 spiking to 5.86 ms / call
-# and phase 1 at 2.5 ms / call. At 2 Hz cycle, the 4 Hz internal
-# fire rate spammed recompute on every other frame at 7 FPS,
-# starving the rest of the per-frame budget. 1 Hz cycle / 2 Hz
-# internal halves all FOW script time without changing the
-# split-phase shape -- spikes still divided across two ticks, just
-# fired half as often. Visual cost: a unit cresting cover takes
-# up to 1 s to reveal new terrain instead of 500 ms; barely
-# perceptible at RTS pacing (the player's eyes are tracking the
-# unit, not the fog edge).
-const FOW_REFRESH_HZ: float = 1.0
+# 4 Hz works because the per-observer stamp cache + per-tick signature
+# dedup added since the 1 Hz decision absorb most of the cost. Cache
+# hits skip the bounding-box-with-LOS walk entirely; the dominant
+# remaining cost is for observers that just changed cells (one or two
+# units mid-move out of dozens). At 4 Hz internal-8 Hz the worst-case
+# 5.86 ms phase-0 spike still fits under a 16.6 ms 60 Hz budget.
+#
+# If a heavy late-game profile shows FOW back at the top of the
+# script board, an adaptive option is to scale this down with the
+# observer count instead of pinning it.
+const FOW_REFRESH_HZ: float = 4.0
 
 ## Plateau-top elevation flag per cell. 1 = cell sits on top of a
 ## walkable plateau; 0 = ground / open. Set by the arena setup via
