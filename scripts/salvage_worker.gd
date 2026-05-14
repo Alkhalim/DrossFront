@@ -566,6 +566,13 @@ func _per_frame_worker_tick(delta: float) -> void:
 
 
 func _find_wreck() -> void:
+	# Guard: cargo held → go home first, never pick a new wreck.
+	# Mirrors the _find_wreck_new guard so the legacy path can't
+	# bounce either.
+	if _carried_salvage > 0 or _carried_microchips > 0:
+		if is_instance_valid(home_yard):
+			state = State.RETURNING
+		return
 	var wrecks: Array[Node] = get_tree().get_nodes_in_group("wrecks")
 	if wrecks.is_empty():
 		return
@@ -818,6 +825,18 @@ func _unstuck_step(delta: float) -> void:
 func _find_wreck_new() -> void:
 	## Same candidate-search logic as _find_wreck; routes the
 	## destination through GroundMovement when a wreck is found.
+	## Guard: if the worker is already carrying cargo it must deposit
+	## first. Calling _find_wreck while holding salvage is the root
+	## cause of the bounce loop — IDLE (cargo > 0) → pick wreck →
+	## arrive → full capacity → RETURNING → path_unreachable → IDLE
+	## again → repeat forever.
+	if _carried_salvage > 0 or _carried_microchips > 0:
+		if is_instance_valid(home_yard):
+			state = State.RETURNING
+			var mc: Node = get_node_or_null("MovementComponent")
+			if mc != null and mc is GroundMovement:
+				(mc as GroundMovement).goto_world(home_yard.global_position)
+		return
 	var wrecks: Array[Node] = get_tree().get_nodes_in_group("wrecks")
 	if wrecks.is_empty():
 		return
@@ -975,4 +994,19 @@ func _on_movement_path_unreachable(_reason: int) -> void:
 		_blacklisted_wrecks[_target_wreck.get_instance_id()] = UNSTUCK_TARGET_BLACKLIST_SEC
 	_target_wreck = null
 	_move_target = Vector3.INF
-	state = State.IDLE
+	# If the worker is carrying cargo when the path fails (e.g. the
+	# path home via the yard is temporarily unreachable), route back
+	# to RETURNING rather than IDLE. IDLE triggers _find_wreck_new
+	# on the next scan tick, which previously caused the bounce loop:
+	# (IDLE with cargo) → pick wreck → full → RETURNING → unreachable
+	# → IDLE → repeat. Going to RETURNING keeps the deposit obligation
+	# visible; the cargo guard in _find_wreck_new will stop any wreck
+	# search until the drop is complete.
+	if _carried_salvage > 0 or _carried_microchips > 0:
+		state = State.RETURNING
+		if is_instance_valid(home_yard):
+			var mc: Node = get_node_or_null("MovementComponent")
+			if mc != null and mc is GroundMovement:
+				(mc as GroundMovement).goto_world(home_yard.global_position)
+	else:
+		state = State.IDLE

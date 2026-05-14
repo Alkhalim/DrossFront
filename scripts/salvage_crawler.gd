@@ -32,13 +32,12 @@ func _resolve_team_color() -> Color:
 		return registry.get_perspective_color(owner_id)
 	return SalvageCrawler._color_for(owner_id)
 const ARRIVE_THRESHOLD: float = 1.4
-## Crawler's worker harvest radius. 1.32× the standard salvage yard's
-## COLLECTION_RADIUS (30u). Restored from the over-aggressive 31.5u cut
-## (which blocked workers from finding wrecks in the map's grove layout)
-## back to 39.6u — still tighter than the original 45u so the player
-## must advance the Crawler to push the mid, but workable with the
-## current grove placement (clusters at 85-95u from each base).
-const HARVEST_RADIUS: float = 39.6
+## Crawler's worker harvest radius. Tightened from 39.6u to 25u per
+## balance pass — forces the Crawler to advance close to a wreck cluster
+## before workers can reach it, making positional play meaningful and
+## reducing how far stray workers roam from their home chassis.
+## Anchor bonus (+30%) expands this to 32.5u when deployed.
+const HARVEST_RADIUS: float = 25.0
 ## Wrecks above this size are too tough to crush — Crawler bumps into them.
 const CRUSH_MAX_WRECK_SIZE: float = 1.3
 ## Salvage absorbed when crushing a wreck (per doc: 25%).
