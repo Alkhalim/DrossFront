@@ -42,6 +42,11 @@ var _build_ghost: Node3D = null
 ## per drawn line, kept in this array and freed when the ghost moves
 ## or placement completes. Sized at most ~10 (max neighbors in 100m).
 var _conveyor_preview_lines: Array[Node3D] = []
+## Meridian mesh-chain placement-preview — one MeshInstance3D line per
+## in-range provider, plus an optional cursor-position disc. Freed on
+## ghost move, placement confirm, or cancel.
+var _mesh_preview_lines: Array[Node3D] = []
+var _mesh_preview_disc: MeshInstance3D = null
 
 ## Currently selected building (if any).
 var _selected_building: Building = null
@@ -2250,6 +2255,7 @@ func cancel_build_placement() -> void:
 		if is_instance_valid(line):
 			line.queue_free()
 	_conveyor_preview_lines.clear()
+	_clear_mesh_preview()
 
 
 func _update_conveyor_preview(ghost_pos: Vector3, bstat: BuildingStatResource) -> void:
@@ -2315,6 +2321,99 @@ func _make_preview_line(a: Vector3, b: Vector3, blocked: bool) -> Node3D:
 	var z_axis: Vector3 = x_axis.cross(dir).normalized()
 	line.transform = Transform3D(Basis(x_axis, dir, z_axis), (a + b) * 0.5)
 	return line
+
+
+## --- Meridian mesh-chain placement preview -----------------------------------
+## Shows connection lines from the cursor to in-range Mesh providers and a
+## faint cursor-position disc so the player can visually align the overlap.
+
+const _MESH_PROVIDER_BUILDING_IDS: Array[StringName] = [
+	&"sensor_spine", &"drone_bay", &"black_pylon", &"sensor_array", &"mesh_relay"
+]
+
+
+func _update_mesh_preview(ghost_pos: Vector3, bstat: BuildingStatResource) -> void:
+	_clear_mesh_preview()
+	if bstat == null or bstat.mesh_provider_radius <= 0.0:
+		return
+	if not (bstat.building_id in _MESH_PROVIDER_BUILDING_IDS):
+		return
+	if _local_player_faction() != 1:
+		return
+	var scene_root: Node = get_tree().current_scene
+	var ms: MeshSystem = scene_root.get_node_or_null("MeshSystem") as MeshSystem
+	if ms == null:
+		return
+	var local_owner_id: int = 0  # local player is always owner_id == 0
+	var providers: Array[Dictionary] = ms.get_providers_for_owner(local_owner_id)
+	var new_radius: float = bstat.mesh_provider_radius
+	for entry: Dictionary in providers:
+		var ppos: Vector3 = entry.get("pos", Vector3.ZERO) as Vector3
+		var their_r2: float = entry.get("r2", 0.0) as float
+		var their_radius: float = sqrt(their_r2)
+		var d: float = Vector2(ghost_pos.x, ghost_pos.z).distance_to(Vector2(ppos.x, ppos.z))
+		if d <= their_radius + new_radius:
+			var line: Node3D = _make_preview_line(ghost_pos, ppos, false)  # green
+			scene_root.add_child(line)
+			_mesh_preview_lines.append(line)
+	# Show the cursor-position disc so the player can align the overlap.
+	_spawn_mesh_preview_disc(ghost_pos, new_radius, scene_root)
+
+
+func _clear_mesh_preview() -> void:
+	for line: Node3D in _mesh_preview_lines:
+		if is_instance_valid(line):
+			line.queue_free()
+	_mesh_preview_lines.clear()
+	if is_instance_valid(_mesh_preview_disc):
+		_mesh_preview_disc.queue_free()
+	_mesh_preview_disc = null
+
+
+func _spawn_mesh_preview_disc(world_pos: Vector3, radius: float, scene_root: Node) -> void:
+	## Instantiates a faint version of the Mesh aura disc at the cursor position
+	## so the player can visually align the new building's radius with existing
+	## providers. Positioned at Y=0.04 (above live discs at Y=0.02).
+	var disc := MeshInstance3D.new()
+	disc.name = "MeshPreviewDisc"
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(radius * 2.0, radius * 2.0)
+	plane.subdivide_width = 4
+	plane.subdivide_depth = 4
+	disc.mesh = plane
+	disc.position = world_pos + Vector3(0.0, 0.04, 0.0)
+	disc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var shader := Shader.new()
+	shader.code = Building.MESH_AURA_DISC_SHADER
+	var mat := ShaderMaterial.new()
+	mat.shader = shader
+	mat.set_shader_parameter(&"radius", radius)
+	# Populate other_providers from the live snapshot so overlap suppression
+	# still works in the preview — merged area reads correctly with existing discs.
+	var ms: MeshSystem = scene_root.get_node_or_null("MeshSystem") as MeshSystem
+	var other_arr: Array[Vector4] = []
+	if ms != null:
+		var providers: Array[Dictionary] = ms.get_providers_for_owner(0)
+		for p: Dictionary in providers:
+			if other_arr.size() >= 8:
+				break
+			var p_pos: Vector3 = p["pos"] as Vector3
+			var p_r: float = sqrt(p["r2"] as float)
+			other_arr.append(Vector4(p_pos.x, p_pos.z, p_r, 0.0))
+	var real_count: int = other_arr.size()
+	while other_arr.size() < 8:
+		other_arr.append(Vector4(0.0, 0.0, 0.0, 0.0))
+	mat.set_shader_parameter(&"other_providers", other_arr)
+	mat.set_shader_parameter(&"other_count", real_count)
+	# Dim the preview to ~30% of live disc brightness. The shader uses
+	# blend_add so ALBEDO magnitude drives perceived opacity — halving
+	# mesh_color halves the additive contribution without touching ALPHA.
+	# Default live color: vec3(0.55, 0.40, 0.85). At 0.3× → ~(0.17, 0.12, 0.26).
+	mat.set_shader_parameter(&"mesh_color", Color(0.17, 0.12, 0.26))
+	mat.render_priority = -11  # draw below live discs at render_priority -10
+	disc.set_surface_override_material(0, mat)
+	scene_root.add_child(disc)
+	_mesh_preview_disc = disc
 
 
 ## --- Salvage Yard wreck highlighting -----------------------------------------
@@ -2662,6 +2761,9 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 			# Conveyor-eligible ghosts — draw green/red lines to in-range
 			# network participants so the player sees which buildings would link.
 			_update_conveyor_preview(_build_ghost.global_position, _build_stats)
+			# Meridian mesh-chain ghosts — draw lines to in-range providers and
+			# show a cursor-position disc so the player can align the new building.
+			_update_mesh_preview(_build_ghost.global_position, _build_stats)
 
 	elif event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
