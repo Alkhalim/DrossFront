@@ -382,19 +382,35 @@ func _chase_position(target: Node3D, primary_range: float) -> Vector3:
 	if d < 0.001:
 		return enemy_pos
 	to_unit /= d
-	# Chase-distance factor — how far INSIDE primary_range to aim. Ground
-	# units use 0.95 (stop just inside max range, preserves player intent
-	# of "stay at long range"). Aircraft use 0.5: aircraft arrival_radius
-	# is 6u (intentionally wide to suppress hover-tremble at the
-	# destination), so a 0.95-factor chase position is so close to
-	# primary_range that the aircraft can end up OUTSIDE weapon range
-	# after arrival (chase at 14.25u from enemy ± 6u arrival = up to
-	# 20.25u from enemy for range=15). Deeper chase at 0.5×range puts
-	# the arrival envelope (D ± 6u) safely inside weapon range — for
-	# range=15, that's 1.5–13.5u, always within 15u. Aircraft don't have
-	# a physical "stay back" requirement (they fly over ground targets)
-	# so closing further is harmless.
-	var chase_factor: float = 0.5 if _shooter_is_air_cached else 0.95
+	# Chase-distance factor — how far INSIDE primary_range to aim.
+	# Aircraft use 0.5: aircraft arrival_radius is 6u (intentionally wide
+	# to suppress hover-tremble), so a 0.95-factor chase position is so
+	# close to primary_range that the aircraft can end up OUTSIDE weapon
+	# range after arrival (chase at 14.25u from enemy ± 6u arrival = up
+	# to 20.25u from enemy for range=15). Deeper chase at 0.5×range puts
+	# the arrival envelope safely inside weapon range.
+	#
+	# Ground units: same problem — GroundMovement arrival_radius is 6.0u.
+	# With factor=0.95 and range=15, the unit targets 14.25u away but can
+	# settle up to 20.25u from the enemy (outside weapon range). We
+	# compute the safe factor from the MC's actual arrival_radius so the
+	# worst-case arrival position (chase_dist + arrival_radius) stays
+	# inside primary_range by at least 1.5u of margin. Clamped to
+	# [0.3, 0.85]: 0.3 ensures short-range units still close in (a pure
+	# melee unit at range=8 would need factor=0.06, impractically close);
+	# 0.85 caps how far inside range long-range units aim so they don't
+	# walk deep into mid-range unnecessarily.
+	var chase_factor: float
+	if _shooter_is_air_cached:
+		chase_factor = 0.5
+	else:
+		var arr_r: float = 6.0  # GroundMovement default
+		var mc_gm: Node = _unit.get_node_or_null("MovementComponent")
+		if mc_gm != null and "arrival_radius" in mc_gm:
+			arr_r = mc_gm.get("arrival_radius") as float
+		# safe_dist: how far from the enemy the unit can stop and still be in range
+		var safe_dist: float = primary_range - arr_r - 1.5
+		chase_factor = clampf(safe_dist / primary_range, 0.3, 0.85)
 	return enemy_pos + to_unit * (primary_range * chase_factor)
 
 

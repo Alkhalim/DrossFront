@@ -5483,11 +5483,21 @@ func command_move(target: Vector3, clear_combat: bool = true) -> void:
 	# already-active move_target — the result is the same. Player
 	# commands (clear_combat=true) always fall through so a player
 	# right-click is never silently ignored.
+	# Exception: a stationary unit that hasn't reached firing range must
+	# still re-issue goto_world so the kernel wakes it from the ARRIVED
+	# state. Without this, a unit that settled at arrival_radius boundary
+	# just outside weapon range is permanently stuck — the idempotency
+	# guard blocks the chase re-issue because the target hasn't changed.
 	if not clear_combat and has_move_order and move_target != Vector3.INF:
 		var dx_m: float = target.x - move_target.x
 		var dz_m: float = target.z - move_target.z
 		if dx_m * dx_m + dz_m * dz_m < 9.0:  # (3 m)^2
-			return
+			# Allow re-issue when the unit is stationary (settled at
+			# arrival boundary). Speed check: XZ velocity² < 0.25 (0.5 m/s).
+			var vxz: Vector3 = velocity
+			var vxz_sq: float = vxz.x * vxz.x + vxz.z * vxz.z
+			if vxz_sq >= 0.25:
+				return
 	move_queue.clear()
 	is_holding_position = false
 	patrol_a = Vector3.INF
