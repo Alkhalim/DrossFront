@@ -397,6 +397,7 @@ func _add_building_details() -> void:
 		&"intelligence_network": _detail_intelligence_network()
 		&"sensor_array": _detail_sensor_array()
 		&"mesh_relay": _detail_mesh_relay()
+		&"sonar_pylon": _detail_sonar_pylon()
 		# Inheritor field construction
 		&"inheritor_construction_site": _detail_inheritor_construction_site()
 	# Mesh-provider aura ring (V3 §Pillar 2). Drawn after the type
@@ -5060,6 +5061,118 @@ func _detail_mesh_relay() -> void:
 	_team_collar_ring(tc.bottom_radius * 1.15, 0.08, Vector3(0.0, fs.y + 0.04, 0.0))
 
 
+func _detail_sonar_pylon() -> void:
+	## Sonar Pylon — Meridian AA defensive position. Tall thin column rising
+	## from a wide octagonal base, topped with a wide angled sonar-emitter
+	## disc/cone, plus a faint blue glow torus around the base.
+	## Footprint: 2.4 × 5.5 × 2.4.  Silhouette: needle-thin spire with a
+	## broad dish crown — unmistakeable AA read from any angle.
+	## MVP: no TurretComponent / weapon yet. Phase 2 wires AA fire behavior.
+	const SONAR_BLUE := Color(0.30, 0.55, 0.70, 1.0)
+	const SONAR_GLOW := Color(0.20, 0.75, 1.00, 1.0)
+	var fs: Vector3 = stats.footprint_size
+
+	# Wide octagonal base pad — visually grounds the tall column.
+	var base_pad := MeshInstance3D.new()
+	var base_cyl := CylinderMesh.new()
+	base_cyl.top_radius = fs.x * 0.48
+	base_cyl.bottom_radius = fs.x * 0.52
+	base_cyl.height = fs.y * 0.07
+	base_cyl.radial_segments = 8
+	base_pad.mesh = base_cyl
+	base_pad.position = Vector3(0.0, fs.y + base_cyl.height * 0.5, 0.0)
+	base_pad.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.22, 0.26)))
+	_attach_visual(base_pad)
+
+	# Team-colour collar ring around the base.
+	_team_collar_ring(base_cyl.bottom_radius * 1.08, 0.07, Vector3(0.0, fs.y + 0.04, 0.0))
+
+	# Faint blue glow torus hugging the base pad — sonar sweep indicator.
+	var glow_torus := MeshInstance3D.new()
+	var gt := TorusMesh.new()
+	gt.inner_radius = fs.x * 0.46
+	gt.outer_radius = fs.x * 0.54
+	gt.rings = 24
+	gt.ring_segments = 6
+	glow_torus.mesh = gt
+	glow_torus.rotation.x = PI * 0.5
+	glow_torus.position = Vector3(0.0, fs.y + 0.04, 0.0)
+	var glow_mat := StandardMaterial3D.new()
+	glow_mat.albedo_color = Color(SONAR_GLOW.r, SONAR_GLOW.g, SONAR_GLOW.b, 0.55)
+	glow_mat.emission_enabled = true
+	glow_mat.emission = SONAR_GLOW
+	glow_mat.emission_energy_multiplier = 0.7
+	glow_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	glow_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	glow_torus.set_surface_override_material(0, glow_mat)
+	_attach_visual(glow_torus)
+
+	# Tall thin column — the spine that carries the sonar emitter.
+	var column := MeshInstance3D.new()
+	var col_cyl := CylinderMesh.new()
+	col_cyl.top_radius = fs.x * 0.05
+	col_cyl.bottom_radius = fs.x * 0.08
+	col_cyl.height = fs.y * 1.20
+	col_cyl.radial_segments = 10
+	column.mesh = col_cyl
+	column.position = Vector3(0.0, fs.y + base_cyl.height + col_cyl.height * 0.5, 0.0)
+	column.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.16, 0.18, 0.24)))
+	_attach_visual(column)
+
+	# Wide angled sonar-emitter disc at the top — reads as a dish / cone
+	# oriented toward the sky for intercepting aircraft.
+	var dish_y: float = fs.y + base_cyl.height + col_cyl.height + 0.10
+	var emitter := MeshInstance3D.new()
+	var em_cyl := CylinderMesh.new()
+	em_cyl.top_radius = fs.x * 0.60
+	em_cyl.bottom_radius = fs.x * 0.10
+	em_cyl.height = 0.22
+	em_cyl.radial_segments = 20
+	emitter.mesh = em_cyl
+	# Tilt ~18° so it reads as "aimed slightly skyward" rather than flat.
+	emitter.rotation.x = deg_to_rad(-18.0)
+	emitter.position = Vector3(0.0, dish_y, 0.0)
+	emitter.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.20, 0.26, 0.32)))
+	_attach_visual(emitter)
+
+	# Inner emissive ring on the dish face — sonar active glow.
+	var dish_ring := MeshInstance3D.new()
+	var dr := TorusMesh.new()
+	dr.inner_radius = fs.x * 0.38
+	dr.outer_radius = fs.x * 0.44
+	dr.rings = 20
+	dr.ring_segments = 6
+	dish_ring.mesh = dr
+	dish_ring.rotation.x = PI * 0.5 + deg_to_rad(-18.0)
+	dish_ring.position = Vector3(0.0, dish_y + 0.06, 0.0)
+	dish_ring.set_surface_override_material(0, _detail_emissive_mat(SONAR_GLOW, 1.6))
+	_attach_visual(dish_ring)
+
+	# Central focus hub — small glowing sphere at the emitter centre.
+	var hub := MeshInstance3D.new()
+	var hs := SphereMesh.new()
+	hs.radius = 0.10
+	hs.height = 0.20
+	hub.mesh = hs
+	hub.position = Vector3(0.0, dish_y + 0.12, 0.0)
+	var hub_mat := StandardMaterial3D.new()
+	hub_mat.albedo_color = SONAR_GLOW
+	hub_mat.emission_enabled = true
+	hub_mat.emission = SONAR_GLOW
+	hub_mat.emission_energy_multiplier = 3.0
+	hub.set_surface_override_material(0, hub_mat)
+	_attach_visual(hub)
+
+	# Ambient light from the dish — casts sonar blue onto the ground.
+	var light := OmniLight3D.new()
+	light.light_color = SONAR_BLUE
+	light.light_energy = 1.4
+	light.omni_range = fs.x * 2.0 + 3.0
+	light.position = Vector3(0.0, dish_y, 0.0)
+	_attach_visual(light)
+
+
 func _detail_inheritor_construction_site() -> void:
 	## Inheritor field construction site: a skeletal scaffolding frame with
 	## restoration-green emissive accents so the player can identify at a glance
@@ -5717,6 +5830,26 @@ func get_build_progress_percent() -> float:
 		return 0.0
 	var current_unit: UnitStatResource = _build_queue[0]
 	return _build_progress / current_unit.build_time
+
+
+func get_build_slot_count() -> int:
+	## Returns the number of active parallel production slots this building
+	## currently has. 1 for all buildings except the Meridian HQ, which
+	## scales 2 / 3 / 4 with Intelligence Network tier.
+	return _resolve_build_slots()
+
+
+func get_slot_progress_percent(slot_idx: int) -> float:
+	## Returns [0.0, 1.0] progress for the unit in slot `slot_idx`.
+	## Returns 0.0 when the slot is out of range or has no queued unit.
+	if slot_idx < 0 or slot_idx >= _build_queue.size():
+		return 0.0
+	var unit: UnitStatResource = _build_queue[slot_idx]
+	if not unit or unit.build_time <= 0.0:
+		return 0.0
+	if slot_idx >= _build_progress_slots.size():
+		return 0.0
+	return clampf(_build_progress_slots[slot_idx] / unit.build_time, 0.0, 1.0)
 
 
 var _is_selected: bool = false

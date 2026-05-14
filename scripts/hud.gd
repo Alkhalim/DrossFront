@@ -62,6 +62,13 @@ func get_visible_build_stat_at(index: int) -> BuildingStatResource:
 ## Optional progress bar shown inside the bottom panel for construction / queue / worker spawn.
 var _progress_bar: ProgressBar = null
 
+## Multi-slot progress bars for the Meridian HQ parallel production queue.
+## Each bar corresponds to one production slot (2-4 depending on Intel tier).
+## The container and bar array are created lazily the first time a Meridian HQ
+## with >1 slot is selected, and hidden when irrelevant.
+var _multi_slot_container: VBoxContainer = null
+var _multi_slot_bars: Array[ProgressBar] = []
+
 ## Selection roster strip — vertical column of unit-class chips
 ## anchored to the LEFT edge of the bottom panel. Shown when more
 ## than one squad is selected; each chip is a coloured class swatch
@@ -1084,6 +1091,16 @@ func _build_progress_bar() -> void:
 	_progress_bar.modulate.a = 0.0
 	if _info_section:
 		_info_section.add_child(_progress_bar)
+	# Multi-slot container for Meridian HQ parallel queue visualization.
+	# Created here alongside the single progress bar so it lives in the
+	# same layout slot; shown only when the selected building is a
+	# Meridian HQ with more than one active production slot.
+	_multi_slot_container = VBoxContainer.new()
+	_multi_slot_container.name = "MultiSlotBars"
+	_multi_slot_container.add_theme_constant_override("separation", 3)
+	_multi_slot_container.visible = false
+	if _info_section:
+		_info_section.add_child(_multi_slot_container)
 
 
 ## --- Resource bar ---
@@ -1258,6 +1275,8 @@ func _update_selection_display() -> void:
 			# 'shown' and 'hidden' instead.
 			if _progress_bar:
 				_progress_bar.modulate.a = 0.0
+			if _multi_slot_container:
+				_multi_slot_container.visible = false
 
 
 func _resolve_inspect_owner_label(owner_id: int) -> String:
@@ -1547,15 +1566,29 @@ func _update_building_panel(building: Building) -> void:
 			_hide_progress()
 	elif building.get_queue_size() > 0:
 		_queue_label.text = ""
-		_show_progress(building.get_build_progress_percent(), Color(0.4, 0.85, 1.0, 0.95))
-		# Build-queue ETA tooltip — hover the bar to see "Currently:
-		# Borzoi — 14s" plus the queue tail. Implemented via the
-		# bar's tooltip_text rather than a custom popup so it picks
-		# up the same fast tooltip delay as everything else.
-		_progress_bar.tooltip_text = _build_queue_tooltip(building)
+		# Meridian HQ with >1 slot: render per-slot stacked bars instead
+		# of the single progress bar so the player can see all slots.
+		var use_multi: bool = (
+			building.has_method("get_build_slot_count")
+			and (building.get_build_slot_count() as int) > 1
+		)
+		if use_multi:
+			_hide_progress()
+			_update_multi_slot_bars(building)
+		else:
+			if _multi_slot_container:
+				_multi_slot_container.visible = false
+			_show_progress(building.get_build_progress_percent(), Color(0.4, 0.85, 1.0, 0.95))
+			# Build-queue ETA tooltip — hover the bar to see "Currently:
+			# Borzoi — 14s" plus the queue tail. Implemented via the
+			# bar's tooltip_text rather than a custom popup so it picks
+			# up the same fast tooltip delay as everything else.
+			_progress_bar.tooltip_text = _build_queue_tooltip(building)
 	else:
 		_queue_label.text = ""
 		_hide_progress()
+		if _multi_slot_container:
+			_multi_slot_container.visible = false
 
 	# Queue icons — one button per pending unit, click to cancel and
 	# refund. Yards / armories don't have a build queue in the usual
@@ -1618,6 +1651,70 @@ func _hide_progress() -> void:
 		_progress_bar.modulate.a = 0.0
 		_progress_bar.value = 0.0
 		_progress_bar.tooltip_text = ""
+
+
+func _update_multi_slot_bars(building: Building) -> void:
+	## Renders N stacked progress bars for a Meridian HQ's parallel
+	## production slots. Each bar shows the in-progress unit name (via
+	## tooltip) and its build fraction. Hidden when irrelevant (non-HQ,
+	## non-Meridian, or only 1 slot active).
+	##
+	## Layout: single-bar progress bar is hidden when multi-slot is shown,
+	## and vice-versa, so only one set of bars is visible at a time.
+	if not _multi_slot_container:
+		return
+	if not building or not building.has_method("get_build_slot_count"):
+		_multi_slot_container.visible = false
+		return
+
+	var slot_count: int = building.get_build_slot_count() as int
+	if slot_count <= 1:
+		_multi_slot_container.visible = false
+		return
+
+	var queue: Array = []
+	if building.has_method("get_queue_snapshot"):
+		queue = building.get_queue_snapshot()
+
+	if queue.is_empty():
+		_multi_slot_container.visible = false
+		return
+
+	# Ensure we have exactly slot_count child bars.
+	while _multi_slot_bars.size() < slot_count:
+		var bar := ProgressBar.new()
+		bar.custom_minimum_size = Vector2(120, 7)
+		bar.size_flags_horizontal = Control.SIZE_FILL
+		bar.show_percentage = false
+		bar.value = 0
+		# Sonar-blue fill to distinguish from single-bar (cyan).
+		var fill_sb := StyleBoxFlat.new()
+		fill_sb.bg_color = Color(0.30, 0.60, 1.00, 0.90)
+		bar.add_theme_stylebox_override("fill", fill_sb)
+		_multi_slot_container.add_child(bar)
+		_multi_slot_bars.append(bar)
+
+	# Hide surplus bars if slot_count shrank.
+	for bar_i: int in _multi_slot_bars.size():
+		var bar: ProgressBar = _multi_slot_bars[bar_i]
+		if bar_i >= slot_count:
+			bar.visible = false
+			continue
+		bar.visible = true
+		var pct: float = 0.0
+		if building.has_method("get_slot_progress_percent"):
+			pct = building.get_slot_progress_percent(bar_i) as float
+		bar.value = clampf(pct, 0.0, 1.0) * 100.0
+		# Tooltip: unit name + remaining seconds.
+		var tip: String = "Slot %d: idle" % (bar_i + 1)
+		if bar_i < queue.size():
+			var u: UnitStatResource = queue[bar_i] as UnitStatResource
+			if u:
+				var remaining: float = maxf(u.build_time * (1.0 - pct), 0.0)
+				tip = "Slot %d: %s — %ds" % [bar_i + 1, u.unit_name, int(ceil(remaining))]
+		bar.tooltip_text = tip
+
+	_multi_slot_container.visible = true
 
 
 ## --- FPS counter ---
@@ -2470,6 +2567,14 @@ func _rebuild_production_buttons(building: Building) -> void:
 				_hq_tab_train.button_pressed = _hq_tab == "train"
 			if _hq_tab_defense:
 				_hq_tab_defense.button_pressed = _hq_tab == "defense"
+			# Meridian HQ: rename tabs "Basic" / "Advanced" instead of
+			# "Train" / "Upgrades" so the split matches the unit roster
+			# organisation (basic vs advanced-tier access).
+			var _hq_faction: int = _local_player_faction()
+			if _hq_tab_train:
+				_hq_tab_train.text = "Basic" if _hq_faction == 1 else "Train"
+			if _hq_tab_defense:
+				_hq_tab_defense.text = "Advanced" if _hq_faction == 1 else "Upgrades"
 	else:
 		# Non-HQ buildings hide the tab row so the production grid
 		# starts at the top of the action section like before.
@@ -5932,6 +6037,7 @@ func _building_role_hint(stat: BuildingStatResource) -> String:
 		&"drone_bay": return "Authorization"
 		&"intelligence_network": return "Tech"
 		&"sensor_array": return "Defense"
+		&"sonar_pylon": return "Defense"
 		&"mesh_relay": return "Power"
 		&"gun_emplacement": return "Defense"
 		&"gun_emplacement_basic": return "Defense"
@@ -6116,6 +6222,8 @@ func _building_description(id: StringName) -> String:
 			return "Anti-air missile rack. Strong against aircraft, near-zero against ground."
 		&"black_pylon":
 			return "Meridian Mesh anchor. Boosts nearby Meridian units' accuracy/reload and unlocks the Wraith bomber."
+		&"sonar_pylon":
+			return "Anti-air sonar turret. Targets aircraft only. Requires Intelligence Network."
 	return ""
 
 

@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+building_name = "Sonar Pylon"
+building_id = &"sonar_pylon"
+hp = 550
+cost_salvage = 200
+cost_fuel = 30
+build_time = 25.0
+power_consumption = 12
+power_production = 0
+producible_units = []
+footprint_size = Vector3(2.4, 5.5, 2.4)
+placeholder_color = Color(0.30, 0.50, 0.62, 1)
+is_advanced = true
+prerequisites = [&"intelligence_network"]
+mesh_provider_radius = 8.0
+faction_lock = 2
+weapons = []

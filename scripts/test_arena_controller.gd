@@ -5107,6 +5107,7 @@ func _setup_buildable_buildings() -> void:
 			"res://resources/buildings/intelligence_network.tres",
 			"res://resources/buildings/sensor_array.tres",
 			"res://resources/buildings/mesh_relay.tres",
+			"res://resources/buildings/sonar_pylon.tres",
 			# Inheritor buildings (faction_lock = 3 = Inheritor only).
 			# Reliquary: passive salvage-pile generator (max 4 per player).
 			# Architect's Network: 3-tier tech hub replacing Armory + Annex.
