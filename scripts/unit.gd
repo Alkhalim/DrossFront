@@ -7758,6 +7758,29 @@ func take_damage(amount: int, attacker: Node3D = null) -> void:
 	_apply_damage_flash()
 	_update_hp_bar()
 
+	# FOW reveal-on-attack (Behavior B) — player units only.
+	# When a player-owned unit takes damage from an enemy outside LOS:
+	#   Non-stealth: briefly reveal the attacker + surrounding area.
+	#   Stealth: reveal only the ground tile under them (terrain flash).
+	if owner_id == 0 and attacker and is_instance_valid(attacker):
+		var fow_node: Node = get_tree().current_scene.get_node_or_null("FogOfWar") if get_tree() else null
+		if fow_node and fow_node.has_method("is_visible_world"):
+			var atk_pos: Vector3 = (attacker as Node3D).global_position
+			if not (fow_node.call("is_visible_world", atk_pos) as bool):
+				# Determine stealth status of attacker.
+				var atk_is_stealth: bool = false
+				if "stealth_revealed" in attacker:
+					var atk_revealed: bool = (attacker.get("stealth_revealed") as bool)
+					var atk_stats_b: UnitStatResource = attacker.get("stats") as UnitStatResource if "stats" in attacker else null
+					if atk_stats_b and atk_stats_b.is_stealth_capable and not atk_revealed:
+						atk_is_stealth = true
+				if atk_is_stealth:
+					# Terrain flash only: 1.5u radius for 1 second.
+					fow_node.call("reveal_area", atk_pos, 1.5, 1.0)
+				else:
+					# Full reveal: 4u radius for 3 seconds.
+					fow_node.call("reveal_area", atk_pos, 4.0, 3.0)
+
 	# Retaliate: if we have a combat component and aren't already engaged,
 	# pick the attacker as our target so we shoot back.
 	if attacker and is_instance_valid(attacker):

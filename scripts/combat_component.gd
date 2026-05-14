@@ -836,6 +836,20 @@ func _physics_process(delta: float) -> void:
 		if _fow_cached and _fow_cached.has_method("is_visible_world"):
 			team_can_see = _fow_cached.call("is_visible_world", _current_target.global_position)
 	if dist > sight_r and not team_can_see:
+		# Player-side units (owner 0 / allied): drop the target entirely when
+		# it exits FOW. The unit won't chase into unscouted terrain — re-
+		# acquisition happens only when the enemy re-enters visible area.
+		# AI units keep the old "walk to last-known position" behaviour
+		# (they operate on ground truth, no fog system).
+		if uses_shared_los:
+			# Target has stepped out of shared FOW. End this engagement.
+			forced_target = null
+			_current_target = null
+			_has_fired_at_current_target = false
+			_was_in_range = false
+			_set_engaged(false)
+			combat_ended.emit()
+			return
 		# Sight-lost chase: walk to last known position. Locked for
 		# COMBAT_LOCKOUT_DURATION_MSEC so we don't re-issue this chase
 		# every combat tick (the kernel field handles the actual motion).
@@ -1074,6 +1088,21 @@ func _find_nearest_enemy(max_range: float) -> Node3D:
 			var their_stats: UnitStatResource = node.get("stats") as UnitStatResource
 			if their_stats and their_stats.is_stealth_capable:
 				continue
+		# FOW gate for player-owned (and player-allied) units: only acquire
+		# enemies that are currently visible in the fog of war. AI units
+		# operate on ground-truth and skip this gate.
+		var fow_owner: bool = (my_owner == 0)
+		if not fow_owner and _registry:
+			fow_owner = _registry.are_allied(my_owner, 0)
+		if fow_owner:
+			if not _fow_cached or not is_instance_valid(_fow_cached):
+				if not _scene_cached or not is_instance_valid(_scene_cached):
+					_scene_cached = get_tree().current_scene if get_tree() else null
+				if _scene_cached:
+					_fow_cached = _scene_cached.get_node_or_null("FogOfWar")
+			if _fow_cached and _fow_cached.has_method("is_visible_world"):
+				if not (_fow_cached.call("is_visible_world", (node as Node3D).global_position) as bool):
+					continue
 		var d: float = _engagement_distance(
 			my_pos, (node as Node3D).global_position, shooter_is_air, node_is_air
 		)
