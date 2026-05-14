@@ -191,19 +191,23 @@ func remove_population(amount: int) -> void:
 func update_population_cap() -> void:
 	## Recomputes population_cap = BASE + 25 per friendly production
 	## building (anything that has at least one producible unit), capped
-	## at POPULATION_MAX. Called by Building._finish_construction so the
-	## cap rises as soon as a foundry / armory completes.
+	## at POPULATION_MAX. Also adds stats.provides_population for any
+	## building that explicitly contributes pop cap (e.g. Sensor Spine,
+	## Drone Bay — authorization buildings that expand the roster budget
+	## without being direct producers). Called by Building._finish_construction
+	## so the cap rises as soon as a foundry / armory / spine completes.
 	var production_count: int = 0
+	var pop_from_provision: int = 0
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		var building: Building = node as Building
 		if not building or not building.is_constructed or not building.stats:
 			continue
 		if building.owner_id != owner_id:
 			continue
-		if building.stats.producible_units.is_empty():
-			continue
-		production_count += 1
-	var new_cap: int = mini(POPULATION_BASE + production_count * POPULATION_PER_BUILDING, POPULATION_MAX)
+		if not building.stats.producible_units.is_empty():
+			production_count += 1
+		pop_from_provision += building.stats.provides_population
+	var new_cap: int = mini(POPULATION_BASE + production_count * POPULATION_PER_BUILDING + pop_from_provision, POPULATION_MAX)
 	if new_cap != population_cap:
 		population_cap = new_cap
 		population_changed.emit(population, population_cap)

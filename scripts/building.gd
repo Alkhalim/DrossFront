@@ -68,6 +68,10 @@ var rally_point: Vector3 = RALLY_UNSET
 ## Reference to the game's resource manager (set externally).
 var resource_manager: Node = null
 
+## Drone Bay: patrol drones spawned on construction completion.
+## Tracked so they can be freed when the Bay is destroyed.
+var _patrol_drones: Array[Node] = []
+
 @onready var _mesh: MeshInstance3D = $MeshInstance3D as MeshInstance3D
 @onready var _collision: CollisionShape3D = $CollisionShape3D as CollisionShape3D
 @onready var _spawn_marker: Marker3D = $SpawnPoint as Marker3D
@@ -293,6 +297,16 @@ var _atmos_steam_timer: float = 0.0
 ## Re-set each fire from _DAMAGE_SPARK_INTERVAL_* keyed by stage.
 var _damage_spark_timer: float = 0.0
 
+## Resonance Pylon AA wave — ticked at ~5Hz independent of the cosmetic stagger.
+## Fires every 2.5 seconds when enemy aircraft are in range (18u).
+## Only active when building_id == &"resonance_pylon".
+const RESONANCE_PYLON_AA_RANGE: float = 18.0
+const RESONANCE_PYLON_AA_DAMAGE: int = 30
+const RESONANCE_PYLON_AA_COOLDOWN: float = 2.5
+const RESONANCE_PYLON_AA_TICK: float = 0.2  # check every 0.2s (~5Hz)
+var _resonance_aa_cooldown: float = 0.0
+var _resonance_aa_tick_acc: float = 0.0
+
 
 func _ready() -> void:
 	if is_ghost_preview:
@@ -474,7 +488,7 @@ func _add_building_details() -> void:
 		&"intelligence_network": _detail_intelligence_network()
 		&"sensor_array": _detail_sensor_array()
 		&"mesh_relay": _detail_mesh_relay()
-		&"sonar_pylon": _detail_sonar_pylon()
+		&"resonance_pylon": _detail_resonance_pylon()
 		# Inheritor field construction
 		&"inheritor_construction_site": _detail_inheritor_construction_site()
 	# Mesh-provider aura ring (V3 §Pillar 2). Drawn after the type
@@ -3501,6 +3515,10 @@ func _finish_construction() -> void:
 		queue_free()
 		return
 
+	# Drone Bay: spawn 3 patrol drones tied to this building on completion.
+	if stats != null and stats.building_id == &"drone_bay":
+		_spawn_patrol_drones()
+
 	# Building LOS occluder registration is INTENTIONALLY disabled
 	# until FOW recompute moves to a shadow-cast / threaded path.
 	# Per-cell Bresenham line walks across N building occluders ×
@@ -5142,13 +5160,14 @@ func _detail_mesh_relay() -> void:
 	_team_collar_ring(tc.bottom_radius * 1.15, 0.08, Vector3(0.0, fs.y + 0.04, 0.0))
 
 
-func _detail_sonar_pylon() -> void:
-	## Sonar Pylon — Meridian AA defensive position. Tall thin column rising
-	## from a wide octagonal base, topped with a wide angled sonar-emitter
-	## disc/cone, plus a faint blue glow torus around the base.
+func _detail_resonance_pylon() -> void:
+	## Resonance Pylon — Meridian area-of-effect AA defensive position.
+	## Tall thin column rising from a wide octagonal base, topped with a
+	## wide angled resonance-emitter disc/cone, plus a faint blue glow
+	## torus around the base. Fires a wave pulse every 2.5s dealing 30
+	## damage to all enemy aircraft within 18u (see _resonance_pylon_aa_pulse).
 	## Footprint: 2.4 × 5.5 × 2.4.  Silhouette: needle-thin spire with a
 	## broad dish crown — unmistakeable AA read from any angle.
-	## MVP: no TurretComponent / weapon yet. Phase 2 wires AA fire behavior.
 	const SONAR_BLUE := Color(0.30, 0.55, 0.70, 1.0)
 	const SONAR_GLOW := Color(0.20, 0.75, 1.00, 1.0)
 	var fs: Vector3 = stats.footprint_size
@@ -5573,6 +5592,17 @@ func _process(delta: float) -> void:
 			_mesh_aura_update_timer = _MESH_AURA_UPDATE_INTERVAL
 			_update_mesh_aura_disc_uniforms()
 
+	# Resonance Pylon AA wave — throttled to ~5Hz, independent of cosmetic stagger.
+	# Deals 30 damage to all enemy aircraft within 18u every 2.5s.
+	if is_constructed and stats != null and stats.building_id == &"resonance_pylon":
+		_resonance_aa_tick_acc += delta
+		if _resonance_aa_tick_acc >= RESONANCE_PYLON_AA_TICK:
+			_resonance_aa_tick_acc = 0.0
+			if _resonance_aa_cooldown > 0.0:
+				_resonance_aa_cooldown -= RESONANCE_PYLON_AA_TICK
+			else:
+				_resonance_pylon_aa_pulse()
+
 	# Quarter-frame stagger for the cosmetic / damage-VFX work.
 	# Buildings don't need 60Hz redraws -- smoke timers, ember
 	# flicker, foundry glow loops all read fine at ~15Hz. The
@@ -5880,7 +5910,39 @@ func _spawn_unit(unit_stats: UnitStatResource) -> void:
 		unit_produced.emit(unit_scene, twin_pos)
 
 
-## Find a spawn position with clearance from obstacles. Tries the
+## --- Drone Bay patrol drones -----------------------------------------------
+
+func _spawn_patrol_drones() -> void:
+	## Instantiate 3 patrol drones at evenly-spaced positions around the Bay.
+	## Drones are aircraft (is_aircraft = true) so they use Aircraft.tscn and
+	## fly at the altitude defined on their UnitStatResource.
+	var drone_stats: UnitStatResource = load("res://resources/units/meridian_patrol_drone.tres") as UnitStatResource
+	if drone_stats == null:
+		push_warning("Building: failed to load meridian_patrol_drone.tres — no patrol drones spawned.")
+		return
+	var aircraft_scene: PackedScene = load("res://scenes/aircraft.tscn") as PackedScene
+	if aircraft_scene == null:
+		push_warning("Building: scenes/aircraft.tscn not found — no patrol drones spawned.")
+		return
+	var units_node: Node = get_tree().current_scene.get_node_or_null("Units")
+	for i: int in 3:
+		var ang: float = TAU * float(i) / 3.0
+		var spawn_pos: Vector3 = global_position + Vector3(cos(ang), drone_stats.flight_altitude, sin(ang)) * 4.0
+		var drone: Node3D = aircraft_scene.instantiate() as Node3D
+		drone.set("stats", drone_stats)
+		drone.set("owner_id", owner_id)
+		if units_node:
+			units_node.add_child(drone)
+		else:
+			get_tree().current_scene.add_child(drone)
+		drone.global_position = spawn_pos
+		# Wire the patrol-around behaviour after the drone is in the tree.
+		if drone.has_method("set_patrol_around"):
+			drone.call("set_patrol_around", self, 12.0)
+		_patrol_drones.append(drone)
+
+
+## --- Find a spawn position with clearance from obstacles. Tries the
 ## initial spot, then 7 alternate angles (45° increments) around the
 ## building at the same radius, then pushes out further along the
 ## original rally direction. Returns initial_pos as a worst-case
@@ -6906,6 +6968,83 @@ func _spawn_building_wreck() -> void:
 		# itself, but explicitly nudging position only matters here.
 
 
+func _resonance_pylon_aa_pulse() -> void:
+	## Resonance Pylon AA wave: deal RESONANCE_PYLON_AA_DAMAGE to all enemy
+	## aircraft within RESONANCE_PYLON_AA_RANGE. Spawns an expanding torus
+	## ring VFX (0.4 sec). Resets the cooldown to RESONANCE_PYLON_AA_COOLDOWN
+	## only if any targets were hit (so the pylon keeps checking until a target
+	## appears, then enters cooldown).
+	if not is_constructed or not stats:
+		return
+	var my_pos: Vector3 = global_position
+	var range_sq: float = RESONANCE_PYLON_AA_RANGE * RESONANCE_PYLON_AA_RANGE
+	var hit_any: bool = false
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node):
+			continue
+		var unit_owner: int = int(node.get("owner_id")) if "owner_id" in node else owner_id
+		if unit_owner == owner_id:
+			continue  # Skip friendly units
+		# Only hit aircraft.
+		if not node.is_in_group("aircraft"):
+			continue
+		var n3: Node3D = node as Node3D
+		if n3 == null:
+			continue
+		if my_pos.distance_squared_to(n3.global_position) > range_sq:
+			continue
+		# Apply damage via take_damage if the unit supports it.
+		if node.has_method("take_damage"):
+			node.take_damage(RESONANCE_PYLON_AA_DAMAGE, self)
+		hit_any = true
+	if hit_any:
+		_resonance_aa_cooldown = RESONANCE_PYLON_AA_COOLDOWN
+		_resonance_pylon_spawn_wave_vfx()
+
+
+func _resonance_pylon_spawn_wave_vfx() -> void:
+	## Spawns an expanding torus ring at ground level around the Resonance
+	## Pylon that scales outward over 0.4 seconds then queue_frees itself.
+	## Pure cosmetic — conveys the sonar-pulse AA blast to the player.
+	var ring_root := Node3D.new()
+	ring_root.global_position = global_position + Vector3(0.0, 0.2, 0.0)
+	get_tree().current_scene.add_child(ring_root)
+
+	var ring_mesh := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.15
+	torus.outer_radius = 0.55
+	torus.rings = 24
+	torus.ring_segments = 8
+	ring_mesh.mesh = torus
+	ring_mesh.rotation.x = PI * 0.5  # Flat on XZ plane
+	ring_root.add_child(ring_mesh)
+
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.25, 0.80, 1.00, 0.75)
+	mat.emission_enabled = true
+	mat.emission = Color(0.20, 0.75, 1.00, 1.0)
+	mat.emission_energy_multiplier = 2.5
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	ring_mesh.set_surface_override_material(0, mat)
+
+	# Tween: scale from 0 → range radius, fade alpha 0.75 → 0 over 0.4s.
+	var tween: Tween = get_tree().create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(ring_root, "scale",
+		Vector3(RESONANCE_PYLON_AA_RANGE, 1.0, RESONANCE_PYLON_AA_RANGE), 0.4)
+	tween.tween_method(
+		func(a: float) -> void:
+			if is_instance_valid(mat):
+				mat.albedo_color.a = a,
+		0.75, 0.0, 0.4
+	)
+	tween.set_parallel(false)
+	tween.tween_callback(ring_root.queue_free)
+
+
 func _exit_tree() -> void:
 	if is_network_eligible():
 		var scene_root: Node = get_tree().current_scene
@@ -6919,3 +7058,9 @@ func _exit_tree() -> void:
 			var ibm: InheritorBuildingManager = scene_root.get_node_or_null("InheritorBuildingManager") as InheritorBuildingManager
 			if ibm != null:
 				ibm.unregister_reliquary(self)
+	# Drone Bay: kill all tethered patrol drones when the Bay is removed.
+	if not _patrol_drones.is_empty():
+		for drone: Node in _patrol_drones:
+			if is_instance_valid(drone):
+				drone.queue_free()
+		_patrol_drones.clear()

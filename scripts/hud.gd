@@ -2878,30 +2878,50 @@ func _append_hq_upgrade_buttons(building: Building) -> void:
 
 ## --- Intel Network tier upgrade panel -----------------------------------
 ## Renders 0, 1, or 2 upgrade buttons for the selected Intelligence Network.
-## Tier 1 → 2: 500 salvage / 60 fuel
-## Tier 2 → 3: 700 salvage / 80 fuel
+## Tier 1 → 2: 500 salvage / 60 fuel, 30 seconds research
+## Tier 2 → 3: 700 salvage / 80 fuel, 50 seconds research
 ## Tier 3: fully upgraded, no button shown.
 
 const INTEL_TIER2_COST_SALVAGE: int = 500
 const INTEL_TIER2_COST_FUEL: int = 60
 const INTEL_TIER3_COST_SALVAGE: int = 700
 const INTEL_TIER3_COST_FUEL: int = 80
+const INTEL_TIER2_RESEARCH_TIME: float = 30.0
+const INTEL_TIER3_RESEARCH_TIME: float = 50.0
+
+## Stored owner_id for the in-flight intel upgrade research so
+## _on_intel_research_finished can call set_intel_network_tier on the
+## correct player. -1 = no pending intel research.
+var _intel_research_owner_id: int = -1
+var _intel_research_target_tier: int = 0
 
 
 func _append_intel_upgrade_buttons(building: Building) -> void:
 	## Renders tier upgrade buttons for the Intelligence Network selection
-	## panel. The MeridianContractsManager is the source of truth for the
-	## current tier; set_intel_network_tier bumps it immediately (no
-	## construction time — MVP instant upgrade).
+	## panel. Uses ResearchManager for timed research (30s / 50s). While
+	## research is in progress the button shows progress and a cancel option.
 	var mcm: MeridianContractsManager = get_tree().current_scene.get_node_or_null("MeridianContractsManager") as MeridianContractsManager
 	if mcm == null:
 		return
+	var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
 	var tier: int = mcm.get_intel_network_tier(building.owner_id)
+
+	# Check if an intel research is currently in progress.
+	var intel_in_progress: bool = (
+		rm != null
+		and rm.has_method("is_in_progress")
+		and rm.call("is_in_progress")
+		and (rm.get("current_id") == &"intel_tier_2" or rm.get("current_id") == &"intel_tier_3")
+	)
+	if intel_in_progress:
+		_button_grid.add_child(_make_intel_research_progress_button(rm))
+		return
+
 	if tier == 1:
 		_button_grid.add_child(_make_intel_upgrade_button(
 			building,
 			"Upgrade to Tier 2",
-			"Bump Intelligence Network to Tier 2. +1 concurrent production slot at the HQ (2 → 3, capped at 4).",
+			"Bump Intelligence Network to Tier 2. +1 concurrent production slot at the HQ (2 → 3, capped at 4). Research: 30 seconds.",
 			2,
 			INTEL_TIER2_COST_SALVAGE,
 			INTEL_TIER2_COST_FUEL,
@@ -2910,7 +2930,7 @@ func _append_intel_upgrade_buttons(building: Building) -> void:
 		_button_grid.add_child(_make_intel_upgrade_button(
 			building,
 			"Upgrade to Tier 3",
-			"Bump Intelligence Network to Tier 3. +1 concurrent production slot at the HQ (3 → 4, capped at 4).",
+			"Bump Intelligence Network to Tier 3. +1 concurrent production slot at the HQ (3 → 4, capped at 4). Research: 50 seconds.",
 			3,
 			INTEL_TIER3_COST_SALVAGE,
 			INTEL_TIER3_COST_FUEL,
@@ -2933,17 +2953,84 @@ func _make_intel_upgrade_button(building: Building, title: String, blurb: String
 	return btn
 
 
+func _make_intel_research_progress_button(rm: Node) -> Button:
+	## Shows in-progress intel research with a cancel affordance.
+	var btn := _StyledTooltipButton.new()
+	btn.custom_minimum_size = Vector2(160, 80)
+	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn.size_flags_vertical = Control.SIZE_FILL
+	var pct: int = int(rm.call("get_progress") * 100.0)
+	var label_str: String = rm.get("current_label")
+	btn.text = "Cancel %s (%d%%) — refund" % [label_str, pct]
+	btn.add_theme_color_override("font_color", Color(1.0, 0.78, 0.32, 1.0))
+	btn.tooltip_text = "Cancel the in-progress upgrade. Salvage and fuel are refunded."
+	btn.pressed.connect(_on_cancel_intel_research)
+	return btn
+
+
 func _on_intel_upgrade_pressed(building: Building, target_tier: int, cost_s: int, cost_f: int) -> void:
 	if not is_instance_valid(building) or not _resource_manager:
+		return
+	var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
+	if rm == null:
+		return
+	# Reject if another research slot is already occupied.
+	if rm.has_method("is_in_progress") and rm.call("is_in_progress"):
 		return
 	if not _resource_manager.can_afford(cost_s, cost_f):
 		return
 	if not _resource_manager.spend(cost_s, cost_f):
 		return
+	# Store which player / tier to apply when research completes.
+	_intel_research_owner_id = building.owner_id
+	_intel_research_target_tier = target_tier
+	# Connect one-shot to research_finished to apply the tier bump.
+	if not rm.is_connected("research_finished", _on_intel_research_finished):
+		rm.research_finished.connect(_on_intel_research_finished)
+	var research_id: StringName = &"intel_tier_2" if target_tier == 2 else &"intel_tier_3"
+	var research_label: String = "Intel Network T%d" % target_tier
+	var research_time: float = INTEL_TIER2_RESEARCH_TIME if target_tier == 2 else INTEL_TIER3_RESEARCH_TIME
+	rm.start_research(research_id, research_label, research_time)
+	# Force panel rebuild so the button immediately reflects "in progress".
+	_last_building_id = -1
+
+
+func _on_cancel_intel_research() -> void:
+	var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
+	if not rm or not rm.has_method("cancel_current"):
+		return
+	if not rm.call("cancel_current"):
+		return
+	# Disconnect the finish handler so it doesn't fire stale.
+	if rm.is_connected("research_finished", _on_intel_research_finished):
+		rm.research_finished.disconnect(_on_intel_research_finished)
+	# Refund the salvage and fuel.
+	if _resource_manager:
+		var cost_s: int = INTEL_TIER2_COST_SALVAGE if _intel_research_target_tier == 2 else INTEL_TIER3_COST_SALVAGE
+		var cost_f: int = INTEL_TIER2_COST_FUEL if _intel_research_target_tier == 2 else INTEL_TIER3_COST_FUEL
+		_resource_manager.add_salvage(cost_s)
+		_resource_manager.add_fuel(cost_f)
+	_intel_research_owner_id = -1
+	_intel_research_target_tier = 0
+	_last_building_id = -1
+
+
+func _on_intel_research_finished(upgrade_id: StringName) -> void:
+	## Called by ResearchManager.research_finished. Applies the intel tier
+	## bump and cleans up the connection.
+	var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
+	if rm and rm.is_connected("research_finished", _on_intel_research_finished):
+		rm.research_finished.disconnect(_on_intel_research_finished)
+	if upgrade_id != &"intel_tier_2" and upgrade_id != &"intel_tier_3":
+		return
+	if _intel_research_owner_id < 0:
+		return
 	var mcm: MeridianContractsManager = get_tree().current_scene.get_node_or_null("MeridianContractsManager") as MeridianContractsManager
 	if mcm != null:
-		mcm.set_intel_network_tier(building.owner_id, target_tier)
-	# Force panel rebuild so the button reflects the new tier immediately.
+		mcm.set_intel_network_tier(_intel_research_owner_id, _intel_research_target_tier)
+	_intel_research_owner_id = -1
+	_intel_research_target_tier = 0
+	# Force panel rebuild so the button reflects the completed tier.
 	_last_building_id = -1
 
 
@@ -6037,7 +6124,7 @@ func _building_role_hint(stat: BuildingStatResource) -> String:
 		&"drone_bay": return "Authorization"
 		&"intelligence_network": return "Tech"
 		&"sensor_array": return "Defense"
-		&"sonar_pylon": return "Defense"
+		&"resonance_pylon": return "Defense"
 		&"mesh_relay": return "Power"
 		&"gun_emplacement": return "Defense"
 		&"gun_emplacement_basic": return "Defense"
@@ -6222,8 +6309,8 @@ func _building_description(id: StringName) -> String:
 			return "Anti-air missile rack. Strong against aircraft, near-zero against ground."
 		&"black_pylon":
 			return "Meridian Mesh anchor. Boosts nearby Meridian units' accuracy/reload and unlocks the Wraith bomber."
-		&"sonar_pylon":
-			return "Anti-air sonar turret. Targets aircraft only. Requires Intelligence Network."
+		&"resonance_pylon":
+			return "Resonance Pylon. Area-of-effect anti-air wave. Damages all enemy aircraft within 18u every 2.5s. Requires Intelligence Network."
 	return ""
 
 

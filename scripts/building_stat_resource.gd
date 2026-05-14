@@ -110,3 +110,9 @@ extends Resource
 ## World-unit radius for the superweapon's effect zone. Used by
 ## both the targeting reticle and the per-kind effect dispatch.
 @export var superweapon_radius: float = 30.0
+
+## Population cap contribution. Used by ResourceManager.update_population_cap
+## for buildings that aren't direct producers but still expand the player's
+## roster cap (e.g., Meridian Sensor Spine + Drone Bay authorize HQ
+## production but should still count toward the player's pop budget).
+@export var provides_population: int = 0

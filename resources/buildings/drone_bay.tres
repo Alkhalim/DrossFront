@@ -18,4 +18,5 @@ placeholder_color = Color(0.32, 0.42, 0.55, 1)
 is_advanced = true
 prerequisites = [&"sensor_spine"]
 faction_lock = 2
+provides_population = 25
 weapons = []

@@ -4,8 +4,8 @@
 
 [resource]
 script = ExtResource("1")
-building_name = "Sonar Pylon"
-building_id = &"sonar_pylon"
+building_name = "Resonance Pylon"
+building_id = &"resonance_pylon"
 hp = 550
 cost_salvage = 200
 cost_fuel = 30
