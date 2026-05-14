@@ -243,6 +243,17 @@ const ATTACK_MOVE_STATIONARY_THRESHOLD_SQ: float = 0.25  # (0.5 m/s)^2 — below
 const _AGENT_FLAG_ENGAGED_IN_COMBAT: int = 0x10  # matches native/movement/src/types.h::AgentFlag
 var _is_kernel_engaged: bool = false
 
+## Mortar accuracy buildup. When a mortar-style weapon fires at the
+## SAME target consecutively, accuracy ramps from 40% → 100% over
+## MORTAR_FOCUS_FULL_SEC seconds. _mortar_focus_target_id stores
+## the instance_id of the locked-on enemy; _mortar_focus_seconds
+## accumulates every combat tick we keep firing at it.
+## Resets when the target changes.
+const MORTAR_FOCUS_FULL_SEC: float = 6.0
+const MORTAR_MAX_SPREAD: float = 4.0  # world units, scatter radius at 0% accuracy
+var _mortar_focus_seconds: float = 0.0
+var _mortar_focus_target_id: int = 0
+
 
 func _ready() -> void:
 	_unit = get_parent()
@@ -382,6 +393,26 @@ func _chase_position(target: Node3D, primary_range: float) -> Vector3:
 	if d < 0.001:
 		return enemy_pos
 	to_unit /= d
+
+	# Kamikaze / melee approach: drive directly ON (or very near) the enemy.
+	# Kamikaze units need dist <= 1.5u to detonate so they aim exactly at
+	# enemy_pos (0u offset). Melee ground units use 0.3u so the kernel
+	# doesn't zero-distance-panic; their collision + separation settle them
+	# adjacent naturally.
+	var is_melee: bool = false
+	var unit_is_kamikaze: bool = false
+	if _stats_cached:
+		if "is_kamikaze" in _stats_cached and (_stats_cached.get("is_kamikaze") as bool):
+			unit_is_kamikaze = true
+		if _stats_cached.primary_weapon:
+			var w: WeaponResource = _stats_cached.primary_weapon
+			if w.range_tier == &"melee" or w.resolved_range() <= 3.0:
+				is_melee = true
+	if unit_is_kamikaze:
+		return enemy_pos  # aim exactly at enemy; detonation check handles kill
+	if is_melee:
+		return enemy_pos + to_unit * 0.3
+
 	# Chase-distance factor — how far INSIDE primary_range to aim.
 	# Aircraft use 0.5: aircraft arrival_radius is 6u (intentionally wide
 	# to suppress hover-tremble), so a 0.95-factor chase position is so
@@ -426,6 +457,14 @@ func get_damage_buff_mult() -> float:
 	var aura: float = _damage_mult_value if _damage_mult_remaining > 0.0 else 1.0
 	if _garrison_active:
 		aura *= GARRISON_DAMAGE_MULT
+	# Wächter deploy mode bonus — when the parent unit is deployed AND
+	# its stat resource defines deployed_damage_mult, apply the extra
+	# multiplier. Checked via duck-typing so any unit with `is_deployed`
+	# + a supporting stat can use the same path.
+	if _unit and "is_deployed" in _unit and (_unit.get("is_deployed") as bool):
+		var ds: UnitStatResource = _unit.get("stats") as UnitStatResource
+		if ds and "deployed_damage_mult" in ds:
+			aura *= ds.get("deployed_damage_mult") as float
 	return aura
 
 
@@ -571,11 +610,18 @@ func _physics_process(delta: float) -> void:
 				else:
 					_retaliation_lost_sight_timer = 0.0
 	if forced_target:
+		if forced_target != _current_target:
+			# Target changed — reset mortar focus buildup so accuracy
+			# resets for the new target.
+			_mortar_focus_seconds = 0.0
+			_mortar_focus_target_id = 0
 		_current_target = forced_target
 	elif _current_target and not _is_valid_target(_current_target):
 		_current_target = null
 		_has_fired_at_current_target = false
 		_was_in_range = false
+		_mortar_focus_seconds = 0.0
+		_mortar_focus_target_id = 0
 		# Unguarded: the elif condition guarantees _current_target was non-null
 		_set_engaged(false)
 		combat_ended.emit()
@@ -815,6 +861,16 @@ func _physics_process(delta: float) -> void:
 		_unit.stop()
 
 		_face_target()
+
+		# Kamikaze self-destruct (Schwarm). When within 1.5u of the target,
+		# the unit deals its weapon damage in a 2u AoE then queue_frees itself.
+		# Uses the primary weapon's damage value; skips the normal fire path.
+		if stats and "is_kamikaze" in stats and (stats.get("is_kamikaze") as bool):
+			const KAMIKAZE_DETONATE_RANGE: float = 1.5
+			const KAMIKAZE_AoE_RADIUS: float = 2.0
+			if dist <= KAMIKAZE_DETONATE_RANGE:
+				_kamikaze_detonate(primary, KAMIKAZE_AoE_RADIUS)
+				return  # unit is queue_free'd inside; don't process further
 
 		# Per-weapon air gating: when the current target is in the
 		# aircraft group, only fire weapons whose engages_air()
@@ -1474,10 +1530,34 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	var effective_style: String = String(weapon_style) if weapon_style != &"" else inferred_style
 	var damage_is_instant: bool = (
 		effective_style == "beam"
+		or effective_style == "flame"  # flame cone is continuous hitscan, same as beam
 		or effective_style == "bullet"  # bullets are hitscan (see drossfront-docs/superpowers/plans/2026-05-12-hitscan-bullets.md)
 		or weapon.is_drone_release
 		or is_shotgun  # shotgun pellets stay instant for now -- the cone is the whole damage event
 	)
+
+	# Mortar focus-fire accuracy buildup. Every consecutive shot at the
+	# same target with a mortar-style weapon increments _mortar_focus_seconds,
+	# capped at MORTAR_FOCUS_FULL_SEC. Resets on target change.
+	var is_mortar_weapon: bool = (effective_style == "mortar")
+	if is_mortar_weapon and _current_target:
+		var tgt_id: int = _current_target.get_instance_id()
+		if tgt_id != _mortar_focus_target_id:
+			_mortar_focus_seconds = 0.0
+			_mortar_focus_target_id = tgt_id
+		# Accumulate focus using the actual rof so we gain accuracy at
+		# a wall-clock rate regardless of stagger delta.
+		_mortar_focus_seconds = minf(_mortar_focus_seconds + rof, MORTAR_FOCUS_FULL_SEC)
+
+	# Flame-cone geometry. When the weapon style is "flame", apply
+	# damage to ALL enemies in a forward cone (25° half-angle, weapon
+	# range length) instead of single-target. Primary target already
+	# receives damage via the take_damage call below; the cone scan
+	# deals the same damage to every other hostile inside the cone.
+	# Runs once per fire event (not per shot in the salvo loop below).
+	var is_flame_cone: bool = (effective_style == "flame")
+	if is_flame_cone and _current_target:
+		_fire_flame_cone(per_member_dmg, weapon)
 	var splash_r: float = weapon.splash_radius if "splash_radius" in weapon else 0.0
 	for i: int in shots:
 		var hit: bool = randf() < hit_chance
@@ -1495,6 +1575,17 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 		var aim_pos: Vector3 = _current_target.global_position
 		if not target_positions.is_empty():
 			aim_pos = target_positions[i % target_positions.size()]
+		# Mortar accuracy scatter — reduces as the unit keeps firing at the
+		# same target (_mortar_focus_seconds climbs toward MORTAR_FOCUS_FULL_SEC).
+		# accuracy_mult 0.0 = worst spread (4u radius); 1.0 = no spread.
+		if is_mortar_weapon:
+			var accuracy_mult: float = clampf(_mortar_focus_seconds / MORTAR_FOCUS_FULL_SEC, 0.0, 1.0)
+			var spread_radius: float = MORTAR_MAX_SPREAD * (1.0 - accuracy_mult)
+			if spread_radius > 0.001:
+				var angle: float = randf() * TAU
+				var radius: float = randf() * spread_radius
+				aim_pos.x += cos(angle) * radius
+				aim_pos.z += sin(angle) * radius
 		# Missed shot -- offset the impact far enough that the projectile
 		# visibly flies PAST the target and lands on the ground beyond
 		# (or sails wide). Distance scales with how close the hit chance
@@ -1838,7 +1929,13 @@ func _resolve_projectile_style(weapon: WeaponResource) -> String:
 	## parameter — explicit projectile_style on the weapon wins, otherwise
 	## falls back to rof_tier mapping. Used by ProjectileManager.fire().
 	if "projectile_style" in weapon and weapon.projectile_style != &"":
-		return String(weapon.projectile_style)
+		var ws: String = String(weapon.projectile_style)
+		# "flame" renders as a beam VFX — map to "beam" for ProjectileManager
+		# (which doesn't have a "flame" bucket). The flame cone AoE is applied
+		# at fire-time in _fire_flame_cone, independently of the tracer.
+		if ws == "flame":
+			return "beam"
+		return ws
 	match weapon.rof_tier:
 		&"continuous": return "beam"
 		&"single", &"slow", &"volley": return "missile"
@@ -2002,3 +2099,119 @@ func _get_target_armor() -> StringName:
 		elif target_stats and "building_id" in target_stats:
 			return &"structure"
 	return &"unarmored"
+
+
+## --- Behavior 2: Kamikaze detonation ---
+
+func _kamikaze_detonate(primary: WeaponResource, aoe_radius: float) -> void:
+	## Called when a kamikaze unit reaches self-destruct range (<= 1.5u from
+	## target). Deals weapon damage to everything in aoe_radius, spawns a
+	## brief explosion flash, then queue_frees the unit.
+	## Damage is applied at detonation position (the kamikaze's position)
+	## rather than the target's position — a drone that clips the edge of
+	## a formation still catches everyone nearby.
+	var detonate_pos: Vector3 = _unit.global_position
+	var base_dmg: int = primary.resolved_damage() if primary else 85
+	var shooter_owner: int = (_unit.get("owner_id") as int) if _unit and "owner_id" in _unit else 0
+
+	# AoE: damage all hostile entities in the radius (including primary target).
+	var idx: SpatialIndex = SpatialIndex.get_instance(get_tree().current_scene)
+	var candidates: Array = idx.nearby(detonate_pos, aoe_radius) if idx else []
+	for raw in candidates:
+		if raw == null or not is_instance_valid(raw):
+			continue
+		var ent: Node = raw as Node
+		if not ent:
+			continue
+		if not ent.has_method("take_damage"):
+			continue
+		var ent_owner: int = (ent.get("owner_id") as int) if "owner_id" in ent else 0
+		if not _is_hostile(shooter_owner, ent_owner):
+			continue
+		if "alive_count" in ent and (ent.get("alive_count") as int) <= 0:
+			continue
+		# Apply weapon role mult vs target armor for correct damage profile.
+		var t_armor: StringName = &"unarmored"
+		if "stats" in ent:
+			var ts: Resource = ent.get("stats")
+			if ts and "armor_class" in ts:
+				t_armor = ts.get("armor_class") as StringName
+		var role_mult: float = primary.get_role_mult_for(t_armor) if primary else 1.0
+		var armored_dmg: int = maxi(int(float(base_dmg) * role_mult), 1)
+		(ent as Node).call("take_damage", armored_dmg, _unit)
+
+	# Explosion VFX — reuse muzzle flash + particle system at larger scale.
+	var scene: Node = get_tree().current_scene if get_tree() else null
+	var pem: Node = scene.get_node_or_null("ParticleEmitterManager") if scene else null
+	if pem and pem.has_method("emit_flash"):
+		pem.emit_flash(detonate_pos, Color(1.0, 0.6, 0.1, 1.0))
+	if pem and pem.has_method("emit_smoke"):
+		pem.emit_smoke(detonate_pos, Vector3(0.0, 1.5, 0.0), Color(0.3, 0.2, 0.15, 0.8))
+
+	# Self-destruct. The unit removes itself from the scene tree.
+	if _unit and is_instance_valid(_unit):
+		_unit.queue_free()
+
+
+## --- Behavior 5: Flame cone ---
+
+func _fire_flame_cone(per_member_dmg: int, weapon: WeaponResource) -> void:
+	## Applies weapon damage to all enemies in a 25° half-angle cone
+	## in front of the unit, up to weapon range. The primary target has
+	## already received its hit via the normal take_damage call in the
+	## shot loop; this scan catches additional enemies in the cone.
+	## Fires once per _fire_weapon call (not per shot), so a 3-member
+	## squad with alive_count=3 deals 3× damage to the primary but only
+	## 1× cone splash to others. This approximates "each tank projects a
+	## forward flame" without a per-member cone scan.
+	const FLAME_HALF_ANGLE_RAD: float = 0.4363  # 25 degrees
+	var unit_pos: Vector3 = _unit.global_position
+	var weapon_range: float = weapon.resolved_range()
+	var shooter_owner: int = (_unit.get("owner_id") as int) if _unit and "owner_id" in _unit else 0
+
+	# Forward direction from unit rotation.
+	var forward: Vector3 = -_unit.global_transform.basis.z
+	forward.y = 0.0
+	if forward.length_squared() < 0.001:
+		return
+	forward = forward.normalized()
+
+	var idx: SpatialIndex = SpatialIndex.get_instance(get_tree().current_scene)
+	var candidates: Array = idx.nearby(unit_pos, weapon_range) if idx else []
+	for raw in candidates:
+		if raw == null or not is_instance_valid(raw):
+			continue
+		var ent: Node = raw as Node
+		if not ent:
+			continue
+		if not ent.has_method("take_damage"):
+			continue
+		# Skip the primary target — it was already damaged in the shot loop.
+		if (ent as Object) == (_current_target as Object):
+			continue
+		var ent_owner: int = (ent.get("owner_id") as int) if "owner_id" in ent else 0
+		if not _is_hostile(shooter_owner, ent_owner):
+			continue
+		if "alive_count" in ent and (ent.get("alive_count") as int) <= 0:
+			continue
+		var ent3: Node3D = ent as Node3D
+		if not ent3:
+			continue
+		# Cone test: check XZ angle to target.
+		var to_ent: Vector3 = ent3.global_position - unit_pos
+		to_ent.y = 0.0
+		var d: float = to_ent.length()
+		if d > weapon_range or d < 0.001:
+			continue
+		var angle: float = acos(clampf(forward.dot(to_ent / d), -1.0, 1.0))
+		if angle > FLAME_HALF_ANGLE_RAD:
+			continue
+		# Apply role-vs-armor damage.
+		var t_armor: StringName = &"unarmored"
+		if "stats" in ent:
+			var ts: Resource = ent.get("stats")
+			if ts and "armor_class" in ts:
+				t_armor = ts.get("armor_class") as StringName
+		var role_mult: float = weapon.get_role_mult_for(t_armor)
+		var cone_dmg: int = maxi(int(float(per_member_dmg) * role_mult), 1)
+		ent.call("take_damage", cone_dmg, _unit)

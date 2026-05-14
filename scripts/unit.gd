@@ -147,6 +147,15 @@ var _build_spark_timer: float = 0.0
 ## button so the player knows when it's available again.
 var _ability_cd_remaining: float = 0.0
 
+## Wächter deploy mode state. Exposed as a plain bool so CombatComponent
+## can read it via duck-typing. _deploy_progress tracks the 0→1 transition
+## (deploy) or 1→0 (undeploy) over DEPLOY_TRANSITION_SEC seconds.
+## During transition _deploy_locked prevents movement and re-toggling.
+var is_deployed: bool = false
+var _deploy_progress: float = 0.0  # 0 = undeployed, 1 = deployed
+var _deploy_locked: bool = false    # true while transition is in progress
+const DEPLOY_TRANSITION_SEC: float = 3.0
+
 ## Accumulator for healing overflow — used by Factory Pulse to
 ## convert "wasted" heal (everyone already at full HP) into
 ## restored squad members. Once this passes hp_per_unit, one
@@ -5472,6 +5481,11 @@ func command_move(target: Vector3, clear_combat: bool = true) -> void:
 	## its own forced target. Plain move clears any pending waypoint queue,
 	## the patrol pair, and the stand-ground flag — those are all
 	## superseded by an explicit move.
+	# Wächter deploy gate: a deployed or mid-transition unit cannot move.
+	# Combat-internal chase commands (clear_combat=false) are also blocked
+	# while deployed so the unit stays in place and fights.
+	if is_deployed or _deploy_locked:
+		return
 	# Combat-internal idempotency. Combat AI re-issues command_move(chase_pos)
 	# every chase tick (~0.5 Hz under the 2-second lockout, multiplied by
 	# 50+ engaged units in mid-battle = ~150 calls/sec). The downstream
@@ -6027,6 +6041,8 @@ func trigger_ability(target_pos: Vector3 = Vector3.INF) -> bool:
 			fired = _ability_plant_charge()
 		"Meltdown":
 			fired = _ability_meltdown()
+		"Wächter Deploy":
+			fired = _ability_wachter_deploy()
 		_:
 			# Unknown ability name on stats — don't crash, just
 			# refuse to fire so the player notices.
@@ -6272,6 +6288,55 @@ func _ability_meltdown() -> bool:
 	# TODO(Phase 3): deal area damage proportional to remaining HP before dying.
 	_die()
 	return true
+
+
+func _ability_wachter_deploy() -> bool:
+	## Wächter Deploy/Undeploy toggle. Transitions between:
+	##   Undeployed: mobile, normal weapon damage.
+	##   Deployed:   immobile, +50% weapon damage (CombatComponent
+	##               reads is_deployed via get_damage_buff_mult).
+	## A 3-second transition locks movement each direction. Cannot
+	## be triggered while a transition is already in progress.
+	if _deploy_locked:
+		return false  # mid-transition; ignore the button press
+	if is_deployed:
+		# Start undeploy transition.
+		_deploy_locked = true
+		_deploy_progress = 1.0
+	else:
+		# Start deploy transition — stop movement first.
+		stop()
+		if has_method("stop"):
+			stop()
+		_deploy_locked = true
+		_deploy_progress = 0.0
+	return true
+
+
+func _tick_deploy_state(delta: float) -> void:
+	## Called every physics frame by _physics_process to advance the
+	## deploy/undeploy transition. When progress completes, locks/unlocks
+	## movement and flips is_deployed.
+	if not _deploy_locked:
+		return
+	if is_deployed:
+		# Undeploy: progress 1 → 0
+		_deploy_progress -= delta / DEPLOY_TRANSITION_SEC
+		if _deploy_progress <= 0.0:
+			_deploy_progress = 0.0
+			is_deployed = false
+			_deploy_locked = false
+	else:
+		# Deploy: progress 0 → 1
+		_deploy_progress += delta / DEPLOY_TRANSITION_SEC
+		if _deploy_progress >= 1.0:
+			_deploy_progress = 1.0
+			is_deployed = true
+			_deploy_locked = false
+
+	# During transition: prevent movement.
+	if _deploy_locked and has_move_order:
+		stop()
 
 
 func _spawn_pulse_visual_at(at_pos: Vector3, radius: float, tint: Color) -> void:
@@ -6638,6 +6703,11 @@ func _per_frame_bookkeeping(delta: float) -> void:
 	# Active-ability cooldown tick.
 	if _ability_cd_remaining > 0.0:
 		_ability_cd_remaining = maxf(0.0, _ability_cd_remaining - delta)
+
+	# Wächter deploy state transition tick. No-ops for all other units
+	# (_deploy_locked == false by default).
+	if _deploy_locked:
+		_tick_deploy_state(delta)
 
 	# Heliarch Heat HP drain + Emergency Cooldown. Faction-gated to
 	# MatchSettingsClass.FactionId.HELIARCH (== 3). The inner function

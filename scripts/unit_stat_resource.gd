@@ -347,3 +347,20 @@ func can_target_air() -> bool:
 ## instead. Empty = fall back to the per-stat diff. Set on the
 ## BRANCH VARIANT (e.g. anvil_hound_ripper) not the parent.
 @export_multiline var branch_summary: String = ""
+
+@export_group("Special Combat Behaviors")
+## When true this unit flies directly into enemies and self-destructs
+## on contact, dealing weapon damage in an AoE around its position.
+## Designed for Schwarm-class suicide drones. CombatComponent checks
+## this flag to skip the normal fire path and trigger detonation instead.
+@export var is_kamikaze: bool = false
+
+## When true this unit has a Deploy/Undeploy active ability that
+## transitions between a mobile-weak mode and a stationary-strong mode.
+## CombatComponent applies +50% damage while `is_deployed` is true on
+## the owner Unit. The transition takes DEPLOY_TRANSITION_SEC seconds
+## during which the unit is immobile and vulnerable.
+@export var has_deploy_mode: bool = false
+## Damage multiplier applied to all weapon hits while the unit is deployed.
+## Default 1.5 = +50% damage. Read by CombatComponent.get_damage_buff_mult.
+@export_range(1.0, 3.0, 0.05) var deployed_damage_mult: float = 1.5
