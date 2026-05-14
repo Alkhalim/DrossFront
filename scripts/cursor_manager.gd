@@ -117,14 +117,22 @@ func set_kind(kind: int) -> void:
 
 ## Throttle for `Input.set_custom_mouse_cursor`. Profile capture in
 ## report599 showed the OS cursor swap eating ~58 ms PER CALL (GPU
-## texture upload that blocks on the render queue) — at ~3.5 swaps/sec
-## that's a steady stream of one-frame stutters whenever the player's
-## mouse hovered between attack/move/repair candidates and as they
-## clicked. The visible swap can tolerate ~50 ms of latency without
-## anyone noticing; coalesce repeated calls into the deferred phase.
-const _APPLY_MIN_INTERVAL_MSEC: int = 50
+## texture upload that blocks on the render queue); a later capture
+## (frame #3243) showed it at ~109 ms. Two layers of defence:
+##   1. Same-texture guard: skip the OS call entirely if the texture
+##      pointer has not changed since the last upload — covers the
+##      common case of repeated press/release events on the same cursor
+##      kind (e.g. click-hold on DEFAULT stays DEFAULT).
+##   2. 200 ms cooldown: even when the texture does change, coalesce
+##      rapid kind-toggle / press-toggle bursts into a single upload
+##      at the end of the window. 5 Hz is imperceptible for cursor
+##      feedback; at 20 Hz (old 50 ms) a burst could cost 2+ s/s.
+const _APPLY_MIN_INTERVAL_MSEC: int = 200
 var _next_apply_at_msec: int = 0
 var _apply_pending: bool = false
+## Last texture pointer handed to the OS. Compared in `_apply_now`
+## so we can skip the ~109 ms blocking upload when nothing changed.
+var _last_applied_tex: ImageTexture = null
 
 
 func _apply_current() -> void:
@@ -162,6 +170,11 @@ func _apply_now() -> void:
 	var tex: ImageTexture = bank.get(_current) as ImageTexture
 	if not tex:
 		return
+	# Same-texture guard: if the pointer hasn't changed the OS already
+	# has this image — skip the ~109 ms blocking upload entirely.
+	if tex == _last_applied_tex:
+		return
+	_last_applied_tex = tex
 	# Anchor stays at the arrow tip — pressed variant pixel-shifts the
 	# silhouette but the click point should remain at the same screen
 	# location, so the hotspot doesn't move.
