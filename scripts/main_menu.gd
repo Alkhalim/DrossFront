@@ -685,19 +685,16 @@ func _build_ai_row(player_id: int, label_text: String, team: int) -> void:
 		{"label": "Heliarch",  "value": MatchSettingsClass.FactionId.HELIARCH},
 	]:
 		fac_dropdown.add_item(fac_entry["label"] as String, fac_entry["value"] as int)
-	# Default selection mirrors the team-based fallback so the player
-	# doesn't need to touch every dropdown if they're happy with the
-	# auto-pick: ally inherits the player's faction, enemy gets the
-	# opposite.
+	# Default selection: ally inherits the player's faction; enemy
+	# defaults to Combine (ANVIL) regardless of the player's pick so
+	# the dropdown visibly matches the start-match override (which
+	# also forces enemy = Combine per commit 6cb3c07). Player can
+	# still change the dropdown to play vs Meridian / Inheritor /
+	# Heliarch — the explicit selection overrides the default.
 	if team == 0:
 		fac_dropdown.selected = fac_dropdown.get_item_index(_selected_faction)
 	else:
-		var opp: int = (
-			MatchSettingsClass.FactionId.SABLE
-			if _selected_faction == MatchSettingsClass.FactionId.ANVIL
-			else MatchSettingsClass.FactionId.ANVIL
-		)
-		fac_dropdown.selected = fac_dropdown.get_item_index(opp)
+		fac_dropdown.selected = fac_dropdown.get_item_index(MatchSettingsClass.FactionId.ANVIL)
 	row.add_child(fac_dropdown)
 	_ai_faction_dropdowns[player_id] = fac_dropdown
 
