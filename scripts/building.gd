@@ -114,12 +114,41 @@ void fragment() {
 	float r_norm = length(uv_c);
 	if (r_norm > 1.0) discard;
 
-	// Interior data-stream in world space — constant visual scale regardless of disc radius.
+	// "Data packets through file-structure maze" pattern in world space —
+	// a faint orthogonal grid (the file structures) with bright pulses
+	// traveling along the lines (the packets). Constant visual scale
+	// regardless of disc radius. Designed to read as circuit-board
+	// information flow, not polka dots.
 	vec2 wp = v_world_pos.xz;
 	float t = TIME * stream_speed;
-	float lines = step(0.5, fract(wp.x * 0.4 + t * 0.5)) * 0.3;
-	float blips = step(0.92, sin(wp.x * 1.0 + t * 2.0) * cos(wp.y * 1.1 - t * 1.7));
-	float stream = mix(0.10, 0.20, lines) + blips * 0.30;
+
+	// 1) Background grid: thin lines on a 2-world-unit cell.
+	//    Distance from nearest grid line in cell-space.
+	vec2 cell = wp * 0.5;
+	vec2 grid_dist = abs(fract(cell) - 0.5);
+	float gline_min = min(grid_dist.x, grid_dist.y);
+	// 1 right on a line, 0 a quarter cell away. Dim baseline so the grid
+	// feels like an underlying structure, not a primary feature.
+	float grid = smoothstep(0.50, 0.46, gline_min) * 0.18;
+
+	// 2) Junctions: small brighter dot at each grid intersection.
+	float junction = smoothstep(0.50, 0.46, grid_dist.x)
+	               * smoothstep(0.50, 0.46, grid_dist.y) * 0.20;
+
+	// 3) Data packets travelling along the grid lines.
+	//    Horizontal lines (constant y near grid line): packet moves +x with time.
+	//    Vertical lines: packet moves +y, phase-shifted so it doesn't sync.
+	float on_h_line = smoothstep(0.50, 0.45, grid_dist.y);  // 1 on horizontal lines
+	float on_v_line = smoothstep(0.50, 0.45, grid_dist.x);  // 1 on vertical lines
+	// Packet pulse: narrow bright pip moving along the line direction.
+	// fract(coord - time) gives a sliding position; step makes it a pip.
+	float h_phase = fract(cell.x * 0.5 - t * 0.35);
+	float v_phase = fract(cell.y * 0.5 - t * 0.40 + 0.27);  // offset phase
+	float h_packet = smoothstep(0.86, 0.90, h_phase) * (1.0 - smoothstep(0.94, 0.98, h_phase));
+	float v_packet = smoothstep(0.86, 0.90, v_phase) * (1.0 - smoothstep(0.94, 0.98, v_phase));
+	float packets = (on_h_line * h_packet + on_v_line * v_packet) * 0.55;
+
+	float stream = grid + junction + packets;
 
 	// Soft radial fade: alpha drops to zero over the outer 20% of the disc.
 	float edge_fade = 1.0 - smoothstep(0.80, 1.0, r_norm);
