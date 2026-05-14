@@ -663,6 +663,12 @@ func _process_economy() -> void:
 	# Queue and pilot a Crawler.
 	_maintain_crawlers()
 
+	# Meridian faction uses a separate build plan. Early-return so the
+	# Combine sequence below is never reached by a Meridian AI.
+	if _my_faction == 1:
+		_process_economy_meridian()
+		return
+
 	# Phase 1 — resource trio (generator + foundry + salvage yard). Always
 	# placed regardless of archetype; only their offsets vary per match
 	# (filled in by `_roll_strategy_and_layout`). AIR personality skips
@@ -802,6 +808,165 @@ func _process_economy() -> void:
 	if _state_timer >= ECONOMY_DURATION:
 		_state = AIState.ARMY
 		_state_timer = 0.0
+
+
+func _process_economy_meridian() -> void:
+	## Meridian (faction 1) build sequence. Called via early-return branch in
+	## _process_economy so the Combine logic is never reached.
+	##
+	## Build order priority (top = highest):
+	##   1. Mesh Relay          — Tier 1 power (vent-gated), seeds mesh chain
+	##   2. Sensor Spine        — population + Light/Medium tech gate
+	##   3. Salvage Yard        — income (ROI-gated, same as Combine)
+	##   4. Drone Bay           — population + Air tech gate
+	##   5. Intelligence Network— unlocks Heavy tier
+	##   6. Sensor Array        — defense + mesh coverage (opportunistic)
+	##   7. Second Mesh Relay   — extra power if we can vent-snap it
+	##   8. Black Pylon         — late power + Heavy/Apex authorization
+	##   9. Resonance Pylon     — AA defense when enemy aircraft spotted
+	##  10. Echo Array          — superweapon (very late game)
+	##
+	## Mesh-providing buildings (Sensor Array, Black Pylon, Resonance Pylon)
+	## bias their position toward existing mesh providers via
+	## _pick_mesh_chain_position so the mesh network extends naturally.
+	## The mesh-chain gate in _try_place will also reject any candidate
+	## that would orphan the new building.
+
+	# --- Tier 0: power first. Mesh Relay is vent-gated, so the existing
+	# vent-snap logic in _try_place takes care of positioning. This
+	# doubles as the mesh-chain seed (HQ has 12u radius at spawn).
+	_try_place("mesh_relay", "res://resources/buildings/mesh_relay.tres",
+			_offset_for("mesh_relay", Vector3(12, 0, 8)))
+
+	# --- Tier 1: population + tech gate.
+	_try_place("sensor_spine", "res://resources/buildings/sensor_spine.tres",
+			_offset_for("sensor_spine", Vector3(-12, 0, 8)))
+
+	# --- Tier 1: income.
+	_try_place_salvage_yard("salvage_yard", _offset_for("salvage_yard", Vector3(0, 0, 22)))
+
+	# --- Tier 1: defensive turret. Cheap early harassment protection.
+	_try_place("turret", _turret_path, _offset_for("turret", Vector3(0, 0, -14)))
+
+	# --- Tier 2: Drone Bay (air tech gate, second population source).
+	# No mesh radius — places freely; prereq check gates on sensor_spine.
+	_try_place("drone_bay", "res://resources/buildings/drone_bay.tres",
+			_offset_for("drone_bay", Vector3(14, 0, -6)))
+
+	# --- Tier 2: Intelligence Network (Heavy tech gate).
+	# No mesh radius — places freely.
+	_try_place("intelligence_network", "res://resources/buildings/intelligence_network.tres",
+			_offset_for("intelligence_network", Vector3(-14, 0, -6)))
+
+	# --- Tier 2: Sensor Array (defense + mesh coverage). Mesh chain check
+	# applies (radius 22u). Bias toward existing providers.
+	var sensor_array_pos: Vector3 = _pick_mesh_chain_position(
+			"res://resources/buildings/sensor_array.tres",
+			_offset_for("sensor_array", Vector3(0, 0, -20)))
+	_try_place("sensor_array", "res://resources/buildings/sensor_array.tres",
+			sensor_array_pos - _hq.global_position if is_instance_valid(_hq) else sensor_array_pos)
+
+	# --- Tier 2: second Salvage Yard for income scaling.
+	_try_place_salvage_yard("salvage_yard_2", _offset_for("salvage_yard_2", Vector3(-12, 0, 28)))
+
+	# --- Tier 3: second Mesh Relay for extra power + chain extension.
+	_try_place("mesh_relay_2", "res://resources/buildings/mesh_relay.tres",
+			_offset_for("mesh_relay_2", Vector3(-12, 0, 8)))
+
+	# --- Tier 3: Black Pylon (late power + Heavy/Apex authorization).
+	# prereq = basic_armory → substituted to sensor_spine. Mesh chain check
+	# applies (radius 35u). Bias toward existing providers.
+	var black_pylon_pos: Vector3 = _pick_mesh_chain_position(
+			"res://resources/buildings/black_pylon.tres",
+			_offset_for("black_pylon", Vector3(16, 0, -10)))
+	_try_place("black_pylon", "res://resources/buildings/black_pylon.tres",
+			black_pylon_pos - _hq.global_position if is_instance_valid(_hq) else black_pylon_pos)
+
+	# --- Tier 3: third Salvage Yard.
+	_try_place_salvage_yard("salvage_yard_3", _offset_for("salvage_yard_3", Vector3(12, 0, 28)))
+
+	# --- Tier 3: Resonance Pylon (AA defense). Only build when enemy
+	# aircraft have been spotted; prereq = intelligence_network.
+	var player_has_aircraft: bool = false
+	for node: Node in get_tree().get_nodes_in_group("aircraft"):
+		if not is_instance_valid(node):
+			continue
+		var node_owner: int = (node.get("owner_id") as int) if "owner_id" in node else owner_id
+		if node_owner == owner_id:
+			continue
+		if "alive_count" in node and (node.get("alive_count") as int) <= 0:
+			continue
+		player_has_aircraft = true
+		break
+	if player_has_aircraft:
+		var res_pylon_pos: Vector3 = _pick_mesh_chain_position(
+				"res://resources/buildings/resonance_pylon.tres",
+				_offset_for("resonance_pylon", Vector3(-16, 0, -10)))
+		_try_place("resonance_pylon", "res://resources/buildings/resonance_pylon.tres",
+				res_pylon_pos - _hq.global_position if is_instance_valid(_hq) else res_pylon_pos)
+
+	# --- Late game: Echo Array superweapon. Gated by black_pylon prereq;
+	# no mesh radius, places freely once the pylon is up.
+	_try_place("echo_array", "res://resources/buildings/echo_array.tres",
+			_offset_for("echo_array", Vector3(0, 0, 30)))
+
+	# Dormant-attack safety net + state transition — same as Combine path.
+	if _force_attack_if_dormant():
+		return
+	if _state_timer >= ECONOMY_DURATION:
+		_state = AIState.ARMY
+		_state_timer = 0.0
+
+
+func _pick_mesh_chain_position(stats_path: String, fallback_offset: Vector3) -> Vector3:
+	## Returns a world-space position for a mesh-providing building that
+	## will extend the chain naturally. Looks for an existing provider
+	## owned by this AI (from MeshSystem) and picks a spot at
+	## (provider_radius + new_radius * 0.7) distance from it — close
+	## enough to touch, far enough to avoid footprint overlap. If no
+	## provider is found (shouldn't happen after HQ is counted), or the
+	## HQ is invalid, returns HQ + fallback_offset.
+	##
+	## The offset returned is WORLD-SPACE, not HQ-relative. Callers must
+	## subtract _hq.global_position when passing to _try_place.
+	if not is_instance_valid(_hq):
+		return fallback_offset  # degenerate: caller will use as-is
+	var fallback_world: Vector3 = _hq.global_position + fallback_offset
+
+	var bstats: BuildingStatResource = load(stats_path) as BuildingStatResource
+	if not bstats or bstats.mesh_provider_radius <= 0.0:
+		return fallback_world
+
+	# Query MeshSystem for our providers.
+	var scene_root: Node = get_tree().current_scene
+	var ms: Node = scene_root.get_node_or_null("MeshSystem")
+	if ms == null or not ms.has_method("get_providers_for_owner"):
+		return fallback_world
+	var providers: Array[Dictionary] = ms.call("get_providers_for_owner", owner_id) as Array[Dictionary]
+	if providers.is_empty():
+		return fallback_world
+
+	# Pick the provider closest to the fallback position as anchor.
+	var best_provider: Dictionary = providers[0]
+	var best_dist: float = INF
+	for p: Dictionary in providers:
+		var ppos: Vector3 = p["pos"] as Vector3
+		var d: float = ppos.distance_to(fallback_world)
+		if d < best_dist:
+			best_dist = d
+			best_provider = p
+	var anchor: Vector3 = best_provider["pos"] as Vector3
+	var their_radius: float = sqrt(best_provider["r2"] as float)
+	var new_radius: float = bstats.mesh_provider_radius
+	# Aim just inside the touching range: provider_radius + new_radius * 0.7
+	# keeps discs overlapping by ~30% of the new building's radius.
+	var chain_dist: float = their_radius + new_radius * 0.7
+	# Direction: from anchor toward the fallback world position.
+	var direction_2d: Vector2 = Vector2(fallback_world.x - anchor.x, fallback_world.z - anchor.z)
+	if direction_2d.length_squared() < 0.01:
+		direction_2d = Vector2(1.0, 0.0)  # arbitrary non-zero fallback
+	direction_2d = direction_2d.normalized()
+	return Vector3(anchor.x + direction_2d.x * chain_dist, anchor.y, anchor.z + direction_2d.y * chain_dist)
 
 
 func _maybe_build_conveyor_nodes() -> void:
@@ -1664,6 +1829,39 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 			or pos.z + bz_h > MAP_HALF_FOR_AI - AI_EDGE_MARGIN:
 		_record_blocker(key, BuildBlocker.NO_CLEAR_SPOT)
 		return
+
+	# Meridian mesh-chain rule: mesh-providing buildings must touch existing
+	# mesh coverage (i.e. their disc must overlap at least one existing
+	# provider's disc). If this placement would orphan the building, skip it
+	# and let the AI retry next tick — typically after _pick_mesh_chain_position
+	# has guided the caller to a better offset. The gate fires only for
+	# buildings that actually have a mesh_provider_radius > 0 so it doesn't
+	# accidentally block Sensor Spine / Drone Bay (both have radius 0).
+	const _MESH_PROVIDER_IDS: Array[StringName] = [
+		&"sensor_spine", &"drone_bay", &"black_pylon", &"sensor_array",
+		&"mesh_relay", &"resonance_pylon",
+	]
+	if _my_faction == 1 \
+			and bstats.building_id in _MESH_PROVIDER_IDS \
+			and bstats.mesh_provider_radius > 0.0:
+		var ms_scene_root: Node = get_tree().current_scene
+		var ms: Node = ms_scene_root.get_node_or_null("MeshSystem")
+		if ms != null and ms.has_method("get_providers_for_owner"):
+			var providers: Array[Dictionary] = ms.call("get_providers_for_owner", owner_id) as Array[Dictionary]
+			var touches_mesh: bool = false
+			var new_radius: float = bstats.mesh_provider_radius
+			for entry: Dictionary in providers:
+				var their_pos: Vector3 = entry["pos"] as Vector3
+				var their_radius: float = sqrt(entry["r2"] as float)
+				var d: float = Vector2(pos.x, pos.z).distance_to(Vector2(their_pos.x, their_pos.z))
+				if d <= their_radius + new_radius:
+					touches_mesh = true
+					break
+			if not touches_mesh:
+				# Skip — this placement would be rejected by the mesh gate.
+				# Don't record a blocker here; _pick_mesh_chain_position will
+				# supply a better offset on the next economy tick.
+				return
 
 	# Use the same path as the player: BuilderComponent.place_building spends
 	# resources, instantiates the building, calls begin_construction, and
