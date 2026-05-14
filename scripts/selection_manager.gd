@@ -2506,6 +2506,36 @@ func _is_valid_build_position(pos: Vector3) -> bool:
 			if not ibm.can_build_reliquary(local_owner_id):
 				return false
 
+	# Meridian mesh-chain rule — mesh-providing buildings must touch or
+	# overlap at least one existing Mesh provider's radius. The HQ counts
+	# as a seed (8u radius, populated via MeshSystem on construction).
+	# Combine players skip this check entirely (they have no Mesh system).
+	const _MESH_PROVIDER_IDS: Array[StringName] = [
+		&"sensor_spine", &"drone_bay", &"black_pylon", &"sensor_array", &"mesh_relay"
+	]
+	if _build_stats != null \
+			and _build_stats.building_id in _MESH_PROVIDER_IDS \
+			and _local_player_faction() == 1 \
+			and _build_stats.mesh_provider_radius > 0.0:
+		var scene_root: Node = get_tree().current_scene
+		var ms: MeshSystem = scene_root.get_node_or_null("MeshSystem") as MeshSystem
+		if ms != null:
+			var local_owner_id: int = 0  # local player is always owner_id == 0
+			var providers: Array[Dictionary] = ms.get_providers_for_owner(local_owner_id)
+			var touches: bool = false
+			var new_radius: float = _build_stats.mesh_provider_radius
+			for entry: Dictionary in providers:
+				# Provider dict shape: { "pos": Vector3, "r2": float, "owner_id": int }
+				var ppos: Vector3 = entry.get("pos", Vector3.ZERO) as Vector3
+				var their_r2: float = entry.get("r2", 0.0) as float
+				var their_radius: float = sqrt(their_r2)
+				var d: float = Vector2(pos.x, pos.z).distance_to(Vector2(ppos.x, ppos.z))
+				if d <= their_radius + new_radius:
+					touches = true
+					break
+			if not touches:
+				return false
+
 	return true
 
 

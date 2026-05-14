@@ -479,7 +479,11 @@ func _add_building_details() -> void:
 		&"inheritor_construction_site": _detail_inheritor_construction_site()
 	# Mesh-provider aura ring (V3 §Pillar 2). Drawn after the type
 	# detail layer so the ring sits on top of the ground markings.
-	if stats.mesh_provider_radius > 0.0:
+	# Meridian-only visualization. Combine HQ has the field set (so
+	# the placement-gate code can use the HQ as a mesh seed for
+	# Meridian players in shared scenarios), but Combine players
+	# don't see the data-stream disc.
+	if stats.mesh_provider_radius > 0.0 and _resolve_faction_id() == 1:
 		_add_mesh_aura_disc(stats.mesh_provider_radius)
 
 

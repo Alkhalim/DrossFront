@@ -40,7 +40,8 @@ func _process(delta: float) -> void:
 
 func _rebuild_provider_list() -> void:
 	_providers.clear()
-	# Buildings — Black Pylon today, future Mesh-anchor structures.
+	var match_settings: Node = get_node_or_null("/root/MatchSettings")
+	# Buildings — Black Pylon today, Sensor Spine, HQ (Meridian seed), etc.
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(node):
 			continue
@@ -49,6 +50,16 @@ func _rebuild_provider_list() -> void:
 		var bstat: BuildingStatResource = node.get("stats") as BuildingStatResource
 		if not bstat or bstat.mesh_provider_radius <= 0.0:
 			continue
+		# Combine HQ has mesh_provider_radius set so the mesh-chain placement
+		# gate can query it, but it should not register as a Mesh provider in
+		# strength / contract calculations — only Meridian buildings do that.
+		# Resolve: owner_id 0 → player_faction, else → enemy_faction.
+		if bstat.building_id == &"headquarters" and match_settings != null:
+			var owner_id: int = node.get("owner_id") as int
+			var faction_id: int = match_settings.get("player_faction") as int if owner_id == 0 \
+					else match_settings.get("enemy_faction") as int
+			if faction_id != 1:
+				continue
 		_providers.append({
 			"pos": (node as Node3D).global_position,
 			"r2": bstat.mesh_provider_radius * bstat.mesh_provider_radius,
