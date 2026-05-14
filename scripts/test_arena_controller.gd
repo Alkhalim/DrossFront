@@ -1213,7 +1213,11 @@ func _setup_player() -> void:
 	if in_tutorial:
 		_prepare_tutorial_starter_units()
 		return
-	if hq:
+	# Inheritors don't start with a Crawler — they rely on field-built
+	# harvesters as part of their construction-site economy. All other
+	# factions get the starter Crawler to smooth early salvage flow.
+	var player_faction_id: int = _faction_id_for_player(0)
+	if hq and player_faction_id != 2:
 		var crawler_scene: PackedScene = load("res://scenes/salvage_crawler.tscn") as PackedScene
 		if crawler_scene:
 			var crawler: Node3D = crawler_scene.instantiate() as Node3D
@@ -1417,16 +1421,20 @@ func _spawn_ai_player(player_id: int, _display_name: String) -> void:
 	# inside the HQ collision (corner spawn → world +x went BACK into
 	# the building). Forward/right space puts every starter clearly out
 	# in open ground regardless of HQ corner.
-	# Faction-aware starter army — pick the engineer + medium mechs from
-	# whichever faction this AI plays. Meridian AIs ship Field Technicians and Jackals
-	# instead of Mekh and Strelet; Combine AIs unchanged.
+	# Per-faction starter army: 2× light mech + 1× medium mech + 2× engineer.
+	# Roster is looked up from _FACTION_ROSTER so each AI plays its own
+	# faction's units. Falls back to Anvil equivalents when the faction
+	# isn't registered (e.g. Heliarch placeholder).
 	var ai_faction: int = _faction_id_for_player(player_id)
-	var ratchet_stats: UnitStatResource = _unit_for_role(ai_faction, "engineer")
-	var rook_stats: UnitStatResource = _unit_for_role(ai_faction, "medium")
-	if not ratchet_stats:
-		ratchet_stats = load("res://resources/units/anvil_ratchet.tres") as UnitStatResource
-	if not rook_stats:
-		rook_stats = load("res://resources/units/anvil_rook.tres") as UnitStatResource
+	var engineer_stats: UnitStatResource = _unit_for_role(ai_faction, "engineer")
+	var light_stats: UnitStatResource = _unit_for_role(ai_faction, "light")
+	var medium_stats: UnitStatResource = _unit_for_role(ai_faction, "medium")
+	if not engineer_stats:
+		engineer_stats = load("res://resources/units/anvil_ratchet.tres") as UnitStatResource
+	if not light_stats:
+		light_stats = load("res://resources/units/anvil_rook.tres") as UnitStatResource
+	if not medium_stats:
+		medium_stats = load("res://resources/units/anvil_hound.tres") as UnitStatResource
 	var hq_pos: Vector3 = ai_hq.global_position
 	var fwd: Vector3 = Vector3.ZERO - hq_pos
 	fwd.y = 0.0
@@ -1436,24 +1444,26 @@ func _spawn_ai_player(player_id: int, _display_name: String) -> void:
 		fwd = Vector3(0.0, 0.0, 1.0)
 	# 90° right of fwd (still XZ-plane).
 	var right: Vector3 = Vector3(-fwd.z, 0.0, fwd.x)
-	# Anchor a generous 8u in front of the HQ — outside the 6u
-	# footprint plus ~2u clearance for the unit's own collision capsule.
+	# Anchor 8u in front of the HQ — outside the 6u footprint plus
+	# ~2u clearance for the unit's own collision capsule.
 	var anchor: Vector3 = hq_pos + fwd * 8.0
-	_spawn_ai_unit(ratchet_stats, anchor - right * 3.0, player_id)
-	_spawn_ai_unit(ratchet_stats, anchor + right * 3.0, player_id)
-	_spawn_ai_unit(rook_stats, anchor + fwd * 3.0 - right * 2.0, player_id)
-	_spawn_ai_unit(rook_stats, anchor + fwd * 3.0 + right * 2.0, player_id)
+	# Engineers flank the anchor; light mechs in front; medium mech centre-rear.
+	_spawn_ai_unit(engineer_stats, anchor - right * 4.0, player_id)
+	_spawn_ai_unit(engineer_stats, anchor + right * 4.0, player_id)
+	_spawn_ai_unit(light_stats, anchor + fwd * 3.0 - right * 3.0, player_id)
+	_spawn_ai_unit(light_stats, anchor + fwd * 3.0 + right * 3.0, player_id)
+	_spawn_ai_unit(medium_stats, anchor + fwd * 3.0, player_id)
 
-	# Starter Crawler -- mirrors the player's starter so AI economy
+	# Starter Crawler — mirrors the player's starter so AI economy
 	# isn't gated by having to build one before any salvage flows.
-	# Placed just behind the starter army on the AI's side of the
-	# HQ so the workers immediately walk into the contested mid.
-	var crawler_scene: PackedScene = load("res://scenes/salvage_crawler.tscn") as PackedScene
-	if crawler_scene:
-		var ai_crawler: Node3D = crawler_scene.instantiate() as Node3D
-		ai_crawler.set("owner_id", player_id)
-		add_child(ai_crawler)
-		ai_crawler.global_position = hq_pos + fwd * 11.0
+	# Inheritors don't get a Crawler (same rule as the human player).
+	if ai_faction != 2:
+		var crawler_scene: PackedScene = load("res://scenes/salvage_crawler.tscn") as PackedScene
+		if crawler_scene:
+			var ai_crawler: Node3D = crawler_scene.instantiate() as Node3D
+			ai_crawler.set("owner_id", player_id)
+			add_child(ai_crawler)
+			ai_crawler.global_position = hq_pos + fwd * 11.0
 
 	# Controller
 	var ai_script: GDScript = load("res://scripts/ai_controller.gd") as GDScript
@@ -1523,6 +1533,12 @@ const _FACTION_ROSTER: Dictionary = {
 		"light": "res://resources/units/sable_specter.tres",
 		"medium": "res://resources/units/sable_jackal.tres",
 		"heavy": "res://resources/units/sable_harbinger.tres",
+	},
+	# FactionId.INHERITOR = 2
+	2: {
+		"engineer": "res://resources/units/inheritor_restorer.tres",
+		"light": "res://resources/units/inheritor_ashigaru.tres",
+		"medium": "res://resources/units/inheritor_wachter.tres",
 	},
 }
 
