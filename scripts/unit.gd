@@ -709,7 +709,12 @@ func _build_squad_visuals() -> void:
 	click_area.collision_mask = 0
 	click_area.monitoring = false
 	click_area.monitorable = false
-	var member_radius: float = maxf(torso_size.x, torso_size.z) * 0.6 + 0.25
+	# Pick-sphere radius enlarged ~47% from original (0.6×+0.25) so clicks
+	# landing on the edge of any visible mech model register cleanly.
+	# Formula: (max chassis XZ extent) * 0.9 + 0.35. Representative values:
+	#   engineer  ~0.84u (was ~0.58u), medium ~0.98u (was ~0.67u),
+	#   heavy     ~2.49u (was ~1.68u)
+	var member_radius: float = maxf(torso_size.x, torso_size.z) * 0.9 + 0.35
 	for i: int in stats.squad_size:
 		var u: Vector2 = unit_offsets[i] as Vector2
 		var member_col := CollisionShape3D.new()

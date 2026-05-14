@@ -194,6 +194,17 @@ func _update_cursor_kind(hovered: Node3D) -> void:
 			cursor_mgr.set_kind(2)  # REPAIR
 			return
 
+	# No enemy combat unit under the cursor — check enemy workers.
+	# SalvageWorkers have collision_layer=0 so the physics raycast above
+	# misses them. Use the screen-projection walk so hovering an enemy
+	# worker also shows the red attack reticle — workers have HP and are
+	# valid attack targets just like combat units.
+	var screen_pos_worker: Vector2 = get_viewport().get_mouse_position()
+	var enemy_worker: Node3D = _find_worker_near_cursor(screen_pos_worker, registry)
+	if enemy_worker:
+		cursor_mgr.set_kind(1)  # ATTACK
+		return
+
 	# No enemy unit under the cursor — check enemy / neutral buildings
 	# too so the player gets the same attack-reticle feedback when
 	# hovering over a structure they could right-click to attack.
@@ -1338,6 +1349,14 @@ func _find_enemy_at(screen_pos: Vector2) -> Node3D:
 	if crawler and _is_attack_target(crawler.owner_id, registry):
 		return crawler
 
+	# Check enemy workers — SalvageWorkers have collision_layer=0 so
+	# the physics raycasts above miss them entirely. Screen-projection
+	# walk finds them so right-clicking an enemy worker issues a proper
+	# attack command instead of silently falling through to a move order.
+	var enemy_worker: Node3D = _find_worker_near_cursor(screen_pos, registry)
+	if enemy_worker:
+		return enemy_worker
+
 	# Check enemy buildings via screen projection. Footprint comes from
 	# the BuildingStatResource if present, otherwise falls back to a
 	# fixed 1.5u radius so destructible structures without `stats` (like
@@ -1375,6 +1394,39 @@ func _is_attack_target(target_owner: int, registry: PlayerRegistry) -> bool:
 	if registry and registry.has_method("are_enemies"):
 		return registry.are_enemies(0, target_owner)
 	return true
+
+
+func _find_worker_near_cursor(screen_pos: Vector2, registry: PlayerRegistry) -> Node3D:
+	## Screen-projection proximity check for SalvageWorker nodes.
+	## Workers set collision_layer=0 (documented: prevents them from blocking
+	## unit movement) so the standard physics raycast misses them entirely.
+	## This walk mirrors the building-detection approach: project each
+	## worker's world position to screen space and accept the first one
+	## whose screen-circle contains the cursor. Only returns enemy workers
+	## (owner_id != 0 and are_enemies true) so friendly workers never
+	## trigger the red attack reticle.
+	##
+	## Pick radius of 28px is conservative — matches roughly one mech
+	## body width at typical RTS zoom. Workers are small solo drones
+	## so a 20-30 px radius feels correct without slop-selecting the
+	## worker two squads behind the cursor.
+	const WORKER_PICK_PX: float = 28.0
+	if not _camera:
+		return null
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node):
+			continue
+		if not (node is SalvageWorker):
+			continue
+		var worker: SalvageWorker = node as SalvageWorker
+		if worker.alive_count <= 0:
+			continue
+		if not _is_attack_target(worker.owner_id, registry):
+			continue
+		var screen_center: Vector2 = _camera.unproject_position(worker.global_position)
+		if screen_pos.distance_to(screen_center) <= WORKER_PICK_PX:
+			return worker
+	return null
 
 
 func _select_all_of_type(unit_name: String) -> void:
