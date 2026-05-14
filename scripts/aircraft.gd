@@ -2458,8 +2458,8 @@ func _tick_patrol() -> void:
 		return
 	# Don't interrupt an active engagement.
 	if _combat != null:
-		var ct: Node3D = _combat.get("_current_target") as Node3D
-		if ct != null and is_instance_valid(ct):
+		var ct_v: Variant = _combat.get("_current_target")
+		if ct_v != null and is_instance_valid(ct_v):
 			return
 	# Pick a new waypoint when idle and arrived (move_target cleared).
 	if move_target == Vector3.INF and _patrol_target != Vector3.INF:

@@ -6336,9 +6336,9 @@ func _building_description(id: StringName) -> String:
 		&"conveyor_node":
 			return "Combine logistics relay. Links production buildings into the conveyor network, enabling salvage transfer between nodes."
 		&"sensor_spine":
-			return "Authorizes the Operations Center to build Light and Medium units (Specter, Jackal, Courier). Also a Mesh provider — surveilling enemies accelerates contract regen."
+			return "Authorizes the Operations Center to build Light and Medium units (Specter, Jackal, Courier). Also a Mesh provider — surveilling enemies accelerates contract regen. +25 population cap."
 		&"drone_bay":
-			return "Authorizes the Operations Center to build Air units (Switchblade, Fang). Requires Sensor Spine."
+			return "Authorizes the Operations Center to build Air units (Switchblade, Fang). Spawns 3 patrol drones tied to the building. +25 population cap. Requires Sensor Spine."
 		&"intelligence_network":
 			return "Meridian tech progression. Tier upgrades unlock Heavy / Apex unit categories and increase the HQ's concurrent production slots."
 		&"sensor_array":

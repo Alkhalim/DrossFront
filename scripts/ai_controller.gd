@@ -571,12 +571,12 @@ func _process(delta: float) -> void:
 	# scan when the targets are met.
 	if _difficulty_is_hard() and _state != AIState.SETUP:
 		_try_hard_target_composition()
-		# Salvage-cap dump: Hard AIs that pile up resources beyond
-		# HARD_SALVAGE_CAP must spend the surplus on a combat unit
-		# at the first idle foundry / advanced foundry / aerodrome
-		# they own. Prevents the late-game "AI is sitting on 5000
-		# salvage" pattern that reads as the AI not knowing what
-		# to do with itself.
+	# Salvage-cap dump: any AI that piles up resources beyond SALVAGE_DUMP_CAP
+	# must spend the surplus on a combat unit at the first idle foundry /
+	# advanced foundry / aerodrome they own. Prevents the late-game
+	# "AI is sitting on 1000+ salvage" pattern. Runs at all difficulties;
+	# threshold scales so easier AIs only dump when further over cap.
+	if _state != AIState.SETUP:
 		_dump_excess_salvage_into_units()
 
 	# Idle-yard reaper. Demolishes any of our salvage yards that
@@ -3311,7 +3311,7 @@ func _all_friendly_foundries() -> Array[Node]:
 
 
 ## --- Hard-difficulty salvage cap --------------------------------------
-## Hard AIs aren't allowed to pile up more than HARD_SALVAGE_CAP. When
+## Any AI isn't allowed to pile up more than SALVAGE_DUMP_CAP. When
 ## they do, _dump_excess_salvage_into_units finds an idle production
 ## building (empty queue) and queues a unit through the standard
 ## strategy-weighted picker. Production buildings are scanned in
@@ -3320,14 +3320,38 @@ func _all_friendly_foundries() -> Array[Node]:
 ## then aerodrome (air). The picker inside _try_queue_at handles the
 ## actual unit choice + faction-aware roster, so this just picks WHERE
 ## to spend.
-const HARD_SALVAGE_CAP: int = 1500
+const SALVAGE_DUMP_CAP: int = 1000
 
 
 func _dump_excess_salvage_into_units() -> void:
 	if not _ai_resource_manager:
 		return
 	var salvage: int = (_ai_resource_manager.get("salvage") as int) if "salvage" in _ai_resource_manager else 0
-	if salvage <= HARD_SALVAGE_CAP:
+	if salvage <= SALVAGE_DUMP_CAP:
+		return
+	# When near pop cap, spending on units is wasteful — they'd fail to
+	# spawn. Instead, nudge the build plan to place more pop-providing
+	# buildings so the cap rises and production can resume.
+	var cur_pop: int = (_ai_resource_manager.get("population") as int) if "population" in _ai_resource_manager else 0
+	var cap_pop: int = (_ai_resource_manager.get("population_cap") as int) if "population_cap" in _ai_resource_manager else 9999
+	var near_pop_cap: bool = cur_pop >= cap_pop - 5
+	if near_pop_cap:
+		# For Meridian: sensor_spine and drone_bay provide +25 pop each
+		# and are the natural next spend when pop-capped. Mirror their
+		# keys from _process_economy_meridian so _buildings_placed dedup
+		# doesn't double-fire the same slot.
+		if _my_faction == 1 and is_instance_valid(_hq):
+			if not _buildings_placed.has("sensor_spine"):
+				_try_place("sensor_spine", "res://resources/buildings/sensor_spine.tres",
+						_offset_for("sensor_spine", Vector3(-12, 0, 8)))
+				return
+			if not _buildings_placed.has("drone_bay"):
+				_try_place("drone_bay", "res://resources/buildings/drone_bay.tres",
+						_offset_for("drone_bay", Vector3(14, 0, -6)))
+				return
+		# For Combine: an extra foundry or aerodrome raises pop implicitly
+		# via update_population_cap's production_count path. Fall through
+		# to the unit-dump so the salvage gets spent regardless.
 		return
 	# Pick an idle production building, prioritised so the dump
 	# leans into the AI's late-game composition (heavies first).
@@ -3364,6 +3388,15 @@ func _try_queue_at(foundry_node: Node) -> void:
 		return
 	if foundry_node.get_queue_size() >= 2:
 		return
+	# Population cap gate. If the AI is at or near its pop cap, queueing
+	# more units wastes salvage — the spawn will fail when they finish
+	# building. Block here so the surplus stays visible and can trigger
+	# the salvage-dump → pop-building path instead.
+	if _ai_resource_manager and "population" in _ai_resource_manager and "population_cap" in _ai_resource_manager:
+		var cur_pop: int = _ai_resource_manager.get("population") as int
+		var cap_pop: int = _ai_resource_manager.get("population_cap") as int
+		if cur_pop >= cap_pop - 5:
+			return
 	# Use the foundry's OWN producibility list as the source of
 	# truth -- this resolves through Building._faction_producible_list
 	# so a Meridian adv_foundry returns Harbinger / Pulsefont, a Combine
@@ -3535,7 +3568,9 @@ func _track_unit_lifecycle() -> void:
 			is_enemy = not registry.are_allied(owner_id, n_owner) and n_owner != owner_id
 		_tracked_units[iid] = "enemy" if is_enemy else "ally"
 		if node.has_signal("squad_destroyed"):
-			node.connect("squad_destroyed", Callable(self, "_on_tracked_unit_destroyed").bind(iid))
+			var _sd_callable: Callable = Callable(self, "_on_tracked_unit_destroyed").bind(iid)
+			if not node.squad_destroyed.is_connected(_sd_callable):
+				node.connect("squad_destroyed", _sd_callable)
 		# Wire path_unreachable for our own units so the AI can re-plan
 		# when a unit gives up on its goal (Plan C Level 4 stuck escalation).
 		if not is_enemy:
