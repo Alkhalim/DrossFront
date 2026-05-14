@@ -87,7 +87,7 @@ const NEUTRAL_COLOR := Color(0.85, 0.7, 0.3, 1.0)
 ## intersect each other.
 const MESH_AURA_DISC_SHADER: String = """
 shader_type spatial;
-render_mode unshaded, blend_add, depth_draw_disabled, cull_disabled;
+render_mode unshaded, blend_add, depth_draw_never, depth_test_disabled, cull_disabled;
 
 uniform float radius = 18.0;
 uniform vec3 mesh_color : source_color = vec3(0.78, 0.45, 1.0);
