@@ -501,6 +501,45 @@ func _add_building_details() -> void:
 		_add_mesh_aura_disc(stats.mesh_provider_radius)
 
 
+## Class-based accent color lookup. One tinted stripe is painted on every
+## building's front wall by _detail_universal_extras so the player can
+## identify a building's role at a glance from top-down RTS view.
+## Combine buildings pick up their color automatically via this same dict.
+const _BUILDING_CLASS_TINT: Dictionary = {
+	# Power
+	&"basic_generator":    Color(0.30, 0.45, 0.65, 1),
+	&"advanced_generator": Color(0.30, 0.45, 0.65, 1),
+	&"mesh_relay":         Color(0.30, 0.45, 0.65, 1),
+	&"black_pylon":        Color(0.30, 0.45, 0.65, 1),
+	# Production
+	&"headquarters":       Color(0.65, 0.40, 0.15, 1),
+	&"basic_foundry":      Color(0.65, 0.40, 0.15, 1),
+	&"advanced_foundry":   Color(0.65, 0.40, 0.15, 1),
+	&"aerodrome":          Color(0.65, 0.40, 0.15, 1),
+	# Authorization (Meridian)
+	&"sensor_spine":       Color(0.20, 0.55, 0.65, 1),
+	&"drone_bay":          Color(0.20, 0.55, 0.65, 1),
+	# Tech
+	&"basic_armory":       Color(0.30, 0.55, 0.30, 1),
+	&"advanced_armory":    Color(0.30, 0.55, 0.30, 1),
+	&"intelligence_network": Color(0.30, 0.55, 0.30, 1),
+	# Defense
+	&"gun_emplacement":       Color(0.65, 0.30, 0.20, 1),
+	&"gun_emplacement_basic": Color(0.65, 0.30, 0.20, 1),
+	&"sam_site":              Color(0.65, 0.30, 0.20, 1),
+	&"sensor_array":          Color(0.65, 0.30, 0.20, 1),
+	&"resonance_pylon":       Color(0.65, 0.30, 0.20, 1),
+	# Superweapon
+	&"molot_platform": Color(0.55, 0.20, 0.45, 1),
+	&"echo_array":     Color(0.55, 0.20, 0.45, 1),
+	# Economy
+	&"salvage_yard":                 Color(0.60, 0.50, 0.20, 1),
+	&"conveyor_node":                Color(0.60, 0.50, 0.20, 1),
+	&"reliquary":                    Color(0.60, 0.50, 0.20, 1),
+	&"inheritor_construction_site":  Color(0.60, 0.50, 0.20, 1),
+}
+
+
 func _detail_universal_extras() -> void:
 	## Pipes / vents / front doorway glow that every building gets so even
 	## the simplest hull reads as "machinery", not "concrete cube".
@@ -645,6 +684,24 @@ func _detail_universal_extras() -> void:
 	ramp.position = Vector3(-fs.x * 0.32, 0.06, -fs.z * 0.5 - fs.z * 0.10)
 	ramp.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.20, 0.17)))
 	_attach_visual(ramp)
+
+	# Class-color accent stripe — a small horizontal band on the front wall
+	# at mid-wall height. Gives the player a fast visual cue for the building's
+	# role (power/production/defense/tech/etc.) at RTS zoom.
+	var class_color: Color = _BUILDING_CLASS_TINT.get(
+		stats.building_id, Color(0.4, 0.4, 0.4, 1))
+	var stripe := MeshInstance3D.new()
+	var sb := BoxMesh.new()
+	sb.size = Vector3(fs.x * 0.55, 0.10, 0.06)
+	stripe.mesh = sb
+	stripe.position = Vector3(0.0, fs.y * 0.55, -fs.z * 0.5 - 0.03)
+	var stripe_mat := StandardMaterial3D.new()
+	stripe_mat.albedo_color = class_color
+	stripe_mat.emission_enabled = true
+	stripe_mat.emission = class_color
+	stripe_mat.emission_energy_multiplier = 0.6
+	stripe.set_surface_override_material(0, stripe_mat)
+	_attach_visual(stripe)
 
 
 func _detail_dark_metal_mat(c: Color = Color(0.18, 0.18, 0.2)) -> StandardMaterial3D:
@@ -5031,9 +5088,12 @@ func _detail_intelligence_network() -> void:
 
 
 func _detail_sensor_array() -> void:
-	## Small radar pedestal — a central column with a tilted dish and
-	## three tripod legs at the base.  Footprint: 2.4 × 4.5 × 2.4.
-	## Top-down: a circle (dish) plus three angled stubs (legs).
+	## Armed radar pedestal — a central column with a tilted dish,
+	## a small ground-defense turret on the dish, and three tripod legs
+	## at the base.  Footprint: 3.0 × 4.5 × 2.0 (rectangular — wider than
+	## deep so the top-down shadow differs clearly from other Meridian pylons).
+	## Top-down: elongated oval (dish) plus three angled stubs (legs) plus
+	## a short barrel stub — reads as "sensor + gun".
 	const MERIDIAN_BLUE := Color(0.30, 0.55, 0.70, 1.0)
 	var fs: Vector3 = stats.footprint_size
 	# Central pedestal column rising from the placeholder roof.
@@ -5085,14 +5145,46 @@ func _detail_sensor_array() -> void:
 		leg.rotation.z = atan2(lx, fs.y * 0.55) * 0.40
 		leg.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.18, 0.20)))
 		_attach_visual(leg)
+	# Turret emitter — small box body with a short barrel cylinder mounted
+	# on the dish face. Signals to the player that this sensor can shoot.
+	var dish_top_y: float = fs.y + cc.height + 0.26
+	var turret_body := MeshInstance3D.new()
+	var tb := BoxMesh.new()
+	tb.size = Vector3(0.26, 0.18, 0.24)
+	turret_body.mesh = tb
+	turret_body.position = Vector3(fs.x * 0.06, dish_top_y, 0.0)
+	turret_body.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.24, 0.28)))
+	_attach_visual(turret_body)
+	var barrel := MeshInstance3D.new()
+	var bc := CylinderMesh.new()
+	bc.top_radius = 0.04
+	bc.bottom_radius = 0.05
+	bc.height = 0.30
+	bc.radial_segments = 8
+	barrel.mesh = bc
+	barrel.rotation.x = deg_to_rad(90.0)
+	barrel.position = Vector3(fs.x * 0.06, dish_top_y, -0.18)
+	barrel.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.14, 0.14, 0.16)))
+	_attach_visual(barrel)
+	# Muzzle emitter tip — tiny red glow so it reads "weapon" not "sensor".
+	var muzzle := MeshInstance3D.new()
+	var ms := SphereMesh.new()
+	ms.radius = 0.04
+	ms.height = 0.08
+	muzzle.mesh = ms
+	muzzle.position = Vector3(fs.x * 0.06, dish_top_y, -0.34)
+	muzzle.set_surface_override_material(0, _detail_emissive_mat(Color(0.85, 0.30, 0.15), 1.8))
+	_attach_visual(muzzle)
 	# Team collar at the column base.
 	_team_collar_ring(cc.bottom_radius * 1.15, 0.08, Vector3(0.0, fs.y + 0.04, 0.0))
 
 
 func _detail_mesh_relay() -> void:
 	## Projector tower with stacked coil rings and a glowing orb tip.
-	## Footprint: 2.5 × 4 × 2.5.  Top-down: concentric rings on a thin
-	## vertical shaft — clear "broadcast tower" read.
+	## Footprint: 2.2 × 4 × 3.2 (asymmetric — thin X, deeper Z so the
+	## top-down shadow is a narrow rectangle, distinct from the square
+	## pylons and the round Sensor Array dish).
+	## Top-down: concentric rings on a thin shaft — clear "broadcast tower" read.
 	const MERIDIAN_BLUE := Color(0.30, 0.55, 0.70, 1.0)
 	var fs: Vector3 = stats.footprint_size
 	# Vertical antenna tower — thin CylinderMesh rising above the hull.

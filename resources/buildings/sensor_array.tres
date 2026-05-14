@@ -1,6 +1,25 @@
-[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="turret_sensor_array_0_array_defense"]
+script = ExtResource("2")
+weapon_name = "Array Defense"
+role_tag = &"Universal"
+damage = 10
+range = 16.0
+rof_seconds = 1.2
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 0.8
+mult_vs_medium_v2 = 0.5
+mult_vs_heavy_v2 = 0.25
+mult_vs_structure_v2 = 0.3
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
 
 [resource]
 script = ExtResource("1")
@@ -13,10 +32,11 @@ build_time = 18.0
 power_consumption = 6
 power_production = 0
 producible_units = []
-footprint_size = Vector3(2.4, 4.5, 2.4)
+footprint_size = Vector3(3.0, 4.5, 2.0)
 placeholder_color = Color(0.28, 0.40, 0.50, 1)
 is_advanced = false
 prerequisites = []
 mesh_provider_radius = 22.0
 faction_lock = 2
-weapons = []
+weapons = [SubResource("turret_sensor_array_0_array_defense")]
+default_weapon_index = 0
