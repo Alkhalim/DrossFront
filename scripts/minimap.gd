@@ -2,6 +2,47 @@ class_name Minimap
 extends Control
 ## Simple minimap showing unit/building positions as colored dots.
 
+## Thin overlay drawn ABOVE the fog tint rect so building squares
+## are always at full brightness regardless of whether their FOW cell
+## is VISIBLE or EXPLORED. Without this layer the 4 Hz fog-cycle
+## demote (VISIBLE→EXPLORED) dims the building dot for half a phase
+## (~125 ms), producing a visible flicker on stationary structures
+## while nearby units don't flicker (they use is_visible_world and
+## simply vanish when out of LOS rather than dimming).
+class _BuildingDotsOverlay extends Control:
+	## Back-reference set immediately after construction.
+	var mm: Minimap = null
+
+	func _draw() -> void:
+		if mm == null:
+			return
+		var fow: FogOfWar = mm._cached_fow
+		var map_size: Vector2 = mm._cached_map_size
+		if map_size == Vector2.ZERO:
+			return
+		var half_world: float = Minimap.MAP_WORLD_SIZE / 2.0
+		var buildings: Array[Node] = get_tree().get_nodes_in_group("buildings")
+		for node: Node in buildings:
+			if not is_instance_valid(node):
+				continue
+			var b_owner: int = node.get("owner_id") as int
+			# Enemy buildings only show once explored (AoE-style memory);
+			# friendly / ally buildings always appear.
+			if fow and b_owner != 0 \
+					and not fow.is_explored_world((node as Node3D).global_position):
+				continue
+			var pos: Vector2 = mm._world_to_map(
+				(node as Node3D).global_position, map_size, half_world
+			)
+			var color: Color = mm._color_for_owner(b_owner)
+			draw_rect(
+				Rect2(
+					pos - Vector2(Minimap.BUILDING_SIZE * 0.5, Minimap.BUILDING_SIZE * 0.5),
+					Vector2(Minimap.BUILDING_SIZE, Minimap.BUILDING_SIZE),
+				),
+				color,
+			)
+
 const MAP_WORLD_SIZE: float = 300.0
 const DOT_SIZE: float = 3.0
 const BUILDING_SIZE: float = 5.0
@@ -92,6 +133,17 @@ var _fog_tint_rect: TextureRect = null
 var _fog_tint_last_revision: int = -1
 var _fog_tint_grid_size: int = 0
 
+## Building-dot overlay drawn ABOVE the fog rect so building squares
+## don't oscillate in brightness as the fog cycle demotes their cells
+## VISIBLE→EXPLORED between recompute phases. See _BuildingDotsOverlay.
+var _building_dots_rect: _BuildingDotsOverlay = null
+
+## Cached per-frame state shared with the building overlay so its
+## _draw can read the current FogOfWar reference and map_size without
+## re-querying the scene tree on every redraw.
+var _cached_fow: FogOfWar = null
+var _cached_map_size: Vector2 = Vector2.ZERO
+
 
 ## Sizing the fog texture rect so its FOW grid coords align with the
 ## minimap's world coords. FOW covers [-FogOfWar.MAP_HALF_EXTENT,
@@ -165,6 +217,16 @@ void fragment() {
 	# those entities anyway, so the dot is gone before the fog
 	# alpha matters).
 	add_child(_fog_tint_rect)
+	# Building dots overlay — added AFTER the fog rect so it renders
+	# on top of the fog, preventing the explored-cell dim from
+	# making stationary building squares flicker at 4 Hz.
+	_building_dots_rect = _BuildingDotsOverlay.new()
+	_building_dots_rect.name = "MinimapBuildingDots"
+	_building_dots_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_building_dots_rect.mm = self
+	# Match parent size so _world_to_map coordinate mapping is identical.
+	_building_dots_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_building_dots_rect)
 
 
 func _refresh_fog_tint_texture(fow: FogOfWar) -> void:
@@ -293,6 +355,9 @@ func _process(delta: float) -> void:
 		return
 	_redraw_timer = 0.0
 	queue_redraw()
+	# Keep the building overlay in sync with the main redraw cadence.
+	if _building_dots_rect != null and is_instance_valid(_building_dots_rect):
+		_building_dots_rect.queue_redraw()
 
 
 func _draw() -> void:
@@ -363,8 +428,12 @@ func _draw() -> void:
 
 	# Cache FOW once for the rest of the draw — every entity loop
 	# below filters through it so the minimap shows what the player
-	# actually knows, not ground truth.
+	# actually knows, not ground truth. Also write the cached copies
+	# that _BuildingDotsOverlay reads in its own _draw call (it runs
+	# after us in the child render pass, so the values are ready).
 	var fow: FogOfWar = get_tree().current_scene.get_node_or_null("FogOfWar") as FogOfWar
+	_cached_fow = fow
+	_cached_map_size = map_size
 
 	# Fog tint over the minimap background — one rect per cell of
 	# the FOW grid. UNEXPLORED cells render fully opaque black so
@@ -387,19 +456,10 @@ func _draw() -> void:
 	# canopy density.
 	_draw_path_blockers(fow, map_size, half_world)
 
-	# Draw buildings
-	var buildings: Array[Node] = get_tree().get_nodes_in_group("buildings")
-	for node: Node in buildings:
-		if not is_instance_valid(node):
-			continue
-		var b_owner: int = node.get("owner_id") as int
-		# Enemy buildings stick around once explored (AoE-style
-		# memory). Friendly + ally buildings always show.
-		if fow and b_owner != 0 and not fow.is_explored_world((node as Node3D).global_position):
-			continue
-		var pos: Vector2 = _world_to_map(node.global_position, map_size, half_world)
-		var color: Color = _color_for_owner(b_owner)
-		draw_rect(Rect2(pos - Vector2(BUILDING_SIZE / 2.0, BUILDING_SIZE / 2.0), Vector2(BUILDING_SIZE, BUILDING_SIZE)), color)
+	# Building dots are drawn by _BuildingDotsOverlay (a child Control
+	# that renders ABOVE the fog overlay rect). This prevents the
+	# explored-cell dim (alpha 0.55) from causing a 4 Hz brightness
+	# flicker on stationary structures. See _BuildingDotsOverlay._draw.
 
 	# Draw fuel deposits
 	var deposits: Array[Node] = get_tree().get_nodes_in_group("fuel_deposits")
