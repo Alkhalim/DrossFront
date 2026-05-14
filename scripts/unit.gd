@@ -755,6 +755,16 @@ func _build_squad_visuals() -> void:
 	# unit-type. The deferred bake queue handles the real work; we
 	# don't need the diagnostic anymore.
 
+	# Re-apply stealth concealment if this unit is already cloaked.
+	# _build_squad_visuals rebuilds all member meshes with fresh
+	# materials (alpha = 1.0 by default). If the unit was concealed
+	# before the rebuild — e.g. because _refresh_starter_unit_visuals
+	# calls _build_squad_visuals AFTER _ready already set stealth — the
+	# new materials must be faded immediately so starter Specters don't
+	# appear fully visible until the next _tick_stealth pass.
+	if stats and stats.is_stealth_capable and not stealth_revealed:
+		_apply_stealth_visual(true)
+
 
 func _bake_member_pivots(member_info: Dictionary) -> void:
 	## Per-pivot mesh bake. Walks the member's Node3D subtree and
@@ -5257,10 +5267,12 @@ func _build_hp_bar() -> void:
 			var frac: float = float(i + 1) / float(stats.squad_size)
 			var divider := MeshInstance3D.new()
 			var d_mesh := BoxMesh.new()
-			d_mesh.size = Vector3(0.04, 0.16, 0.12)
+			# Widened from 0.04 → 0.08 so member boundaries are clearly
+			# readable at combat zoom (bug C: more prominent separators).
+			d_mesh.size = Vector3(0.08, 0.18, 0.14)
 			divider.mesh = d_mesh
 			var d_mat := StandardMaterial3D.new()
-			d_mat.albedo_color = Color(0.05, 0.05, 0.05, 1.0)
+			d_mat.albedo_color = Color(0.02, 0.02, 0.02, 1.0)
 			divider.set_surface_override_material(0, d_mat)
 			divider.position = Vector3(-bar_w * 0.5 + frac * bar_w, 0.0, 0.01)
 			_hp_bar.add_child(divider)

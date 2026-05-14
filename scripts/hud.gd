@@ -1744,17 +1744,17 @@ func _build_fps_counter() -> void:
 
 func _update_selection_roster() -> void:
 	## Rebuild the roster strip when the selection changes. Shows
-	## a chip per unique unit_class in the current selection with a
-	## live count + average HP fill. Hidden when no units are
-	## selected or only one class is in play (the regular bottom-
-	## panel readout already covers that case).
+	## a chip per unique unit_type in the current selection with a
+	## count + per-squad-member HP segments. Shown for ANY multi-unit
+	## selection (even same type); hidden when 0 or 1 unit selected
+	## (the regular single-unit bottom panel covers that case).
 	if not _roster_strip or not _selection_manager:
 		return
 	var units: Array[Node3D] = _selection_manager.get_selected_units()
 	if units.size() <= 1:
 		_roster_strip.visible = false
 		return
-	# Bucket per unit_name + accumulate HP fill.
+	# Bucket per unit_name + accumulate per-member HP arrays.
 	var buckets: Dictionary = {}
 	for unit: Node3D in units:
 		if not is_instance_valid(unit) or not ("stats" in unit) or not unit.stats:
@@ -1766,6 +1766,10 @@ func _update_selection_roster() -> void:
 				"hp_now": 0,
 				"hp_max": 0,
 				"class": str(unit.stats.unit_class),
+				"squad_size": unit.stats.squad_size as int,
+				"hp_per_unit": unit.stats.hp_per_unit as int,
+				# per_member_hp: flat list of each member HP across all units of this type
+				"per_member_hp": [] as Array,
 			}
 		var b: Dictionary = buckets[key]
 		b["count"] = (b["count"] as int) + 1
@@ -1774,10 +1778,18 @@ func _update_selection_roster() -> void:
 			hp_now = unit.call("get_total_hp") as int
 		b["hp_now"] = (b["hp_now"] as int) + hp_now
 		b["hp_max"] = (b["hp_max"] as int) + (unit.stats.hp_total as int)
-	if buckets.size() < 2:
-		_roster_strip.visible = false
-		return
-	# Cheap signature so we only rebuild when classes/counts change.
+		# Collect per-member HP so the chip can render segmented bars.
+		var pmhp: Array = b["per_member_hp"] as Array
+		if "member_hp" in unit:
+			for mhp: int in (unit.member_hp as Array[int]):
+				pmhp.append(mhp)
+		else:
+			# Fallback: fill with average (aircraft / crawlers without member_hp).
+			var sq: int = unit.stats.squad_size as int
+			var per: int = hp_now / maxi(sq, 1)
+			for _i: int in sq:
+				pmhp.append(per)
+	# Cheap signature so we only rebuild when composition changes.
 	var sig: String = ""
 	for k: String in buckets.keys():
 		sig += "%s:%d|" % [k, (buckets[k] as Dictionary)["count"] as int]
@@ -1785,45 +1797,55 @@ func _update_selection_roster() -> void:
 		_roster_last_signature = sig
 		for child: Node in _roster_strip.get_children():
 			child.queue_free()
+		# Lay chips out in a horizontal row so they fit within the panel height.
+		var chip_row := HBoxContainer.new()
+		chip_row.add_theme_constant_override("separation", 5)
+		chip_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_roster_strip.add_child(chip_row)
 		for class_name_str: String in buckets.keys():
 			var data: Dictionary = buckets[class_name_str] as Dictionary
-			_roster_strip.add_child(_make_roster_chip(class_name_str, data))
+			chip_row.add_child(_make_roster_chip(class_name_str, data))
 	_roster_strip.visible = true
 
 
 func _make_roster_chip(class_name_str: String, data: Dictionary) -> Control:
-	var hp_now: int = data["hp_now"] as int
-	var hp_max: int = maxi(data["hp_max"] as int, 1)
-	var fill: float = clampf(float(hp_now) / float(hp_max), 0.0, 1.0)
-	var fill_color: Color = Color(0.40, 0.95, 0.40, 0.95)
-	if fill < 0.5: fill_color = Color(0.95, 0.78, 0.32, 0.95)
-	if fill < 0.25: fill_color = Color(1.0, 0.40, 0.35, 0.95)
-	# Class swatch (left) + label + HP sliver as a vertical chip.
+	## Chip layout: class-colour swatch | label (NxName) | segmented HP bar.
+	## Each segment = one squad member. Full = green, half = yellow, low = red,
+	## dead = dark grey. A 2px dark separator sits between segments for clarity.
+	var hp_per_unit: int = maxi(data["hp_per_unit"] as int, 1)
+	var per_member_hp: Array = data["per_member_hp"] as Array
+
 	var chip := PanelContainer.new()
-	chip.custom_minimum_size = Vector2(0, 28)
+	chip.custom_minimum_size = Vector2(110, 32)
 	var inner := HBoxContainer.new()
-	inner.add_theme_constant_override("separation", 6)
+	inner.add_theme_constant_override("separation", 5)
 	chip.add_child(inner)
+
+	# Left colour swatch — encodes unit class at a glance.
 	var swatch := ColorRect.new()
-	swatch.custom_minimum_size = Vector2(6, 22)
+	swatch.custom_minimum_size = Vector2(5, 0)
+	swatch.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	swatch.color = _class_swatch_color(data["class"] as String)
 	inner.add_child(swatch)
+
 	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 1)
+	col.add_theme_constant_override("separation", 2)
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	inner.add_child(col)
+
 	var name_lbl := Label.new()
 	name_lbl.text = "%dx %s" % [data["count"] as int, class_name_str]
-	name_lbl.add_theme_font_size_override("font_size", 12)
+	name_lbl.add_theme_font_size_override("font_size", 11)
 	col.add_child(name_lbl)
-	var bar := ProgressBar.new()
-	bar.show_percentage = false
-	bar.custom_minimum_size = Vector2(0, 4)
-	bar.value = fill * 100.0
-	var fill_sb := StyleBoxFlat.new()
-	fill_sb.bg_color = fill_color
-	bar.add_theme_stylebox_override("fill", fill_sb)
-	col.add_child(bar)
+
+	# Segmented HP bar — one segment per squad member, rendered via _draw.
+	var seg_bar := _SegmentedHPBar.new()
+	seg_bar.member_hp = per_member_hp
+	seg_bar.hp_per_unit = hp_per_unit
+	seg_bar.custom_minimum_size = Vector2(0, 7)
+	seg_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.add_child(seg_bar)
+
 	return chip
 
 
@@ -1838,30 +1860,61 @@ func _class_swatch_color(unit_class: String) -> Color:
 	return Color(0.85, 0.85, 0.85, 1.0)
 
 
+## Custom Control that draws a per-squad-member segmented HP bar.
+## Each array entry in member_hp is one member; hp_per_unit is the max
+## per member. Segments are separated by a 2px dark divider line.
+class _SegmentedHPBar extends Control:
+	## Flat array of current HP values, one per squad member (across all units
+	## of this type in the chip). Set before adding to the scene.
+	var member_hp: Array = []
+	## Maximum HP per individual squad member.
+	var hp_per_unit: int = 1
+
+	func _draw() -> void:
+		var n: int = member_hp.size()
+		if n == 0:
+			return
+		var w: float = size.x
+		var h: float = size.y
+		var seg_w: float = w / float(n)
+		const DIVIDER_W: float = 2.0
+		const BG: Color = Color(0.1, 0.1, 0.1, 0.85)
+		for i: int in n:
+			var mhp: int = member_hp[i] as int
+			var x0: float = float(i) * seg_w
+			var x1: float = x0 + seg_w - (DIVIDER_W if i < n - 1 else 0.0)
+			# Background
+			draw_rect(Rect2(x0, 0.0, x1 - x0, h), BG)
+			# Fill
+			if mhp > 0:
+				var pct: float = clampf(float(mhp) / float(hp_per_unit), 0.0, 1.0)
+				var fill_color: Color = Color(0.30, 0.90, 0.30, 0.95)
+				if pct < 0.5:
+					fill_color = Color(0.95, 0.75, 0.20, 0.95)
+				if pct < 0.25:
+					fill_color = Color(1.0, 0.35, 0.30, 0.95)
+				draw_rect(Rect2(x0, 0.0, (x1 - x0) * pct, h), fill_color)
+			# Separator after this segment (not after the last one)
+			if i < n - 1:
+				var sx: float = x0 + seg_w - DIVIDER_W
+				draw_rect(Rect2(sx, 0.0, DIVIDER_W, h), Color(0.0, 0.0, 0.0, 1.0))
+
+
 func _build_selection_roster() -> void:
-	## Vertical chip column floating ABOVE the bottom panel on the
-	## left edge of the screen, NOT inside the bottom panel itself.
-	## Earlier the strip was a child of _bottom_panel — its layout
-	## could pour HP-sliver chips over the production / build /
-	## command buttons in the action grid. Making it a HUD-root child
-	## anchored bottom-left guarantees it floats to the left of the
-	## panel and never collides with the action buttons.
+	## Unit-card strip that lives INSIDE InfoSection of the bottom panel
+	## when multiple units are selected. Replaces the old floating column
+	## that sat above the panel (and duplicated the text readout inside).
+	## Using an HBoxContainer wraps cards horizontally so they fit within
+	## the panel's fixed height without overflowing into ActionSection.
 	_roster_strip = VBoxContainer.new()
 	_roster_strip.name = "SelectionRoster"
-	_roster_strip.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	_roster_strip.add_theme_constant_override("separation", 4)
-	_roster_strip.offset_left = 12
-	_roster_strip.offset_right = 12 + 168
-	# Bottom panel grew from 120 -> 150px tall to fit the new
-	# multi-row stat sheet, so the roster strip's bottom anchor
-	# moved up to clear it (roster sits ABOVE the panel).
-	_roster_strip.offset_top = -290
-	_roster_strip.offset_bottom = -160
-	_roster_strip.size_flags_horizontal = 0
-	_roster_strip.size_flags_vertical = 0
+	_roster_strip.add_theme_constant_override("separation", 3)
+	_roster_strip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_roster_strip.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_roster_strip.mouse_filter = Control.MOUSE_FILTER_PASS
 	_roster_strip.visible = false
-	add_child(_roster_strip)
+	if _info_section:
+		_info_section.add_child(_roster_strip)
 
 
 var _mesh_overlay_on: bool = false
@@ -5239,21 +5292,11 @@ func _update_unit_panel(units: Array[Node3D]) -> void:
 			_name_label.text = "Unit"
 			_stats_label.text = ""
 	else:
-		var counts: Dictionary = {}
-		for unit: Node3D in units:
-			var uname: String = unit.stats.unit_name if unit.stats else "Unknown"
-			if counts.has(uname):
-				counts[uname] += 1
-			else:
-				counts[uname] = 1
-
-		var parts: PackedStringArray = PackedStringArray()
-		for uname: String in counts:
-			parts.append("%d %s" % [counts[uname], uname])
-		_name_label.text = "%d units selected" % units.size()
-		_stats_label.text = _build_stat_sheet([
-			[_stat_chip("Roster", "  •  ".join(parts), STAT_LABEL_COLOR_SQUAD)],
-		])
+		# The roster strip (inside InfoSection) shows per-type chips with
+		# segmented HP bars — no need to duplicate that info as text here.
+		# Clear the text labels so only the cards are visible.
+		_name_label.text = "%d units" % units.size()
+		_stats_label.text = ""
 
 
 ## Visual feedback when a player-selected unit's pathfinding fails
