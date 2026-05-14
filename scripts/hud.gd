@@ -2871,17 +2871,12 @@ const HQ_PLATING_HP_MULT: float = 1.25
 
 func _meridian_unit_is_advanced(unit_stat: UnitStatResource) -> bool:
 	## Returns true if this unit belongs on Meridian's "Advanced" HQ tab.
-	## Basic tab: engineer, light, and light aircraft (Fang, Switchblade —
-	## no black_pylon prerequisite). Advanced tab: medium, heavy, transport,
-	## and any aircraft that requires black_pylon (i.e. Wraith bomber).
-	match unit_stat.unit_class:
-		&"engineer", &"light":
-			return false
-		&"aircraft":
-			return unit_stat.unlock_prerequisite == &"black_pylon"
-		_:
-			# medium, heavy, transport, caster → Advanced
-			return true
+	## Advanced tab: any unit gated behind Black Pylon (Harbinger, Pulsefont,
+	## Wraith). Basic tab: everything else — engineer, light, medium (Jackal),
+	## transport (Courier), crawler, and light aircraft (Switchblade, Fang).
+	if unit_stat == null:
+		return false
+	return unit_stat.unlock_prerequisite == &"black_pylon"
 
 
 func _append_hq_upgrade_buttons(building: Building) -> void:
@@ -6336,15 +6331,15 @@ func _building_description(id: StringName) -> String:
 		&"conveyor_node":
 			return "Combine logistics relay. Links production buildings into the conveyor network, enabling salvage transfer between nodes."
 		&"sensor_spine":
-			return "Authorizes the Operations Center to build Light and Medium units (Specter, Jackal, Courier). Also a Mesh provider — surveilling enemies accelerates contract regen. +25 population cap."
+			return "Authorizes the HQ to train Light and Medium units (Specter, Jackal, Courier). +25 population cap."
 		&"drone_bay":
-			return "Authorizes the Operations Center to build Air units (Switchblade, Fang). Spawns 3 patrol drones tied to the building. +25 population cap. Requires Sensor Spine."
+			return "Authorizes the HQ to train Air units (Switchblade, Fang). Spawns 3 patrol drones tied to the building. +25 population cap. Requires Sensor Spine."
 		&"intelligence_network":
-			return "Meridian tech progression. Tier upgrades unlock Heavy / Apex unit categories and increase the HQ's concurrent production slots."
+			return "Meridian tech hub. Tier upgrades gate Heavy and Caster production and scale the HQ's concurrent build slots."
 		&"sensor_array":
-			return "Defensive structure with surveillance — surveilling enemies accelerates contract regen."
+			return "Surveillance and defense. Projects a 22u Mesh aura and fires a weak anti-ground turret (10 dmg / 16u) to deter infantry."
 		&"mesh_relay":
-			return "Tier 1 power building for Meridian. Generates Power and projects a basic Mesh aura — surveilling enemies accelerates contract regen."
+			return "Tier 1 power source for Meridian (+30 Power). Projects a 10u Mesh aura. Requires a geothermic vent."
 		&"gun_emplacement":
 			return "Combine mode-switchable emplacement: Balanced / Anti-Light / Anti-Heavy. Ground only. +15% HP / damage vs the baseline turret."
 		&"gun_emplacement_basic":
@@ -6356,9 +6351,9 @@ func _building_description(id: StringName) -> String:
 		&"sam_site":
 			return "Anti-air missile rack. Strong against aircraft, near-zero against ground."
 		&"black_pylon":
-			return "Meridian Mesh anchor. Boosts nearby Meridian units' accuracy/reload and unlocks the Wraith bomber."
+			return "Late-tier power source (+90 Power) with a 35u Mesh aura. Requires a geothermic vent. Authorizes the HQ to train Harbinger, Pulsefont, and Wraith."
 		&"resonance_pylon":
-			return "Resonance Pylon. Area-of-effect anti-air wave. Damages all enemy aircraft within 18u every 2.5s. Requires Intelligence Network."
+			return "Anti-air defense. Emits an area wave every 2.5s that damages all enemy aircraft within 18u. Projects an 8u Mesh aura. Requires Intelligence Network."
 	return ""
 
 
