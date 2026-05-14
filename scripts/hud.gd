@@ -1404,7 +1404,7 @@ func _update_crawler_panel(crawler: SalvageCrawler) -> void:
 	# build buttons would persist on a crawler-only selection.
 	var current_action: String = _crawler_action_key(crawler)
 	var prev_action: String = str(get_meta("_crawler_action", ""))
-	if _showing_build_buttons or current_action != prev_action:
+	if _showing_build_buttons or current_action != prev_action or _last_building_id != -1:
 		set_meta("_crawler_action", current_action)
 		_clear_buttons()
 		_action_label.text = ""
