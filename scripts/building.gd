@@ -174,11 +174,11 @@ void fragment() {
 	if (inside_other) {
 		// Inside another provider's disc: stream only, no border.
 		ALBEDO = mesh_color * stream * 0.5;
-		ALPHA = stream * 0.3;
+		ALPHA = stream * 0.2;
 	} else {
 		// Outside any other provider: stream + border.
 		ALBEDO = mesh_color * (stream + border * 0.7);
-		ALPHA = (stream * 0.5 + border * 0.7) * edge_fade;
+		ALPHA = (stream * 0.35 + border * 0.5) * edge_fade;
 	}
 }
 """
