@@ -16,5 +16,6 @@ footprint_size = Vector3(3.2, 6.0, 3.2)
 placeholder_color = Color(0.10, 0.08, 0.16, 1)
 is_advanced = true
 prerequisites = [&"basic_armory"]
+requires_geothermic_vent = true
 mesh_provider_radius = 35.0
 faction_lock = 2

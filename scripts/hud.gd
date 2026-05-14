@@ -2581,11 +2581,44 @@ func _rebuild_production_buttons(building: Building) -> void:
 		if _hq_tab_row:
 			_hq_tab_row.visible = false
 
-	# Defense tab: render the upgrade buttons and skip the unit grid.
+	# Determine producer faction early — needed for Meridian tab split and
+	# later for contract-cost chips. Re-used below in the unit loop.
+	var hq_producer_faction_id: int = 0
+	if building.has_method("_resolve_faction_id"):
+		hq_producer_faction_id = building.call("_resolve_faction_id") as int
+
+	# Defense / Advanced tab.
+	# Meridian HQ: "defense" tab shows advanced-tier units (medium / heavy /
+	# caster / bomber), not the Combine upgrade buttons.
+	# Combine HQ: "defense" tab shows the standard upgrade buttons.
 	if show_hq_tabs and _hq_tab == "defense":
-		_action_label.text = "Upgrades"
-		_append_hq_upgrade_buttons(building)
-		return
+		if hq_producer_faction_id == 1:
+			# Meridian Advanced tab — fall through to the unit-render loop
+			# below with producible_all filtered to advanced units only.
+			pass
+		else:
+			_action_label.text = "Upgrades"
+			_append_hq_upgrade_buttons(building)
+			return
+
+	# For Meridian HQ: filter producible_all by the current tab so only the
+	# correct tier of units renders. Basic tab = engineer + light + non-black-pylon
+	# aircraft; Advanced tab = medium, heavy, transport, and black-pylon aircraft.
+	if show_hq_tabs and hq_producer_faction_id == 1:
+		var filtered: Array[UnitStatResource] = []
+		for us: UnitStatResource in producible_all:
+			var adv: bool = _meridian_unit_is_advanced(us)
+			if _hq_tab == "defense" and adv:
+				filtered.append(us)
+			elif _hq_tab == "train" and not adv:
+				filtered.append(us)
+		producible_all = filtered
+		# Rebuild the unlocked subset from the filtered list so hotkey
+		# indexing stays contiguous within the active tab.
+		producible = []
+		for us2: UnitStatResource in producible_all:
+			if building.is_unit_unlocked(us2) if building.has_method("is_unit_unlocked") else true:
+				producible.append(us2)
 
 	# Superweapon panel -- a building with a SuperweaponComponent
 	# replaces the standard production grid with one big activation
@@ -2834,6 +2867,21 @@ const HQ_PLATING_COST_FUEL: int = 50
 const HQ_BATTERY_COST_SALVAGE: int = 200
 const HQ_BATTERY_COST_FUEL: int = 80
 const HQ_PLATING_HP_MULT: float = 1.25
+
+
+func _meridian_unit_is_advanced(unit_stat: UnitStatResource) -> bool:
+	## Returns true if this unit belongs on Meridian's "Advanced" HQ tab.
+	## Basic tab: engineer, light, and light aircraft (Fang, Switchblade —
+	## no black_pylon prerequisite). Advanced tab: medium, heavy, transport,
+	## and any aircraft that requires black_pylon (i.e. Wraith bomber).
+	match unit_stat.unit_class:
+		&"engineer", &"light":
+			return false
+		&"aircraft":
+			return unit_stat.unlock_prerequisite == &"black_pylon"
+		_:
+			# medium, heavy, transport, caster → Advanced
+			return true
 
 
 func _append_hq_upgrade_buttons(building: Building) -> void:
