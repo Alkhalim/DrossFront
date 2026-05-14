@@ -49,6 +49,15 @@ static func get_instance(scene_root: Node) -> MovementOrchestrator:
 	# (cleared on scene reload via is_instance_valid).
 	if _pending_instance != null and is_instance_valid(_pending_instance):
 		return _pending_instance
+	# Fallback scan: get_node_or_null only matches by exact name, but
+	# Godot auto-renames duplicate children (MovementOrchestrator2,
+	# MovementOrchestrator3, …) when a deferred add races a prior one
+	# that landed before this call. Scan direct children so we find
+	# any existing MovementOrchestrator regardless of its assigned name.
+	for child: Node in scene_root.get_children():
+		if child is MovementOrchestrator and is_instance_valid(child):
+			_pending_instance = null
+			return child as MovementOrchestrator
 	var orch := MovementOrchestrator.new()
 	orch.name = "MovementOrchestrator"
 	_pending_instance = orch
@@ -107,6 +116,26 @@ func unregister(mc: Object) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	# Duplicate-instance guard. If multiple orchestrators somehow entered
+	# the tree (deferred-add race that slipped past _pending_instance),
+	# Godot renames the extras "MovementOrchestrator2", "…3", … so
+	# get_node_or_null("MovementOrchestrator") keeps finding the first
+	# one and the extras run forever un-noticed. Detect by scanning our
+	# parent: the FIRST MovementOrchestrator child found is the primary;
+	# any other that runs _physics_process self-destructs.
+	var parent: Node = get_parent()
+	if parent != null:
+		for sibling: Node in parent.get_children():
+			if sibling is MovementOrchestrator:
+				if sibling != self:
+					# An earlier sibling is the primary — we are a duplicate.
+					push_warning("MovementOrchestrator: duplicate (%s) yielding to primary (%s)" % [name, sibling.name])
+					set_physics_process(false)
+					queue_free()
+					return
+				# sibling == self means we are first → we are the primary
+				break
+
 	_frame_counter += 1
 	var frame_phase: int = _frame_counter % 3
 
