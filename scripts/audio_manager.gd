@@ -118,16 +118,13 @@ func _ensure_sfx_bus() -> void:
 	AudioServer.add_bus(idx)
 	AudioServer.set_bus_name(idx, "SFX")
 	AudioServer.set_bus_send(idx, "Master")
-	# SFX overall volume — combat sounds were dominating the mix; user
-	# feedback that even -3 dB was still too loud. -8 dB feels like a
-	# proper "background" level under the music + voicelines, and the
-	# settings slider gives a positive headroom up to +6 dB if anyone
-	# wants the heavy mix back.
-	AudioServer.set_bus_volume_db(idx, -8.0)
-	# Testing-phase default: start muted so launching the game during
-	# PF-B verification doesn't fire sounds every reload. Settings
-	# slider un-mutes when dragged above 0.
-	AudioServer.set_bus_mute(idx, true)
+	# Default volume mirrors the main-menu settings slider (40% linear).
+	# The SFX bus didn't exist during main_menu._build_settings_panel, so
+	# the slider call was skipped (bus_idx == -1); set it here on creation
+	# instead so the player hears SFX at the advertised 40% from the first
+	# frame of a match.
+	AudioServer.set_bus_volume_db(idx, linear_to_db(0.4))
+	AudioServer.set_bus_mute(idx, false)
 
 
 func _ensure_music_bus() -> void:
@@ -137,8 +134,11 @@ func _ensure_music_bus() -> void:
 	AudioServer.add_bus(idx)
 	AudioServer.set_bus_name(idx, "Music")
 	AudioServer.set_bus_send(idx, "Master")
-	# Testing-phase default: muted (see _ensure_sfx_bus).
-	AudioServer.set_bus_mute(idx, true)
+	# Default to 40% so the bus matches the settings slider default.
+	# MusicManager also creates this bus (in main_menu where AudioManager
+	# is absent) without muting, so we match that behaviour here.
+	AudioServer.set_bus_volume_db(idx, linear_to_db(0.4))
+	AudioServer.set_bus_mute(idx, false)
 
 
 func _load_sfx_banks() -> void:
@@ -286,12 +286,13 @@ func _setup_voiceline_bus() -> void:
 		chorus.set_voice_level_db(0, -6.0)
 	AudioServer.add_bus_effect(idx, chorus)
 	# Bus level — pushed +5 dB so the bandpass-attenuated VO is
-	# clearly audible against the combat SFX that's been turned down
-	# (-3 dB on SFX bus). Per-faction tweaks happen at the per-call
-	# level (Anvil VO gets a small extra dB boost in `_play_voiceline`).
+	# clearly audible against the combat SFX. Per-faction tweaks happen
+	# at the per-call level (Anvil VO gets a small extra dB boost in
+	# `_play_voiceline`). The +5 dB here is a pre-amp on a bus that the
+	# Voiceline slider will modulate; slider default is 40% (≈ -8 dB),
+	# so the effective level is +5 + linear_to_db(0.4) ≈ -3 dB overall.
 	AudioServer.set_bus_volume_db(idx, 5.0)
-	# Testing-phase default: muted (see _ensure_sfx_bus).
-	AudioServer.set_bus_mute(idx, true)
+	AudioServer.set_bus_mute(idx, false)
 	_vl_bus_idx = idx
 
 

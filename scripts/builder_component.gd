@@ -94,7 +94,7 @@ var _idle_scan_frame: int = 0
 ## where build_time is multi-second and repair patients don't appear
 ## faster than ~2s. Wall-clock gating makes the cadence physics-rate
 ## independent so future physics retunes don't reintroduce the issue.
-const IDLE_SCAN_MIN_INTERVAL_MSEC: int = 2000
+const IDLE_SCAN_MIN_INTERVAL_MSEC: int = 500
 var _next_idle_scan_msec: int = 0
 
 
@@ -698,8 +698,11 @@ func _try_auto_assist() -> void:
 	## the search radius.
 	if not _unit or not is_instance_valid(_unit):
 		return
-	if _unit.has_move_order:
-		return  # Player gave a move command — don't second-guess them.
+	# has_move_order check removed: the _move_priority_until_ms gate in
+	# _physics_process already blocks auto-assist during player commands.
+	# Keeping it here prevented the engineer from switching to a closer
+	# foundation that appeared while it was walking toward a self-issued
+	# target.
 	var my_owner: int = _unit.owner_id
 	var my_pos: Vector3 = _unit.global_position
 	var best: Building = null
