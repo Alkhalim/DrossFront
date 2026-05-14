@@ -76,6 +76,74 @@ const PLAYER_COLOR := Color(0.08, 0.25, 0.85, 1.0)
 const ENEMY_COLOR := Color(0.80, 0.10, 0.10, 1.0)
 const NEUTRAL_COLOR := Color(0.85, 0.7, 0.3, 1.0)
 
+## Mesh-aura disc shader. Replaces the old TorusMesh ring with a full
+## PlaneMesh disc that draws:
+##   - an animated data-stream interior (shifting lines + blips, alpha 0.10-0.20)
+##   - a soft edge gradient that fades the disc alpha to zero over the outer 25%
+##   - a subtle rim highlight so the coverage boundary reads clearly
+## Overlap suppression: up to 8 "other provider" (xz, radius) tuples are passed
+## as a uniform vec4 array. When the fragment's world XZ falls inside another
+## provider's disc, the edge ring is suppressed so rings don't visually
+## intersect each other.
+const MESH_AURA_DISC_SHADER: String = """
+shader_type spatial;
+render_mode unshaded, blend_add, depth_draw_disabled, cull_disabled;
+
+uniform float radius = 18.0;
+uniform vec3 mesh_color : source_color = vec3(0.78, 0.45, 1.0);
+uniform float stream_speed = 0.5;
+
+// Up to 8 OTHER providers from the same owner. xy = world XZ centre; z = radius; w unused.
+// Unused slots should have z <= 0.0.
+uniform vec4 other_providers[8];
+uniform int other_count = 0;
+
+varying vec3 v_world_pos;
+
+void vertex() {
+	v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
+
+void fragment() {
+	// UV runs 0..1 across the disc. Map to -1..1 range; compute radial distance.
+	vec2 uv_c = (UV - 0.5) * 2.0;
+	float r_norm = length(uv_c);
+	if (r_norm > 1.0) discard;
+
+	// Interior data-stream: flowing horizontal lines + sparse blips.
+	float t = TIME * stream_speed;
+	float lines = step(0.5, fract(uv_c.x * 3.0 + t)) * 0.3;
+	float blips = step(0.92, sin(uv_c.x * 9.0 + t * 2.0) * cos(uv_c.y * 11.0 - t * 1.7));
+	float stream = mix(0.10, 0.20, lines) + blips * 0.30;
+
+	// Soft radial fade: alpha drops to zero over the outer 25% of the disc.
+	float edge_fade = 1.0 - smoothstep(0.75, 1.0, r_norm);
+	// Soft rim highlight — a bright-ish band just inside the edge.
+	float ring = smoothstep(0.78, 0.88, r_norm) - smoothstep(0.92, 1.0, r_norm);
+
+	// Overlap suppression: if this fragment's world XZ is inside another
+	// provider's disc, suppress the edge ring so rings don't cross.
+	bool inside_other = false;
+	for (int i = 0; i < other_count; i++) {
+		if (other_providers[i].z <= 0.0) continue;
+		vec2 d = v_world_pos.xz - other_providers[i].xy;
+		if (dot(d, d) < other_providers[i].z * other_providers[i].z) {
+			inside_other = true;
+			break;
+		}
+	}
+
+	if (inside_other) {
+		// Overlap region: faint interior stream only, no edge ring.
+		ALBEDO = mesh_color * stream * 0.5;
+		ALPHA = stream * 0.4;
+	} else {
+		ALBEDO = mesh_color * (stream + ring * 0.8);
+		ALPHA = (stream + ring) * 0.7 * edge_fade;
+	}
+}
+"""
+
 
 static func team_color_for(owner_idx: int) -> Color:
 	# Static fallback used by tools / tests that lack a PlayerRegistry.
@@ -93,6 +161,15 @@ func _resolve_team_color() -> Color:
 		return registry.get_perspective_color(owner_id)
 	return Building.team_color_for(owner_id)
 var _team_ring: MeshInstance3D = null
+
+## Mesh-aura disc — ShaderMaterial reference so _process can push the
+## other_providers uniform array at ~1Hz. Null when this building has
+## no mesh_provider_radius (i.e. not a Mesh provider).
+var _mesh_aura_disc_mat: ShaderMaterial = null
+## Counts down in real-time seconds; when it hits zero the other_providers
+## uniform is rebuilt and the timer is reset to _MESH_AURA_UPDATE_INTERVAL.
+var _mesh_aura_update_timer: float = 0.0
+const _MESH_AURA_UPDATE_INTERVAL: float = 1.0
 
 var _progress_bg: MeshInstance3D = null
 var _progress_bar: MeshInstance3D = null
@@ -403,7 +480,7 @@ func _add_building_details() -> void:
 	# Mesh-provider aura ring (V3 §Pillar 2). Drawn after the type
 	# detail layer so the ring sits on top of the ground markings.
 	if stats.mesh_provider_radius > 0.0:
-		_add_mesh_aura_ring(stats.mesh_provider_radius)
+		_add_mesh_aura_disc(stats.mesh_provider_radius)
 
 
 func _detail_universal_extras() -> void:
@@ -5230,29 +5307,73 @@ func _detail_inheritor_construction_site() -> void:
 	_attach_visual(orb)
 
 
-func _add_mesh_aura_ring(radius: float) -> void:
-	## Flat ground ring marking this building's Mesh aura coverage.
-	## Always visible to the controlling player; opponents see it
-	## only when they have line of sight on the structure.
-	var ring := MeshInstance3D.new()
-	ring.name = "MeshAuraRing"
-	var torus := TorusMesh.new()
-	torus.inner_radius = radius - 0.20
-	torus.outer_radius = radius
-	torus.rings = 48
-	torus.ring_segments = 4
-	ring.mesh = torus
-	ring.position.y = 0.05
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.78, 0.45, 1.0, 0.55)
-	mat.emission_enabled = true
-	mat.emission = Color(0.78, 0.45, 1.0, 1.0)
-	mat.emission_energy_multiplier = 0.9
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	ring.set_surface_override_material(0, mat)
-	add_child(ring)
+func _add_mesh_aura_disc(radius: float) -> void:
+	## Full-disc Mesh-aura visualization replacing the old TorusMesh ring.
+	## Uses a PlaneMesh sized to the coverage diameter + a custom shader
+	## that draws an animated data-stream interior, a soft edge gradient,
+	## and suppresses the outer ring wherever the disc overlaps another
+	## provider's disc (fed via the other_providers uniform at ~1Hz).
+	var disc := MeshInstance3D.new()
+	disc.name = "MeshAuraDisc"
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(radius * 2.0, radius * 2.0)
+	# Subdivide so the vertex shader world-position interpolation is
+	# accurate even at large radii.
+	plane.subdivide_width = 4
+	plane.subdivide_depth = 4
+	disc.mesh = plane
+	disc.position.y = 0.05
+	# Cast no shadows and don't occlude anything — purely cosmetic additive layer.
+	disc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var shader := Shader.new()
+	shader.code = MESH_AURA_DISC_SHADER
+	var mat := ShaderMaterial.new()
+	mat.shader = shader
+	mat.set_shader_parameter(&"radius", radius)
+	# other_providers starts as 8 zero-radius sentinels; will be
+	# rebuilt by _update_mesh_aura_disc_uniforms on the first _process tick.
+	var empty_providers: Array[Vector4] = []
+	for _i: int in range(8):
+		empty_providers.append(Vector4(0.0, 0.0, 0.0, 0.0))
+	mat.set_shader_parameter(&"other_providers", empty_providers)
+	mat.set_shader_parameter(&"other_count", 0)
+	disc.set_surface_override_material(0, mat)
+	add_child(disc)
+	_mesh_aura_disc_mat = mat
+	# Trigger an immediate first update so the uniforms are correct
+	# on the very first rendered frame.
+	_mesh_aura_update_timer = 0.0
+
+
+func _update_mesh_aura_disc_uniforms() -> void:
+	## Rebuild the other_providers uniform for _mesh_aura_disc_mat.
+	## Queries MeshSystem for all providers with the same owner_id and
+	## passes their world XZ + radius to the shader (up to 8 slots).
+	## The shader uses this list to suppress the edge ring where this
+	## disc overlaps a neighbour, avoiding harsh ring intersections.
+	if _mesh_aura_disc_mat == null:
+		return
+	var mesh_sys: MeshSystem = get_tree().current_scene.get_node_or_null("MeshSystem") as MeshSystem if get_tree() else null
+	var other_arr: Array[Vector4] = []
+	if mesh_sys != null:
+		var providers: Array[Dictionary] = mesh_sys.get_providers_for_owner(owner_id)
+		var my_pos: Vector3 = global_position
+		for p: Dictionary in providers:
+			if other_arr.size() >= 8:
+				break
+			var p_pos: Vector3 = p["pos"] as Vector3
+			# Skip self (within a tiny tolerance).
+			if p_pos.distance_squared_to(my_pos) < 0.25:
+				continue
+			var p_r: float = sqrt(p["r2"] as float)
+			other_arr.append(Vector4(p_pos.x, p_pos.z, p_r, 0.0))
+	var real_count: int = other_arr.size()
+	# Pad to exactly 8 slots with zero-radius sentinels so the GLSL
+	# fixed-size array is always fully populated.
+	while other_arr.size() < 8:
+		other_arr.append(Vector4(0.0, 0.0, 0.0, 0.0))
+	_mesh_aura_disc_mat.set_shader_parameter(&"other_providers", other_arr)
+	_mesh_aura_disc_mat.set_shader_parameter(&"other_count", real_count)
 
 
 func _local_player_has_built(building_id: StringName) -> bool:
@@ -5438,6 +5559,15 @@ func _process(delta: float) -> void:
 			_update_damaged_hp_bar()
 			if _sel_prod_bg and is_instance_valid(_sel_prod_bg):
 				_update_unselected_production_bar()
+
+	# Mesh-aura disc — push the other_providers uniform at ~1Hz so the
+	# overlap-suppression ring boundary stays correct as buildings are built
+	# or destroyed. Only runs when this building is a Mesh provider.
+	if _mesh_aura_disc_mat != null:
+		_mesh_aura_update_timer -= delta
+		if _mesh_aura_update_timer <= 0.0:
+			_mesh_aura_update_timer = _MESH_AURA_UPDATE_INTERVAL
+			_update_mesh_aura_disc_uniforms()
 
 	# Quarter-frame stagger for the cosmetic / damage-VFX work.
 	# Buildings don't need 60Hz redraws -- smoke timers, ember

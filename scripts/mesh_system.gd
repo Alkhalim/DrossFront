@@ -116,3 +116,13 @@ func reload_factor(strength: int) -> float:
 func get_provider_snapshot() -> Array[Dictionary]:
 	## Read-only snapshot for the visualization overlay.
 	return _providers
+
+
+func get_providers_for_owner(owner_id: int) -> Array[Dictionary]:
+	## Returns all providers belonging to the given owner_id.
+	## Each entry: { "pos": Vector3, "r2": float, "owner_id": int }
+	var result: Array[Dictionary] = []
+	for p: Dictionary in _providers:
+		if (p["owner_id"] as int) == owner_id:
+			result.append(p)
+	return result
