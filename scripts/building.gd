@@ -37,6 +37,17 @@ var hq_battery_active: bool = false
 var current_hp: int = 0
 var _construction_progress: float = 0.0
 
+## Per-instance build_time override. When > 0.0, _effective_build_time() returns
+## this instead of stats.build_time. Used by the Inheritor construction site so
+## the foundation's build duration equals the queued unit's build_time rather
+## than the placeholder 0.0 baked into inheritor_construction_site.tres.
+var _build_time_override: float = 0.0
+
+
+func _effective_build_time() -> float:
+	return _build_time_override if _build_time_override > 0.0 else (stats.build_time if stats else 0.0)
+
+
 ## Production queue — array of UnitStatResource.
 var _build_queue: Array[UnitStatResource] = []
 ## Slot-0 progress kept as a plain float for backward-compat with HUD / any
@@ -3118,14 +3129,15 @@ func advance_construction(amount: float, builder: Node = null) -> void:
 	# end. Damage taken during construction stays applied — we lerp
 	# the floor (20% start) toward the cap (stats.hp), and clamp
 	# current_hp so a hit during the build doesn't get healed away.
-	if stats and stats.build_time > 0.0:
-		var p: float = clampf(_construction_progress / stats.build_time, 0.0, 1.0)
+	var eff_bt: float = _effective_build_time()
+	if stats and eff_bt > 0.0:
+		var p: float = clampf(_construction_progress / eff_bt, 0.0, 1.0)
 		var target_hp: int = maxi(int(float(stats.hp) * (0.2 + 0.8 * p)), 1)
 		if target_hp > current_hp:
 			current_hp = target_hp
 	_update_progress_bar()
 	_update_construction_rise()
-	if _construction_progress >= stats.build_time:
+	if _construction_progress >= eff_bt:
 		_finish_construction()
 
 
@@ -3314,9 +3326,10 @@ func _evacuate_foundation_blockers() -> void:
 
 
 func get_construction_percent() -> float:
-	if not stats or stats.build_time <= 0.0:
+	var eff_bt: float = _effective_build_time()
+	if eff_bt <= 0.0:
 		return 1.0
-	return clampf(_construction_progress / stats.build_time, 0.0, 1.0)
+	return clampf(_construction_progress / eff_bt, 0.0, 1.0)
 
 
 ## Deferred from _ready. Lets parent setup code that flips
@@ -3354,7 +3367,7 @@ func _finish_construction() -> void:
 		var ibm: InheritorBuildingManager = InheritorBuildingManager.get_instance(scene_root)
 		if ibm != null:
 			ibm.register_reliquary(self)
-	_construction_progress = stats.build_time
+	_construction_progress = _effective_build_time()
 	# Top up to full HP on completion. Damage taken during construction
 	# stays applied, but a clean build with no interference finishes
 	# at stats.hp instead of slightly under from the 20%→100% lerp.
@@ -3393,6 +3406,19 @@ func _finish_construction() -> void:
 		_collision.disabled = false
 	if _visual_root:
 		_visual_root.position.y = 0.0
+
+	# Inheritor construction site: instead of remaining as a permanent
+	# building, spawn the queued unit (pair via the existing faction == 2
+	# branch in _spawn_unit) and despawn the site. Deferred free so the
+	# rest of _finish_construction's signal emissions complete cleanly
+	# before the building disappears.
+	if stats != null and stats.building_id == &"inheritor_construction_site":
+		if not _build_queue.is_empty():
+			var queued: UnitStatResource = _build_queue[0]
+			_spawn_unit(queued)
+		queue_free()
+		return
+
 	# Building LOS occluder registration is INTENTIONALLY disabled
 	# until FOW recompute moves to a shadow-cast / threaded path.
 	# Per-cell Bresenham line walks across N building occluders ×
@@ -3550,7 +3576,7 @@ func _update_progress_bar() -> void:
 	if _progress_label:
 		var line: String = "%d%%" % int(pct * 100.0)
 		if _build_rate_per_sec > 0.0001:
-			var remaining: float = (stats.build_time - _construction_progress) / _build_rate_per_sec
+			var remaining: float = (_effective_build_time() - _construction_progress) / _build_rate_per_sec
 			if remaining > 0.5:
 				line += "  •  ~%ds" % int(ceilf(remaining))
 		_progress_label.text = line
@@ -5403,25 +5429,13 @@ func _process(delta: float) -> void:
 		if cnm != null:
 			net_speed = cnm.get_bonuses_for_building(self).speed_mult
 
-	# Inheritor construction site: gated on adjacent Restorer count.
-	# Zero engineers = no progress. 1+ engineers = scaled collaboration mult.
-	# 1 Restorer → 1.0x, 2 → 1.4x, 3+ → 1.8x (spec line 633).
-	var inheritor_collab_mult: float = 1.0
-	if stats != null and stats.building_id == &"inheritor_construction_site":
-		var n_restorers: int = _count_adjacent_restorers()
-		if n_restorers <= 0:
-			# No engineer in range — freeze progress until a Restorer arrives.
-			return
-		# [1.0, 1.0, 1.4, 1.8]: index 0 unused (guarded above), 1/2/3 per spec.
-		inheritor_collab_mult = ([1.0, 1.0, 1.4, 1.8] as Array)[mini(n_restorers, 3)]
-
 	# Advance each active slot. Iterate in reverse so removing an entry from
 	# _build_queue doesn't invalidate lower slot indices that we haven't
 	# visited yet.
 	var active_slots: int = mini(slot_count, _build_queue.size())
 	for slot_idx: int in range(active_slots - 1, -1, -1):
 		var slot_unit: UnitStatResource = _build_queue[slot_idx]
-		_build_progress_slots[slot_idx] += delta * efficiency * net_speed * inheritor_collab_mult
+		_build_progress_slots[slot_idx] += delta * efficiency * net_speed
 		if _build_progress_slots[slot_idx] >= slot_unit.build_time:
 			# Unit complete — spawn it, remove from queue, shift progress
 			# values down so slot indices still line up with queue indices.

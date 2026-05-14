@@ -233,7 +233,17 @@ func _physics_process(delta: float) -> void:
 
 	# In range — stop moving and build
 	_unit.stop()
-	_target_building.advance_construction(build_rate * delta, _unit)
+	# Inheritor construction-site collaboration multiplier (spec §633).
+	# Applies only to the field-unit foundation; other buildings are unaffected.
+	# 1 Restorer → 1.0x, 2 total → 1.4x, 3+ total → 1.8x. Cap at 3.
+	var collab_mult: float = 1.0
+	if _target_building != null and _target_building.stats != null \
+			and _target_building.stats.building_id == &"inheritor_construction_site":
+		var n_peers: int = _count_peer_engineers_at_target()
+		# n_peers = number of OTHER Restorers also on this target.
+		# Total = n_peers + self → index into [1.0, 1.0, 1.4, 1.8], capped at 3.
+		collab_mult = ([1.0, 1.0, 1.4, 1.8] as Array)[mini(n_peers + 1, 3)]
+	_target_building.advance_construction(build_rate * delta * collab_mult, _unit)
 	# Only animate when the foundation is actually progressing (it can be
 	# blocked by units standing inside the footprint).
 	_set_build_anim(not _target_building.is_constructed and _target_building._is_foundation_clear())
@@ -567,13 +577,54 @@ func _spot_has_other_engineer(spot: Vector3, radius: float) -> bool:
 	return false
 
 
+func _count_peer_engineers_at_target() -> int:
+	## Counts OTHER Restorers (engineers with a BuilderComponent) that are
+	## also targeting the same _target_building as this engineer, within
+	## build range. Used to compute the Inheritor construction-site
+	## collaboration multiplier (spec §633). Capped at 2 peers (3 total).
+	if not _target_building or not is_instance_valid(_target_building):
+		return 0
+	var count: int = 0
+	var idx: SpatialIndex = SpatialIndex.get_instance(get_tree().current_scene)
+	if idx == null:
+		# Fallback: walk the units group.
+		for node: Node in get_tree().get_nodes_in_group("units"):
+			if not is_instance_valid(node) or node == _unit:
+				continue
+			if not node.has_method("get_builder"):
+				continue
+			var other_builder: Node = node.get_builder()
+			if other_builder != null and other_builder.get("_target_building") == _target_building:
+				count += 1
+				if count >= 2:
+					break
+		return count
+	var search_radius: float = _build_max_distance() + 2.0
+	for raw: Variant in idx.nearby(_target_building.global_position, search_radius):
+		if raw == null or not is_instance_valid(raw):
+			continue
+		var node: Node = raw as Node
+		if node == null or node == _unit:
+			continue
+		if not node.has_method("get_builder"):
+			continue
+		var other_builder: Node = node.get_builder()
+		if other_builder != null and other_builder.get("_target_building") == _target_building:
+			count += 1
+			if count >= 2:
+				break
+	return count
+
+
 func start_field_unit_build(unit_stats: UnitStatResource, world_pos: Vector3) -> void:
 	## Inheritor Restorer field-build entry point. Spawns a construction-site
-	## Building at world_pos with the chosen unit on its _build_queue, then
-	## routes the Restorer to it via the existing start_building approach loop.
-	## Cost has already been paid by the caller (HUD / SelectionManager) before
-	## this is invoked. If the Restorer is killed mid-construction the unit is
-	## lost with no refund per spec line 631.
+	## Building at world_pos as a real foundation (is_constructed = false) so
+	## the Restorer constructs it exactly like any other building via the existing
+	## advance_construction loop. When the foundation completes, _finish_construction
+	## detects the inheritor_construction_site building_id, spawns the queued unit
+	## pair, and queue_free()s the site. Cost has already been paid by the caller
+	## (HUD / SelectionManager) before this is invoked. If the Restorer is killed
+	## mid-construction the unit is lost with no refund per spec line 631.
 	var site_stats: BuildingStatResource = load(
 		"res://resources/buildings/inheritor_construction_site.tres"
 	) as BuildingStatResource
@@ -588,27 +639,43 @@ func start_field_unit_build(unit_stats: UnitStatResource, world_pos: Vector3) ->
 	site.stats = site_stats
 	if _unit:
 		site.owner_id = _unit.owner_id
-	# The construction site itself is "instantly constructed" — what takes
-	# time is the unit on its queue. Mark is_constructed=true so the site's
-	# production tick fires immediately once it enters the scene.
-	site.is_constructed = true
+	# Foundation state — engineer constructs it like any other building.
+	# is_constructed stays false (the default); begin_construction() is
+	# called implicitly by start_building → advance_construction on the
+	# first in-range tick. We call begin_construction() here so the
+	# progress bar and buried-visual state are ready before the Restorer
+	# walks over (mirrors how place_building works for other factions).
+	# Per-instance build_time override: foundation takes the queued unit's
+	# build_time (e.g. Ashigaru 50s, Wächter 75s) — not the 0.0 placeholder
+	# baked into inheritor_construction_site.tres.
+	site._build_time_override = unit_stats.build_time
 
 	var scene_root: Node = get_tree().current_scene
+	var buildings_node: Node = scene_root.get_node_or_null("Buildings")
 	var units_node: Node = scene_root.get_node_or_null("Units")
-	# Construction sites are added under the same parent as Units so the
-	# SpatialIndex and BuilderComponent.start_building's scan find them.
-	# They register themselves in the "buildings" group inside _ready via
-	# Building._ready, which is what the approach loop queries.
-	if units_node:
-		units_node.add_child(site)
+	# Prefer a dedicated Buildings node; fall back to Units (where the
+	# old code put sites) then to the scene root. The SpatialIndex and
+	# BuilderComponent.start_building's scan find the site regardless of
+	# parent because Building._ready registers it in the "buildings" group.
+	var parent_node: Node
+	if buildings_node != null:
+		parent_node = buildings_node
+	elif units_node != null:
+		parent_node = units_node
 	else:
-		scene_root.add_child(site)
+		parent_node = scene_root
+	parent_node.add_child(site)
 	site.global_position = world_pos
 
-	# Queue the unit AFTER add_child so _ready has run (which sets up the
-	# stats, HP, and group membership). We bypass queue_unit()'s
-	# producible_units gate (the site's list is intentionally empty —
-	# the unit to build is injected per-instance by this method).
+	# Call begin_construction() AFTER add_child so _ready has run and the
+	# progress bar + visual state are correctly initialised before the
+	# Restorer walks to the site.
+	site.begin_construction()
+
+	# Stash the queued unit AFTER begin_construction so the queue is
+	# populated when _finish_construction runs. We bypass queue_unit()'s
+	# is_constructed + producible_units gate (the site's producible list is
+	# intentionally empty — the unit to build is injected per-instance here).
 	site._build_queue.append(unit_stats)
 
 	# Route the Restorer to the site using the existing approach loop.
