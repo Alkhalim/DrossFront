@@ -17,6 +17,6 @@ footprint_size = Vector3(2.4, 4.5, 2.4)
 placeholder_color = Color(0.28, 0.40, 0.50, 1)
 is_advanced = false
 prerequisites = []
-mesh_provider_radius = 14.0
+mesh_provider_radius = 22.0
 faction_lock = 2
 weapons = []

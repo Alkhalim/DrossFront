@@ -1019,11 +1019,25 @@ func _offset_for(key: String, fallback: Vector3) -> Vector3:
 	return fallback
 
 
+func _ai_faction_substitute_prereq(prereq: StringName) -> StringName:
+	## Meridian AI maps cross-faction prerequisite IDs to their equivalents.
+	## Mirrors hud._faction_substitute_prereq for Meridian (faction_id == 1).
+	if _my_faction == 1:
+		match prereq:
+			&"basic_armory":    return &"sensor_spine"
+			&"advanced_armory": return &"intelligence_network"
+			&"basic_generator": return &"mesh_relay"
+			_: return prereq
+	return prereq
+
+
 func _ai_prerequisites_met(bstats: BuildingStatResource) -> bool:
 	## True if every prerequisite building_id on `bstats` has at least one
 	## fully-constructed instance owned by THIS AI player. Buildings still
 	## under construction don't count — the player rule is the same, so
 	## both sides chain through basic → advanced.
+	## Faction substitution applies so Meridian AI resolves cross-faction
+	## prereqs to its own buildings (e.g. basic_generator → mesh_relay).
 	if bstats.prerequisites.is_empty():
 		return true
 	var have: Dictionary = {}
@@ -1038,7 +1052,7 @@ func _ai_prerequisites_met(bstats: BuildingStatResource) -> bool:
 		if stat:
 			have[stat.building_id] = true
 	for req_v: Variant in bstats.prerequisites:
-		var req: StringName = StringName(req_v)
+		var req: StringName = _ai_faction_substitute_prereq(StringName(req_v))
 		if not have.has(req):
 			return false
 	return true

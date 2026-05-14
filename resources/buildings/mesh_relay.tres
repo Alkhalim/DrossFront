@@ -14,5 +14,5 @@ power_production = 30
 footprint_size = Vector3(2.5, 4, 2.5)
 placeholder_color = Color(0.30, 0.45, 0.55, 1)
 requires_geothermic_vent = true
-mesh_provider_radius = 16.0
+mesh_provider_radius = 10.0
 faction_lock = 2

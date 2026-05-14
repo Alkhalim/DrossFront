@@ -5324,6 +5324,20 @@ func _local_player_built_ids() -> Dictionary:
 	return ids
 
 
+func _faction_substitute_prereq(prereq: StringName, faction_id: int) -> StringName:
+	## Returns the faction-appropriate equivalent of a prerequisite ID.
+	## Meridian (faction_id == 1) doesn't build Combine production buildings,
+	## so map their cross-faction equivalents. Combine (0) and others are
+	## returned unchanged, keeping their prereq chains intact.
+	if faction_id == 1:  # Meridian Protocol
+		match prereq:
+			&"basic_armory":    return &"sensor_spine"
+			&"advanced_armory": return &"intelligence_network"
+			&"basic_generator": return &"mesh_relay"
+			_: return prereq
+	return prereq
+
+
 func _prerequisites_met(bstat: BuildingStatResource, built_ids: Dictionary) -> bool:
 	if bstat.prerequisites.is_empty():
 		return true
@@ -5331,8 +5345,9 @@ func _prerequisites_met(bstat: BuildingStatResource, built_ids: Dictionary) -> b
 	var cheats: Node = get_tree().current_scene.get_node_or_null("CheatManager") if get_tree() else null
 	if cheats and "tech_craze" in cheats and (cheats.get("tech_craze") as bool):
 		return true
+	var faction_id: int = _local_player_faction()
 	for req_v: Variant in bstat.prerequisites:
-		var req: StringName = StringName(req_v)
+		var req: StringName = _faction_substitute_prereq(StringName(req_v), faction_id)
 		if not built_ids.has(req):
 			return false
 	return true
@@ -5342,9 +5357,11 @@ func _building_tooltip_with_prereq(bstat: BuildingStatResource, prereqs_ok: bool
 	var base: String = _building_tooltip(bstat)
 	if prereqs_ok or bstat.prerequisites.is_empty():
 		return base
+	var faction_id: int = _local_player_faction()
 	var names: PackedStringArray = PackedStringArray()
 	for req_v: Variant in bstat.prerequisites:
-		names.append(_pretty_id(StringName(req_v)))
+		var req: StringName = _faction_substitute_prereq(StringName(req_v), faction_id)
+		names.append(_pretty_id(req))
 	return "%s\n\nRequires: %s" % [base, ", ".join(names)]
 
 
@@ -6165,9 +6182,11 @@ func make_styled_building_tooltip(bstat: BuildingStatResource, prereqs_ok: bool)
 		lines.append(blurb)
 
 	if not prereqs_ok and not bstat.prerequisites.is_empty():
+		var faction_id: int = _local_player_faction()
 		var pretty: PackedStringArray = PackedStringArray()
 		for req_v: Variant in bstat.prerequisites:
-			pretty.append(_pretty_id(StringName(req_v)))
+			var req: StringName = _faction_substitute_prereq(StringName(req_v), faction_id)
+			pretty.append(_pretty_id(req))
 		lines.append("")
 		lines.append("[color=#ff6e6e]Requires: %s[/color]" % ", ".join(pretty))
 

@@ -246,9 +246,11 @@ func _process(delta: float) -> void:
 
 
 func _recheck_cover_state() -> void:
-	## Scans the buildings group for a Generator (basic_generator or
-	## advanced_generator) whose footprint overlaps this vent. Sets
+	## Scans the buildings group for any power-producing building
+	## (power_production > 0) whose footprint overlaps this vent. Sets
 	## is_covered accordingly so the steam plume tracks reality.
+	## Covers basic_generator, advanced_generator, mesh_relay, and any
+	## future power building without needing a hardcoded ID list.
 	var found: bool = false
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(node):
@@ -259,8 +261,8 @@ func _recheck_cover_state() -> void:
 		var stats: Variant = b.get("stats")
 		if stats == null:
 			continue
-		var bid: StringName = stats.get("building_id") as StringName
-		if bid != &"basic_generator" and bid != &"advanced_generator":
+		var power_prod: int = stats.get("power_production") as int
+		if power_prod <= 0:
 			continue
 		if b.global_position.distance_to(global_position) < VENT_SIZE * 0.6:
 			found = true
