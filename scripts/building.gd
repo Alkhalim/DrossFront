@@ -91,10 +91,10 @@ const NEUTRAL_COLOR := Color(0.85, 0.7, 0.3, 1.0)
 ## intersect each other.
 const MESH_AURA_DISC_SHADER: String = """
 shader_type spatial;
-render_mode unshaded, blend_add, depth_draw_never, depth_test_disabled, cull_disabled;
+render_mode unshaded, blend_add, depth_draw_never, cull_disabled;
 
 uniform float radius = 18.0;
-uniform vec3 mesh_color : source_color = vec3(0.78, 0.45, 1.0);
+uniform vec3 mesh_color : source_color = vec3(0.55, 0.40, 0.85);
 uniform float stream_speed = 0.5;
 
 // Up to 8 OTHER providers from the same owner. xy = world XZ centre; z = radius; w unused.
@@ -114,19 +114,24 @@ void fragment() {
 	float r_norm = length(uv_c);
 	if (r_norm > 1.0) discard;
 
-	// Interior data-stream: flowing horizontal lines + sparse blips.
+	// Interior data-stream in world space — constant visual scale regardless of disc radius.
+	vec2 wp = v_world_pos.xz;
 	float t = TIME * stream_speed;
-	float lines = step(0.5, fract(uv_c.x * 3.0 + t)) * 0.3;
-	float blips = step(0.92, sin(uv_c.x * 9.0 + t * 2.0) * cos(uv_c.y * 11.0 - t * 1.7));
+	float lines = step(0.5, fract(wp.x * 0.4 + t * 0.5)) * 0.3;
+	float blips = step(0.92, sin(wp.x * 1.0 + t * 2.0) * cos(wp.y * 1.1 - t * 1.7));
 	float stream = mix(0.10, 0.20, lines) + blips * 0.30;
 
-	// Soft radial fade: alpha drops to zero over the outer 25% of the disc.
-	float edge_fade = 1.0 - smoothstep(0.75, 1.0, r_norm);
-	// Soft rim highlight — a bright-ish band just inside the edge.
-	float ring = smoothstep(0.78, 0.88, r_norm) - smoothstep(0.92, 1.0, r_norm);
+	// Soft radial fade: alpha drops to zero over the outer 20% of the disc.
+	float edge_fade = 1.0 - smoothstep(0.80, 1.0, r_norm);
+
+	// Border in world units — thin sharp band at the disc perimeter.
+	// Last ~0.4 world units, with a hard inner edge and a sharp outer fade.
+	float world_dist = r_norm * radius;
+	float border = smoothstep(radius - 0.4, radius - 0.15, world_dist)
+	             * (1.0 - smoothstep(radius - 0.05, radius, world_dist));
 
 	// Overlap suppression: if this fragment's world XZ is inside another
-	// provider's disc, suppress the edge ring so rings don't cross.
+	// provider's disc, suppress the border so rings don't cross.
 	bool inside_other = false;
 	for (int i = 0; i < other_count; i++) {
 		if (other_providers[i].z <= 0.0) continue;
@@ -138,12 +143,13 @@ void fragment() {
 	}
 
 	if (inside_other) {
-		// Overlap region: faint interior stream only, no edge ring.
+		// Inside another provider's disc: stream only, no border.
 		ALBEDO = mesh_color * stream * 0.5;
-		ALPHA = stream * 0.4;
+		ALPHA = stream * 0.3;
 	} else {
-		ALBEDO = mesh_color * (stream + ring * 0.8);
-		ALPHA = (stream + ring) * 0.7 * edge_fade;
+		// Outside any other provider: stream + border.
+		ALBEDO = mesh_color * (stream + border * 0.7);
+		ALPHA = (stream * 0.5 + border * 0.7) * edge_fade;
 	}
 }
 """
@@ -497,7 +503,7 @@ func _add_building_details() -> void:
 	# the placement-gate code can use the HQ as a mesh seed for
 	# Meridian players in shared scenarios), but Combine players
 	# don't see the data-stream disc.
-	if stats.mesh_provider_radius > 0.0 and _resolve_faction_id() == 1:
+	if stats.mesh_provider_radius > 0.0 and _resolve_faction_id() == 1 and not is_ghost_preview:
 		_add_mesh_aura_disc(stats.mesh_provider_radius)
 
 
@@ -5437,7 +5443,7 @@ func _add_mesh_aura_disc(radius: float) -> void:
 	plane.subdivide_width = 4
 	plane.subdivide_depth = 4
 	disc.mesh = plane
-	disc.position.y = 0.05
+	disc.position.y = 0.02
 	# Cast no shadows and don't occlude anything — purely cosmetic additive layer.
 	disc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var shader := Shader.new()
@@ -5453,6 +5459,8 @@ func _add_mesh_aura_disc(radius: float) -> void:
 	mat.set_shader_parameter(&"other_providers", empty_providers)
 	mat.set_shader_parameter(&"other_count", 0)
 	disc.set_surface_override_material(0, mat)
+	# Draw below units and buildings — disc renders first so entities occlude it.
+	mat.render_priority = -10
 	add_child(disc)
 	_mesh_aura_disc_mat = mat
 	# Trigger an immediate first update so the uniforms are correct
