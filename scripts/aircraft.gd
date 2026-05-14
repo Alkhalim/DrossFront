@@ -2433,6 +2433,14 @@ func _pick_new_patrol_target() -> void:
 	var dist: float = _patrol_radius * (0.5 + 0.5 * randf())
 	_patrol_target = _patrol_around.global_position + Vector3(cos(ang), 0.0, sin(ang)) * dist
 	command_move(_patrol_target, false)
+	# Enable auto-targeting while flying to the patrol waypoint.
+	# command_move sets has_move_order=true which blocks CombatComponent's
+	# can_auto_target check (requires either idle OR attack_move_target set).
+	# Setting attack_move_target satisfies the second branch so the drone
+	# scans for enemies throughout its patrol circuit without interrupting
+	# the waypoint movement.
+	if _combat != null:
+		_combat.set("attack_move_target", _patrol_target)
 
 
 ## Called from _process on the heavy tick (every 3rd frame). Checks whether
