@@ -6,17 +6,18 @@
 
 [sub_resource type="Resource" id="weapon_cutting_laser"]
 script = ExtResource("2")
-weapon_name = "Cutting Laser"
-role_tag = &"AP"
-damage_tier = &"very_low"
-range_tier = &"short"
-rof_tier = &"slow"
+weapon_name = "Lattice Welder"
+role_tag = &"AS"
+damage_tier = &"moderate"
+range_tier = &"melee"
+range_value = 2.0
+rof_tier = &"continuous"
 projectile_style = &"beam"
-base_accuracy = 0.85
+base_accuracy = 0.95
 
-damage = 3
-range = 8.0
-rof_seconds = 2.0
+damage = 25
+range = 2.0
+rof_seconds = 0.25
 use_explicit_air = true
 engages_air_explicit = false
 mult_vs_unarmored_v2 = 1.0
@@ -45,9 +46,9 @@ build_time = 18.0
 built_at = &"headquarters"
 primary_weapon = SubResource("weapon_cutting_laser")
 detection_radius = 100.0
-special_description = "Inheritor engineer. Crafts units in the field; produces 2 per construction. Built in pairs at the HQ."
+special_description = "Inheritor engineer — Restorator. Lattice Welder (AS, Moderate, Melee, Continuous) repairs allies OR damages enemies at melee range. Must close to enemies to do damage. Repairs at 12 HP/sec. Built in pairs at HQ. CONCERN: melee engagement + dual-function welder requires code implementation."
 can_build = true
-repair_rate = 5.6
+repair_rate = 12.0
 
 speed = 8.0
 sight_radius = 18.0

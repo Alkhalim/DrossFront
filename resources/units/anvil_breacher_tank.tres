@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="UnitStatResource" load_steps=6 format=3]
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
 
@@ -10,41 +10,62 @@
 
 [sub_resource type="Resource" id="weapon_breacher_cannon"]
 script = ExtResource("2")
-weapon_name = "Twin AT Cannon Battery"
+weapon_name = "Heavy Howitzer"
 role_tag = &"AP"
-damage_tier = &"very_high"
+damage_tier = &"high"
 range_tier = &"long"
 rof_tier = &"slow"
-damage_value = 195
-rof_seconds_value = 5.9
-salvo_count = 2
-salvo_stagger_sec = 0.13
-projectile_style = &"shell"
-base_accuracy = 0.85
+damage_value = 120
+rof_seconds_value = 4.5
+projectile_style = &"mortar"
+base_accuracy = 0.75
 can_damage_trees = true
-mult_vs_light = 0.55
+splash_radius = 3.0
+splash_damage_mult = 0.6
+mult_vs_light = 1.0
 mult_vs_medium = 0.85
-mult_vs_heavy = 1.00
-structure_damage_mult = 0.70
+mult_vs_heavy = 0.60
+structure_damage_mult = 1.20
 
-damage = 195
+damage = 120
 range = 25.0
-rof_seconds = 5.9
+rof_seconds = 4.5
 use_explicit_air = true
 engages_air_explicit = false
 mult_vs_unarmored_v2 = 1.0
-mult_vs_light_v2 = 0.55
+mult_vs_light_v2 = 1.0
 mult_vs_medium_v2 = 0.85
-mult_vs_heavy_v2 = 1.0
-mult_vs_structure_v2 = 0.7
-mult_vs_light_air_v2 = 1.0
-mult_vs_heavy_air_v2 = 0.5
+mult_vs_heavy_v2 = 0.6
+mult_vs_structure_v2 = 1.2
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
+
+[sub_resource type="Resource" id="weapon_coaxial_mg"]
+script = ExtResource("2")
+weapon_name = "Coaxial MG"
+role_tag = &"Universal"
+damage_tier = &"low"
+range_tier = &"medium"
+rof_tier = &"fast"
+
+damage = 12
+range = 15.0
+rof_seconds = 0.5
+use_explicit_air = false
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 1.0
+mult_vs_medium_v2 = 0.5
+mult_vs_heavy_v2 = 0.3
+mult_vs_structure_v2 = 0.2
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
 
 [resource]
 script = ExtResource("1")
 unit_name = "Breacher Tank"
 display_name = "Boyar"
-unit_class = &"transport"
+unit_class = &"medium"
 hp_total = 2100
 hp_per_unit = 700
 armor_class = &"medium"
@@ -55,11 +76,12 @@ population = 12
 cost_salvage = 340
 cost_fuel = 22
 build_time = 38.0
-built_at = &"advanced_foundry"
+built_at = &"basic_foundry"
 primary_weapon = SubResource("weapon_breacher_cannon")
-special_description = "Combine tracked tank hunter — the Boyar. Casemate hull with twin forward-mounted heavy AT cannons fired in quick succession."
-branch_a_name = "Salvo"
-branch_b_name = "Mortar"
+secondary_weapon = SubResource("weapon_coaxial_mg")
+special_description = "Combine's Boyar medium assault tank. Heavy Howitzer fires with arc trajectory — can shell over terrain and friendly units. Slow reload but devastating impact. Front armor +20% vs AP. Secondary Coaxial MG for close defense."
+branch_a_name = "Dozer"
+branch_b_name = "Plow"
 branch_a_stats = ExtResource("3")
 branch_b_stats = ExtResource("4")
 

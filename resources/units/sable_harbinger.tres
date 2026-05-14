@@ -10,16 +10,17 @@
 
 [sub_resource type="Resource" id="weapon_harbinger_railgun"]
 script = ExtResource("2")
-weapon_name = "Spinal Railgun"
+weapon_name = "Long-Range Guided Missile Pod"
 role_tag = &"AP"
 damage_tier = &"very_high"
-range_tier = &"long"
+range_tier = &"very_long"
 rof_tier = &"slow"
+base_accuracy = 0.95
 can_damage_trees = true
 
-damage = 75
-range = 20.0
-rof_seconds = 2.0
+damage = 85
+range = 40.0
+rof_seconds = 3.5
 use_explicit_air = true
 engages_air_explicit = false
 mult_vs_unarmored_v2 = 1.0
@@ -77,9 +78,9 @@ primary_weapon = SubResource("weapon_harbinger_railgun")
 sees_over_buildings = true
 secondary_weapon = SubResource("weapon_drone_swarm")
 mesh_provider_radius = 30.0
-special_description = "Meridian heavy drone carrier. Spinal railgun for armored targets, drone bay releases for sustained mid-range pressure, and a 30u Mesh aura provider. Requires Black Pylon to build."
+special_description = "Meridian heavy command platform. Long-Range Guided Missile Pod (Very High AP, Very Long range, Mesh lock-on) for armored targets. Drone Bay deploys 4 Fang-type drones that orbit and engage autonomously. Sophisticated designator — not a brawler."
 passive_description = "Mesh Aura 30u + Sees Over Buildings — extends Meridian's Mesh accuracy buff to nearby allies; tall-mech vision pierces rooftops + dense terrain."
-branch_a_name = "Swarm Marshal"
+branch_a_name = "Striker"
 branch_b_name = "Overseer"
 branch_a_stats = ExtResource("3")
 branch_b_stats = ExtResource("4")

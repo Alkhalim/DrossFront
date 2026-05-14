@@ -10,8 +10,8 @@
 
 [sub_resource type="Resource" id="weapon_courier_twinmg"]
 script = ExtResource("2")
-weapon_name = "Twin Heavy MG Turret"
-role_tag = &"AP"
+weapon_name = "Defensive Twin MG"
+role_tag = &"Universal"
 damage_tier = &"low"
 range_tier = &"medium"
 rof_tier = &"rapid"

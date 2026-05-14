@@ -6,29 +6,26 @@
 
 [sub_resource type="Resource" id="weapon_twin_mg"]
 script = ExtResource("2")
-weapon_name = "Twin Shoulder MGs"
+weapon_name = "Restored Katana"
 role_tag = &"AP"
-damage_tier = &"very_low"
-range_tier = &"medium"
-range_value = 17.0
-rof_tier = &"rapid"
-can_hit_air = true
-air_damage_mult = 0.7
-mult_vs_light_air = 1.00
-mult_vs_heavy_air = 0.30
+damage_tier = &"high"
+range_tier = &"melee"
+range_value = 2.0
+rof_tier = &"fast"
+can_hit_air = false
 
-damage = 3
-range = 17.0
-rof_seconds = 0.25
+damage = 50
+range = 2.0
+rof_seconds = 0.5
 use_explicit_air = true
-engages_air_explicit = true
-mult_vs_unarmored_v2 = 1.0
-mult_vs_light_v2 = 1.0
-mult_vs_medium_v2 = 0.4
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 2.0
+mult_vs_light_v2 = 1.5
+mult_vs_medium_v2 = 0.5
 mult_vs_heavy_v2 = 0.3
 mult_vs_structure_v2 = 0.2
-mult_vs_light_air_v2 = 1.0
-mult_vs_heavy_air_v2 = 0.3
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
 
 [resource]
 script = ExtResource("1")
@@ -47,7 +44,7 @@ cost_fuel = 0
 build_time = 28.0
 built_at = &"headquarters"
 primary_weapon = SubResource("weapon_twin_mg")
-special_description = "Light scout. Available after first Reliquary is built. Pair-produced."
+special_description = "Inheritor melee scout — Ashigaru. Restored Katana (AP, High, Melee, Fast) strikes at point-blank on quadruped legs. Very Fast — closes quickly to engage. Pair-produced. CONCERN: melee engagement behavior requires code implementation."
 
 speed = 10.8
 sight_radius = 26.0

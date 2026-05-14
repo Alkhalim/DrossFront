@@ -6,24 +6,26 @@
 
 [sub_resource type="Resource" id="weapon_drone_mg"]
 script = ExtResource("2")
-weapon_name = "Drone Light MG"
-role_tag = &"AAir_Light"
-damage_tier = &"low"
-range_tier = &"short"
-rof_tier = &"rapid"
+weapon_name = "Kamikaze Detonation"
+role_tag = &"AP"
+damage_tier = &"very_high"
+range_tier = &"melee"
+range_value = 2.0
+rof_tier = &"single"
+can_damage_trees = true
 
-damage = 4
-range = 8.0
-rof_seconds = 0.28
+damage = 85
+range = 2.0
+rof_seconds = 99.0
 use_explicit_air = true
-engages_air_explicit = true
-mult_vs_unarmored_v2 = 0.4
-mult_vs_light_v2 = 0.35
-mult_vs_medium_v2 = 0.28
-mult_vs_heavy_v2 = 0.1
-mult_vs_structure_v2 = 0.15
-mult_vs_light_air_v2 = 1.0
-mult_vs_heavy_air_v2 = 0.2
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 1.5
+mult_vs_medium_v2 = 1.5
+mult_vs_heavy_v2 = 1.0
+mult_vs_structure_v2 = 2.0
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
 
 [resource]
 script = ExtResource("1")
@@ -42,7 +44,7 @@ cost_fuel = 10
 build_time = 22.0
 built_at = &"headquarters"
 primary_weapon = SubResource("weapon_drone_mg")
-special_description = "Swarm air. Requires Architect's Network Tier 1. Pair-produced."
+special_description = "Inheritor suicide drone swarm — Schwarm. Each drone flies into a target and detonates (Very High AS/AP on contact, one-shot per drone). Devastating to structures and clustered enemies. Pack of 6; drones replenish at HQ/Architect's Choir (1 per 8-10 sec). CONCERN: kamikaze self-destruct behavior requires code implementation."
 is_aircraft = true
 flight_altitude = 4.5
 flight_speed = 12.0

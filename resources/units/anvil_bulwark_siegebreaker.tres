@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="UnitStatResource" load_steps=4 format=3]
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
 
@@ -6,54 +6,33 @@
 
 [sub_resource type="Resource" id="weapon_artillery_cannon"]
 script = ExtResource("2")
-weapon_name = "Siege Mortar"
-role_tag = &"AS"
-damage_tier = &"extreme"
-range_tier = &"very_long"
-rof_tier = &"single"
-base_accuracy = 0.75
-can_damage_trees = true
-
-damage = 150
-range = 40.0
-rof_seconds = 4.0
-use_explicit_air = true
-engages_air_explicit = false
-mult_vs_unarmored_v2 = 0.6
-mult_vs_light_v2 = 0.6
-mult_vs_medium_v2 = 0.6
-mult_vs_heavy_v2 = 0.7
-mult_vs_structure_v2 = 2.5
-mult_vs_light_air_v2 = 0.2
-mult_vs_heavy_air_v2 = 0.2
-
-[sub_resource type="Resource" id="weapon_siege_pod"]
-script = ExtResource("2")
-weapon_name = "Shoulder AT Missile Pod"
-role_tag = &"AA"
-damage_tier = &"high"
+weapon_name = "Higher-Calibre Siege Guns"
+role_tag = &"AP"
+damage_tier = &"very_high"
 range_tier = &"medium"
 rof_tier = &"slow"
-base_accuracy = 0.92
+base_accuracy = 0.82
 can_damage_trees = true
+salvo_count = 2
+salvo_stagger_sec = 0.15
 
-damage = 50
+damage = 85
 range = 15.0
-rof_seconds = 2.0
+rof_seconds = 2.5
 use_explicit_air = true
 engages_air_explicit = false
-mult_vs_unarmored_v2 = 0.8
+mult_vs_unarmored_v2 = 1.0
 mult_vs_light_v2 = 0.5
 mult_vs_medium_v2 = 0.8
-mult_vs_heavy_v2 = 1.2
-mult_vs_structure_v2 = 0.6
-mult_vs_light_air_v2 = 0.3
-mult_vs_heavy_air_v2 = 0.4
+mult_vs_heavy_v2 = 1.1
+mult_vs_structure_v2 = 1.0
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
 
 [resource]
 script = ExtResource("1")
-unit_name = "Bulwark (Siegebreaker)"
-display_name = "Bulwark (Siegebreaker)"
+unit_name = "Bulwark (Ironcrusher)"
+display_name = "Bulwark (Ironcrusher)"
 unit_class = &"heavy"
 hp_total = 2240
 hp_per_unit = 1120
@@ -68,10 +47,9 @@ build_time = 42.0
 built_at = &"advanced_foundry"
 unlock_prerequisite = &"basic_armory"
 primary_weapon = SubResource("weapon_artillery_cannon")
-secondary_weapon = SubResource("weapon_siege_pod")
-special_description = "Bulwark Siegebreaker — swaps the Heavy AP Cannon for a long-range Siege Mortar (AS-tagged, extreme damage vs structures). The siege variant — sit back, lob shells over enemy turret cover. Same chassis durability as base Bulwark."
-passive_description = "Siege Mortar — long-range AS shells. Extreme damage vs structures, weak vs mechs."
-branch_summary = "Trades hull thickness for a long-barrelled siege cannon and rangefinder pod. The dedicated structure-cracker; weaker in straight mech-on-mech fights."
+special_description = "Bulwark Ironcrusher — quad autocannons upgraded to higher-calibre siege guns (AP/AS, Very High, Medium, Slow). Trades sustained DPS for siege-level burst damage per shot pair."
+passive_description = "Siege Guns — Very High AP damage per salvo. Slower than base Bulwark but each shot hits harder."
+branch_summary = "Autocannons replaced with heavier-calibre guns. Slower ROF but each shot deals Very High damage — trades spray for power."
 
 speed = 5.0
 sight_radius = 18.0

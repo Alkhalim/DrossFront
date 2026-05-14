@@ -1,62 +1,56 @@
-[gd_resource type="Resource" script_class="UnitStatResource" load_steps=4 format=3]
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
 
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
 
-[sub_resource type="Resource" id="weapon_breacher_mortar"]
+[sub_resource type="Resource" id="weapon_plow_cannon"]
 script = ExtResource("2")
-weapon_name = "Heavy Basilisk Mortar"
+weapon_name = "AT Cannon"
 role_tag = &"AP"
-damage_tier = &"high"
-range_tier = &"very_long"
-rof_tier = &"single"
-damage_value = 159
-rof_seconds_value = 5.45
-projectile_style = &"mortar"
-base_accuracy = 0.74
+damage_tier = &"very_high"
+range_tier = &"long"
+rof_tier = &"slow"
+damage_value = 195
+rof_seconds_value = 5.5
+projectile_style = &"shell"
+base_accuracy = 0.88
 can_damage_trees = true
-mult_vs_light = 1.10
-mult_vs_medium = 0.85
-mult_vs_heavy = 0.30
-structure_damage_mult = 0.70
-splash_radius = 3.5
-splash_damage_mult = 0.65
 
-damage = 159
-range = 40.0
-rof_seconds = 5.45
+damage = 195
+range = 25.0
+rof_seconds = 5.5
 use_explicit_air = true
 engages_air_explicit = false
 mult_vs_unarmored_v2 = 1.0
-mult_vs_light_v2 = 1.1
-mult_vs_medium_v2 = 0.85
-mult_vs_heavy_v2 = 0.3
-mult_vs_structure_v2 = 0.7
-mult_vs_light_air_v2 = 1.0
-mult_vs_heavy_air_v2 = 0.5
+mult_vs_light_v2 = 0.5
+mult_vs_medium_v2 = 0.9
+mult_vs_heavy_v2 = 1.0
+mult_vs_structure_v2 = 0.6
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
 
 [resource]
 script = ExtResource("1")
-unit_name = "Breacher Tank (Mortar)"
-display_name = "Boyar (Mortar)"
-unit_class = &"transport"
-hp_total = 1380
-hp_per_unit = 460
+unit_name = "Breacher Tank (Plow)"
+display_name = "Boyar (Plow)"
+unit_class = &"medium"
+hp_total = 2100
+hp_per_unit = 700
 armor_class = &"medium"
 speed_tier = &"slow"
-sight_tier = &"long"
+sight_tier = &"medium"
 squad_size = 3
 population = 14
 cost_salvage = 300
 cost_fuel = 40
 build_time = 34.0
-built_at = &"advanced_foundry"
-primary_weapon = SubResource("weapon_breacher_mortar")
-special_description = "Boyar Mortar branch — main gun replaced by a long-range high-arc Basilisk mortar. Strong vs light squads, decent vs medium, falls off vs heavy armour. Sit back and lob shells over enemy turret cover. 0.7x vs structures."
-passive_description = "High-Arc Mortar — fires over cover and obstacles. Long reload, but the splash chews through light formations from beyond direct-fire range."
-branch_summary = "Mobile mortar platform. Trades raw AT damage for a high-arc anti-light shell that fires from outside return-fire range."
+built_at = &"basic_foundry"
+primary_weapon = SubResource("weapon_plow_cannon")
+special_description = "Boyar Plow — howitzer upgraded to AT cannon (AP, Very High, Long, Slow). Single-shot anti-armor specialist. Slow ROF but very high damage. Front armor +30% vs AP."
+passive_description = "AT Cannon — very high damage single-shot anti-armor gun. Slow ROF; pick targets carefully."
+branch_summary = "Howitzer replaced with a high-velocity AT cannon. Slower reload but each shot deals Very High AP damage — the anti-heavy specialist."
 
 speed = 5.0
-sight_radius = 26.0
-armor_reduction = 0.3
+sight_radius = 18.0
+armor_reduction = 0.4

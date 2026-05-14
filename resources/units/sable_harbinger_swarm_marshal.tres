@@ -6,7 +6,7 @@
 
 [sub_resource type="Resource" id="weapon_marshal_railgun"]
 script = ExtResource("2")
-weapon_name = "Spinal Railgun"
+weapon_name = "Long-Range Guided Missile Pod (Striker)"
 role_tag = &"AP"
 damage_tier = &"very_high"
 range_tier = &"long"
@@ -53,8 +53,8 @@ mult_vs_heavy_air_v2 = 0.3
 
 [resource]
 script = ExtResource("1")
-unit_name = "Harbinger (Swarm Marshal)"
-display_name = "Harbinger (Swarm Marshal)"
+unit_name = "Harbinger (Striker)"
+display_name = "Harbinger (Striker)"
 unit_class = &"heavy"
 hp_total = 2080
 hp_per_unit = 1040
@@ -79,8 +79,8 @@ ability_radius = 0.0
 ability_duration = 0.0
 ability_autocast = true
 ability_description = "Next railgun shot fires as a glowing 5-pellet salvo for 2x damage. Autocasts whenever the cooldown rolls over and a target is in range."
-special_description = "Harbinger Swarm Marshal — combat-focused branch. Faster drone-bay cadence + the Heavy Volley ability: every 12s the next railgun shot fires as a glowing 5-pellet salvo for 2x damage. Trades the Overseer's wider Mesh aura for raw burst output."
-branch_summary = "Trades the Mesh aura for a glowing Heavy Volley active and bigger guns. The Harbinger that hunts other apex units."
+special_description = "Harbinger Striker branch — guided missiles upgraded (range +20%, damage +15%). Drone bay reduced to 2 drones. Pure ranged precision strike specialist."
+branch_summary = "Missile range and damage upgraded at the cost of drone bay capacity. The Harbinger that hunts high-value targets from maximum range."
 speed = 5.6
 sight_radius = 26.0
 armor_reduction = 0.45

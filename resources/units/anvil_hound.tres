@@ -10,49 +10,49 @@
 
 [sub_resource type="Resource" id="weapon_autocannons"]
 script = ExtResource("2")
-weapon_name = "Twin Universal Autocannons"
-role_tag = &"Universal"
+weapon_name = "Unguided Rocket Pods"
+role_tag = &"AP"
 damage_tier = &"moderate"
 range_tier = &"medium"
-rof_tier = &"moderate"
-can_hit_air = true
-mult_vs_light = 0.40
-mult_vs_medium = 1.00
-mult_vs_heavy = 0.60
+rof_tier = &"volley"
+base_accuracy = 0.60
+salvo_count = 7
+salvo_stagger_sec = 0.08
+can_damage_trees = true
 
-damage = 15
+damage = 25
 range = 15.0
-rof_seconds = 1.0
+rof_seconds = 3.0
 use_explicit_air = false
 engages_air_explicit = false
-mult_vs_unarmored_v2 = 0.8
-mult_vs_light_v2 = 0.8
-mult_vs_medium_v2 = 1.0
-mult_vs_heavy_v2 = 0.3
-mult_vs_structure_v2 = 0.3
-mult_vs_light_air_v2 = 0.4
-mult_vs_heavy_air_v2 = 0.3
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 1.0
+mult_vs_medium_v2 = 0.7
+mult_vs_heavy_v2 = 0.4
+mult_vs_structure_v2 = 0.8
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
 
 [sub_resource type="Resource" id="weapon_at_missiles"]
 script = ExtResource("2")
-weapon_name = "Shoulder AT Missile Rack"
-role_tag = &"AA"
-damage_tier = &"high"
+weapon_name = "Coaxial Medium MG"
+role_tag = &"Universal"
+damage_tier = &"low"
 range_tier = &"medium"
-rof_tier = &"slow"
+rof_tier = &"fast"
 
-damage = 50
+damage = 12
 range = 15.0
-rof_seconds = 3.0
+rof_seconds = 0.5
 use_explicit_air = true
 engages_air_explicit = false
-mult_vs_unarmored_v2 = 0.8
-mult_vs_light_v2 = 0.5
-mult_vs_medium_v2 = 0.8
-mult_vs_heavy_v2 = 1.0
-mult_vs_structure_v2 = 0.6
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 1.0
+mult_vs_medium_v2 = 0.5
+mult_vs_heavy_v2 = 0.3
+mult_vs_structure_v2 = 0.3
 mult_vs_light_air_v2 = 0.3
-mult_vs_heavy_air_v2 = 0.4
+mult_vs_heavy_air_v2 = 0.2
 
 [resource]
 script = ExtResource("1")
@@ -73,7 +73,7 @@ build_time = 35.0
 built_at = &"basic_foundry"
 primary_weapon = SubResource("weapon_autocannons")
 secondary_weapon = SubResource("weapon_at_missiles")
-special_description = "Combine's mid-tier brawler. Twin Universal autocannons + a slower AT missile secondary for armored targets."
+special_description = "Combine's rocket saturation squad. Unguided Rocket Pods devastate grouped targets and structures — Inaccurate vs fast lone targets. Coaxial MG finishes damaged targets. Squad strength bonus +12% accuracy at full strength."
 branch_a_stats = ExtResource("3")
 branch_b_stats = ExtResource("4")
 branch_a_name = "Tracker"

@@ -10,47 +10,49 @@
 
 [sub_resource type="Resource" id="weapon_rotary_cannon"]
 script = ExtResource("2")
-weapon_name = "Triple AP Cannon Battery"
+weapon_name = "Quad Heavy Autocannons"
 role_tag = &"AP"
-damage_tier = &"very_high"
-range_tier = &"long"
-rof_tier = &"slow"
-damage_value = 57
-rof_seconds_value = 2.0
-salvo_count = 3
-salvo_stagger_sec = 0.10
-projectile_style = &"shell"
-can_damage_trees = true
-mult_vs_light = 0.3
-mult_vs_medium = 0.5
-mult_vs_heavy = 1.0
-structure_damage_mult = 0.6
-
-damage = 57
-range = 25.0
-rof_seconds = 2.0
-use_explicit_air = true
-engages_air_explicit = false
-mult_vs_unarmored_v2 = 1.0
-mult_vs_light_v2 = 0.3
-mult_vs_medium_v2 = 0.5
-mult_vs_heavy_v2 = 1.0
-mult_vs_structure_v2 = 0.6
-mult_vs_light_air_v2 = 1.0
-mult_vs_heavy_air_v2 = 0.5
-
-[sub_resource type="Resource" id="weapon_missile_pod"]
-script = ExtResource("2")
-weapon_name = "Shoulder AT Missile Pod"
-role_tag = &"AA"
 damage_tier = &"high"
 range_tier = &"medium"
-rof_tier = &"slow"
+rof_tier = &"fast"
+damage_value = 50
+rof_seconds_value = 0.5
+salvo_count = 4
+salvo_stagger_sec = 0.06
+projectile_style = &"shell"
 can_damage_trees = true
+mult_vs_light = 0.6
+mult_vs_medium = 0.9
+mult_vs_heavy = 0.7
+structure_damage_mult = 0.5
 
 damage = 50
 range = 15.0
-rof_seconds = 2.0
+rof_seconds = 0.5
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 0.6
+mult_vs_medium_v2 = 0.9
+mult_vs_heavy_v2 = 0.7
+mult_vs_structure_v2 = 0.5
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
+
+[sub_resource type="Resource" id="weapon_missile_pod"]
+script = ExtResource("2")
+weapon_name = "AT Missile Pod"
+role_tag = &"AP"
+damage_tier = &"very_high"
+range_tier = &"long"
+rof_tier = &"volley"
+can_damage_trees = true
+salvo_count = 2
+salvo_stagger_sec = 0.30
+
+damage = 85
+range = 25.0
+rof_seconds = 6.0
 use_explicit_air = true
 engages_air_explicit = false
 mult_vs_unarmored_v2 = 0.8
@@ -58,8 +60,8 @@ mult_vs_light_v2 = 0.5
 mult_vs_medium_v2 = 0.8
 mult_vs_heavy_v2 = 1.2
 mult_vs_structure_v2 = 0.6
-mult_vs_light_air_v2 = 0.3
-mult_vs_heavy_air_v2 = 0.4
+mult_vs_light_air_v2 = 0.2
+mult_vs_heavy_air_v2 = 0.3
 
 [resource]
 script = ExtResource("1")
@@ -80,9 +82,9 @@ built_at = &"advanced_foundry"
 unlock_prerequisite = &"basic_armory"
 primary_weapon = SubResource("weapon_rotary_cannon")
 secondary_weapon = SubResource("weapon_missile_pod")
-special_description = "Combine heavy line. Heavy AP cannon for armored targets + AA missile pod secondary for self-defense vs aircraft."
-branch_a_name = "Siegebreaker"
-branch_b_name = "Ironwall"
+special_description = "Combine's iconic heavy war machine. Quad Heavy Autocannons deliver sustained AP DPS at medium range. AT Missile Pod handles heavy targets at long range. Front armor +25% vs AP. Fearsome Combine heavy identity."
+branch_a_name = "Citadel"
+branch_b_name = "Ironcrusher"
 branch_a_stats = ExtResource("3")
 branch_b_stats = ExtResource("4")
 

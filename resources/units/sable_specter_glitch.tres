@@ -6,7 +6,7 @@
 
 [sub_resource type="Resource" id="weapon_pulse_repeater_glitch"]
 script = ExtResource("2")
-weapon_name = "Light Pulse Repeater"
+weapon_name = "Suppressed Marksman Rifle (Glitch)"
 role_tag = &"AP"
 damage_tier = &"low"
 range_tier = &"medium"

@@ -10,12 +10,12 @@
 
 [sub_resource type="Resource" id="weapon_twin_mg"]
 script = ExtResource("2")
-weapon_name = "Twin Shoulder MGs"
+weapon_name = "Twin Autocannons"
 role_tag = &"AP"
-damage_tier = &"very_low"
+damage_tier = &"low"
 range_tier = &"medium"
 range_value = 17.0
-rof_tier = &"rapid"
+rof_tier = &"fast"
 can_hit_air = true
 air_damage_mult = 0.7
 mult_vs_light_air = 1.00

@@ -6,7 +6,7 @@
 
 [sub_resource type="Resource" id="weapon_overseer_railgun"]
 script = ExtResource("2")
-weapon_name = "Spinal Railgun"
+weapon_name = "Long-Range Guided Missile Pod (Overseer)"
 role_tag = &"AP"
 damage_tier = &"very_high"
 range_tier = &"long"

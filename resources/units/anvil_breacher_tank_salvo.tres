@@ -4,60 +4,52 @@
 
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
 
-[sub_resource type="Resource" id="weapon_salvo_pod"]
+[sub_resource type="Resource" id="weapon_dozer_flamer"]
 script = ExtResource("2")
-weapon_name = "Six-Tube Rocket Battery"
-role_tag = &"AP"
-damage_tier = &"high"
-range_tier = &"long"
-rof_tier = &"slow"
-damage_value = 23
-rof_seconds_value = 3.6
-projectile_style = &"missile"
-base_accuracy = 0.85
-salvo_count = 6
-salvo_stagger_sec = 0.10
+weapon_name = "Heavy Flame Projector"
+role_tag = &"AS"
+damage_tier = &"moderate"
+range_tier = &"short"
+rof_tier = &"continuous"
+projectile_style = &"beam"
+base_accuracy = 0.90
 can_damage_trees = true
-mult_vs_light = 0.55
-mult_vs_medium = 0.95
-mult_vs_heavy = 1.10
-structure_damage_mult = 0.70
+splash_radius = 2.5
+splash_damage_mult = 0.8
 
-damage = 23
-range = 25.0
-rof_seconds = 3.6
+damage = 25
+range = 8.0
+rof_seconds = 0.25
 use_explicit_air = true
 engages_air_explicit = false
-mult_vs_unarmored_v2 = 1.0
-mult_vs_light_v2 = 0.55
-mult_vs_medium_v2 = 0.95
-mult_vs_heavy_v2 = 1.1
-mult_vs_structure_v2 = 0.7
-mult_vs_light_air_v2 = 1.0
-mult_vs_heavy_air_v2 = 0.5
+mult_vs_unarmored_v2 = 1.5
+mult_vs_light_v2 = 1.5
+mult_vs_medium_v2 = 0.8
+mult_vs_heavy_v2 = 0.5
+mult_vs_structure_v2 = 1.8
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
 
 [resource]
 script = ExtResource("1")
-unit_name = "Breacher Tank (Salvo)"
-display_name = "Boyar (Salvo)"
-unit_class = &"transport"
-hp_total = 1380
-hp_per_unit = 460
+unit_name = "Breacher Tank (Dozer)"
+display_name = "Boyar (Dozer)"
+unit_class = &"medium"
+hp_total = 2100
+hp_per_unit = 700
 armor_class = &"medium"
 speed_tier = &"slow"
 sight_tier = &"medium"
 squad_size = 3
-population = 14
+population = 12
 cost_salvage = 300
 cost_fuel = 40
 build_time = 33.0
-built_at = &"advanced_foundry"
-primary_weapon = SubResource("weapon_salvo_pod")
-rof_ramp_per_hit = 0.10
-rof_ramp_max = 0.55
-special_description = "Boyar Salvo branch — main gun replaced by a six-tube rocket battery that ripples all six rockets in tight succession. Each consecutive salvo at the same target shortens the next reload by 10%, capped at 55% off (cycle floor ~1.6s). Locks onto a target and tears it apart faster the longer it stays painted."
-passive_description = "Lock-On Cycle — every consecutive salvo at the same target shortens the next reload (-10% per shot, max -55%). Resets when the target changes."
-branch_summary = "Six-tube ripple-fire rocket battery with a fire-rate ramp -- best when you can keep the squad painting one heavy mech."
+built_at = &"basic_foundry"
+primary_weapon = SubResource("weapon_dozer_flamer")
+special_description = "Boyar Dozer — howitzer replaced with a heavy flame projector (AS, Moderate, Short, Continuous). Anti-infantry / anti-structure breaching tank. Captured/license-produced thermal system. Trades range for raw close-quarters power."
+passive_description = "Flame Projector — sustained flame cone shreds infantry and structures at short range. The only Combine unit with thermal weapons."
+branch_summary = "Howitzer removed for a close-range flame projector. Breach buildings and burn infantry formations; must close to effective range."
 
 speed = 5.0
 sight_radius = 18.0

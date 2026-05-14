@@ -6,28 +6,30 @@
 
 [sub_resource type="Resource" id="weapon_autocannons"]
 script = ExtResource("2")
-weapon_name = "Twin Universal Autocannons"
-role_tag = &"Universal"
+weapon_name = "Proximity-Fuse Rocket Pods"
+role_tag = &"AP"
 damage_tier = &"moderate"
 range_tier = &"medium"
-rof_tier = &"moderate"
-can_hit_air = true
-mult_vs_light = 0.40
-mult_vs_medium = 1.00
-mult_vs_heavy = 0.60
+rof_tier = &"volley"
+base_accuracy = 0.60
+salvo_count = 7
+salvo_stagger_sec = 0.08
+splash_radius = 2.5
+splash_damage_mult = 0.5
+can_damage_trees = true
 
-damage = 15
+damage = 25
 range = 15.0
-rof_seconds = 1.0
+rof_seconds = 3.0
 use_explicit_air = false
 engages_air_explicit = false
-mult_vs_unarmored_v2 = 0.8
-mult_vs_light_v2 = 0.8
-mult_vs_medium_v2 = 1.0
-mult_vs_heavy_v2 = 0.3
-mult_vs_structure_v2 = 0.3
-mult_vs_light_air_v2 = 0.4
-mult_vs_heavy_air_v2 = 0.3
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 1.0
+mult_vs_medium_v2 = 0.7
+mult_vs_heavy_v2 = 0.4
+mult_vs_structure_v2 = 0.8
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
 
 [resource]
 script = ExtResource("1")

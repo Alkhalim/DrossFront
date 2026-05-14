@@ -6,17 +6,16 @@
 
 [sub_resource type="Resource" id="weapon_welder"]
 script = ExtResource("2")
-weapon_name = "Pulse Welder"
-role_tag = &"AP"
-damage_tier = &"very_low"
-range_tier = &"short"
-rof_tier = &"slow"
-projectile_style = &"beam"
-base_accuracy = 0.96
+weapon_name = "Suppressed PDW"
+role_tag = &"Universal"
+damage_tier = &"low"
+range_tier = &"medium"
+rof_tier = &"fast"
+base_accuracy = 0.88
 
-damage = 5
-range = 8.0
-rof_seconds = 2.0
+damage = 12
+range = 15.0
+rof_seconds = 0.5
 use_explicit_air = true
 engages_air_explicit = false
 mult_vs_unarmored_v2 = 1.0
@@ -35,7 +34,7 @@ unit_class = &"engineer"
 hp_total = 800
 hp_per_unit = 200
 armor_class = &"light"
-speed_tier = &"fast"
+speed_tier = &"moderate"
 sight_tier = &"medium"
 squad_size = 4
 population = 4
@@ -48,7 +47,7 @@ primary_weapon = SubResource("weapon_welder")
 detection_radius = 100.0
 special_description = "Builds structures. Repairs at 8 HP/sec. Slightly faster than the Combine's Mekh — Meridian engineers prioritise mobility over armour."
 can_build = true
-repair_rate = 5.6
-speed = 13.5
+repair_rate = 9.0
+speed = 8.0
 sight_radius = 18.0
 armor_reduction = 0.15

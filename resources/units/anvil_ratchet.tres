@@ -6,17 +6,17 @@
 
 [sub_resource type="Resource" id="weapon_pistol"]
 script = ExtResource("2")
-weapon_name = "Cutting Laser"
-role_tag = &"AP"
-damage_tier = &"very_low"
+weapon_name = "Industrial Cutting Laser"
+role_tag = &"AS"
+damage_tier = &"low"
 range_tier = &"short"
-rof_tier = &"slow"
+rof_tier = &"continuous"
 projectile_style = &"beam"
 base_accuracy = 0.85
 
-damage = 5
+damage = 12
 range = 8.0
-rof_seconds = 2.0
+rof_seconds = 0.25
 use_explicit_air = true
 engages_air_explicit = false
 mult_vs_unarmored_v2 = 1.0
@@ -33,15 +33,15 @@ unit_name = "Ratchet"
 display_name = "Mekh"
 unit_class = &"engineer"
 hp_total = 720
-hp_per_unit = 144
+hp_per_unit = 180
 armor_class = &"light"
 speed_tier = &"moderate"
 sight_tier = &"medium"
-squad_size = 5
-population = 5
-cost_salvage = 40
+squad_size = 4
+population = 4
+cost_salvage = 60
 cost_fuel = 0
-build_time = 12.0
+build_time = 15.0
 built_at = &"headquarters"
 primary_weapon = SubResource("weapon_pistol")
 detection_radius = 100.0

@@ -6,7 +6,7 @@
 
 [sub_resource type="Resource" id="weapon_widow_needles"]
 script = ExtResource("2")
-weapon_name = "Long Pulse Lasers"
+weapon_name = "Rapid-Pulse Laser (Widow)"
 role_tag = &"AP"
 damage_tier = &"moderate"
 range_tier = &"long"

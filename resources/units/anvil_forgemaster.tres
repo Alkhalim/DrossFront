@@ -10,16 +10,17 @@
 
 [sub_resource type="Resource" id="weapon_riveter"]
 script = ExtResource("2")
-weapon_name = "Riveter Autocannon"
+weapon_name = "MOLOT Designator Laser"
 role_tag = &"AP"
 damage_tier = &"low"
 range_tier = &"medium"
-rof_tier = &"fast"
-base_accuracy = 0.84
+rof_tier = &"moderate"
+projectile_style = &"beam"
+base_accuracy = 0.95
 
 damage = 12
 range = 15.0
-rof_seconds = 0.5
+rof_seconds = 1.0
 use_explicit_air = true
 engages_air_explicit = false
 mult_vs_unarmored_v2 = 1.0
@@ -62,7 +63,7 @@ hp_total = 850
 hp_per_unit = 850
 armor_class = &"medium"
 speed_tier = &"slow"
-sight_tier = &"medium"
+sight_tier = &"long"
 squad_size = 1
 population = 10
 cost_salvage = 480

@@ -6,30 +6,30 @@
 
 [sub_resource type="Resource" id="weapon_sapper_mg"]
 script = ExtResource("2")
-weapon_name = "Twin Shoulder MGs"
+weapon_name = "Cluster Mine Launcher"
 role_tag = &"AP"
-damage_tier = &"low"
-range_tier = &"medium"
-range_value = 17.0
-rof_tier = &"rapid"
-base_accuracy = 0.82
-can_hit_air = true
-air_damage_mult = 0.7
-mult_vs_light_air = 1.00
-mult_vs_heavy_air = 0.30
+damage_tier = &"moderate"
+range_tier = &"short"
+range_value = 8.0
+rof_tier = &"volley"
+base_accuracy = 0.72
+can_hit_air = false
+salvo_count = 3
+salvo_stagger_sec = 0.10
+can_damage_trees = false
 
-damage = 5
-range = 17.0
-rof_seconds = 0.25
+damage = 25
+range = 8.0
+rof_seconds = 2.0
 use_explicit_air = true
-engages_air_explicit = true
+engages_air_explicit = false
 mult_vs_unarmored_v2 = 1.0
 mult_vs_light_v2 = 1.0
-mult_vs_medium_v2 = 0.4
-mult_vs_heavy_v2 = 0.3
-mult_vs_structure_v2 = 0.2
-mult_vs_light_air_v2 = 1.0
-mult_vs_heavy_air_v2 = 0.3
+mult_vs_medium_v2 = 0.6
+mult_vs_heavy_v2 = 0.4
+mult_vs_structure_v2 = 0.5
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
 
 [sub_resource type="Resource" id="weapon_sapper_demo"]
 script = ExtResource("2")
@@ -59,8 +59,8 @@ script = ExtResource("1")
 unit_name = "Rook (Sapper)"
 display_name = "Strelet (Sapper)"
 unit_class = &"light"
-hp_total = 1020
-hp_per_unit = 255
+hp_total = 1420
+hp_per_unit = 355
 armor_class = &"light"
 speed_tier = &"fast"
 sight_tier = &"long"
