@@ -796,8 +796,9 @@ func _build_settings_panel() -> void:
 	# bus's mute flag fires, guaranteeing silence — not just very low
 	# volume). 100 = unity gain (0 dB). Linear-to-dB inside the handler
 	# gives perceptually-smooth steps.
-	# Testing-phase: audio_manager starts all three buses muted, so all
-	# sliders open at 0 and the player drags up to enable.
+	# Default: all three buses open at 40% (≈ -7.96 dB) on every launch.
+	# There is no save system, so 40% applies on every launch.
+	const AUDIO_DEFAULT_PERCENT: float = 40.0
 	for entry: Dictionary in [
 		{"label": "SFX", "bus": "SFX"},
 		{"label": "Voices", "bus": "Voiceline"},
@@ -818,16 +819,13 @@ func _build_settings_panel() -> void:
 		slider.min_value = 0.0
 		slider.max_value = 100.0
 		slider.step = 1.0
+		# Drive the AudioServer bus to 40% immediately so audio matches
+		# the slider position from the first frame.
 		var bus_idx: int = AudioServer.get_bus_index(entry["bus"] as String)
 		if bus_idx >= 0:
-			if AudioServer.is_bus_mute(bus_idx):
-				slider.value = 0.0
-			else:
-				# Reverse the linear-to-dB map: slider % = db_to_linear(bus_db) × 100,
-				# clamped to the slider range so +dB headroom collapses to 100.
-				slider.value = clampf(db_to_linear(AudioServer.get_bus_volume_db(bus_idx)) * 100.0, 0.0, 100.0)
-		else:
-			slider.value = 0.0
+			AudioServer.set_bus_mute(bus_idx, false)
+			AudioServer.set_bus_volume_db(bus_idx, linear_to_db(AUDIO_DEFAULT_PERCENT / 100.0))
+		slider.value = AUDIO_DEFAULT_PERCENT
 		slider.value_changed.connect(_on_bus_volume_changed.bind(entry["bus"] as String))
 		row.add_child(slider)
 
@@ -1052,13 +1050,10 @@ func _on_start_match_pressed() -> void:
 	MatchSettings.mode = _selected_mode as MatchSettingsClass.Mode
 	MatchSettings.map_id = _selected_map as MatchSettingsClass.MapId
 	MatchSettings.player_faction = _selected_faction as MatchSettingsClass.FactionId
-	# Enemy AI defaults to the OPPOSITE faction so picking Sable triggers
-	# an asymmetric Anvil-vs-Sable match. (Per-AI faction overrides
-	# could be added to the dropdown rows in the future.)
-	if _selected_faction == MatchSettingsClass.FactionId.ANVIL:
-		MatchSettings.enemy_faction = MatchSettingsClass.FactionId.SABLE
-	else:
-		MatchSettings.enemy_faction = MatchSettingsClass.FactionId.ANVIL
+	# Enemy AI defaults to Combine (ANVIL). The per-AI faction dropdowns
+	# can override this per-slot; the legacy enemy_faction field used by
+	# older code that hasn't migrated to per-AI overrides defaults here.
+	MatchSettings.enemy_faction = MatchSettingsClass.FactionId.ANVIL
 	# Read each AI's per-row dropdown selection.
 	var diffs: Dictionary = {}
 	var pers: Dictionary = {}

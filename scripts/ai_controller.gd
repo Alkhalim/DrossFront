@@ -111,6 +111,12 @@ const OIL_CONTEST_INTERVAL: float = 18.0
 ## AI bouncing off and respawning the same dispatch in 18s.
 const OIL_CONTEST_DETACHMENT_SIZE: int = 4
 var _oil_contest_timer: float = 0.0
+## Throttle for Combine AI Conveyor Node placement attempts.
+## Timer advances in _process; _conveyor_node_due is set when it fires,
+## then consumed by _process_economy.
+const CONVEYOR_NODE_INTERVAL: float = 10.0
+var _conveyor_node_timer: float = 0.0
+var _conveyor_node_due: bool = false
 
 var _salvage_accumulator: float = 0.0
 
@@ -540,6 +546,13 @@ func _process(delta: float) -> void:
 			if _oil_contest_timer >= OIL_CONTEST_INTERVAL:
 				_oil_contest_timer = 0.0
 				_try_contest_oil()
+		# Combine-only Conveyor Node placement interval. Flag is consumed
+		# by _process_economy so the placement runs in that context.
+		if _my_faction == 0 and _state == AIState.ECONOMY:
+			_conveyor_node_timer += delta
+			if _conveyor_node_timer >= CONVEYOR_NODE_INTERVAL:
+				_conveyor_node_timer = 0.0
+				_conveyor_node_due = true
 
 	match _state:
 		AIState.ECONOMY:
@@ -771,6 +784,12 @@ func _process_economy() -> void:
 			_try_place("advanced_armory", "res://resources/buildings/advanced_armory.tres", _offset_for("advanced_armory", Vector3(-18, 0, -4)))
 			_try_place_salvage_yard("salvage_yard_3", _offset_for("salvage_yard_3", Vector3(12, 0, 28)))
 
+	# Combine-only: drop Conveyor Nodes to chain production buildings.
+	# The timer is advanced in _process; here we fire if the flag is set.
+	if _my_faction == 0 and _conveyor_node_due:
+		_conveyor_node_due = false
+		_maybe_build_conveyor_nodes()
+
 	# Dynamic AA escalation — once the strategy's static queue has
 	# placed its baseline SAM, push for extra SAM sites if the player
 	# is going air. See _maybe_build_extra_sam for the count formula.
@@ -783,6 +802,54 @@ func _process_economy() -> void:
 	if _state_timer >= ECONOMY_DURATION:
 		_state = AIState.ARMY
 		_state_timer = 0.0
+
+
+func _maybe_build_conveyor_nodes() -> void:
+	## Combine AI only. After 2+ production buildings exist, try to drop a
+	## Conveyor Node at the midpoint between adjacent pairs to chain them
+	## into the discount network. Uses the standard _try_place pipeline
+	## (engineer, resource check, clear-spot scan) so placement follows
+	## the same rules as every other AI building.
+	## Pairs are skipped when they are farther than 18u apart (single Node
+	## can't bridge them) or when would_overfull_network rejects the spot.
+	if not is_instance_valid(_hq):
+		return
+	var scene_root: Node = get_tree().current_scene
+	var cnm: ConveyorNetworkManager = scene_root.get_node_or_null("ConveyorNetworkManager") as ConveyorNetworkManager
+	# Gather own constructed production buildings.
+	var producers: Array[Node] = []
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		if (node.get("owner_id") as int) != owner_id:
+			continue
+		if not node.get("is_constructed"):
+			continue
+		var stat: BuildingStatResource = node.get("stats") as BuildingStatResource
+		if stat == null:
+			continue
+		if stat.building_id in [&"basic_foundry", &"advanced_foundry", &"aerodrome", &"headquarters"]:
+			producers.append(node)
+	if producers.size() < 2:
+		return  # Not enough to chain yet.
+	# Walk all pairs; try the first midpoint that passes network + clear checks.
+	for i: int in producers.size():
+		for j: int in range(i + 1, producers.size()):
+			var pa: Vector3 = (producers[i] as Node3D).global_position
+			var pb: Vector3 = (producers[j] as Node3D).global_position
+			if pa.distance_to(pb) > 18.0:
+				continue  # Too far apart — would need multiple nodes.
+			var mid: Vector3 = (pa + pb) * 0.5
+			if cnm != null and cnm.would_overfull_network(owner_id, mid, &"conveyor_node"):
+				continue
+			# Build a unique key per pair so _buildings_placed dedup works
+			# and successive pairs each get their own slot.
+			var pair_key: String = "conveyor_node_%d_%d" % [i, j]
+			if _buildings_placed.has(pair_key):
+				continue
+			var offset: Vector3 = mid - _hq.global_position
+			_try_place(pair_key, "res://resources/buildings/conveyor_node.tres", offset)
+			return  # One placement attempt per interval tick.
 
 
 func _maybe_build_extra_sam() -> void:
