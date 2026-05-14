@@ -5927,7 +5927,7 @@ func _spawn_patrol_drones() -> void:
 	var units_node: Node = get_tree().current_scene.get_node_or_null("Units")
 	for i: int in 3:
 		var ang: float = TAU * float(i) / 3.0
-		var spawn_pos: Vector3 = global_position + Vector3(cos(ang), drone_stats.flight_altitude, sin(ang)) * 4.0
+		var spawn_pos: Vector3 = global_position + Vector3(cos(ang) * 4.0, drone_stats.flight_altitude, sin(ang) * 4.0)
 		var drone: Node3D = aircraft_scene.instantiate() as Node3D
 		drone.set("stats", drone_stats)
 		drone.set("owner_id", owner_id)

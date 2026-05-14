@@ -361,6 +361,10 @@ func _process(delta: float) -> void:
 			# Subtle Z roll mimicking drone yaw correction.
 			drone.rotation.z = sin(_drone_anim_time * 1.7 + phase) * 0.05
 
+	# Patrol-orbit tick for Drone Bay defenders.
+	if _patrol_around != null:
+		_tick_patrol()
+
 	# PB-6 / PF-B-B5: new movement system owns XZ position when active.
 	# Visual-only work above (altitude bob, shadow, rotor spin, drone bob)
 	# still runs. When AircraftMovement is present, either:
@@ -454,6 +458,8 @@ func _build_visuals() -> void:
 			_build_switchblade()
 		"Wraith Bomber":
 			_build_wraith()
+		"Patrol Drone":
+			_build_patrol_drone()
 		_:
 			_build_default_aircraft()
 
@@ -2347,6 +2353,109 @@ func _build_default_aircraft() -> void:
 	stripe_mat.emission_energy_multiplier = 1.2
 	stripe.set_surface_override_material(0, stripe_mat)
 	add_child(stripe)
+
+
+## --- Patrol Drone (Drone Bay defender) -----------------------------------
+
+func _build_patrol_drone() -> void:
+	## Small flat disc + raised sensor dome. Single-body craft; no swarm.
+	## Meridian teal-blue accent to read as allied tech on the battlefield.
+	var team: Color = _team_color()
+	var body := MeshInstance3D.new()
+	body.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var disc := CylinderMesh.new()
+	disc.top_radius = 0.40
+	disc.bottom_radius = 0.40
+	disc.height = 0.10
+	disc.radial_segments = 16
+	body.mesh = disc
+	body.set_surface_override_material(0, _aircraft_metal_mat(Color(0.12, 0.13, 0.16, 1.0)))
+	add_child(body)
+	# Sensor dome on top.
+	var dome := MeshInstance3D.new()
+	dome.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var dome_mesh := SphereMesh.new()
+	dome_mesh.radius = 0.20
+	dome_mesh.height = 0.22
+	dome_mesh.radial_segments = 10
+	dome_mesh.rings = 5
+	dome.mesh = dome_mesh
+	dome.position.y = 0.14
+	var dome_mat := StandardMaterial3D.new()
+	dome_mat.albedo_color = Color(0.20, 0.72, 0.90, 0.75)
+	dome_mat.emission_enabled = true
+	dome_mat.emission = Color(0.20, 0.72, 0.90, 1.0)
+	dome_mat.emission_energy_multiplier = 1.6
+	dome_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	dome_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	dome.set_surface_override_material(0, dome_mat)
+	add_child(dome)
+	# Team colour ring around disc edge.
+	var ring := MeshInstance3D.new()
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var torus_mesh := TorusMesh.new()
+	torus_mesh.inner_radius = 0.35
+	torus_mesh.outer_radius = 0.44
+	torus_mesh.ring_segments = 4
+	torus_mesh.rings = 20
+	ring.mesh = torus_mesh
+	var ring_mat := StandardMaterial3D.new()
+	ring_mat.albedo_color = team
+	ring_mat.emission_enabled = true
+	ring_mat.emission = team
+	ring_mat.emission_energy_multiplier = 1.4
+	ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ring.set_surface_override_material(0, ring_mat)
+	add_child(ring)
+
+
+## --- Patrol-around-parent state (Drone Bay defenders) -------------------
+
+## Set by Drone Bay after spawn. When non-null the drone orbits this node.
+var _patrol_around: Node3D = null
+var _patrol_radius: float = 12.0
+var _patrol_target: Vector3 = Vector3.INF
+## Throttle counter so we don't re-pick patrol target every frame.
+var _patrol_tick: int = 0
+
+
+func set_patrol_around(parent: Node3D, radius: float) -> void:
+	## Called by Building._spawn_patrol_drones immediately after spawn.
+	_patrol_around = parent
+	_patrol_radius = radius
+	_pick_new_patrol_target()
+
+
+func _pick_new_patrol_target() -> void:
+	if not is_instance_valid(_patrol_around):
+		return
+	var ang: float = randf() * TAU
+	var dist: float = _patrol_radius * (0.5 + 0.5 * randf())
+	_patrol_target = _patrol_around.global_position + Vector3(cos(ang), 0.0, sin(ang)) * dist
+	command_move(_patrol_target, false)
+
+
+## Called from _process on the heavy tick (every 3rd frame). Checks whether
+## the drone has reached its patrol waypoint and should pick a new one.
+func _tick_patrol() -> void:
+	if _patrol_around == null:
+		return
+	if not is_instance_valid(_patrol_around):
+		_patrol_around = null
+		return
+	# If the parent bay dies, kill this drone.
+	var bay_hp: int = _patrol_around.get("current_hp") as int
+	if bay_hp <= 0:
+		queue_free()
+		return
+	# Don't interrupt an active engagement.
+	if _combat != null:
+		var ct: Node3D = _combat.get("_current_target") as Node3D
+		if ct != null and is_instance_valid(ct):
+			return
+	# Pick a new waypoint when idle and arrived (move_target cleared).
+	if move_target == Vector3.INF and _patrol_target != Vector3.INF:
+		_pick_new_patrol_target()
 
 
 ## --- V3 stealth (Wraith) -------------------------------------------------
