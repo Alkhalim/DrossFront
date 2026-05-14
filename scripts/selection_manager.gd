@@ -1852,25 +1852,58 @@ func _deselect_building() -> void:
 	_hide_rally_marker()
 
 
+func _building_attack_range(bstat: BuildingStatResource) -> float:
+	## Returns the attack range in world units for a building that can fire,
+	## or 0.0 when the building has no attack capability.
+	##
+	## Special cases:
+	##   drone_bay       — no native weapons; effective aggro range is
+	##                     patrol_radius(12) + drone_weapon_range(14) = 26u.
+	##   resonance_pylon — custom AA wave coded in building.gd with a
+	##                     hardcoded 18u radius; no WeaponResource entry.
+	##
+	## All other attackable buildings (gun_emplacement, gun_emplacement_basic,
+	## sam_site, sensor_array, headquarters, …) expose their range via the
+	## first WeaponResource in the `weapons` array.
+	if bstat == null:
+		return 0.0
+	match bstat.building_id:
+		&"drone_bay":
+			return 26.0  # patrol 12u + drone weapon range 14u
+		&"resonance_pylon":
+			return 18.0  # hardcoded AA wave range in building.gd
+	if bstat.weapons.is_empty():
+		return 0.0
+	var w: WeaponResource = bstat.weapons[bstat.default_weapon_index] as WeaponResource
+	if w == null:
+		return 0.0
+	return w.resolved_range()
+
+
 func _show_attack_range(building: Building) -> void:
 	## Adds a translucent disc at the building's footprint matching its
-	## turret range. Stores it as a child so `_hide_attack_range` can
-	## kill it on deselect.
+	## attack range. Stores it as a child named "SelectionAttackRange" so
+	## `_hide_attack_range` can remove it on deselect.
+	## Covers: gun_emplacement, gun_emplacement_basic, sam_site,
+	## sensor_array, headquarters, resonance_pylon, drone_bay, and any
+	## future building with a weapons[] entry.
 	if not building or not building.stats:
 		return
-	if building.stats.building_id != &"gun_emplacement":
+	var radius: float = _building_attack_range(building.stats)
+	if radius <= 0.0:
 		return
 	if building.has_node("SelectionAttackRange"):
 		return  # Already showing.
+	# For live turret buildings, prefer the TurretComponent's runtime range
+	# so range-modifier upgrades (if added later) are reflected automatically.
+	var turret: Node = building.get_node_or_null("TurretComponent")
+	if turret and turret.has_method("get_range"):
+		var live_range: float = turret.get_range()
+		if live_range > 0.0:
+			radius = live_range
 	var ring := MeshInstance3D.new()
 	ring.name = "SelectionAttackRange"
 	var disc := CylinderMesh.new()
-	var radius: float = TurretComponent.TURRET_RANGE
-	# If the turret component is live, take its actual range (covers
-	# upgraded profiles in case we add range modifiers later).
-	var turret: Node = building.get_node_or_null("TurretComponent")
-	if turret and turret.has_method("get_range"):
-		radius = turret.get_range()
 	disc.top_radius = radius
 	disc.bottom_radius = radius
 	disc.height = 0.04
@@ -2270,11 +2303,12 @@ func start_build_placement(bstat: BuildingStatResource) -> void:
 
 	_build_ghost = ghost as Node3D
 
-	# Attack-range ring on ghosts for buildings that fire at things.
-	# Currently only the gun emplacement; other defensive types (SAM
-	# site, etc.) drop in here later.
-	if bstat.building_id == &"gun_emplacement":
-		_attach_range_ring(ghost, TurretComponent.TURRET_RANGE, Color(0.95, 0.4, 0.35, 0.35))
+	# Attack-range ring on ghosts for any building that can fire.
+	# Uses the same _building_attack_range() helper as the selection ring
+	# so the ghost and the placed building always show the same radius.
+	var _ghost_attack_radius: float = _building_attack_range(bstat)
+	if _ghost_attack_radius > 0.0:
+		_attach_range_ring(ghost, _ghost_attack_radius, Color(0.95, 0.4, 0.35, 0.35))
 
 	# Salvage Yard / Crawler — show the worker harvest radius and highlight
 	# every wreck inside it so the player can see what they'd be feeding.
