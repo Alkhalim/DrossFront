@@ -14,7 +14,7 @@ extends Node
 signal contracts_changed(owner_id: int, current: int, maximum: int)
 
 const MAX_CONTRACTS: int = 8
-const BASELINE_REGEN_INTERVAL: float = 18.0  # seconds per +1 contract (no mesh)
+const BASELINE_REGEN_INTERVAL: float = 75.0  # seconds per +1 contract (no mesh)
 const MIN_REGEN_INTERVAL: float = 2.0        # floor — heavy mesh investment cap
 
 ## Per-owner current count. Capped at MAX_CONTRACTS.
@@ -155,12 +155,12 @@ func _scan_regen_interval(owner_id: int) -> float:
 				break  # count each provider at most once
 
 	# Calibrated so:
-	#   No mesh:                  interval = 18.0 (baseline)
-	#   Modest mesh (~766 m^2):   -2.7s → ~15.3s
-	#   Strong mesh (~2500 m^2):  -8.8s → ~9.2s
-	#   Full saturation (~5000):  -17.5s → clamped at 2.0 (MIN_REGEN_INTERVAL)
+	#   No mesh:                  interval = 75.0 (baseline)
+	#   Modest mesh (1 relay+HQ): -10s → ~65s
+	#   Strong mesh (~2500 m^2):  -50s → ~45s (0.020 * 2500 = 50)
+	#   Full saturation (~2500):  -50s → 25s (capped well above MIN 2.0)
 	# Enemy presence: +0.5s reduction per provider with enemies (cap at 3 providers).
-	const AREA_TO_REDUCTION: float = 0.0035  # seconds reduction per square world unit
+	const AREA_TO_REDUCTION: float = 0.020  # seconds reduction per square world unit
 	const ENEMY_REDUCTION_PER_PROVIDER: float = 0.5
 	const MAX_ENEMY_BONUS: float = 1.5
 	var area_reduction: float = total_area * AREA_TO_REDUCTION
