@@ -1721,7 +1721,9 @@ func _setup_fuel_deposits() -> void:
 			var small: Node3D = deposit_script.new()
 			# Lower yield + smaller capture radius than the main deposits —
 			# rewards expansion without making them a primary fight.
-			small.fuel_per_second = 2.0
+			# Economy tuning 2026-05-14: small field = old 2.0 × 0.525 = 1.05.
+			# No large-field +20% bonus here — that applies to standard deposits only.
+			small.fuel_per_second = 1.05
 			small.capture_radius = 8.0
 			small.capture_time = 18.0
 			small.scale = Vector3(0.65, 0.65, 0.65)

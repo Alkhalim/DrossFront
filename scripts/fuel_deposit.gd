@@ -5,17 +5,22 @@ extends Node3D
 signal captured(new_owner: int)
 signal contested
 
-## Fuel generated per second when captured. Halved from the previous
-## 5.0 so a captured deposit takes twice as long to bankroll a heavy
-## mech — the player has to actually defend the fuel income now,
-## not just plant the flag and walk off. Income is paid in batched
-## chunks every FUEL_PAYOUT_INTERVAL_SEC so the floating "+N F"
-## readout doesn't strobe.
-@export var fuel_per_second: float = 2.5
+## Fuel generated per second when captured. This is the *large-field*
+## (standard) baseline. Economy tuning 2026-05-14:
+##   - Delivery interval 30% faster (7s vs old 10s)
+##   - Per-minute total income -25% overall
+##   - Large fields generate 20% more than small satellite fields
+## Combined: new per-second = old 2.5 × 0.525 × 1.2 ≈ 1.575.
+## Small satellite fields override this to 1.05 (= old 2.0 × 0.525).
+## Income is paid in batched chunks every FUEL_PAYOUT_INTERVAL_SEC
+## so the floating "+N F" readout doesn't strobe.
+@export var fuel_per_second: float = 1.575
 
-## Seconds between fuel payout chunks. ~10s feels like a tide
-## rather than a stream — visible income event without spam.
-const FUEL_PAYOUT_INTERVAL_SEC: float = 10.0
+## Seconds between fuel payout chunks. 7s = old 10s × 0.7 (30% faster
+## delivery frequency). Per-minute output is controlled by fuel_per_second,
+## not this interval — faster ticks with lower per-second keeps total
+## income at 75% of the old rate for large fields.
+const FUEL_PAYOUT_INTERVAL_SEC: float = 7.0
 
 ## Radius in which units can capture or contest.
 @export var capture_radius: float = 12.0
