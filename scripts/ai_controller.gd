@@ -1830,9 +1830,9 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 		_record_blocker(key, BuildBlocker.NO_CLEAR_SPOT)
 		return
 
-	# Meridian mesh-chain rule: mesh-providing buildings must touch existing
-	# mesh coverage (i.e. their disc must overlap at least one existing
-	# provider's disc). If this placement would orphan the building, skip it
+	# Meridian mesh-chain rule: mesh-providing buildings must OVERLAP an
+	# existing provider's disc by at least MESH_OVERLAP_MARGIN units (not
+	# merely touch at the border). If this placement would fail the gate, skip
 	# and let the AI retry next tick — typically after _pick_mesh_chain_position
 	# has guided the caller to a better offset. The gate fires only for
 	# buildings that actually have a mesh_provider_radius > 0 so it doesn't
@@ -1841,6 +1841,7 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 		&"sensor_spine", &"drone_bay", &"black_pylon", &"sensor_array",
 		&"mesh_relay", &"resonance_pylon",
 	]
+	const MESH_OVERLAP_MARGIN: float = 2.0
 	if _my_faction == 1 \
 			and bstats.building_id in _MESH_PROVIDER_IDS \
 			and bstats.mesh_provider_radius > 0.0:
@@ -1848,16 +1849,16 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 		var ms: Node = ms_scene_root.get_node_or_null("MeshSystem")
 		if ms != null and ms.has_method("get_providers_for_owner"):
 			var providers: Array[Dictionary] = ms.call("get_providers_for_owner", owner_id) as Array[Dictionary]
-			var touches_mesh: bool = false
+			var overlaps_mesh: bool = false
 			var new_radius: float = bstats.mesh_provider_radius
 			for entry: Dictionary in providers:
 				var their_pos: Vector3 = entry["pos"] as Vector3
 				var their_radius: float = sqrt(entry["r2"] as float)
 				var d: float = Vector2(pos.x, pos.z).distance_to(Vector2(their_pos.x, their_pos.z))
-				if d <= their_radius + new_radius:
-					touches_mesh = true
+				if d <= their_radius + new_radius - MESH_OVERLAP_MARGIN:
+					overlaps_mesh = true
 					break
-			if not touches_mesh:
+			if not overlaps_mesh:
 				# Skip — this placement would be rejected by the mesh gate.
 				# Don't record a blocker here; _pick_mesh_chain_position will
 				# supply a better offset on the next economy tick.

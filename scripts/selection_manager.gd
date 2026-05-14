@@ -2115,6 +2115,68 @@ func queue_unit_at_building(index: int) -> void:
 		_audio.play_production_started()
 
 
+func queue_unit_by_stat(unit_stats: UnitStatResource) -> void:
+	## Queues a unit identified by its UnitStatResource directly, bypassing
+	## the index-into-producible-list lookup used by queue_unit_at_building.
+	## Called from HUD production buttons so that the Meridian Basic/Advanced
+	## tab filter doesn't cause index mismatches (clicking the 3rd visible
+	## button used to enqueue the 3rd entry in the FULL roster, not the tab).
+	if not _selected_building or not _selected_building.stats:
+		return
+	if unit_stats == null:
+		return
+
+	var target: Building = _pick_lowest_queue_target()
+	if not target:
+		return
+
+	if not target.is_constructed:
+		if _audio:
+			_audio.play_error()
+		return
+
+	var bid: int = target.get_instance_id()
+	var now: int = Time.get_ticks_msec()
+	var prev: int = (_last_queue_msec.get(bid, 0) as int)
+	if (now - prev) < 100:
+		return
+	_last_queue_msec[bid] = now
+
+	var resource_mgr: ResourceManager = get_tree().current_scene.get_node("ResourceManager") as ResourceManager
+	if not resource_mgr:
+		return
+
+	if unit_stats.is_crawler and _crawler_count_for_owner(0) >= CRAWLER_CAP:
+		if _audio:
+			_audio.play_error()
+		return
+
+	if not resource_mgr.can_afford(unit_stats.cost_salvage, unit_stats.cost_fuel):
+		return
+	if not resource_mgr.has_population(unit_stats.population):
+		return
+
+	var scene_root: Node = get_tree().current_scene
+
+	var mcm: MeridianContractsManager = scene_root.get_node_or_null("MeridianContractsManager") as MeridianContractsManager
+	var owner_faction_id: int = _resolve_owner_faction_id(target)
+	if mcm != null and owner_faction_id == 1:
+		if not mcm.can_afford(target.owner_id, unit_stats.contract_cost):
+			return
+
+	var cnm: ConveyorNetworkManager = scene_root.get_node_or_null("ConveyorNetworkManager") as ConveyorNetworkManager
+	var cost: Dictionary = {"salvage": unit_stats.cost_salvage, "fuel": unit_stats.cost_fuel}
+	if cnm != null:
+		cost = cnm.compute_unit_cost(target, unit_stats)
+	resource_mgr.spend(cost.salvage, cost.fuel)
+	resource_mgr.add_population(unit_stats.population)
+	target.queue_unit(unit_stats)
+	if mcm != null and owner_faction_id == 1:
+		mcm.spend(target.owner_id, unit_stats.contract_cost)
+	if _audio:
+		_audio.play_production_started()
+
+
 func _pick_lowest_queue_target() -> Building:
 	## Returns the cohort member with the smallest current queue size, or
 	## the singular `_selected_building` when no cohort is active. Buildings
@@ -2352,8 +2414,13 @@ func _update_mesh_preview(ghost_pos: Vector3, bstat: BuildingStatResource) -> vo
 		var their_r2: float = entry.get("r2", 0.0) as float
 		var their_radius: float = sqrt(their_r2)
 		var d: float = Vector2(ghost_pos.x, ghost_pos.z).distance_to(Vector2(ppos.x, ppos.z))
-		if d <= their_radius + new_radius:
-			var line: Node3D = _make_preview_line(ghost_pos, ppos, false)  # green
+		# Show green when the discs overlap by at least 2u (placement valid);
+		# show red when they merely touch or have less than 2u penetration.
+		const MESH_OVERLAP_MARGIN: float = 2.0
+		var valid_overlap: bool = d <= their_radius + new_radius - MESH_OVERLAP_MARGIN
+		var touching: bool = d <= their_radius + new_radius
+		if touching:
+			var line: Node3D = _make_preview_line(ghost_pos, ppos, not valid_overlap)
 			scene_root.add_child(line)
 			_mesh_preview_lines.append(line)
 	# Show the cursor-position disc so the player can align the overlap.
@@ -2657,13 +2724,15 @@ func _is_valid_build_position(pos: Vector3) -> bool:
 			if not ibm.can_build_reliquary(local_owner_id):
 				return false
 
-	# Meridian mesh-chain rule — mesh-providing buildings must touch or
-	# overlap at least one existing Mesh provider's radius. The HQ counts
-	# as a seed (8u radius, populated via MeshSystem on construction).
-	# Combine players skip this check entirely (they have no Mesh system).
+	# Meridian mesh-chain rule — mesh-providing buildings must overlap at
+	# least one existing Mesh provider's disc by at least MESH_OVERLAP_MARGIN
+	# units (not merely touch at the border). The HQ counts as a seed (8u
+	# radius, populated via MeshSystem on construction). Combine players skip
+	# this check entirely (they have no Mesh system).
 	const _MESH_PROVIDER_IDS: Array[StringName] = [
 		&"sensor_spine", &"drone_bay", &"black_pylon", &"sensor_array", &"mesh_relay"
 	]
+	const MESH_OVERLAP_MARGIN: float = 2.0
 	if _build_stats != null \
 			and _build_stats.building_id in _MESH_PROVIDER_IDS \
 			and _local_player_faction() == 1 \
@@ -2673,7 +2742,7 @@ func _is_valid_build_position(pos: Vector3) -> bool:
 		if ms != null:
 			var local_owner_id: int = 0  # local player is always owner_id == 0
 			var providers: Array[Dictionary] = ms.get_providers_for_owner(local_owner_id)
-			var touches: bool = false
+			var overlaps: bool = false
 			var new_radius: float = _build_stats.mesh_provider_radius
 			for entry: Dictionary in providers:
 				# Provider dict shape: { "pos": Vector3, "r2": float, "owner_id": int }
@@ -2681,10 +2750,10 @@ func _is_valid_build_position(pos: Vector3) -> bool:
 				var their_r2: float = entry.get("r2", 0.0) as float
 				var their_radius: float = sqrt(their_r2)
 				var d: float = Vector2(pos.x, pos.z).distance_to(Vector2(ppos.x, ppos.z))
-				if d <= their_radius + new_radius:
-					touches = true
+				if d <= their_radius + new_radius - MESH_OVERLAP_MARGIN:
+					overlaps = true
 					break
-			if not touches:
+			if not overlaps:
 				return false
 
 	return true

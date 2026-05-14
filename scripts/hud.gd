@@ -2706,8 +2706,7 @@ func _rebuild_production_buttons(building: Building) -> void:
 			var hotkey: String = hotkeys[unlocked_idx] if unlocked_idx < hotkeys.size() else str(unlocked_idx + 1)
 			_set_label_button(btn, "[%s]" % hotkey, u_display)
 			btn.tooltip_text = _unit_tooltip(display_stat)
-			var capture_idx: int = unlocked_idx
-			btn.pressed.connect(_on_production_button.bind(capture_idx))
+			btn.pressed.connect(_on_production_button_stat.bind(unit_stat))
 			# Cost chip shows the network-discounted cost (salvage/fuel) so the
 			# player can see exactly what they'll be charged. Falls back to the
 			# raw stat cost when no CNM is available (test scenes / non-Combine
@@ -3201,6 +3200,15 @@ func _apply_hq_battery(building: Building) -> void:
 func _on_production_button(index: int) -> void:
 	if _selection_manager:
 		_selection_manager.queue_unit_at_building(index)
+
+
+func _on_production_button_stat(unit_stat: UnitStatResource) -> void:
+	## Routes a production-button click via the specific UnitStatResource that
+	## the button represents — avoids the index-mismatch bug that occurred when
+	## the Meridian Basic/Advanced tab filtered producible_all to a subset but
+	## the old index-based path still indexed into the FULL unlocked list.
+	if _selection_manager:
+		_selection_manager.queue_unit_by_stat(unit_stat)
 
 
 ## Color codes used by `_attach_cost_widget` for the salvage / fuel /
