@@ -15,6 +15,15 @@ extends MovementComponent
 
 var _bank_angle_current: float = 0.0
 var _last_heading_xz: Vector2 = Vector2.ZERO
+
+## Per-instance hover bob — small Y oscillation layered on top of the
+## altitude pull so aircraft read as airborne rather than glued to a
+## flat plane. Phase is randomized per-spawn so a flight of three
+## doesn't bob in unison.
+var _bob_time: float = 0.0
+var _bob_phase: float = 0.0
+const _BOB_FREQ: float = 1.5  # rad/s
+const _BOB_AMP: float = 0.18  # u — small enough not to interfere with arrival
 ## Arrival hysteresis state (mirrors GroundMovement._is_arrived). True when
 ## the aircraft is within arrival_radius of its goal and the kernel's
 ## AGENT_FLAG_ARRIVED is set (SEEK suppressed). Cleared on every new order
@@ -56,6 +65,7 @@ func _ready() -> void:
 	# from _body.global_position. First real goto_world sets both the
 	# target and HAS_TARGET correctly.
 	call_deferred("_snap_altitude_on_spawn")
+	_bob_phase = randf() * TAU
 
 
 func _snap_altitude_on_spawn() -> void:
@@ -117,18 +127,28 @@ func _apply_kernel_velocity(v: Vector3, delta: float) -> void:
 	_velocity = v
 	super._apply_kernel_velocity(v, delta)
 	_update_bank(delta)
+	# Hover bob — the kernel-driven path bypasses tick_movement entirely
+	# (PF-B-B5 bug), so without this aircraft on the kernel sit dead-stable
+	# in the air. Apply the same bob curve as tick_movement.
+	_apply_altitude_bob(delta)
+
+
+func _apply_altitude_bob(delta: float) -> void:
+	if _body == null:
+		return
+	_bob_time += delta
+	var bob_y: float = sin(_bob_time * _BOB_FREQ + _bob_phase) * _BOB_AMP
+	var target_y: float = base_altitude + bob_y
+	var y_diff: float = target_y - _body.global_position.y
+	var y_step: float = clampf(y_diff,
+		-altitude_climb_rate * delta,
+		altitude_climb_rate * delta)
+	_body.global_position.y += y_step
 
 func tick_movement(delta: float, frame_phase: int) -> void:
 	super.tick_movement(delta, frame_phase)
-	# Altitude maintenance: pull Y toward base_altitude. Aircraft don't
-	# have gravity (GroundMovement applies gravity; AircraftMovement
-	# explicitly does not).
-	if _body != null:
-		var y_diff: float = base_altitude - _body.global_position.y
-		var y_step: float = clampf(y_diff,
-			-altitude_climb_rate * delta,
-			altitude_climb_rate * delta)
-		_body.global_position.y += y_step
+	# Altitude maintenance + hover bob (legacy non-kernel path).
+	_apply_altitude_bob(delta)
 	_update_bank(delta)
 
 func _update_bank(delta: float) -> void:

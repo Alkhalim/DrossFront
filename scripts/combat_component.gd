@@ -1561,6 +1561,8 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 		effective_style == "beam"
 		or effective_style == "flame"  # flame cone is continuous hitscan, same as beam
 		or effective_style == "bullet"  # bullets are hitscan (see drossfront-docs/superpowers/plans/2026-05-12-hitscan-bullets.md)
+		or effective_style == "tesla"  # tesla bolts are visually segmented but mechanically beams
+		or effective_style == "lightning"  # synonym; same hitscan damage path
 		or weapon.is_drone_release
 		or is_shotgun  # shotgun pellets stay instant for now -- the cone is the whole damage event
 	)
@@ -1963,6 +1965,12 @@ func _resolve_projectile_style(weapon: WeaponResource) -> String:
 		# (which doesn't have a "flame" bucket). The flame cone AoE is applied
 		# at fire-time in _fire_flame_cone, independently of the tracer.
 		if ws == "flame":
+			return "beam"
+		# "tesla"/"lightning" route through the beam path so the legacy
+		# Projectile.create handler runs; Projectile.create then routes
+		# to _create_tesla_beam_mesh based on the unmodified style_override
+		# value, which the CombatComponent passes through verbatim.
+		if ws == "tesla" or ws == "lightning":
 			return "beam"
 		return ws
 	match weapon.rof_tier:

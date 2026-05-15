@@ -592,6 +592,61 @@ func _process(delta: float) -> void:
 	# defends itself even mid-attack.
 	if _state != AIState.SETUP:
 		_check_threat_response()
+	# Bandaid: every 30s, force a queue attempt across every owned
+	# production building. If pop-capped, enqueue an additional foundry
+	# so the next cycle has somewhere to spend (playtest 2026-05-15).
+	if _state != AIState.SETUP:
+		_train_kick_tick()
+
+
+## --- TRAIN KICK BANDAID ---
+const TRAIN_KICK_INTERVAL: float = 30.0
+const TRAIN_KICK_POP_BUILD_COOLDOWN: float = 60.0
+var _train_kick_last_clock: float = 0.0
+var _train_kick_pop_build_clock: float = -100.0
+
+
+func _train_kick_tick() -> void:
+	## Every 30s, force-walk owned production buildings and try to queue
+	## ANY affordable unit. If all are blocked, check whether population
+	## is the limiter and (if so + cooldown elapsed) place an additional
+	## pop-providing foundry so the next kick cycle has somewhere to spend.
+	if _match_clock_sec - _train_kick_last_clock < TRAIN_KICK_INTERVAL:
+		return
+	# Walk owned buildings + force-try queueing on each producer.
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		if (node.get("owner_id") as int) != owner_id:
+			continue
+		if not node.has_method("get_producible_units"):
+			continue
+		if not node.has_method("get_queue_size"):
+			continue
+		var producible_v: Variant = node.call("get_producible_units")
+		if not (producible_v is Array) or (producible_v as Array).is_empty():
+			continue
+		var before: int = node.call("get_queue_size") as int
+		_try_queue_at(node)
+		if (node.call("get_queue_size") as int) > before:
+			# Queued something — reset timer + bail (one queue per kick).
+			_train_kick_last_clock = _match_clock_sec
+			return
+	# Nothing got queued. If pop-cap is the blocker (and the cap is
+	# still below the absolute ceiling of 250) drop another basic
+	# foundry so the next kick has +25 pop headroom. Cooldown prevents
+	# stacking too many in a row.
+	if _ai_resource_manager and "population" in _ai_resource_manager and "population_cap" in _ai_resource_manager:
+		var cur_pop: int = _ai_resource_manager.get("population") as int
+		var cap_pop: int = _ai_resource_manager.get("population_cap") as int
+		if cur_pop >= cap_pop - 5 and cap_pop < 250:
+			if _match_clock_sec - _train_kick_pop_build_clock >= TRAIN_KICK_POP_BUILD_COOLDOWN:
+				_train_kick_pop_build_clock = _match_clock_sec
+				var key: String = "kick_pop_%d" % int(_match_clock_sec)
+				_try_place(key, "res://resources/buildings/basic_foundry.tres",
+					_offset_for("kick_pop_building", Vector3(18, 0, -8)))
+	# Reset timer regardless so we don't re-walk every tick.
+	_train_kick_last_clock = _match_clock_sec
 
 
 func _personality_wave_size_base() -> int:
@@ -3106,13 +3161,15 @@ func _existing_generator_positions() -> Array[Vector3]:
 func _find_clear_placement(desired: Vector3, footprint: Vector3, vent_keepout: float = 0.0, candidate_id: StringName = &"") -> Vector3:
 	if _is_placement_clear(desired, footprint, vent_keepout, candidate_id):
 		return desired
-	# Spiral search — expanding rings around the desired anchor. Step
-	# bumped from 2.5u → 4.0u so adjacent rings actually clear the
-	# wider PLACEMENT_GAP and the AI doesn't end up nestling buildings
-	# right next to each other once the desired spot is taken.
-	for ring: int in range(1, 8):
-		for step: int in 12:
-			var ang: float = float(step) / 12.0 * TAU
+	# Spiral search — expanding rings around the desired anchor.
+	# Reduced from 7×12=84 candidates to 5×8=40 per perf playtest
+	# 2026-05-15: AIController._is_placement_clear hit 583 calls in
+	# one frame, dominating the spike profile. Narrower search still
+	# covers ~20u radius (5 rings × 4u step) which is sufficient for
+	# typical AI base layouts.
+	for ring: int in range(1, 6):
+		for step: int in 8:
+			var ang: float = float(step) / 8.0 * TAU
 			var test_offset := Vector3(cos(ang), 0.0, sin(ang)) * float(ring) * 4.0
 			var pos: Vector3 = desired + test_offset
 			if _is_placement_clear(pos, footprint, vent_keepout, candidate_id):

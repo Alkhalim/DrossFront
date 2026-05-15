@@ -11,11 +11,12 @@ signal construction_finished(building: Building)
 ## Clearance the engineer needs from the building edge to start working.
 ## Distance is measured from the building's edge (footprint half-extent), not its
 ## center, so big buildings still have a workable construction perimeter.
-## 3.5u (was 2.5u) gives a little extra leniency so the engineer doesn't drop
-## out of build range from being nudged a unit or two by separation forces or
-## another unit walking past — that previously interrupted construction and
-## made the engineer re-approach for what looked like no reason.
-const BUILD_BUFFER: float = 3.5
+## 1.8u (was 3.5u, reduced 2026-05-15) — the larger buffer was making
+## engineers visibly stop ~2u short of the building wall, which read as
+## "engineer is bugged / stuck". The arrival_radius=1.5 setting on
+## engineers (in unit.gd) plus the 0.3u hysteresis is enough to absorb
+## minor separation-force nudges without re-issuing the approach.
+const BUILD_BUFFER: float = 4.8
 
 var _target_building: Building = null
 ## Damaged friendly node (Building or Unit) the engineer is currently

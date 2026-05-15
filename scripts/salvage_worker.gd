@@ -1003,6 +1003,37 @@ func _on_movement_path_unreachable(_reason: int) -> void:
 	# visible; the cargo guard in _find_wreck_new will stop any wreck
 	# search until the drop is complete.
 	if _carried_salvage > 0 or _carried_microchips > 0:
+		# Deposit-on-fail fallback (report 622): if the worker is
+		# already within close range of the yard but GroundMovement
+		# keeps reporting "unreachable" — typically because a teammate
+		# is blocking the exact dropoff cell — drop the cargo here
+		# instead of looping forever. Uses the same edge-aware
+		# distance test as _return_to_yard_new but with a more
+		# forgiving radius (8u).
+		if is_instance_valid(home_yard):
+			var hy_pos: Vector3 = home_yard.global_position
+			var d_center: float = global_position.distance_to(hy_pos)
+			var yard_extent: float = 0.0
+			if "stats" in home_yard:
+				var hy_stats: Resource = home_yard.get("stats") as Resource
+				if hy_stats and "footprint_size" in hy_stats:
+					var fs: Vector3 = hy_stats.get("footprint_size") as Vector3
+					yard_extent = maxf(fs.x, fs.z) * 0.5
+			var d_edge: float = maxf(d_center - yard_extent, 0.0)
+			if d_edge < 8.0 or d_center < 10.0:
+				if resource_manager:
+					resource_manager.add_salvage(_carried_salvage)
+					if _carried_microchips > 0 and resource_manager.has_method("add_microchips"):
+						resource_manager.add_microchips(_carried_microchips)
+				if _carried_salvage > 0 or _carried_microchips > 0:
+					home_yard.set_meta("last_delivery_msec", Time.get_ticks_msec())
+				_carried_salvage = 0
+				_carried_microchips = 0
+				state = State.IDLE
+				var mc_clear: Node = get_node_or_null("MovementComponent")
+				if mc_clear != null and mc_clear is GroundMovement:
+					(mc_clear as GroundMovement).clear_target()
+				return
 		state = State.RETURNING
 		if is_instance_valid(home_yard):
 			var mc: Node = get_node_or_null("MovementComponent")

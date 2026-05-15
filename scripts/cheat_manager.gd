@@ -14,6 +14,16 @@ extends Node
 ## tree every match.
 var tech_craze: bool = false
 
+## Multiplies build / production speed (engineer construction +
+## HQ/Foundry unit training) for the local player. 1.0 = normal.
+## Set to 5.0 by the geschwindigkeit cheat.
+var build_speed_mult: float = 1.0
+
+## When true, every building's power-efficiency lookup returns 1.0
+## regardless of consumption vs production — i.e. "infinite power".
+## Set by cashmoneten so the player isn't throttled mid-test.
+var infinite_power: bool = false
+
 
 func cheat_catalogue() -> Array:
 	## Returns every recognised cheat as { code, desc } pairs. Used by
@@ -22,7 +32,9 @@ func cheat_catalogue() -> Array:
 	## file, not two.
 	return [
 		{"code": "techcraze", "desc": "Unlock every unit + building tech gate for the rest of the match."},
-		{"code": "cashmoneten", "desc": "Fill salvage / fuel / microchips to their cap."},
+		{"code": "cashmoneten", "desc": "Fill salvage / fuel / microchips / contracts to cap + infinite Power."},
+		{"code": "geschwindigkeit", "desc": "5x build + train speed for the rest of the match."},
+		{"code": "einfachturbo", "desc": "Applies cashmoneten + geschwindigkeit + techcraze in one go."},
 		{"code": "nofog", "desc": "Disable fog of war for the local player."},
 	]
 
@@ -41,12 +53,36 @@ func apply_code(raw: String) -> String:
 			return "Cheat: tech tree unlocked."
 		"cashmoneten":
 			_max_resources_for_local_player()
-			return "Cheat: max resources granted."
+			_max_contracts_for_local_player()
+			infinite_power = true
+			return "Cheat: max resources + contracts + infinite Power."
+		"geschwindigkeit":
+			build_speed_mult = 5.0
+			return "Cheat: build / train speed x5."
+		"einfachturbo":
+			tech_craze = true
+			_max_resources_for_local_player()
+			_max_contracts_for_local_player()
+			infinite_power = true
+			build_speed_mult = 5.0
+			return "Cheat: einfachturbo — tech, resources, contracts, power, x5 speed."
 		"nofog":
 			if _set_omniscient_local():
 				return "Cheat: fog of war disabled."
 			return "Cheat: no fog-of-war system in this scene."
 	return "Unknown cheat: %s" % code
+
+
+func _max_contracts_for_local_player() -> void:
+	## Top up the local player's Meridian contract pool. No-op for
+	## non-Meridian players (Anvil / Inheritor / Heliarch never had a
+	## contract pool to fill).
+	var mcm: Node = get_tree().current_scene.get_node_or_null("MeridianContractsManager") if get_tree() else null
+	if mcm == null or not mcm.has_method("refund"):
+		return
+	# refund() caps at MAX_CONTRACTS so passing a large value safely
+	# fills the pool to whatever the current ceiling is.
+	mcm.call("refund", 0, 99)
 
 
 func _set_omniscient_local() -> bool:

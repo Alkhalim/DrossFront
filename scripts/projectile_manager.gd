@@ -504,29 +504,53 @@ func _apply_pending_damage(idx: int) -> void:
 	# Splash. Mirrors the splash branch in Projectile._spawn_impact —
 	# SpatialIndex narrow-phase, friend/foe filter, edge-case handling
 	# for freed-mid-flight shooter.
+	# `primary` may be a freed Object by impact time (squad died mid-flight),
+	# which the strict Node3D parameter on _apply_splash rejects with an
+	# InvalidType crash. Validate before passing — `_apply_splash` only
+	# uses `primary` to skip the original target in the AoE walk, so null
+	# is safe (the freed primary is already gone from SpatialIndex).
+	# Bug seen in error report 623 (2026-05-14).
 	var splash_r: float = _state_pending_splash_radius[idx]
 	var splash_d: int = _state_pending_splash_damage[idx]
 	if splash_r > 0.0 and splash_d > 0:
-		_apply_splash(_state_pos[idx], splash_r, splash_d, _state_pending_target[idx],
-				_state_pending_shooter[idx], _state_pending_shooter_owner_id[idx])
+		var splash_primary: Node3D = _state_pending_target[idx]
+		if splash_primary != null and not is_instance_valid(splash_primary):
+			splash_primary = null
+		var splash_shooter: Node3D = _state_pending_shooter[idx]
+		if splash_shooter != null and not is_instance_valid(splash_shooter):
+			splash_shooter = null
+		_apply_splash(_state_pos[idx], splash_r, splash_d, splash_primary,
+				splash_shooter, _state_pending_shooter_owner_id[idx])
 
 
-func _apply_splash(pos: Vector3, radius: float, dmg: int, primary: Node3D,
-		shooter: Node3D, shooter_owner_id: int) -> void:
+func _apply_splash(pos: Vector3, radius: float, dmg: int, primary, shooter, shooter_owner_id: int) -> void:
+	## `primary` and `shooter` are intentionally untyped (Variant) — the
+	## strict Node3D type check at the call boundary was crashing under
+	## a race where the object was queue_freed between the caller's
+	## is_instance_valid() check and this call site (one physics frame
+	## later). Validate inside instead. Reports 622–624 all hit this.
 	var scene: Node = get_tree().current_scene if get_tree() else null
 	if scene == null:
 		return
 	var idx: SpatialIndex = SpatialIndex.get_instance(scene)
 	if idx == null:
 		return
+	# Re-validate primary + shooter inside the function body. Either
+	# may be a freed reference even if the caller checked, due to
+	# inter-frame races.
+	var primary_valid: Node3D = null
+	if primary != null and is_instance_valid(primary):
+		primary_valid = primary as Node3D
+	var splash_attacker: Node3D = null
+	if shooter != null and is_instance_valid(shooter):
+		splash_attacker = shooter as Node3D
 	var registry: Node = scene.get_node_or_null("PlayerRegistry")
 	var owner_unknown: bool = shooter_owner_id < 0
-	var splash_attacker: Node3D = shooter if (shooter != null and is_instance_valid(shooter)) else null
 	for raw: Variant in idx.nearby(pos, radius):
 		if raw == null or not is_instance_valid(raw):
 			continue
 		var ent: Node = raw as Node
-		if ent == null or ent == primary:
+		if ent == null or ent == primary_valid:
 			continue
 		if not ent.has_method("take_damage"):
 			continue

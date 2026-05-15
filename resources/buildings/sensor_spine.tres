@@ -4,7 +4,7 @@
 
 [resource]
 script = ExtResource("1")
-building_name = "Sensor Spine"
+building_name = "Dispatch Spire"
 building_id = &"sensor_spine"
 hp = 600
 cost_salvage = 250

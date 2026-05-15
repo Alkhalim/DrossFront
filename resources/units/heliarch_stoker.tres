@@ -1,0 +1,55 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_stoker_torch"]
+script = ExtResource("2")
+weapon_name = "Reactor Torch"
+role_tag = &"AS"
+damage_tier = &"low"
+range_tier = &"melee"
+range_value = 2.5
+rof_tier = &"continuous"
+projectile_style = &"beam"
+base_accuracy = 0.95
+
+damage = 14
+range = 2.5
+rof_seconds = 0.30
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 0.8
+mult_vs_medium_v2 = 0.4
+mult_vs_heavy_v2 = 0.2
+mult_vs_structure_v2 = 0.5
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
+
+[resource]
+script = ExtResource("1")
+unit_name = "Stoker"
+display_name = "Stoker"
+unit_class = &"engineer"
+hp_total = 800
+hp_per_unit = 200
+armor_class = &"light"
+speed_tier = &"moderate"
+sight_tier = &"medium"
+squad_size = 4
+population = 4
+cost_salvage = 60
+cost_fuel = 0
+build_time = 18.0
+built_at = &"headquarters"
+primary_weapon = SubResource("weapon_stoker_torch")
+detection_radius = 100.0
+special_description = "Heliarch engineer — Stoker. Reactor Torch repairs allies and welds structures. Can overcharge friendly buildings temporarily (passive; tier-2 mechanic — not yet implemented). No branches."
+can_build = true
+repair_rate = 10.0
+
+speed = 8.0
+sight_radius = 18.0
+armor_reduction = 0.15

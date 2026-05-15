@@ -71,6 +71,13 @@ var resource_manager: Node = null
 ## Drone Bay: patrol drones spawned on construction completion.
 ## Tracked so they can be freed when the Bay is destroyed.
 var _patrol_drones: Array[Node] = []
+## Respawn timer for Drone Bay patrol drones. Ticks while the bay is
+## fully constructed; when a drone dies and the accumulator exceeds
+## PATROL_RESPAWN_INTERVAL the bay spawns one replacement. Up to the
+## standard cap of 3 active drones. User feedback 2026-05-14.
+var _patrol_respawn_accum: float = 0.0
+const PATROL_RESPAWN_INTERVAL: float = 30.0
+const PATROL_DRONE_CAP: int = 3
 
 @onready var _mesh: MeshInstance3D = $MeshInstance3D as MeshInstance3D
 @onready var _collision: CollisionShape3D = $CollisionShape3D as CollisionShape3D
@@ -150,14 +157,16 @@ void fragment() {
 
 	float stream = grid + junction + packets;
 
-	// Soft radial fade: alpha drops to zero over the outer 20% of the disc.
-	float edge_fade = 1.0 - smoothstep(0.80, 1.0, r_norm);
+	// Soft radial fade: alpha drops to zero over the outer 35% of the disc
+	// so the perimeter dissolves smoothly instead of cutting off sharp.
+	float edge_fade = 1.0 - smoothstep(0.65, 1.0, r_norm);
 
-	// Border in world units — thin sharp band at the disc perimeter.
-	// Last ~0.4 world units, with a hard inner edge and a sharp outer fade.
+	// Border in world units — soft halo at the disc perimeter (no hard
+	// rim per playtest 2026-05-15). Wider inner ramp + wider outer fade
+	// so the edge reads as a glow gradient rather than a painted ring.
 	float world_dist = r_norm * radius;
-	float border = smoothstep(radius - 0.4, radius - 0.15, world_dist)
-	             * (1.0 - smoothstep(radius - 0.05, radius, world_dist));
+	float border = smoothstep(radius - 1.2, radius - 0.4, world_dist)
+	             * (1.0 - smoothstep(radius - 0.5, radius, world_dist));
 
 	// Overlap suppression: if this fragment's world XZ is inside another
 	// provider's disc, suppress the border so rings don't cross.
@@ -174,11 +183,11 @@ void fragment() {
 	if (inside_other) {
 		// Inside another provider's disc: stream only, no border.
 		ALBEDO = mesh_color * stream * 0.5;
-		ALPHA = stream * 0.2;
+		ALPHA = stream * 0.13;
 	} else {
-		// Outside any other provider: stream + border.
-		ALBEDO = mesh_color * (stream + border * 0.7);
-		ALPHA = (stream * 0.35 + border * 0.5) * edge_fade;
+		// Outside any other provider: stream + soft halo.
+		ALBEDO = mesh_color * (stream + border * 0.55);
+		ALPHA = (stream * 0.22 + border * 0.30) * edge_fade;
 	}
 }
 """
@@ -435,6 +444,16 @@ func _ready() -> void:
 			turret.name = "TurretComponent"
 			turret.set("profile", &"anti_air")
 			add_child(turret)
+		elif stats.building_id == &"sensor_array":
+			# Meridian Sensor Array — declares weapons in its .tres but
+			# previously had no TurretComponent attached, so it never
+			# fired (playtest report 2026-05-14). Use the default
+			# profile so it engages ground + air per the weapon's role
+			# tags from the resource.
+			var turret_script: GDScript = load("res://scripts/turret_component.gd") as GDScript
+			var sensor_turret: Node = turret_script.new()
+			sensor_turret.name = "TurretComponent"
+			add_child(sensor_turret)
 		# Headquarters self-defense -- one TurretComponent per corner
 		# MG nest, each with its own pivot. The components are
 		# created from inside _detail_hq_defense_turret once the
@@ -524,8 +543,10 @@ func _add_building_details() -> void:
 		&"sensor_array": _detail_sensor_array()
 		&"mesh_relay": _detail_mesh_relay()
 		&"resonance_pylon": _detail_resonance_pylon()
-		# Inheritor field construction
+		# Inheritor field construction + Pillar 1 (salvage mastery)
 		&"inheritor_construction_site": _detail_inheritor_construction_site()
+		&"reliquary": _detail_reliquary()
+		&"architect_network": _detail_architect_network()
 	# Mesh-provider aura ring (V3 §Pillar 2). Drawn after the type
 	# detail layer so the ring sits on top of the ground markings.
 	# Meridian-only visualization. Combine HQ has the field set (so
@@ -545,7 +566,8 @@ const _BUILDING_CLASS_TINT: Dictionary = {
 	&"basic_generator":    Color(0.30, 0.45, 0.65, 1),
 	&"advanced_generator": Color(0.30, 0.45, 0.65, 1),
 	&"mesh_relay":         Color(0.30, 0.45, 0.65, 1),
-	&"black_pylon":        Color(0.30, 0.45, 0.65, 1),
+	# Energy
+	&"black_pylon":        Color(0.65, 0.55, 0.20, 1),
 	# Production
 	&"headquarters":       Color(0.65, 0.40, 0.15, 1),
 	&"basic_foundry":      Color(0.65, 0.40, 0.15, 1),
@@ -557,7 +579,7 @@ const _BUILDING_CLASS_TINT: Dictionary = {
 	# Tech
 	&"basic_armory":       Color(0.30, 0.55, 0.30, 1),
 	&"advanced_armory":    Color(0.30, 0.55, 0.30, 1),
-	&"intelligence_network": Color(0.30, 0.55, 0.30, 1),
+	&"intelligence_network": Color(0.55, 0.30, 0.65, 1),
 	# Defense
 	&"gun_emplacement":       Color(0.65, 0.30, 0.20, 1),
 	&"gun_emplacement_basic": Color(0.65, 0.30, 0.20, 1),
@@ -1207,9 +1229,31 @@ func _build_hq_corner_mg_nest(corner: Vector3) -> Node3D:
 	belt.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.45, 0.38, 0.18)))
 	pivot.add_child(belt)
 
-	# Aim outward from the building centre so the barrel sits in
-	# its arc at construction-time before any target locks on.
-	pivot.rotation.y = atan2(corner.x, corner.z)
+	# Outward aim already set at pivot creation (`atan2(-corner.x,
+	# -corner.z)` aligns local -Z with the corner's radial direction).
+	# The previous overwrite here used `atan2(corner.x, corner.z)`,
+	# which is exactly 180° off — TurretComponent then captured that
+	# inward-facing pose as its idle rest, swivelling guns toward the
+	# HQ centre at idle (playtest 2026-05-15).
+
+	# Combine-only: cap each MG nest with a rusty onion-cupola dome
+	# so the corner reads as a fortified defense turret merged with
+	# Orthodox temple architecture, not "MG nest with a dome floating
+	# above". Per user pick 2026-05-15: darker, less shiny, more
+	# rusty; the MG IS the cupola defense post. Sized to match the
+	# sandbag-ring footprint.
+	if _resolve_faction_id() == 0:
+		const ANVIL_BRASS: Color = Color(0.78, 0.62, 0.18, 1.0)
+		const GILDED_GOLD: Color = Color(0.95, 0.78, 0.35, 1.0)
+		const TEMPLE_DARK: Color = Color(0.12, 0.10, 0.08, 1.0)
+		# Position the cupola so the lower bulb sits ABOVE the MG
+		# barrel/cradle (clears the gun's vertical-aim arc) while still
+		# visually anchoring on the nest. The MG fires from underneath
+		# the cupola through the "open" front of the sandbag ring.
+		# Slightly larger cupola to match the up-scaled nest (was 0.42)
+		# and pass tip_style "falcon" so the finial reads as a stylized
+		# Combine raptor instead of the default Orthodox cross.
+		_add_orthodox_onion_dome(corner.x, corner.z, corner.y + 1.10, 0.55, ANVIL_BRASS, GILDED_GOLD, TEMPLE_DARK, false, true, &"falcon")
 	return pivot
 
 
@@ -1408,6 +1452,319 @@ func _detail_headquarters() -> void:
 
 	# Spawn door for engineers (small unit door on the camera-facing side).
 	_add_production_door(1.1, 1.5)
+
+	# Combine-only ornaments per docs §2.4 + user pick 2026-05-15:
+	# Orthodox Christian inspired (NOT Western cathedral). Adds onion
+	# domes, an iconostasis-style front panel, brass cornice trim.
+	if _resolve_faction_id() == 0:
+		_add_combine_hq_orthodox_ornaments()
+
+
+func _add_combine_hq_orthodox_ornaments() -> void:
+	## Orthodox-Christian-inspired ornaments stacked on the base HQ.
+	## Per user pick 2026-05-15: NOT Western Gothic cathedral; squat
+	## fortress-temple aesthetic with onion-dome bell towers, an
+	## iconostasis-style gold front panel with the hammer-and-anvil
+	## doctrine icon at center, brass cornice trim along the hull.
+	var fs: Vector3 = stats.footprint_size
+	const ANVIL_BRASS: Color = Color(0.78, 0.62, 0.18, 1.0)
+	const GILDED_GOLD: Color = Color(0.95, 0.78, 0.35, 1.0)
+	const TEMPLE_DARK: Color = Color(0.12, 0.10, 0.08, 1.0)
+	const DEEP_BLUE: Color = Color(0.22, 0.20, 0.32, 1.0)
+	# --- Brass cornice trim along the top edge of the hull, all four
+	# sides. Continuous brass strip; sells the "fortress-temple" base
+	# silhouette before any domes go on top.
+	for cornice_side: int in 4:
+		var cornice := MeshInstance3D.new()
+		var cb := BoxMesh.new()
+		var c_pos: Vector3
+		match cornice_side:
+			0:  # front (-Z)
+				cb.size = Vector3(fs.x * 1.04, 0.10, 0.14)
+				c_pos = Vector3(0.0, fs.y - 0.08, -fs.z * 0.5 - 0.06)
+			1:  # back (+Z)
+				cb.size = Vector3(fs.x * 1.04, 0.10, 0.14)
+				c_pos = Vector3(0.0, fs.y - 0.08, fs.z * 0.5 + 0.06)
+			2:  # left (-X)
+				cb.size = Vector3(0.14, 0.10, fs.z * 1.04)
+				c_pos = Vector3(-fs.x * 0.5 - 0.06, fs.y - 0.08, 0.0)
+			_:  # right (+X)
+				cb.size = Vector3(0.14, 0.10, fs.z * 1.04)
+				c_pos = Vector3(fs.x * 0.5 + 0.06, fs.y - 0.08, 0.0)
+		cornice.mesh = cb
+		cornice.position = c_pos
+		cornice.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+		_attach_visual(cornice)
+	# --- Iconostasis-style front panel mounted above the production
+	# door on the FRONT face. Three vertical gold panels separated by
+	# brass dividers; the CENTER panel carries the hammer-and-anvil
+	# doctrine icon (replacing what would be the central royal doors
+	# of a real iconostasis).
+	var pano_w: float = fs.x * 0.66
+	var pano_h: float = fs.y * 0.55
+	var pano_y: float = fs.y * 0.55
+	var pano_z: float = -fs.z * 0.5 - 0.04
+	# Dark backing slab so the gold panels stand out.
+	var backing := MeshInstance3D.new()
+	var back_box := BoxMesh.new()
+	back_box.size = Vector3(pano_w + 0.10, pano_h + 0.10, 0.04)
+	backing.mesh = back_box
+	backing.position = Vector3(0.0, pano_y, pano_z)
+	backing.set_surface_override_material(0, _detail_dark_metal_mat(TEMPLE_DARK))
+	_attach_visual(backing)
+	# Three vertical panels.
+	var panel_w: float = pano_w / 3.2
+	for p_i: int in 3:
+		var px: float = (float(p_i) - 1.0) * (pano_w / 3.0)
+		# Gold leaf panel.
+		var panel := MeshInstance3D.new()
+		var pb := BoxMesh.new()
+		pb.size = Vector3(panel_w, pano_h * 0.92, 0.04)
+		panel.mesh = pb
+		panel.position = Vector3(px, pano_y, pano_z - 0.04)
+		var panel_mat := StandardMaterial3D.new()
+		panel_mat.albedo_color = GILDED_GOLD
+		panel_mat.emission_enabled = true
+		panel_mat.emission = GILDED_GOLD
+		panel_mat.emission_energy_multiplier = 0.55
+		panel_mat.metallic = 0.85
+		panel_mat.roughness = 0.25
+		panel.set_surface_override_material(0, panel_mat)
+		_attach_visual(panel)
+		# Brass divider between panels (skip last).
+		if p_i < 2:
+			var divider := MeshInstance3D.new()
+			var db := BoxMesh.new()
+			db.size = Vector3(0.06, pano_h, 0.06)
+			divider.mesh = db
+			divider.position = Vector3(px + (pano_w / 6.0), pano_y, pano_z - 0.06)
+			divider.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+			_attach_visual(divider)
+	# Hammer-and-anvil doctrine icon overlaid on the CENTER gold panel.
+	# Anvil bar + hammer haft + hammer head, in dark metal so they
+	# read as embossed onto the gilded background.
+	var center_y: float = pano_y
+	var center_z: float = pano_z - 0.08
+	var anvil_bar := MeshInstance3D.new()
+	var ab := BoxMesh.new()
+	ab.size = Vector3(panel_w * 0.62, 0.07, 0.04)
+	anvil_bar.mesh = ab
+	anvil_bar.position = Vector3(0.0, center_y - pano_h * 0.18, center_z)
+	anvil_bar.set_surface_override_material(0, _detail_dark_metal_mat(TEMPLE_DARK))
+	_attach_visual(anvil_bar)
+	var haft := MeshInstance3D.new()
+	var hb := BoxMesh.new()
+	hb.size = Vector3(0.06, pano_h * 0.30, 0.04)
+	haft.mesh = hb
+	haft.position = Vector3(0.0, center_y, center_z)
+	haft.set_surface_override_material(0, _detail_dark_metal_mat(TEMPLE_DARK))
+	_attach_visual(haft)
+	var hammer_head := MeshInstance3D.new()
+	var hhb := BoxMesh.new()
+	hhb.size = Vector3(panel_w * 0.46, 0.13, 0.04)
+	hammer_head.mesh = hhb
+	hammer_head.position = Vector3(0.0, center_y + pano_h * 0.18, center_z)
+	hammer_head.set_surface_override_material(0, _detail_dark_metal_mat(TEMPLE_DARK))
+	_attach_visual(hammer_head)
+	# Four corner onion-cupola defense turrets are now built INSIDE
+	# _build_hq_corner_mg_nest itself — the MG nests double as the
+	# cupola bases per user pick 2026-05-15 ("merge warfare and
+	# architecture; the MGs ARE the cupolas"). No standalone corner
+	# domes here; the warhead/architecture merger is the whole point.
+	# Central 5th dome is intentionally omitted — the command spire
+	# + rotating radar dish already reads as the central feature.
+	# --- Two hanging blue banners flanking the iconostasis — Orthodox
+	# liturgical banner read (typically deep blue with gold cross /
+	# sigil). Brass mounting rod above, banner cloth below.
+	for bn_side: int in 2:
+		var bnx: float = (-1.0 if bn_side == 0 else 1.0) * (pano_w * 0.5 + 0.32)
+		var rod := MeshInstance3D.new()
+		var rod_cyl := CylinderMesh.new()
+		rod_cyl.top_radius = 0.04
+		rod_cyl.bottom_radius = 0.04
+		rod_cyl.height = 0.30
+		rod_cyl.radial_segments = 8
+		rod.mesh = rod_cyl
+		rod.rotation.z = PI * 0.5
+		rod.position = Vector3(bnx, pano_y + pano_h * 0.55, pano_z - 0.06)
+		rod.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+		_attach_visual(rod)
+		var banner := MeshInstance3D.new()
+		var brn := BoxMesh.new()
+		brn.size = Vector3(0.04, pano_h * 0.85, 0.18)
+		banner.mesh = brn
+		banner.position = Vector3(bnx, pano_y + pano_h * 0.05, pano_z - 0.06)
+		banner.set_surface_override_material(0, _detail_dark_metal_mat(DEEP_BLUE))
+		_attach_visual(banner)
+		# Small brass cross sigil at the banner's center.
+		var v_bar := MeshInstance3D.new()
+		var vbb := BoxMesh.new()
+		vbb.size = Vector3(0.05, 0.16, 0.04)
+		v_bar.mesh = vbb
+		v_bar.position = Vector3(bnx + 0.02, pano_y + pano_h * 0.05, pano_z - 0.16)
+		v_bar.set_surface_override_material(0, _detail_dark_metal_mat(GILDED_GOLD))
+		_attach_visual(v_bar)
+		var h_bar := MeshInstance3D.new()
+		var hbb := BoxMesh.new()
+		hbb.size = Vector3(0.05, 0.04, 0.12)
+		h_bar.mesh = hbb
+		h_bar.position = Vector3(bnx + 0.02, pano_y + pano_h * 0.10, pano_z - 0.16)
+		h_bar.set_surface_override_material(0, _detail_dark_metal_mat(GILDED_GOLD))
+		_attach_visual(h_bar)
+
+
+func _add_orthodox_onion_dome(world_x: float, world_z: float, base_y: float, scale: float, brass: Color, gold: Color, dark: Color, is_central: bool, rusty: bool = false, tip_style: StringName = &"cross") -> void:
+	## Single Orthodox onion dome: brass-collared base ring + bulbous
+	## gilded bulb (squashed sphere) + tall tip spike with a small
+	## brass cross at the top. Scale parameter controls dome footprint
+	## radius. is_central makes the dome ~1.4x bigger.
+	## When rusty=true, all colors are weathered down (dimmer + matte)
+	## and the bulb uses a patinated-bronze finish instead of bright
+	## gilded gold so corner-defense cupolas read as "fortification with
+	## architectural flair" rather than "gilded temple".
+	if rusty:
+		# Override the bright palette with a weathered/rust treatment.
+		brass = Color(0.42, 0.32, 0.14, 1.0)  # dim weathered brass
+		gold = Color(0.50, 0.38, 0.20, 1.0)   # patinated bronze (no longer "gilded")
+		dark = Color(0.18, 0.13, 0.10, 1.0)   # rusty iron (warmer than pure black)
+	var dome_scale: float = scale * (1.6 if is_central else 1.0)
+	# Brass-collared base ring at the bottom of the dome.
+	var collar := MeshInstance3D.new()
+	var collar_cyl := CylinderMesh.new()
+	collar_cyl.top_radius = dome_scale * 0.85
+	collar_cyl.bottom_radius = dome_scale * 0.85
+	collar_cyl.height = dome_scale * 0.30
+	collar_cyl.radial_segments = 16
+	collar.mesh = collar_cyl
+	collar.position = Vector3(world_x, base_y + dome_scale * 0.15, world_z)
+	collar.set_surface_override_material(0, _detail_dark_metal_mat(dark))
+	_attach_visual(collar)
+	# Brass rim torus on top of the collar.
+	var rim := MeshInstance3D.new()
+	var rim_t := TorusMesh.new()
+	rim_t.inner_radius = dome_scale * 0.78
+	rim_t.outer_radius = dome_scale * 0.95
+	rim_t.rings = 18
+	rim_t.ring_segments = 6
+	rim.mesh = rim_t
+	rim.rotation.x = PI * 0.5
+	rim.position = Vector3(world_x, base_y + dome_scale * 0.32, world_z)
+	rim.set_surface_override_material(0, _detail_dark_metal_mat(brass))
+	_attach_visual(rim)
+	# The onion bulb itself — squashed sphere wider than tall, then a
+	# narrower second sphere stacked above to give the iconic
+	# bulbous-then-pointy onion silhouette.
+	var bulb_lower := MeshInstance3D.new()
+	var bl_sph := SphereMesh.new()
+	bl_sph.radius = dome_scale * 0.95
+	bl_sph.height = dome_scale * 1.20
+	bulb_lower.mesh = bl_sph
+	bulb_lower.position = Vector3(world_x, base_y + dome_scale * 1.05, world_z)
+	var gold_mat := StandardMaterial3D.new()
+	gold_mat.albedo_color = gold
+	# Rusty cupolas read as patinated bronze, NOT gilded gold —
+	# darker emission + lower metallic + rougher surface.
+	if rusty:
+		gold_mat.emission_enabled = true
+		gold_mat.emission = gold
+		gold_mat.emission_energy_multiplier = 0.10
+		gold_mat.metallic = 0.45
+		gold_mat.roughness = 0.65
+	else:
+		gold_mat.emission_enabled = true
+		gold_mat.emission = gold
+		gold_mat.emission_energy_multiplier = 0.45
+		gold_mat.metallic = 0.95
+		gold_mat.roughness = 0.20
+	bulb_lower.set_surface_override_material(0, gold_mat)
+	_attach_visual(bulb_lower)
+	# Smaller upper bulb (the pointy end of the onion).
+	var bulb_upper := MeshInstance3D.new()
+	var bu_sph := SphereMesh.new()
+	bu_sph.radius = dome_scale * 0.55
+	bu_sph.height = dome_scale * 0.85
+	bulb_upper.mesh = bu_sph
+	bulb_upper.position = Vector3(world_x, base_y + dome_scale * 1.85, world_z)
+	bulb_upper.set_surface_override_material(0, gold_mat)
+	_attach_visual(bulb_upper)
+	# Tip spike — thin tapering pillar above the upper bulb.
+	var spike := MeshInstance3D.new()
+	var sp_cyl := CylinderMesh.new()
+	sp_cyl.top_radius = 0.0
+	sp_cyl.bottom_radius = dome_scale * 0.10
+	sp_cyl.height = dome_scale * 0.55
+	sp_cyl.radial_segments = 8
+	spike.mesh = sp_cyl
+	spike.position = Vector3(world_x, base_y + dome_scale * 2.55, world_z)
+	spike.set_surface_override_material(0, _detail_dark_metal_mat(brass))
+	_attach_visual(spike)
+	# Tip finial — Orthodox cross by default, or a stylized brutalist
+	# falcon silhouette for the Combine HQ corner cupolas (the temple-
+	# warfare merger leans into Combine raptor iconography rather than
+	# overt religious symbology).
+	if tip_style == &"falcon":
+		var brass_mat: StandardMaterial3D = _detail_dark_metal_mat(brass)
+		var tip_y: float = base_y + dome_scale * 3.05
+		# Vertical body column — the bird's standing torso.
+		var body := MeshInstance3D.new()
+		var body_box := BoxMesh.new()
+		body_box.size = Vector3(dome_scale * 0.10, dome_scale * 0.40, dome_scale * 0.10)
+		body.mesh = body_box
+		body.position = Vector3(world_x, tip_y, world_z)
+		body.set_surface_override_material(0, brass_mat)
+		_attach_visual(body)
+		# Spread wings — two angled slabs canted up-out from the body's
+		# upper third. Brutalist read = thick straight planes, not feathers.
+		for wing_side: int in 2:
+			var wsx: float = -1.0 if wing_side == 0 else 1.0
+			var wing := MeshInstance3D.new()
+			var wing_box := BoxMesh.new()
+			wing_box.size = Vector3(dome_scale * 0.42, dome_scale * 0.06, dome_scale * 0.16)
+			wing.mesh = wing_box
+			# Pivot at the body shoulder; box centre offset by half-length
+			# along the wing's tilt so it cantilevers out.
+			var wing_tilt: float = deg_to_rad(28.0)
+			var w_off_x: float = wsx * (dome_scale * 0.05 + cos(wing_tilt) * dome_scale * 0.21)
+			var w_off_y: float = dome_scale * 0.10 + sin(wing_tilt) * dome_scale * 0.21
+			wing.position = Vector3(world_x + w_off_x, tip_y + w_off_y, world_z)
+			wing.rotation.z = -wsx * wing_tilt
+			wing.set_surface_override_material(0, brass_mat)
+			_attach_visual(wing)
+		# Beak — small forward wedge at the top of the body.
+		var beak := MeshInstance3D.new()
+		var beak_box := BoxMesh.new()
+		beak_box.size = Vector3(dome_scale * 0.08, dome_scale * 0.06, dome_scale * 0.16)
+		beak.mesh = beak_box
+		beak.position = Vector3(world_x, tip_y + dome_scale * 0.18, world_z - dome_scale * 0.08)
+		beak.rotation.x = deg_to_rad(15.0)
+		beak.set_surface_override_material(0, brass_mat)
+		_attach_visual(beak)
+		# Crest — small upward fin on top of the body so the silhouette
+		# from above still reads as a crowned head.
+		var crest := MeshInstance3D.new()
+		var crest_box := BoxMesh.new()
+		crest_box.size = Vector3(dome_scale * 0.04, dome_scale * 0.12, dome_scale * 0.08)
+		crest.mesh = crest_box
+		crest.position = Vector3(world_x, tip_y + dome_scale * 0.26, world_z + dome_scale * 0.02)
+		crest.set_surface_override_material(0, brass_mat)
+		_attach_visual(crest)
+	else:
+		# Brass cross at the very tip — small vertical bar + horizontal
+		# crossbar so the silhouette reads as Orthodox.
+		var v_cross := MeshInstance3D.new()
+		var vcb := BoxMesh.new()
+		vcb.size = Vector3(0.04, dome_scale * 0.40, 0.04)
+		v_cross.mesh = vcb
+		v_cross.position = Vector3(world_x, base_y + dome_scale * 3.05, world_z)
+		v_cross.set_surface_override_material(0, _detail_dark_metal_mat(brass))
+		_attach_visual(v_cross)
+		var h_cross := MeshInstance3D.new()
+		var hcb := BoxMesh.new()
+		hcb.size = Vector3(dome_scale * 0.30, 0.04, 0.04)
+		h_cross.mesh = hcb
+		h_cross.position = Vector3(world_x, base_y + dome_scale * 3.05, world_z)
+		h_cross.set_surface_override_material(0, _detail_dark_metal_mat(brass))
+		_attach_visual(h_cross)
 
 
 func _detail_foundry(advanced: bool) -> void:
@@ -1644,6 +2001,212 @@ func _detail_foundry(advanced: bool) -> void:
 	else:
 		_add_production_door(2.7, 1.9)
 
+	# --- Combine cathedral-foundry ornaments per docs §2.4: "forge-
+	# cathedral, chain-of-command, hammer-and-anvil iconography,
+	# liturgical hymn structure, banners, oaths". Anvil players only
+	# (Sable / Meridian doesn't use this aesthetic).
+	if _resolve_faction_id() == 0:
+		_add_combine_foundry_ornaments(advanced)
+
+
+func _add_combine_foundry_ornaments(advanced: bool) -> void:
+	## Layered Combine cathedral-industrial ornaments stacked on top of
+	## the base foundry build. Adds: twin furnace doors with hot amber
+	## glow flanking the production door, brass ornamental cornice
+	## along the top of the front wall, hanging Combine banner on the
+	## right side, hammer-and-anvil sigil panel beside the door.
+	var fs: Vector3 = stats.footprint_size
+	const ANVIL_BRASS: Color = Color(0.78, 0.62, 0.18, 1.0)
+	const FORGE_GLOW: Color = Color(1.0, 0.45, 0.10, 1.0)
+	const DARK_IRON: Color = Color(0.10, 0.09, 0.08, 1.0)
+	# --- Twin furnace doors flanking the front face. Each is a
+	# recessed dark cavity backed by an amber emissive plate so the
+	# glow reads as deep furnace mouth.
+	var door_w: float = fs.x * 0.18
+	var door_h: float = fs.y * 0.36
+	var door_y: float = fs.y * 0.30
+	for door_side: int in 2:
+		var dsx: float = (-1.0 if door_side == 0 else 1.0) * fs.x * 0.32
+		# Recessed cavity.
+		var cavity := MeshInstance3D.new()
+		var cv := BoxMesh.new()
+		cv.size = Vector3(door_w, door_h, 0.18)
+		cavity.mesh = cv
+		cavity.position = Vector3(dsx, door_y, -fs.z * 0.5 + 0.03)
+		cavity.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.04, 0.03, 0.02)))
+		_attach_visual(cavity)
+		# Amber glow plate at the back of the cavity.
+		var glow := MeshInstance3D.new()
+		var gv := BoxMesh.new()
+		gv.size = Vector3(door_w * 0.78, door_h * 0.80, 0.04)
+		glow.mesh = gv
+		glow.position = Vector3(dsx, door_y, -fs.z * 0.5 + 0.13)
+		glow.set_surface_override_material(0, _detail_emissive_mat(FORGE_GLOW, 2.4))
+		_attach_visual(glow)
+		# Brass door frame jutting proud of the wall.
+		for fr_side_v: Vector2 in [Vector2(-door_w * 0.5 - 0.05, 0.0), Vector2(door_w * 0.5 + 0.05, 0.0), Vector2(0.0, door_h * 0.5 + 0.05), Vector2(0.0, -door_h * 0.5 - 0.05)]:
+			var jamb := MeshInstance3D.new()
+			var jb := BoxMesh.new()
+			# Jamb is vertical (X tiny) for the side pairs and horizontal (Y tiny) for top/bottom.
+			if absf(fr_side_v.x) > 0.01:
+				jb.size = Vector3(0.06, door_h + 0.20, 0.10)
+			else:
+				jb.size = Vector3(door_w + 0.20, 0.06, 0.10)
+			jamb.mesh = jb
+			jamb.position = Vector3(dsx + fr_side_v.x, door_y + fr_side_v.y, -fs.z * 0.5 - 0.05)
+			jamb.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+			_attach_visual(jamb)
+		# Small omni light per door so the amber tint spills onto the front wall.
+		var door_light := OmniLight3D.new()
+		door_light.light_color = FORGE_GLOW
+		door_light.light_energy = 0.7
+		door_light.omni_range = fs.x * 1.2
+		door_light.position = Vector3(dsx, door_y, -fs.z * 0.5 - 0.05)
+		_attach_visual(door_light)
+	# --- Brass ornamental cornice wrapping ALL 4 sides of the hull
+	# (not just the front), per playtest 2026-05-15: "brass detailing
+	# on buildings/railings ... should properly follow the building's
+	# shape and also be visible on all sides not only the back or
+	# side walls".
+	for cornice_side: int in 4:
+		var cornice := MeshInstance3D.new()
+		var cb := BoxMesh.new()
+		var c_pos: Vector3
+		match cornice_side:
+			0:  # front (-Z)
+				cb.size = Vector3(fs.x * 0.95, 0.10, 0.14)
+				c_pos = Vector3(0.0, fs.y - 0.08, -fs.z * 0.5 - 0.06)
+			1:  # back (+Z)
+				cb.size = Vector3(fs.x * 0.95, 0.10, 0.14)
+				c_pos = Vector3(0.0, fs.y - 0.08, fs.z * 0.5 + 0.06)
+			2:  # left (-X)
+				cb.size = Vector3(0.14, 0.10, fs.z * 0.95)
+				c_pos = Vector3(-fs.x * 0.5 - 0.06, fs.y - 0.08, 0.0)
+			_:  # right (+X)
+				cb.size = Vector3(0.14, 0.10, fs.z * 0.95)
+				c_pos = Vector3(fs.x * 0.5 + 0.06, fs.y - 0.08, 0.0)
+		cornice.mesh = cb
+		cornice.position = c_pos
+		cornice.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+		_attach_visual(cornice)
+	# Corbels — small protruding brass pegs hanging just below cornice
+	# on all four faces. More on the front face since that's the
+	# "ceremonial entrance" wall.
+	var corbel_count: int = 4 if not advanced else 6
+	for c_i: int in corbel_count:
+		var t: float = (float(c_i) + 0.5) / float(corbel_count)
+		# Front face corbels (the ceremonial-entrance row).
+		var corbel_f := MeshInstance3D.new()
+		var cob_f := BoxMesh.new()
+		cob_f.size = Vector3(0.08, 0.16, 0.10)
+		corbel_f.mesh = cob_f
+		corbel_f.position = Vector3(-fs.x * 0.45 + t * fs.x * 0.90, fs.y - 0.24, -fs.z * 0.5 - 0.07)
+		corbel_f.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+		_attach_visual(corbel_f)
+	# Side + back faces get a smaller corbel set so the trim wraps
+	# the silhouette without over-decorating the non-entrance walls.
+	var side_corbel_count: int = 3 if not advanced else 4
+	for back_i: int in side_corbel_count:
+		var bt: float = (float(back_i) + 0.5) / float(side_corbel_count)
+		# Back face.
+		var corbel_b := MeshInstance3D.new()
+		var cob_b := BoxMesh.new()
+		cob_b.size = Vector3(0.08, 0.14, 0.10)
+		corbel_b.mesh = cob_b
+		corbel_b.position = Vector3(-fs.x * 0.42 + bt * fs.x * 0.84, fs.y - 0.24, fs.z * 0.5 + 0.07)
+		corbel_b.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+		_attach_visual(corbel_b)
+		# Left face.
+		var corbel_l := MeshInstance3D.new()
+		var cob_l := BoxMesh.new()
+		cob_l.size = Vector3(0.10, 0.14, 0.08)
+		corbel_l.mesh = cob_l
+		corbel_l.position = Vector3(-fs.x * 0.5 - 0.07, fs.y - 0.24, -fs.z * 0.42 + bt * fs.z * 0.84)
+		corbel_l.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+		_attach_visual(corbel_l)
+		# Right face.
+		var corbel_r := MeshInstance3D.new()
+		var cob_r := BoxMesh.new()
+		cob_r.size = Vector3(0.10, 0.14, 0.08)
+		corbel_r.mesh = cob_r
+		corbel_r.position = Vector3(fs.x * 0.5 + 0.07, fs.y - 0.24, -fs.z * 0.42 + bt * fs.z * 0.84)
+		corbel_r.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+		_attach_visual(corbel_r)
+	# --- Hanging Combine banner on the right side wall. Tall narrow
+	# rectangle with a brass top rod + cross-strut, draped down in
+	# faction colors.
+	var banner_x: float = fs.x * 0.5 + 0.06
+	var banner_top_y: float = fs.y * 0.92
+	var banner_h: float = fs.y * 0.55
+	var banner_w: float = 0.14
+	# Brass mounting rod.
+	var rod := MeshInstance3D.new()
+	var rod_cyl := CylinderMesh.new()
+	rod_cyl.top_radius = 0.04
+	rod_cyl.bottom_radius = 0.04
+	rod_cyl.height = banner_w * 1.6
+	rod_cyl.radial_segments = 8
+	rod.mesh = rod_cyl
+	rod.rotation.z = PI * 0.5
+	rod.position = Vector3(banner_x, banner_top_y, 0.0)
+	rod.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+	_attach_visual(rod)
+	# Banner cloth — long thin emissive strip in player-tinged amber-brass
+	# so it reads as ornamental from above.
+	var banner := MeshInstance3D.new()
+	var br := BoxMesh.new()
+	br.size = Vector3(0.04, banner_h, banner_w)
+	banner.mesh = br
+	banner.position = Vector3(banner_x, banner_top_y - banner_h * 0.5, 0.0)
+	banner.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.55, 0.22, 0.10)))
+	_attach_visual(banner)
+	# Brass cross-strut at the bottom of the banner — keeps the cloth
+	# read as deliberately fixed.
+	var strut := MeshInstance3D.new()
+	var str_box := BoxMesh.new()
+	str_box.size = Vector3(0.06, 0.05, banner_w * 1.4)
+	strut.mesh = str_box
+	strut.position = Vector3(banner_x, banner_top_y - banner_h - 0.02, 0.0)
+	strut.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+	_attach_visual(strut)
+	# --- Hammer-and-anvil sigil panel mounted ABOVE the production
+	# door on the front wall. Dark backing plate + brass anvil bar +
+	# brass hammer (haft + head). Same icon as the Bulwark unit.
+	var sigil_x: float = 0.0
+	var sigil_y: float = fs.y - 0.55
+	var sigil_z: float = -fs.z * 0.5 - 0.04
+	var backing := MeshInstance3D.new()
+	var back_box := BoxMesh.new()
+	back_box.size = Vector3(fs.x * 0.22, 0.45, 0.04)
+	backing.mesh = back_box
+	backing.position = Vector3(sigil_x, sigil_y, sigil_z)
+	backing.set_surface_override_material(0, _detail_dark_metal_mat(DARK_IRON))
+	_attach_visual(backing)
+	# Anvil bar (horizontal, near bottom of plate).
+	var anvil_bar := MeshInstance3D.new()
+	var ab_box := BoxMesh.new()
+	ab_box.size = Vector3(fs.x * 0.16, 0.06, 0.04)
+	anvil_bar.mesh = ab_box
+	anvil_bar.position = Vector3(sigil_x, sigil_y - 0.13, sigil_z - 0.02)
+	anvil_bar.set_surface_override_material(0, _detail_emissive_mat(ANVIL_BRASS, 0.45))
+	_attach_visual(anvil_bar)
+	# Hammer haft (vertical, in middle).
+	var haft := MeshInstance3D.new()
+	var ht_box := BoxMesh.new()
+	ht_box.size = Vector3(0.05, 0.18, 0.04)
+	haft.mesh = ht_box
+	haft.position = Vector3(sigil_x, sigil_y, sigil_z - 0.02)
+	haft.set_surface_override_material(0, _detail_emissive_mat(ANVIL_BRASS, 0.45))
+	_attach_visual(haft)
+	# Hammer head (wider, near top).
+	var hammer_head := MeshInstance3D.new()
+	var hh_box := BoxMesh.new()
+	hh_box.size = Vector3(fs.x * 0.12, 0.10, 0.04)
+	hammer_head.mesh = hh_box
+	hammer_head.position = Vector3(sigil_x, sigil_y + 0.13, sigil_z - 0.02)
+	hammer_head.set_surface_override_material(0, _detail_emissive_mat(ANVIL_BRASS, 0.45))
+	_attach_visual(hammer_head)
+
 
 func _detail_generator() -> void:
 	var fs: Vector3 = stats.footprint_size
@@ -1756,6 +2319,135 @@ func _detail_generator() -> void:
 	# reactor', not just a bigger Strakh Dynamo.
 	if is_advanced:
 		_apply_reactor_support_structures(fs)
+
+	# Combine-only ornaments: brass cap ring, brass-rimmed access
+	# hatch on the front, brass corbel ring around the base flange,
+	# and a small hammer-and-anvil sigil panel on the side. Faction-
+	# gated so Sable / Meridian / Inheritor power buildings stay on
+	# the base build.
+	if _resolve_faction_id() == 0:
+		_add_combine_generator_ornaments(is_advanced)
+
+
+func _add_combine_generator_ornaments(is_advanced: bool) -> void:
+	## Layered Combine cathedral-industrial ornaments stacked on the
+	## base generator. Adds a brass ring around the cyan reactor cap,
+	## a brass-rimmed access hatch on the front face, four brass
+	## corbels around the base flange, and a hammer-and-anvil sigil
+	## panel on the side.
+	var fs: Vector3 = stats.footprint_size
+	const ANVIL_BRASS: Color = Color(0.78, 0.62, 0.18, 1.0)
+	const DARK_IRON: Color = Color(0.10, 0.09, 0.08, 1.0)
+	# --- Brass ring just under the cyan reactor cap. Reads as the
+	# brass-trimmed reactor head plate (consecrated machinery).
+	var cap_ring := MeshInstance3D.new()
+	var rt := TorusMesh.new()
+	rt.inner_radius = fs.x * 0.20
+	rt.outer_radius = fs.x * 0.27
+	rt.rings = 24
+	rt.ring_segments = 8
+	cap_ring.mesh = rt
+	cap_ring.rotation.x = PI * 0.5
+	cap_ring.position = Vector3(0.0, fs.y + fs.y * 0.55 - 0.02, 0.0)
+	cap_ring.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+	_attach_visual(cap_ring)
+	# --- Brass-rimmed access hatch on the front face. Recessed dark
+	# cavity backed by a thin amber emissive (reads as warning light
+	# inside the access tunnel).
+	var hatch_w: float = fs.x * 0.32
+	var hatch_h: float = fs.y * 0.30
+	var hatch_y: float = fs.y * 0.40
+	var hatch_z: float = -fs.z * 0.5 - 0.04
+	var cavity := MeshInstance3D.new()
+	var cv := BoxMesh.new()
+	cv.size = Vector3(hatch_w, hatch_h, 0.10)
+	cavity.mesh = cv
+	cavity.position = Vector3(0.0, hatch_y, hatch_z + 0.03)
+	cavity.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.04, 0.03, 0.02)))
+	_attach_visual(cavity)
+	# Faint amber glow in the back of the cavity.
+	var hatch_glow := MeshInstance3D.new()
+	var hg := BoxMesh.new()
+	hg.size = Vector3(hatch_w * 0.78, hatch_h * 0.70, 0.04)
+	hatch_glow.mesh = hg
+	hatch_glow.position = Vector3(0.0, hatch_y, hatch_z + 0.10)
+	hatch_glow.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.55, 0.18), 1.4))
+	_attach_visual(hatch_glow)
+	# Brass jamb frame around the hatch (4 sides).
+	for fr_v: Vector2 in [Vector2(-hatch_w * 0.5 - 0.05, 0.0), Vector2(hatch_w * 0.5 + 0.05, 0.0), Vector2(0.0, hatch_h * 0.5 + 0.05), Vector2(0.0, -hatch_h * 0.5 - 0.05)]:
+		var jamb := MeshInstance3D.new()
+		var jb := BoxMesh.new()
+		if absf(fr_v.x) > 0.01:
+			jb.size = Vector3(0.06, hatch_h + 0.20, 0.10)
+		else:
+			jb.size = Vector3(hatch_w + 0.20, 0.06, 0.10)
+		jamb.mesh = jb
+		jamb.position = Vector3(fr_v.x, hatch_y + fr_v.y, hatch_z - 0.05)
+		jamb.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+		_attach_visual(jamb)
+	# --- Brass corbel ring around the base flange. Four small brass
+	# blocks at compass points so the base reads as ornamentally
+	# "consecrated" rather than purely functional.
+	for corbel_i: int in 4:
+		var ang: float = float(corbel_i) * (PI * 0.5) + PI * 0.25
+		var corbel := MeshInstance3D.new()
+		var cob := BoxMesh.new()
+		cob.size = Vector3(0.12, 0.18, 0.12)
+		corbel.mesh = cob
+		var cx: float = sin(ang) * fs.x * 0.50
+		var cz: float = cos(ang) * fs.z * 0.50
+		corbel.position = Vector3(cx, 0.30, cz)
+		corbel.rotation.y = -ang
+		corbel.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+		_attach_visual(corbel)
+	# --- Hammer-and-anvil sigil panel on the LEFT side wall. Smaller
+	# than HQ/Foundry sigil but same iconography for consistency.
+	var sigil_x: float = -fs.x * 0.5 - 0.04
+	var sigil_y: float = fs.y * 0.55
+	var sigil_z: float = 0.0
+	var backing := MeshInstance3D.new()
+	var back_box := BoxMesh.new()
+	back_box.size = Vector3(0.04, fs.y * 0.42, fs.z * 0.20)
+	backing.mesh = back_box
+	backing.position = Vector3(sigil_x, sigil_y, sigil_z)
+	backing.set_surface_override_material(0, _detail_dark_metal_mat(DARK_IRON))
+	_attach_visual(backing)
+	# Anvil bar (oriented along Z since this is a side wall).
+	var anvil_bar := MeshInstance3D.new()
+	var ab := BoxMesh.new()
+	ab.size = Vector3(0.04, 0.05, fs.z * 0.14)
+	anvil_bar.mesh = ab
+	anvil_bar.position = Vector3(sigil_x - 0.02, sigil_y - fs.y * 0.10, sigil_z)
+	anvil_bar.set_surface_override_material(0, _detail_emissive_mat(ANVIL_BRASS, 0.45))
+	_attach_visual(anvil_bar)
+	var haft := MeshInstance3D.new()
+	var ht := BoxMesh.new()
+	ht.size = Vector3(0.04, fs.y * 0.16, 0.05)
+	haft.mesh = ht
+	haft.position = Vector3(sigil_x - 0.02, sigil_y, sigil_z)
+	haft.set_surface_override_material(0, _detail_emissive_mat(ANVIL_BRASS, 0.45))
+	_attach_visual(haft)
+	var hammer_head := MeshInstance3D.new()
+	var hh := BoxMesh.new()
+	hh.size = Vector3(0.04, 0.08, fs.z * 0.10)
+	hammer_head.mesh = hh
+	hammer_head.position = Vector3(sigil_x - 0.02, sigil_y + fs.y * 0.09, sigil_z)
+	hammer_head.set_surface_override_material(0, _detail_emissive_mat(ANVIL_BRASS, 0.45))
+	_attach_visual(hammer_head)
+	# Advanced generators get an extra brass band around the flange
+	# (extra trim because the higher tier "deserves" more ornament).
+	if is_advanced:
+		var trim_band := MeshInstance3D.new()
+		var tb := TorusMesh.new()
+		tb.inner_radius = fs.x * 0.50
+		tb.outer_radius = fs.x * 0.58
+		tb.rings = 28
+		tb.ring_segments = 6
+		trim_band.mesh = tb
+		trim_band.rotation.x = PI * 0.5
+		trim_band.position = Vector3(0.0, 0.18, 0.0)
+		trim_band.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+		_attach_visual(trim_band)
 
 
 func _apply_reactor_support_structures(fs: Vector3) -> void:
@@ -2128,6 +2820,158 @@ func _detail_salvage_yard() -> void:
 	strut.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.3, 0.26, 0.16)))
 	_attach_visual(strut)
 
+	# Combine-only ornaments: brass-trimmed weighbridge + cargo loading
+	# dock with stacked crates + side conveyor belt visual. Per docs
+	# §2.4 "Forge-cathedral, hammer-and-anvil iconography". Faction-gated
+	# so Sable / Meridian / Inheritor yards stay on the base build.
+	if _resolve_faction_id() == 0:
+		_add_combine_salvage_yard_ornaments()
+
+
+func _add_combine_salvage_yard_ornaments() -> void:
+	## Layered Combine-flavour ornaments stacked on the base salvage
+	## yard: a brass-trimmed weighbridge platform out the front, a
+	## cargo loading dock with stacked supply crates on the right side,
+	## and a short side conveyor belt visual feeding from the scrap
+	## pile into the bins.
+	var fs: Vector3 = stats.footprint_size
+	const ANVIL_BRASS: Color = Color(0.78, 0.62, 0.18, 1.0)
+	const CRATE_TINT: Color = Color(0.45, 0.32, 0.18, 1.0)
+	const BELT_DARK: Color = Color(0.08, 0.07, 0.06, 1.0)
+	# --- Brass-trimmed weighbridge platform out the FRONT (-Z). Flat
+	# slab sized to read as a vehicle weigh-station, with a thin brass
+	# rim border so the silhouette stands out from the adjacent ground.
+	var bridge := MeshInstance3D.new()
+	var bbox := BoxMesh.new()
+	bbox.size = Vector3(fs.x * 0.55, 0.10, 0.85)
+	bridge.mesh = bbox
+	bridge.position = Vector3(0.0, 0.05, -fs.z * 0.5 - 0.55)
+	bridge.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.20, 0.18, 0.16)))
+	_attach_visual(bridge)
+	# Brass rim border around the weighbridge — four thin bars.
+	for rim_side: int in 4:
+		var rim := MeshInstance3D.new()
+		var rb := BoxMesh.new()
+		var rim_pos: Vector3
+		match rim_side:
+			0:  # front rim
+				rb.size = Vector3(fs.x * 0.57, 0.06, 0.06)
+				rim_pos = Vector3(0.0, 0.10, -fs.z * 0.5 - 0.96)
+			1:  # back rim (toward yard)
+				rb.size = Vector3(fs.x * 0.57, 0.06, 0.06)
+				rim_pos = Vector3(0.0, 0.10, -fs.z * 0.5 - 0.14)
+			2:  # left rim
+				rb.size = Vector3(0.06, 0.06, 0.85)
+				rim_pos = Vector3(-fs.x * 0.27, 0.10, -fs.z * 0.5 - 0.55)
+			_:  # right rim
+				rb.size = Vector3(0.06, 0.06, 0.85)
+				rim_pos = Vector3(fs.x * 0.27, 0.10, -fs.z * 0.5 - 0.55)
+		rim.mesh = rb
+		rim.position = rim_pos
+		rim.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+		_attach_visual(rim)
+	# Brass arch above the weighbridge — two short uprights with a
+	# horizontal cross-piece. Reads as the gantry the loaded carrier
+	# drives under to register weight.
+	for arch_side: int in 2:
+		var asx: float = (-1.0 if arch_side == 0 else 1.0) * fs.x * 0.27
+		var upright := MeshInstance3D.new()
+		var ub := BoxMesh.new()
+		ub.size = Vector3(0.08, 0.55, 0.08)
+		upright.mesh = ub
+		upright.position = Vector3(asx, 0.30 + 0.275, -fs.z * 0.5 - 0.55)
+		upright.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+		_attach_visual(upright)
+	var arch_top := MeshInstance3D.new()
+	var atb := BoxMesh.new()
+	atb.size = Vector3(fs.x * 0.62, 0.10, 0.10)
+	arch_top.mesh = atb
+	arch_top.position = Vector3(0.0, 0.30 + 0.55, -fs.z * 0.5 - 0.55)
+	arch_top.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+	_attach_visual(arch_top)
+	# --- Cargo loading dock platform on the RIGHT side (+X). Slightly
+	# raised platform with three stacked supply crates of varying sizes.
+	var dock := MeshInstance3D.new()
+	var dock_box := BoxMesh.new()
+	dock_box.size = Vector3(0.55, 0.20, fs.z * 0.65)
+	dock.mesh = dock_box
+	dock.position = Vector3(fs.x * 0.5 + 0.30, 0.10, 0.0)
+	dock.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.20, 0.18)))
+	_attach_visual(dock)
+	# Stack of three crates on the dock — varying heights for a real
+	# loading-bay read.
+	var crate_specs: Array = [
+		{"size": Vector3(0.40, 0.34, 0.40), "pos": Vector3(fs.x * 0.5 + 0.30, 0.20 + 0.17, -fs.z * 0.20)},
+		{"size": Vector3(0.36, 0.32, 0.36), "pos": Vector3(fs.x * 0.5 + 0.30, 0.20 + 0.16, fs.z * 0.05)},
+		{"size": Vector3(0.42, 0.30, 0.42), "pos": Vector3(fs.x * 0.5 + 0.30, 0.20 + 0.15, fs.z * 0.25)},
+	]
+	for spec in crate_specs:
+		var crate := MeshInstance3D.new()
+		var cb := BoxMesh.new()
+		cb.size = spec.size as Vector3
+		crate.mesh = cb
+		crate.position = spec.pos as Vector3
+		crate.rotation.y = randf_range(-0.15, 0.15)
+		crate.set_surface_override_material(0, _detail_dark_metal_mat(CRATE_TINT))
+		_attach_visual(crate)
+		# Brass cross-strap on each crate face.
+		var strap := MeshInstance3D.new()
+		var sbox := BoxMesh.new()
+		sbox.size = Vector3((cb.size.x) + 0.02, 0.04, (cb.size.z) + 0.02)
+		strap.mesh = sbox
+		strap.position = (spec.pos as Vector3) + Vector3(0.0, (cb.size.y) * 0.15, 0.0)
+		strap.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+		_attach_visual(strap)
+	# --- Side conveyor belt segment on the LEFT side (-X). Short
+	# horizontal belt strip with two end pulleys, hinting at scrap
+	# being mechanically transported into the yard. Static visual only.
+	var belt_root := Node3D.new()
+	belt_root.position = Vector3(-fs.x * 0.5 - 0.30, 0.18, 0.0)
+	_attach_visual(belt_root)
+	# Belt slab.
+	var belt := MeshInstance3D.new()
+	var btb := BoxMesh.new()
+	btb.size = Vector3(0.40, 0.06, fs.z * 0.85)
+	belt.mesh = btb
+	belt.set_surface_override_material(0, _detail_dark_metal_mat(BELT_DARK))
+	belt_root.add_child(belt)
+	# Two end pulleys (drum cylinders).
+	for pulley_end: int in 2:
+		var pz: float = (-1.0 if pulley_end == 0 else 1.0) * fs.z * 0.42
+		var pulley := MeshInstance3D.new()
+		var pcyl := CylinderMesh.new()
+		pcyl.top_radius = 0.10
+		pcyl.bottom_radius = 0.10
+		pcyl.height = 0.42
+		pcyl.radial_segments = 14
+		pulley.mesh = pcyl
+		pulley.rotation.z = PI * 0.5
+		pulley.position = Vector3(0.0, 0.0, pz)
+		pulley.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.16, 0.14)))
+		belt_root.add_child(pulley)
+	# Belt support legs — two short uprights between belt and ground.
+	for leg_i: int in 2:
+		var lz: float = (-1.0 if leg_i == 0 else 1.0) * fs.z * 0.30
+		var leg := MeshInstance3D.new()
+		var lb := BoxMesh.new()
+		lb.size = Vector3(0.08, 0.18, 0.08)
+		leg.mesh = lb
+		leg.position = Vector3(0.0, -0.11, lz)
+		leg.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.20, 0.18, 0.16)))
+		belt_root.add_child(leg)
+	# Two scrap chunks on the belt to sell that material's actually
+	# being moved. Small dark cubes.
+	for s_i: int in 2:
+		var chunk := MeshInstance3D.new()
+		var csb := BoxMesh.new()
+		csb.size = Vector3(0.18, 0.14, 0.18)
+		chunk.mesh = csb
+		var cz: float = (-1.0 if s_i == 0 else 1.0) * fs.z * 0.18
+		chunk.position = Vector3(0.0, 0.10, cz)
+		chunk.rotation.y = randf_range(0.0, TAU)
+		chunk.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.16, 0.14, 0.12)))
+		belt_root.add_child(chunk)
+
 
 func _detail_aerodrome() -> void:
 	## Aerodrome — landing pad with hangar entrance + control tower.
@@ -2475,6 +3319,130 @@ func _build_aerodrome_tower_sable(fs: Vector3) -> void:
 	tip.set_surface_override_material(0, band_mat)
 	_attach_visual(tip)
 
+	# Combine-only ornaments: brass cornice along the roof, hammer-and-
+	# anvil sigil on the front, hanging blue banner with brass cross
+	# on the side, and a single small Orthodox onion dome on the
+	# control tower so the building family carries a consistent
+	# silhouette read.
+	if _resolve_faction_id() == 0:
+		_add_combine_aerodrome_ornaments()
+
+
+func _add_combine_aerodrome_ornaments() -> void:
+	## Layered Combine ornaments stacked on the base aerodrome. Adds
+	## brass cornice trim along the roof edges, a hammer-and-anvil
+	## sigil panel on the front face, a hanging blue banner with a
+	## brass cross on the side, and a single small Orthodox onion
+	## dome on top of the control tower (using the shared helper so
+	## it matches the HQ corner domes).
+	var fs: Vector3 = stats.footprint_size
+	const ANVIL_BRASS: Color = Color(0.78, 0.62, 0.18, 1.0)
+	const GILDED_GOLD: Color = Color(0.95, 0.78, 0.35, 1.0)
+	const TEMPLE_DARK: Color = Color(0.12, 0.10, 0.08, 1.0)
+	const DEEP_BLUE: Color = Color(0.22, 0.20, 0.32, 1.0)
+	# --- Brass cornice trim along the four roof edges (matches Foundry
+	# + HQ family treatment).
+	for cornice_side: int in 4:
+		var cornice := MeshInstance3D.new()
+		var cb := BoxMesh.new()
+		var c_pos: Vector3
+		match cornice_side:
+			0:
+				cb.size = Vector3(fs.x * 1.00, 0.08, 0.12)
+				c_pos = Vector3(0.0, fs.y + 0.04, -fs.z * 0.5 - 0.05)
+			1:
+				cb.size = Vector3(fs.x * 1.00, 0.08, 0.12)
+				c_pos = Vector3(0.0, fs.y + 0.04, fs.z * 0.5 + 0.05)
+			2:
+				cb.size = Vector3(0.12, 0.08, fs.z * 1.00)
+				c_pos = Vector3(-fs.x * 0.5 - 0.05, fs.y + 0.04, 0.0)
+			_:
+				cb.size = Vector3(0.12, 0.08, fs.z * 1.00)
+				c_pos = Vector3(fs.x * 0.5 + 0.05, fs.y + 0.04, 0.0)
+		cornice.mesh = cb
+		cornice.position = c_pos
+		cornice.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+		_attach_visual(cornice)
+	# --- Hammer-and-anvil sigil panel on the FRONT face (mounted on
+	# the side wall, not above the door — the runway dominates the
+	# front and we want the sigil legible from the building's profile).
+	var sigil_x: float = -fs.x * 0.5 - 0.04
+	var sigil_y: float = fs.y * 0.55
+	var sigil_z: float = -fs.z * 0.20
+	var backing := MeshInstance3D.new()
+	var back_box := BoxMesh.new()
+	back_box.size = Vector3(0.04, fs.y * 0.42, fs.z * 0.20)
+	backing.mesh = back_box
+	backing.position = Vector3(sigil_x, sigil_y, sigil_z)
+	backing.set_surface_override_material(0, _detail_dark_metal_mat(TEMPLE_DARK))
+	_attach_visual(backing)
+	var anvil_bar := MeshInstance3D.new()
+	var ab := BoxMesh.new()
+	ab.size = Vector3(0.04, 0.05, fs.z * 0.14)
+	anvil_bar.mesh = ab
+	anvil_bar.position = Vector3(sigil_x - 0.02, sigil_y - fs.y * 0.10, sigil_z)
+	anvil_bar.set_surface_override_material(0, _detail_emissive_mat(ANVIL_BRASS, 0.45))
+	_attach_visual(anvil_bar)
+	var haft := MeshInstance3D.new()
+	var ht := BoxMesh.new()
+	ht.size = Vector3(0.04, fs.y * 0.16, 0.05)
+	haft.mesh = ht
+	haft.position = Vector3(sigil_x - 0.02, sigil_y, sigil_z)
+	haft.set_surface_override_material(0, _detail_emissive_mat(ANVIL_BRASS, 0.45))
+	_attach_visual(haft)
+	var hammer_head := MeshInstance3D.new()
+	var hh := BoxMesh.new()
+	hh.size = Vector3(0.04, 0.10, fs.z * 0.10)
+	hammer_head.mesh = hh
+	hammer_head.position = Vector3(sigil_x - 0.02, sigil_y + fs.y * 0.10, sigil_z)
+	hammer_head.set_surface_override_material(0, _detail_emissive_mat(ANVIL_BRASS, 0.45))
+	_attach_visual(hammer_head)
+	# --- Hanging blue banner with brass cross on the OPPOSITE side wall.
+	# Same Orthodox liturgical-banner treatment as the HQ.
+	var bn_x: float = fs.x * 0.5 + 0.06
+	var bn_top_y: float = fs.y * 0.92
+	var bn_h: float = fs.y * 0.50
+	# Brass mounting rod.
+	var rod := MeshInstance3D.new()
+	var rod_cyl := CylinderMesh.new()
+	rod_cyl.top_radius = 0.04
+	rod_cyl.bottom_radius = 0.04
+	rod_cyl.height = 0.30
+	rod_cyl.radial_segments = 8
+	rod.mesh = rod_cyl
+	rod.rotation.x = PI * 0.5
+	rod.position = Vector3(bn_x, bn_top_y, -fs.z * 0.20)
+	rod.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+	_attach_visual(rod)
+	var banner := MeshInstance3D.new()
+	var brn := BoxMesh.new()
+	brn.size = Vector3(0.04, bn_h, 0.20)
+	banner.mesh = brn
+	banner.position = Vector3(bn_x, bn_top_y - bn_h * 0.5, -fs.z * 0.20)
+	banner.set_surface_override_material(0, _detail_dark_metal_mat(DEEP_BLUE))
+	_attach_visual(banner)
+	# Brass cross sigil at the banner center.
+	var v_bar := MeshInstance3D.new()
+	var vbb := BoxMesh.new()
+	vbb.size = Vector3(0.04, 0.18, 0.05)
+	v_bar.mesh = vbb
+	v_bar.position = Vector3(bn_x + 0.02, bn_top_y - bn_h * 0.5, -fs.z * 0.20)
+	v_bar.set_surface_override_material(0, _detail_dark_metal_mat(GILDED_GOLD))
+	_attach_visual(v_bar)
+	var h_bar := MeshInstance3D.new()
+	var hbb := BoxMesh.new()
+	hbb.size = Vector3(0.04, 0.04, 0.14)
+	h_bar.mesh = hbb
+	h_bar.position = Vector3(bn_x + 0.02, bn_top_y - bn_h * 0.42, -fs.z * 0.20)
+	h_bar.set_surface_override_material(0, _detail_dark_metal_mat(GILDED_GOLD))
+	_attach_visual(h_bar)
+	# --- Single small Orthodox onion dome on top of the control tower.
+	# The aerodrome's existing tower spike (built in the base function)
+	# is at roughly (fs.x * 0.30, fs.y + ~0.55, -fs.z * 0.30); we
+	# place the dome ABOVE that so the silhouette reads as the family
+	# Combine "consecrated tower". Smaller than HQ corner domes.
+	_add_orthodox_onion_dome(fs.x * 0.30, -fs.z * 0.30, fs.y + 0.85, fs.x * 0.10, ANVIL_BRASS, GILDED_GOLD, TEMPLE_DARK, false)
+
 
 func _detail_sam_site() -> void:
 	## SAM Site — bunker base with a tilted missile launcher rack on
@@ -2602,6 +3570,10 @@ func _detail_sam_site() -> void:
 	dish.set_surface_override_material(0, dish_mat)
 	pivot.add_child(dish)
 
+	# Combine-only ornaments — same compact treatment as Gun Emplacement.
+	if _resolve_faction_id() == 0:
+		_add_combine_defense_ornaments()
+
 
 func _detail_gun_emplacement() -> void:
 	var fs: Vector3 = stats.footprint_size
@@ -2620,6 +3592,101 @@ func _detail_gun_emplacement() -> void:
 	turret_pivot = pivot
 
 	rebuild_turret_visual(&"balanced")
+
+	# Combine-only ornaments for the bunker base — brass cornice trim,
+	# hammer-and-anvil sigil panel, brass cross side sigils. Doesn't
+	# touch the rotating turret pivot (keeps targeting code clean).
+	if _resolve_faction_id() == 0:
+		_add_combine_defense_ornaments()
+
+
+func _add_combine_defense_ornaments() -> void:
+	## Compact Combine-flavour ornaments for defense buildings (Gun
+	## Emplacement, SAM Site). Adds: brass cornice trim around the
+	## chassis base, a hammer-and-anvil sigil panel on the front face,
+	## and brass cross sigils on each side wall. Doesn't add an
+	## onion dome (too much ornament for a small fortification).
+	## Operates on the static chassis only — does not touch the
+	## rotating turret pivot, so targeting code stays unaffected.
+	var fs: Vector3 = stats.footprint_size
+	const ANVIL_BRASS: Color = Color(0.78, 0.62, 0.18, 1.0)
+	const GILDED_GOLD: Color = Color(0.95, 0.78, 0.35, 1.0)
+	const TEMPLE_DARK: Color = Color(0.12, 0.10, 0.08, 1.0)
+	# --- Brass cornice trim around the chassis base (just below the
+	# turret cap so it doesn't overlap the rotating dome).
+	var cornice_y: float = fs.y - 0.10
+	for cornice_side: int in 4:
+		var cornice := MeshInstance3D.new()
+		var cb := BoxMesh.new()
+		var c_pos: Vector3
+		match cornice_side:
+			0:
+				cb.size = Vector3(fs.x * 1.02, 0.06, 0.10)
+				c_pos = Vector3(0.0, cornice_y, -fs.z * 0.5 - 0.04)
+			1:
+				cb.size = Vector3(fs.x * 1.02, 0.06, 0.10)
+				c_pos = Vector3(0.0, cornice_y, fs.z * 0.5 + 0.04)
+			2:
+				cb.size = Vector3(0.10, 0.06, fs.z * 1.02)
+				c_pos = Vector3(-fs.x * 0.5 - 0.04, cornice_y, 0.0)
+			_:
+				cb.size = Vector3(0.10, 0.06, fs.z * 1.02)
+				c_pos = Vector3(fs.x * 0.5 + 0.04, cornice_y, 0.0)
+		cornice.mesh = cb
+		cornice.position = c_pos
+		cornice.set_surface_override_material(0, _detail_dark_metal_mat(ANVIL_BRASS))
+		_attach_visual(cornice)
+	# --- Hammer-and-anvil sigil on the FRONT face (smaller than HQ
+	# version since defense buildings are physically smaller).
+	var sigil_y: float = fs.y * 0.45
+	var sigil_z: float = -fs.z * 0.5 - 0.03
+	var backing := MeshInstance3D.new()
+	var back_box := BoxMesh.new()
+	back_box.size = Vector3(fs.x * 0.40, fs.y * 0.42, 0.04)
+	backing.mesh = back_box
+	backing.position = Vector3(0.0, sigil_y, sigil_z)
+	backing.set_surface_override_material(0, _detail_dark_metal_mat(TEMPLE_DARK))
+	_attach_visual(backing)
+	var anvil_bar := MeshInstance3D.new()
+	var ab := BoxMesh.new()
+	ab.size = Vector3(fs.x * 0.30, 0.05, 0.04)
+	anvil_bar.mesh = ab
+	anvil_bar.position = Vector3(0.0, sigil_y - fs.y * 0.10, sigil_z - 0.02)
+	anvil_bar.set_surface_override_material(0, _detail_emissive_mat(ANVIL_BRASS, 0.45))
+	_attach_visual(anvil_bar)
+	var haft := MeshInstance3D.new()
+	var ht := BoxMesh.new()
+	ht.size = Vector3(0.04, fs.y * 0.16, 0.04)
+	haft.mesh = ht
+	haft.position = Vector3(0.0, sigil_y, sigil_z - 0.02)
+	haft.set_surface_override_material(0, _detail_emissive_mat(ANVIL_BRASS, 0.45))
+	_attach_visual(haft)
+	var hammer_head := MeshInstance3D.new()
+	var hh := BoxMesh.new()
+	hh.size = Vector3(fs.x * 0.22, 0.10, 0.04)
+	hammer_head.mesh = hh
+	hammer_head.position = Vector3(0.0, sigil_y + fs.y * 0.10, sigil_z - 0.02)
+	hammer_head.set_surface_override_material(0, _detail_emissive_mat(ANVIL_BRASS, 0.45))
+	_attach_visual(hammer_head)
+	# --- Small brass cross sigils on each SIDE wall — Orthodox cross
+	# silhouette (vertical bar + horizontal crossbar) so the player
+	# reads "consecrated bunker" from any side angle.
+	for side: int in 2:
+		var sx: float = (-1.0 if side == 0 else 1.0) * (fs.x * 0.5 + 0.04)
+		var v_bar := MeshInstance3D.new()
+		var vbb := BoxMesh.new()
+		vbb.size = Vector3(0.04, fs.y * 0.30, 0.06)
+		v_bar.mesh = vbb
+		v_bar.position = Vector3(sx, fs.y * 0.50, 0.0)
+		v_bar.set_surface_override_material(0, _detail_dark_metal_mat(GILDED_GOLD))
+		_attach_visual(v_bar)
+		var h_bar := MeshInstance3D.new()
+		var hbb := BoxMesh.new()
+		hbb.size = Vector3(0.04, 0.04, fs.z * 0.18)
+		h_bar.mesh = hbb
+		h_bar.position = Vector3(sx, fs.y * 0.55, 0.0)
+		h_bar.set_surface_override_material(0, _detail_dark_metal_mat(GILDED_GOLD))
+		_attach_visual(h_bar)
 
 
 func rebuild_turret_visual(profile: StringName) -> void:
@@ -3308,7 +4375,7 @@ func advance_construction(amount: float, builder: Node = null) -> void:
 			# the factor we assigned them on the first call so the
 			# whole frame stays consistent.
 			scaled = amount * (_builders_this_tick[builder_id] as float)
-	_construction_progress += scaled
+	_construction_progress += scaled * _cheat_build_speed_mult()
 	_build_amount_this_tick += scaled
 	# Scale current_hp from 20% (placement) up to stats.hp as
 	# construction progresses. Construction completion sets it to full
@@ -3820,6 +4887,15 @@ func cancel_queue_at(index: int) -> bool:
 	# AIController) bumped it on enqueue.
 	if resource_manager and resource_manager.has_method("remove_population"):
 		resource_manager.remove_population(unit_stats.population)
+	# Meridian contracts rebate — without this, cancelling a queued
+	# Harbinger / Wraith burned the 3 contracts at queue-time but only
+	# refunded salvage/fuel/pop, which felt punishing for a misclick.
+	if "contract_cost" in unit_stats and (unit_stats.get("contract_cost") as int) > 0:
+		var scene_root: Node = get_tree().current_scene if get_tree() else null
+		if scene_root != null:
+			var mcm: Node = scene_root.get_node_or_null("MeridianContractsManager")
+			if mcm and mcm.has_method("refund"):
+				mcm.call("refund", owner_id, unit_stats.get("contract_cost") as int)
 	_build_queue.remove_at(index)
 	# Shift per-slot progress values down from the cancelled index so slot
 	# indices stay aligned with queue indices after the removal.
@@ -3862,7 +4938,7 @@ func queue_unit(unit_stats: UnitStatResource) -> bool:
 ## UnitStatResource with unlock_prerequisite set is filtered out unless
 ## the owner has constructed that building. This is how Voron Walker /
 ## Hammerhead / Wraith / etc. are hidden behind the Advanced Armory
-## (or Black Pylon, for Wraith) — the building keeps the unit in its
+## (or Mesh Nexus, for Wraith) — the building keeps the unit in its
 ## producible_units list and the unit's gate decides visibility.
 func is_network_eligible() -> bool:
 	## Building participates in Conveyor Networks if its resource has
@@ -3945,28 +5021,36 @@ func _meridian_hq_producible() -> Array[String]:
 	## Meridian HQ's producible-unit roster — the union of categories
 	## authorized by buildings the owner has constructed. Engineer
 	## (Rigger) and Crawler are always available. Sensor Spine →
-	## Light/Medium; Drone Bay → Air; Black Pylon → Heavy/Caster.
+	## Light/Medium; Drone Bay → Air; Intelligence Network → Heavy/Caster.
 	## Phase 3 (Intelligence Network tiers) further gates Heavy/Apex
 	## by tech tier; that gate lives on the units' unlock_prerequisite,
 	## not here.
+	##
+	## Techcraze bypass: the cheat opens unit unlock_prerequisite gates
+	## via _unit_unlock_prerequisite_met but doesn't touch this dynamic
+	## roster, so without an explicit bypass the Meridian player still
+	## needs to physically build Sensor Spine / Drone Bay / Intel Network
+	## for those categories to even APPEAR. Force-include them when the
+	## cheat is on so techcraze actually unlocks everything.
+	var bypass: bool = owner_id == 0 and _cheats_tech_craze()
 	var paths: Array[String] = [
 		"res://resources/units/sable_rigger.tres",
-		# Crawler stays shared with Anvil for now.
-		"res://resources/units/anvil_crawler.tres",
+		# Meridian gets its own slightly-faster crawler variant.
+		"res://resources/units/sable_crawler.tres",
 	]
-	if _local_player_has_built(&"sensor_spine"):
+	if bypass or _local_player_has_built(&"sensor_spine"):
 		paths.append("res://resources/units/sable_specter.tres")
 		paths.append("res://resources/units/sable_jackal.tres")
-	if _local_player_has_built(&"drone_bay"):
+	if bypass or _local_player_has_built(&"drone_bay"):
 		paths.append("res://resources/units/sable_switchblade.tres")
 		paths.append("res://resources/units/sable_fang.tres")
-	if _local_player_has_built(&"black_pylon"):
+	if bypass or _local_player_has_built(&"intelligence_network"):
 		paths.append("res://resources/units/sable_harbinger.tres")
 		paths.append("res://resources/units/sable_wraith.tres")
 		paths.append("res://resources/units/sable_pulsefont.tres")
 	# Couriers — keep the transport branch reachable. Spec ties Courier
 	# to medium-tier authorization (Sensor Spine territory).
-	if _local_player_has_built(&"sensor_spine"):
+	if bypass or _local_player_has_built(&"sensor_spine"):
 		paths.append("res://resources/units/sable_courier_tank.tres")
 	return paths
 
@@ -4018,6 +5102,26 @@ func _faction_producible_list() -> Array[UnitStatResource]:
 				# non-producer so Anvil units don't leak through.
 				forced_empty = true
 
+	elif faction_id == 3:
+		# Heliarch — basic-foundry roster lives on the HQ for now.
+		# Stoker (engineer), Matador (light), Cremator (medium) plus the
+		# shared Salvage Crawler so the player can rebuild salvage
+		# infrastructure. Advanced Foundry / Aerodrome rosters land when
+		# their .tres files exist; until then those buildings produce
+		# nothing rather than leaking Anvil units.
+		match stats.building_id:
+			&"headquarters":
+				paths = [
+					"res://resources/units/heliarch_stoker.tres",
+					"res://resources/units/heliarch_matador.tres",
+					"res://resources/units/heliarch_cremator.tres",
+					"res://resources/units/anvil_crawler.tres",
+				]
+			&"basic_foundry", &"advanced_foundry", &"aerodrome":
+				forced_empty = true
+			_:
+				return stats.producible_units
+
 	else:
 		# Unknown future faction — safe fallback.
 		return stats.producible_units
@@ -4056,6 +5160,19 @@ func _cheats_tech_craze() -> bool:
 	if cheats and "tech_craze" in cheats:
 		return cheats.get("tech_craze") as bool
 	return false
+
+
+func _cheat_build_speed_mult() -> float:
+	## Local-player-only multiplier on construction + production tick
+	## rates. Returns 1.0 (no-op) when the cheat isn't set or this
+	## building isn't owned by the local player — AI shouldn't ride
+	## the player's geschwindigkeit cheat.
+	if owner_id != 0:
+		return 1.0
+	var cheats: Node = get_tree().current_scene.get_node_or_null("CheatManager") if get_tree() else null
+	if cheats and "build_speed_mult" in cheats:
+		return cheats.get("build_speed_mult") as float
+	return 1.0
 
 
 func _apply_sable_building_silhouette() -> void:
@@ -5123,95 +6240,146 @@ func _detail_intelligence_network() -> void:
 
 
 func _detail_sensor_array() -> void:
-	## Armed radar pedestal — a central column with a tilted dish,
-	## a small ground-defense turret on the dish, and three tripod legs
-	## at the base.  Footprint: 3.0 × 4.5 × 2.0 (rectangular — wider than
-	## deep so the top-down shadow differs clearly from other Meridian pylons).
-	## Top-down: elongated oval (dish) plus three angled stubs (legs) plus
-	## a short barrel stub — reads as "sensor + gun".
+	## Satellite ground station — squat pedestal + yoke mount + ONE
+	## big parabolic dish tilted up at the sky. Earlier "phased-array
+	## panel + 4 small dishes" version was too cramped (dishes clipped
+	## into each other and the panel into one unreadable blob, per
+	## error report 631). Single iconic dish reads cleanly at RTS
+	## zoom. Defence turret tucked down at the pedestal side so the
+	## dish silhouette stays clean.
 	const MERIDIAN_BLUE := Color(0.30, 0.55, 0.70, 1.0)
 	var fs: Vector3 = stats.footprint_size
-	# Central pedestal column rising from the placeholder roof.
-	var col := MeshInstance3D.new()
-	var cc := CylinderMesh.new()
-	cc.top_radius = fs.x * 0.10
-	cc.bottom_radius = fs.x * 0.14
-	cc.height = fs.y * 0.75
-	cc.radial_segments = 10
-	col.mesh = cc
-	col.position = Vector3(0.0, fs.y + cc.height * 0.5, 0.0)
-	col.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.20, 0.24)))
-	_attach_visual(col)
-	# Radar dish on top — flat cone (top_radius small, bottom_radius large)
-	# tilted ~30° to suggest it's aimed at the horizon.
+	# Squat low pedestal.
+	var pedestal := MeshInstance3D.new()
+	var pb := BoxMesh.new()
+	pb.size = Vector3(fs.x * 0.80, fs.y * 0.38, fs.z * 0.80)
+	pedestal.mesh = pb
+	pedestal.position = Vector3(0.0, fs.y + pb.size.y * 0.5, 0.0)
+	pedestal.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.20, 0.24)))
+	_attach_visual(pedestal)
+	# Yoke mount — two short verticals on the left/right of the pedestal
+	# top, holding the dish on a tilt axis. Reads as a real dish mount.
+	var yoke_mat: StandardMaterial3D = _detail_dark_metal_mat(Color(0.22, 0.24, 0.28))
+	var yoke_top_y: float = fs.y + pb.size.y + 0.30
+	for yoke_side: int in 2:
+		var ysx: float = -fs.x * 0.30 if yoke_side == 0 else fs.x * 0.30
+		var yoke := MeshInstance3D.new()
+		var yk_box := BoxMesh.new()
+		yk_box.size = Vector3(0.10, 0.45, 0.18)
+		yoke.mesh = yk_box
+		yoke.position = Vector3(ysx, yoke_top_y - 0.225, 0.0)
+		yoke.set_surface_override_material(0, yoke_mat)
+		_attach_visual(yoke)
+	# Big parabolic dish — squashed sphere tilted up ~50° so the bowl
+	# face points skyward but is clearly visible from the standard RTS
+	# camera angle.
+	var dish_radius: float = fs.x * 0.55
 	var dish := MeshInstance3D.new()
-	var dc := CylinderMesh.new()
-	dc.top_radius = 0.06
-	dc.bottom_radius = fs.x * 0.42
-	dc.height = 0.16
-	dc.radial_segments = 18
-	dish.mesh = dc
-	dish.rotation.x = deg_to_rad(-30.0)
-	dish.position = Vector3(fs.x * 0.06, fs.y + cc.height + 0.14, 0.0)
-	dish.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.24, 0.26, 0.32)))
+	var bowl := SphereMesh.new()
+	bowl.radius = dish_radius
+	bowl.height = dish_radius * 0.55  # squashed flat → bowl shape
+	bowl.radial_segments = 18
+	bowl.rings = 8
+	dish.mesh = bowl
+	dish.rotation = Vector3(deg_to_rad(-50.0), 0.0, 0.0)
+	dish.position = Vector3(0.0, yoke_top_y, 0.0)
+	dish.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.32, 0.34, 0.40)))
 	_attach_visual(dish)
-	# Junction box at the dish base — small emissive cube where the
-	# dish meets the column.
-	var jbox := MeshInstance3D.new()
-	var jb := BoxMesh.new()
-	jb.size = Vector3(0.22, 0.18, 0.22)
-	jbox.mesh = jb
-	jbox.position = Vector3(0.0, fs.y + cc.height + 0.06, 0.0)
-	jbox.set_surface_override_material(0, _detail_emissive_mat(MERIDIAN_BLUE, 1.6))
-	_attach_visual(jbox)
-	# Three tripod legs radiating outward from the base of the
-	# placeholder down to the ground.  Reads as a sturdy tripod mount
-	# from any camera angle.
-	for leg_i: int in 3:
-		var ang: float = float(leg_i) / 3.0 * TAU + PI / 6.0
-		var lx: float = sin(ang) * (fs.x * 0.42)
-		var lz: float = cos(ang) * (fs.x * 0.42)
-		var leg := MeshInstance3D.new()
-		var lb := BoxMesh.new()
-		lb.size = Vector3(0.10, fs.y * 0.70, 0.10)
-		leg.mesh = lb
-		leg.position = Vector3(lx * 0.55, fs.y * 0.35, lz * 0.55)
-		leg.rotation.x = -atan2(lz, fs.y * 0.55) * 0.40
-		leg.rotation.z = atan2(lx, fs.y * 0.55) * 0.40
-		leg.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.18, 0.18, 0.20)))
-		_attach_visual(leg)
-	# Turret emitter — small box body with a short barrel cylinder mounted
-	# on the dish face. Signals to the player that this sensor can shoot.
-	var dish_top_y: float = fs.y + cc.height + 0.26
+	# Concentric rim ring — adds the "satellite dish" read by tracing
+	# the bowl's outer edge.
+	var rim := MeshInstance3D.new()
+	var rim_t := TorusMesh.new()
+	rim_t.inner_radius = dish_radius * 0.85
+	rim_t.outer_radius = dish_radius * 1.02
+	rim_t.rings = 24
+	rim_t.ring_segments = 6
+	rim.mesh = rim_t
+	rim.rotation = Vector3(deg_to_rad(-50.0), 0.0, 0.0)
+	rim.position = Vector3(0.0, yoke_top_y, 0.0)
+	rim.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.24, 0.28)))
+	_attach_visual(rim)
+	# Feed horn at the focal point — small emissive box on a short
+	# strut, pointed at the bowl center.
+	var feed_strut := MeshInstance3D.new()
+	var fs_box := BoxMesh.new()
+	fs_box.size = Vector3(0.05, 0.05, dish_radius * 0.85)
+	feed_strut.mesh = fs_box
+	feed_strut.rotation = Vector3(deg_to_rad(-50.0), 0.0, 0.0)
+	feed_strut.position = Vector3(0.0, yoke_top_y + sin(deg_to_rad(50.0)) * dish_radius * 0.25, cos(deg_to_rad(50.0)) * dish_radius * 0.30)
+	feed_strut.set_surface_override_material(0, yoke_mat)
+	_attach_visual(feed_strut)
+	var feed_horn := MeshInstance3D.new()
+	var fh_box := BoxMesh.new()
+	fh_box.size = Vector3(0.14, 0.14, 0.18)
+	feed_horn.mesh = fh_box
+	feed_horn.position = Vector3(0.0, yoke_top_y + sin(deg_to_rad(50.0)) * dish_radius * 0.55, cos(deg_to_rad(50.0)) * dish_radius * 0.55)
+	feed_horn.set_surface_override_material(0, _detail_emissive_mat(MERIDIAN_BLUE, 1.6))
+	_attach_visual(feed_horn)
+	# Defense turret — small box + barrel tucked at the FRONT-LEFT of
+	# the pedestal so it doesn't compete with the dish silhouette but
+	# still telegraphs "this sensor also shoots". Wrapped in a Node3D
+	# pivot + assigned to building.turret_pivot so TurretComponent has
+	# something to rotate toward targets. (Fix 2026-05-15: my Sensor
+	# Array redesign forgot the pivot, so the turret never fired.)
+	var turret_x: float = -fs.x * 0.30
+	var turret_z: float = -fs.z * 0.30
+	var turret_y: float = fs.y + pb.size.y + 0.10
+	var pivot := Node3D.new()
+	pivot.name = "TurretPivot"
+	pivot.position = Vector3(turret_x, turret_y, turret_z)
+	_attach_visual(pivot)
 	var turret_body := MeshInstance3D.new()
 	var tb := BoxMesh.new()
-	tb.size = Vector3(0.26, 0.18, 0.24)
+	tb.size = Vector3(0.24, 0.20, 0.24)
 	turret_body.mesh = tb
-	turret_body.position = Vector3(fs.x * 0.06, dish_top_y, 0.0)
+	turret_body.position = Vector3(0.0, 0.0, 0.0)
 	turret_body.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.24, 0.28)))
-	_attach_visual(turret_body)
+	pivot.add_child(turret_body)
 	var barrel := MeshInstance3D.new()
 	var bc := CylinderMesh.new()
 	bc.top_radius = 0.04
 	bc.bottom_radius = 0.05
-	bc.height = 0.30
+	bc.height = 0.28
 	bc.radial_segments = 8
 	barrel.mesh = bc
 	barrel.rotation.x = deg_to_rad(90.0)
-	barrel.position = Vector3(fs.x * 0.06, dish_top_y, -0.18)
+	# Local -Z so the barrel tip points along the pivot's forward axis,
+	# matching the gun-emplacement convention TurretComponent uses.
+	barrel.position = Vector3(0.0, 0.0, -0.18)
 	barrel.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.14, 0.14, 0.16)))
-	_attach_visual(barrel)
-	# Muzzle emitter tip — tiny red glow so it reads "weapon" not "sensor".
+	pivot.add_child(barrel)
 	var muzzle := MeshInstance3D.new()
 	var ms := SphereMesh.new()
-	ms.radius = 0.04
-	ms.height = 0.08
+	ms.radius = 0.035
+	ms.height = 0.07
 	muzzle.mesh = ms
-	muzzle.position = Vector3(fs.x * 0.06, dish_top_y, -0.34)
+	muzzle.position = Vector3(0.0, 0.0, -0.34)
 	muzzle.set_surface_override_material(0, _detail_emissive_mat(Color(0.85, 0.30, 0.15), 1.8))
-	_attach_visual(muzzle)
-	# Team collar at the column base.
-	_team_collar_ring(cc.bottom_radius * 1.15, 0.08, Vector3(0.0, fs.y + 0.04, 0.0))
+	pivot.add_child(muzzle)
+	# Muzzle marker — TurretComponent reads a Marker3D named "Muzzle"
+	# under the pivot to spawn projectiles from the actual barrel tip.
+	var muzzle_marker := Marker3D.new()
+	muzzle_marker.name = "Muzzle"
+	muzzle_marker.position = Vector3(0.0, 0.0, -0.34)
+	pivot.add_child(muzzle_marker)
+	# Hand the pivot to the TurretComponent.
+	turret_pivot = pivot
+	# Two small accessory antennae poking up from the back-right of
+	# the pedestal — silhouette accent so the back end doesn't read
+	# as a blank wall.
+	for ant_i: int in 2:
+		var ant := MeshInstance3D.new()
+		var ac := CylinderMesh.new()
+		ac.top_radius = 0.025
+		ac.bottom_radius = 0.035
+		ac.height = 0.45 + 0.10 * float(ant_i)
+		ac.radial_segments = 6
+		ant.mesh = ac
+		ant.position = Vector3(fs.x * 0.30 + 0.05 * float(ant_i), fs.y + pb.size.y + ac.height * 0.5, fs.z * 0.28)
+		ant.set_surface_override_material(0, yoke_mat)
+		_attach_visual(ant)
+	# Team collar around the pedestal base.
+	_team_collar_ring(fs.x * 0.42, 0.08, Vector3(0.0, fs.y + 0.04, 0.0))
 
 
 func _detail_mesh_relay() -> void:
@@ -5457,6 +6625,143 @@ func _detail_inheritor_construction_site() -> void:
 	_attach_visual(orb)
 
 
+## Inheritor Reliquary — passive salvage-pile generator. Reads as a sacred
+## reassembled archive: a low concrete plinth with patinated-bronze panels,
+## a stepped reliquary cabinet, and a single Architect-violet light glowing
+## from a recessed niche. Per 03_factions §4.4: "pale concrete-grey ...
+## patinated bronze ... violet-white as the indicator". Compact (2.5×3.5×2.5).
+const INHERITOR_VIOLET: Color = Color(0.70, 0.55, 1.0, 1.0)
+const INHERITOR_CONCRETE: Color = Color(0.62, 0.60, 0.56, 1.0)
+const INHERITOR_BRONZE: Color = Color(0.55, 0.40, 0.20, 1.0)
+const INHERITOR_VERDIGRIS: Color = Color(0.32, 0.50, 0.42, 1.0)
+
+
+func _detail_reliquary() -> void:
+	if not stats:
+		return
+	var fs: Vector3 = stats.footprint_size
+	# Low concrete plinth covering most of the footprint.
+	var plinth := MeshInstance3D.new()
+	var pb := BoxMesh.new()
+	pb.size = Vector3(fs.x * 0.92, fs.y * 0.22, fs.z * 0.92)
+	plinth.mesh = pb
+	plinth.position = Vector3(0.0, fs.y * 0.11, 0.0)
+	plinth.set_surface_override_material(0, _detail_dark_metal_mat(INHERITOR_CONCRETE))
+	_attach_visual(plinth)
+	# Stepped reliquary cabinet — three stacked tiers, bronze-trimmed.
+	var tier_heights: Array[float] = [0.42, 0.30, 0.20]
+	var tier_widths: Array[float] = [0.78, 0.62, 0.42]
+	var y_cursor: float = fs.y * 0.22
+	for i: int in tier_heights.size():
+		var tier := MeshInstance3D.new()
+		var th: float = fs.y * tier_heights[i]
+		var tw_x: float = fs.x * tier_widths[i]
+		var tw_z: float = fs.z * tier_widths[i]
+		var tb := BoxMesh.new()
+		tb.size = Vector3(tw_x, th, tw_z)
+		tier.mesh = tb
+		tier.position = Vector3(0.0, y_cursor + th * 0.5, 0.0)
+		var tone: Color = INHERITOR_CONCRETE if i != 1 else INHERITOR_BRONZE
+		tier.set_surface_override_material(0, _detail_dark_metal_mat(tone))
+		_attach_visual(tier)
+		y_cursor += th
+	# Front-facing niche — a small inset cavity with the Architect-violet glow.
+	var niche := MeshInstance3D.new()
+	var nb := BoxMesh.new()
+	nb.size = Vector3(fs.x * 0.18, fs.y * 0.30, 0.08)
+	niche.mesh = nb
+	niche.position = Vector3(0.0, fs.y * 0.40, fs.z * 0.42)
+	niche.set_surface_override_material(0, _detail_emissive_mat(INHERITOR_VIOLET, 1.8))
+	_attach_visual(niche)
+	# Four corner gold-leaf studs (faction iconography on dark backing).
+	var half_x: float = fs.x * 0.42
+	var half_z: float = fs.z * 0.42
+	for xi: int in 2:
+		for zi: int in 2:
+			var stud := MeshInstance3D.new()
+			var sb := SphereMesh.new()
+			sb.radius = 0.08
+			sb.height = 0.16
+			stud.mesh = sb
+			stud.position = Vector3(
+				half_x * (1.0 if xi == 0 else -1.0),
+				fs.y * 0.22,
+				half_z * (1.0 if zi == 0 else -1.0),
+			)
+			stud.set_surface_override_material(0, _detail_emissive_mat(Color(0.95, 0.78, 0.35), 0.6))
+			_attach_visual(stud)
+
+
+## Inheritor Architect's Network — pre-Severance computer relic. Two violet
+## emissive screens framed in patinated bronze atop a concrete monolith,
+## with verdigris piping running into the ground. Reads as "ancient
+## machine still talking to something we can't see".
+func _detail_architect_network() -> void:
+	if not stats:
+		return
+	var fs: Vector3 = stats.footprint_size
+	# Concrete monolith — the bulk of the structure.
+	var monolith := MeshInstance3D.new()
+	var mb := BoxMesh.new()
+	mb.size = Vector3(fs.x * 0.78, fs.y * 0.78, fs.z * 0.78)
+	monolith.mesh = mb
+	monolith.position = Vector3(0.0, fs.y * 0.39, 0.0)
+	monolith.set_surface_override_material(0, _detail_dark_metal_mat(INHERITOR_CONCRETE))
+	_attach_visual(monolith)
+	# Two violet screens facing forward, slightly tilted.
+	for i: int in 2:
+		var screen := MeshInstance3D.new()
+		var sb := BoxMesh.new()
+		sb.size = Vector3(fs.x * 0.28, fs.y * 0.38, 0.06)
+		screen.mesh = sb
+		var x_off: float = fs.x * (0.18 if i == 0 else -0.18)
+		screen.position = Vector3(x_off, fs.y * 0.50, fs.z * 0.40)
+		screen.rotation.y = deg_to_rad(8.0 if i == 0 else -8.0)
+		screen.set_surface_override_material(0, _detail_emissive_mat(INHERITOR_VIOLET, 2.0))
+		_attach_visual(screen)
+	# Bronze frame above the screens — the reassembled relic header.
+	var header := MeshInstance3D.new()
+	var hb := BoxMesh.new()
+	hb.size = Vector3(fs.x * 0.82, fs.y * 0.08, 0.18)
+	header.mesh = hb
+	header.position = Vector3(0.0, fs.y * 0.74, fs.z * 0.40)
+	header.set_surface_override_material(0, _detail_dark_metal_mat(INHERITOR_BRONZE))
+	_attach_visual(header)
+	# Verdigris piping running down the left and right sides into the ground.
+	for side: int in 2:
+		var pipe := MeshInstance3D.new()
+		var pmesh := CylinderMesh.new()
+		pmesh.top_radius = 0.10
+		pmesh.bottom_radius = 0.10
+		pmesh.height = fs.y * 0.78
+		pipe.mesh = pmesh
+		pipe.position = Vector3(
+			fs.x * (0.42 if side == 0 else -0.42),
+			fs.y * 0.39,
+			-fs.z * 0.25,
+		)
+		pipe.set_surface_override_material(0, _detail_dark_metal_mat(INHERITOR_VERDIGRIS))
+		_attach_visual(pipe)
+	# Crowning violet emitter — a small upright spire on top.
+	var spire := MeshInstance3D.new()
+	var sp_mesh := CylinderMesh.new()
+	sp_mesh.top_radius = 0.04
+	sp_mesh.bottom_radius = 0.18
+	sp_mesh.height = fs.y * 0.36
+	spire.mesh = sp_mesh
+	spire.position = Vector3(0.0, fs.y * 0.95, 0.0)
+	spire.set_surface_override_material(0, _detail_emissive_mat(INHERITOR_VIOLET, 1.6))
+	_attach_visual(spire)
+	# Violet point-light at the spire tip so the relic actually casts color
+	# on the surrounding ground at night — sells the "still active" feel.
+	var light := OmniLight3D.new()
+	light.light_color = INHERITOR_VIOLET
+	light.light_energy = 1.0
+	light.omni_range = fs.x * 1.8 + 2.0
+	light.position = Vector3(0.0, fs.y * 1.10, 0.0)
+	_attach_visual(light)
+
+
 func _add_mesh_aura_disc(radius: float) -> void:
 	## Full-disc Mesh-aura visualization replacing the old TorusMesh ring.
 	## Uses a PlaneMesh sized to the coverage diameter + a custom shader
@@ -5581,7 +6886,7 @@ func _building_role_color() -> Color:
 	match stats.building_id:
 		&"basic_foundry", &"advanced_foundry", &"aerodrome":
 			return _BUILDING_ROLE_TINT_PRODUCTION
-		&"basic_armory", &"advanced_armory", &"black_pylon":
+		&"basic_armory", &"advanced_armory", &"intelligence_network":
 			return _BUILDING_ROLE_TINT_TECH
 		&"gun_emplacement", &"gun_emplacement_basic", &"sam_site":
 			return _BUILDING_ROLE_TINT_DEFENSE
@@ -5648,6 +6953,11 @@ func _scrappy_neutral_building_tint(c: Color) -> Color:
 
 
 func _process(delta: float) -> void:
+	# Drone Bay respawn-over-time tick — runs even while unselected so
+	# the bay rebuilds its patrol drone trio independently of the HUD.
+	if is_constructed and stats != null and stats.building_id == &"drone_bay":
+		_tick_drone_bay_respawn(delta)
+
 	# Construction-progress sampling runs every frame regardless of
 	# the cosmetic stagger so the worker count + ETA refresh feels
 	# instant when the player adds / removes engineers. Sample window
@@ -5841,7 +7151,7 @@ func _process(delta: float) -> void:
 	var active_slots: int = mini(slot_count, _build_queue.size())
 	for slot_idx: int in range(active_slots - 1, -1, -1):
 		var slot_unit: UnitStatResource = _build_queue[slot_idx]
-		_build_progress_slots[slot_idx] += delta * efficiency * net_speed
+		_build_progress_slots[slot_idx] += delta * efficiency * net_speed * _cheat_build_speed_mult()
 		if _build_progress_slots[slot_idx] >= slot_unit.build_time:
 			# Unit complete — spawn it, remove from queue, shift progress
 			# values down so slot indices still line up with queue indices.
@@ -6042,33 +7352,67 @@ func _spawn_unit(unit_stats: UnitStatResource) -> void:
 ## --- Drone Bay patrol drones -----------------------------------------------
 
 func _spawn_patrol_drones() -> void:
-	## Instantiate 3 patrol drones at evenly-spaced positions around the Bay.
-	## Drones are aircraft (is_aircraft = true) so they use Aircraft.tscn and
-	## fly at the altitude defined on their UnitStatResource.
+	## Instantiate the initial 3 patrol drones at evenly-spaced positions
+	## around the Bay. Drones are aircraft (is_aircraft = true) so they
+	## use Aircraft.tscn and fly at the altitude defined on their
+	## UnitStatResource. Subsequent respawns route through
+	## `_spawn_single_patrol_drone` instead so the array doesn't double up.
+	for i: int in PATROL_DRONE_CAP:
+		var ang: float = TAU * float(i) / float(PATROL_DRONE_CAP)
+		_spawn_single_patrol_drone(ang)
+
+
+func _spawn_single_patrol_drone(angle_rad: float) -> void:
+	## Spawns one patrol drone at a given angular offset around the bay.
+	## Shared by the initial 3-drone burst and the over-time respawn tick.
 	var drone_stats: UnitStatResource = load("res://resources/units/meridian_patrol_drone.tres") as UnitStatResource
 	if drone_stats == null:
-		push_warning("Building: failed to load meridian_patrol_drone.tres — no patrol drones spawned.")
+		push_warning("Building: failed to load meridian_patrol_drone.tres — no patrol drone spawned.")
 		return
 	var aircraft_scene: PackedScene = load("res://scenes/aircraft.tscn") as PackedScene
 	if aircraft_scene == null:
-		push_warning("Building: scenes/aircraft.tscn not found — no patrol drones spawned.")
+		push_warning("Building: scenes/aircraft.tscn not found — no patrol drone spawned.")
 		return
 	var units_node: Node = get_tree().current_scene.get_node_or_null("Units")
-	for i: int in 3:
-		var ang: float = TAU * float(i) / 3.0
-		var spawn_pos: Vector3 = global_position + Vector3(cos(ang) * 4.0, drone_stats.flight_altitude, sin(ang) * 4.0)
-		var drone: Node3D = aircraft_scene.instantiate() as Node3D
-		drone.set("stats", drone_stats)
-		drone.set("owner_id", owner_id)
-		if units_node:
-			units_node.add_child(drone)
-		else:
-			get_tree().current_scene.add_child(drone)
-		drone.global_position = spawn_pos
-		# Wire the patrol-around behaviour after the drone is in the tree.
-		if drone.has_method("set_patrol_around"):
-			drone.call("set_patrol_around", self, 12.0)
-		_patrol_drones.append(drone)
+	var spawn_pos: Vector3 = global_position + Vector3(cos(angle_rad) * 4.0, drone_stats.flight_altitude, sin(angle_rad) * 4.0)
+	var drone: Node3D = aircraft_scene.instantiate() as Node3D
+	drone.set("stats", drone_stats)
+	drone.set("owner_id", owner_id)
+	if units_node:
+		units_node.add_child(drone)
+	else:
+		get_tree().current_scene.add_child(drone)
+	drone.global_position = spawn_pos
+	if drone.has_method("set_patrol_around"):
+		drone.call("set_patrol_around", self, 12.0)
+	_patrol_drones.append(drone)
+
+
+func _tick_drone_bay_respawn(delta: float) -> void:
+	## Drone Bay respawn-over-time tick. Prunes dead/freed drones from
+	## the array, and every PATROL_RESPAWN_INTERVAL seconds spawns one
+	## replacement if the bay is below its cap. Loses 3 drones → fully
+	## restored in 90s. The accumulator only ticks when the bay is
+	## actually missing drones, so an undamaged bay doesn't buffer up
+	## a free spawn for the next time a drone dies.
+	if not is_constructed:
+		return
+	# Prune freed entries.
+	var live: Array[Node] = []
+	for d: Node in _patrol_drones:
+		if is_instance_valid(d):
+			live.append(d)
+	_patrol_drones = live
+	if _patrol_drones.size() >= PATROL_DRONE_CAP:
+		_patrol_respawn_accum = 0.0
+		return
+	_patrol_respawn_accum += delta
+	if _patrol_respawn_accum >= PATROL_RESPAWN_INTERVAL:
+		_patrol_respawn_accum = 0.0
+		# Spawn in the gap angle so the new drone takes the missing slot
+		# rather than piling on top of an existing one.
+		var ang: float = TAU * float(_patrol_drones.size()) / float(PATROL_DRONE_CAP)
+		_spawn_single_patrol_drone(ang)
 
 
 ## --- Find a spawn position with clearance from obstacles. Tries the

@@ -206,11 +206,27 @@ func _turn_toward(face_dir: Vector3, delta: float) -> void:
 	## model's BACK (-Z) at the target — units fired tail-first.
 	## In Godot rotation.y semantics, atan2(x, z) sets +Z to align
 	## with the (x, z) direction, which is what we want.
+	##
+	## Bank: roll into the turn proportional to the signed yaw error
+	## so direction changes read as a real aircraft banking instead
+	## of the previous flat-yaw spin. Decays back to 0 when flying
+	## straight (lerp toward `bank_target` does the easing).
 	if face_dir.length_squared() < 0.0001:
+		# Decay bank back to level even while idle so a parked unit
+		# doesn't keep its last roll forever.
+		rotation.z = lerp_angle(rotation.z, 0.0, clampf(4.0 * delta, 0.0, 1.0))
 		return
 	var target_y: float = atan2(face_dir.x, face_dir.z)
 	var turn_speed: float = 5.0  # rad/s — aircraft turn slightly slower than light mechs
+	var yaw_error: float = wrapf(target_y - rotation.y, -PI, PI)
 	rotation.y = lerp_angle(rotation.y, target_y, clampf(turn_speed * delta, 0.0, 1.0))
+	# Bank target — sign chosen so a right-hand turn (yaw_error < 0
+	# in Godot's left-handed Y convention) drops the right wing.
+	# Cap at 35° so a hard 180° doesn't flip the model upside down.
+	const BANK_GAIN: float = 1.4
+	const BANK_MAX_RAD: float = deg_to_rad(35.0)
+	var bank_target: float = clampf(yaw_error * BANK_GAIN, -BANK_MAX_RAD, BANK_MAX_RAD)
+	rotation.z = lerp_angle(rotation.z, bank_target, clampf(6.0 * delta, 0.0, 1.0))
 
 
 ## Surface-compat wrapper — HUD's selection panel calls `get_builder` on
@@ -460,6 +476,10 @@ func _build_visuals() -> void:
 			_build_wraith()
 		"Patrol Drone":
 			_build_patrol_drone()
+		"Schwarm":
+			# Inheritor suicide-drone swarm. 6 small kamikaze munitions
+			# with Architect-violet emitters + verdigris-bronze accents.
+			_build_inheritor_swarm(6, _team_color(), Color(0.62, 0.60, 0.56), 0.50)
 		_:
 			_build_default_aircraft()
 
@@ -959,6 +979,140 @@ func _build_anvil_drone(parent: Node3D, team: Color, body_color: Color, s: float
 	parent.add_child(stripe)
 
 
+func _build_inheritor_swarm(count: int, team: Color, body_color: Color, drone_size: float) -> void:
+	## Inheritor Schwarm — squad of small kamikaze munitions in V
+	## formation. Each drone is a wedge with verdigris-bronze chassis,
+	## an Architect-violet detonator glow at the tip, and small bronze
+	## fins. Per 03_factions §4.4: pale concrete-grey, patinated bronze,
+	## violet-white indicator.
+	const ARCHITECT_VIOLET: Color = Color(0.70, 0.55, 1.0, 1.0)
+	const BRONZE_PATINA: Color = Color(0.55, 0.40, 0.20, 1.0)
+	const VERDIGRIS: Color = Color(0.32, 0.50, 0.42, 1.0)
+	var ring_offsets: Array[Vector3] = _v_formation_offsets(count, drone_size * 1.6)
+	for i: int in count:
+		var drone := Node3D.new()
+		drone.position = ring_offsets[i]
+		drone.set_meta("bob_phase", randf() * TAU)
+		add_child(drone)
+		_drone_meshes.append(drone)
+		_build_inheritor_kamikaze_drone(drone, team, body_color, drone_size, ARCHITECT_VIOLET, BRONZE_PATINA, VERDIGRIS)
+
+
+func _build_inheritor_kamikaze_drone(parent: Node3D, team: Color, body_color: Color, s: float, violet: Color, bronze: Color, verdigris: Color) -> void:
+	## A single Inheritor kamikaze drone. Wedge body, violet detonator
+	## bulb at the nose, verdigris pipe along the spine, two bronze
+	## fins at the back. Reads as "consecrated suicide munition" rather
+	## than "fighter aircraft".
+	# Wedge body — tapering from wider rear to a pointed nose. Built
+	# as two stacked boxes so the silhouette has a clear forward taper.
+	var rear := MeshInstance3D.new()
+	rear.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var rb := BoxMesh.new()
+	rb.size = Vector3(s * 0.50, s * 0.30, s * 0.85)
+	rear.mesh = rb
+	rear.position = Vector3(0, 0, -s * 0.35)
+	rear.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.08)))
+	parent.add_child(rear)
+	# Mid section — slightly narrower.
+	var mid := MeshInstance3D.new()
+	mid.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var mb := BoxMesh.new()
+	mb.size = Vector3(s * 0.35, s * 0.26, s * 0.60)
+	mid.mesh = mb
+	mid.position = Vector3(0, 0.02, s * 0.20)
+	mid.set_surface_override_material(0, _aircraft_metal_mat(body_color))
+	parent.add_child(mid)
+	# Nose taper — short cone to a violet detonator.
+	var nose := MeshInstance3D.new()
+	nose.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var nose_cyl := CylinderMesh.new()
+	nose_cyl.top_radius = 0.0
+	nose_cyl.bottom_radius = s * 0.14
+	nose_cyl.height = s * 0.50
+	nose_cyl.radial_segments = 8
+	nose.mesh = nose_cyl
+	nose.rotation.x = deg_to_rad(-90.0)  # cone tip points forward (-Z)
+	nose.position = Vector3(0, 0.02, s * 0.72)
+	nose.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.16)))
+	parent.add_child(nose)
+	# Violet detonator bulb just behind the cone tip.
+	var detonator := MeshInstance3D.new()
+	detonator.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var det_sph := SphereMesh.new()
+	det_sph.radius = s * 0.10
+	det_sph.height = s * 0.20
+	detonator.mesh = det_sph
+	detonator.position = Vector3(0, 0.02, s * 0.92)
+	var det_mat := StandardMaterial3D.new()
+	det_mat.albedo_color = violet
+	det_mat.emission_enabled = true
+	det_mat.emission = violet
+	det_mat.emission_energy_multiplier = 2.8
+	det_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	detonator.set_surface_override_material(0, det_mat)
+	parent.add_child(detonator)
+	# Verdigris-bronze pipework along the spine — sells "plumbed with
+	# corrosive payload".
+	var spine_pipe := MeshInstance3D.new()
+	spine_pipe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var sp_cyl := CylinderMesh.new()
+	sp_cyl.top_radius = s * 0.04
+	sp_cyl.bottom_radius = s * 0.04
+	sp_cyl.height = s * 1.10
+	sp_cyl.radial_segments = 8
+	spine_pipe.mesh = sp_cyl
+	spine_pipe.rotation.x = PI * 0.5
+	spine_pipe.position = Vector3(0, s * 0.20, -s * 0.05)
+	spine_pipe.set_surface_override_material(0, _aircraft_metal_mat(verdigris))
+	parent.add_child(spine_pipe)
+	# Two bronze fins at the rear — small swept verticals so the drone
+	# reads as guided rather than thrown.
+	for fin_side: int in 2:
+		var fsx: float = 1.0 if fin_side == 0 else -1.0
+		var fin := MeshInstance3D.new()
+		fin.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var fb := BoxMesh.new()
+		fb.size = Vector3(s * 0.04, s * 0.30, s * 0.34)
+		fin.mesh = fb
+		fin.position = Vector3(fsx * s * 0.10, s * 0.20, -s * 0.65)
+		fin.rotation.z = fsx * deg_to_rad(12.0)
+		fin.set_surface_override_material(0, _aircraft_metal_mat(bronze))
+		parent.add_child(fin)
+	# Small violet thruster glow at the back so propulsion reads.
+	var thruster := MeshInstance3D.new()
+	thruster.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var th_cyl := CylinderMesh.new()
+	th_cyl.top_radius = s * 0.08
+	th_cyl.bottom_radius = s * 0.08
+	th_cyl.height = s * 0.10
+	th_cyl.radial_segments = 10
+	thruster.mesh = th_cyl
+	thruster.rotation.x = PI * 0.5
+	thruster.position = Vector3(0, 0, -s * 0.78)
+	var th_mat := StandardMaterial3D.new()
+	th_mat.albedo_color = violet
+	th_mat.emission_enabled = true
+	th_mat.emission = violet
+	th_mat.emission_energy_multiplier = 2.0
+	th_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	thruster.set_surface_override_material(0, th_mat)
+	parent.add_child(thruster)
+	# Team-color sliver near the rear so allegiance reads.
+	var team_sliver := MeshInstance3D.new()
+	team_sliver.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var ts_box := BoxMesh.new()
+	ts_box.size = Vector3(s * 0.20, s * 0.04, s * 0.20)
+	team_sliver.mesh = ts_box
+	team_sliver.position = Vector3(0, s * 0.18, -s * 0.55)
+	var team_mat := StandardMaterial3D.new()
+	team_mat.albedo_color = team
+	team_mat.emission_enabled = true
+	team_mat.emission = team
+	team_mat.emission_energy_multiplier = 1.2
+	team_sliver.set_surface_override_material(0, team_mat)
+	parent.add_child(team_sliver)
+
+
 func _build_sable_drone(parent: Node3D, team: Color, body_color: Color, s: float) -> void:
 	# Slim angular drone — Sable predatory.
 	var body := MeshInstance3D.new()
@@ -1053,6 +1207,42 @@ func _build_sable_drone(parent: Node3D, team: Color, body_color: Color, s: float
 	tail.position = Vector3(0, s * 0.30, -s * 0.50)
 	tail.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.2)))
 	parent.add_child(tail)
+
+	# Asymmetric data-uplink antenna on the right side of the body —
+	# breaks the mirror-symmetry per 03_factions §"Sable Visual Language:
+	# deliberately asymmetric". Mounted just behind the canards, angles
+	# up-and-out. Violet emissive tip dot.
+	var uplink := MeshInstance3D.new()
+	uplink.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var u_cyl := CylinderMesh.new()
+	u_cyl.top_radius = s * 0.018
+	u_cyl.bottom_radius = s * 0.028
+	u_cyl.height = s * 0.38
+	u_cyl.radial_segments = 6
+	uplink.mesh = u_cyl
+	uplink.rotation.z = deg_to_rad(-22.0)
+	uplink.position = Vector3(s * 0.32, s * 0.18, s * 0.18)
+	uplink.set_surface_override_material(0, _aircraft_metal_mat(Color(0.10, 0.10, 0.12)))
+	parent.add_child(uplink)
+	var uplink_tip := MeshInstance3D.new()
+	uplink_tip.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var ut_sph := SphereMesh.new()
+	ut_sph.radius = s * 0.04
+	ut_sph.height = s * 0.08
+	uplink_tip.mesh = ut_sph
+	uplink_tip.position = Vector3(
+		s * 0.32 + sin(deg_to_rad(-22.0)) * s * 0.19,
+		s * 0.18 + cos(deg_to_rad(-22.0)) * s * 0.19,
+		s * 0.18,
+	)
+	var ut_mat := StandardMaterial3D.new()
+	ut_mat.albedo_color = SABLE_NEON_PALE
+	ut_mat.emission_enabled = true
+	ut_mat.emission = SABLE_NEON_PALE
+	ut_mat.emission_energy_multiplier = 2.2
+	ut_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	uplink_tip.set_surface_override_material(0, ut_mat)
+	parent.add_child(uplink_tip)
 
 
 func _build_hammerhead() -> void:
@@ -1779,15 +1969,41 @@ func _build_switchblade() -> void:
 	fuselage.set_surface_override_material(0, _aircraft_metal_mat(body_color))
 	add_child(fuselage)
 
-	# Sharp nose cone.
+	# Fuselage-to-nose fairing — intermediate-sized box that absorbs the
+	# step from fuselage cross-section (0.7 x 0.5) down to nose
+	# (0.45 x 0.35) so the player doesn't see a hard shoulder mid-craft.
+	var fairing_blend := MeshInstance3D.new()
+	fairing_blend.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var fairing_box := BoxMesh.new()
+	fairing_box.size = Vector3(0.58, 0.42, 0.32)
+	fairing_blend.mesh = fairing_box
+	fairing_blend.position.z = 1.50
+	fairing_blend.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.15)))
+	add_child(fairing_blend)
+	# Tapering nose — short box section + a true cone tip so the front
+	# isn't a hard right-angle slab. The cone uses very few radial
+	# segments so the silhouette stays faceted (Sable angular language)
+	# instead of going full smooth.
 	var nose := MeshInstance3D.new()
 	nose.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var nose_box := BoxMesh.new()
-	nose_box.size = Vector3(0.45, 0.35, 0.9)
+	nose_box.size = Vector3(0.45, 0.35, 0.7)
 	nose.mesh = nose_box
-	nose.position.z = 2.0
+	nose.position.z = 2.00
 	nose.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.2)))
 	add_child(nose)
+	var nose_tip := MeshInstance3D.new()
+	nose_tip.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var tip_cone := CylinderMesh.new()
+	tip_cone.top_radius = 0.0
+	tip_cone.bottom_radius = 0.22
+	tip_cone.height = 0.55
+	tip_cone.radial_segments = 6  # faceted, not smooth
+	nose_tip.mesh = tip_cone
+	nose_tip.rotation.x = PI * 0.5  # cone points along +Z (point forward)
+	nose_tip.position.z = 2.55
+	nose_tip.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.25)))
+	add_child(nose_tip)
 
 	# Swept-back wings (triangular slabs rotated).
 	for side: int in 2:
@@ -1801,6 +2017,31 @@ func _build_switchblade() -> void:
 		wing.rotation.y = sx * deg_to_rad(-32.0)
 		wing.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.1)))
 		add_child(wing)
+		# Wing-root fairing — short tapered box bridging the wing's
+		# trailing-edge root into the fuselage rear so the wing isn't
+		# visually disconnected from the body. Tapered from wing
+		# thickness up to a short fuselage-side fairing.
+		var fairing := MeshInstance3D.new()
+		fairing.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var fb := BoxMesh.new()
+		fb.size = Vector3(0.18, 0.18, 0.55)
+		fairing.mesh = fb
+		fairing.position = Vector3(sx * 0.30, 0.04, -0.55)
+		fairing.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.1)))
+		add_child(fairing)
+		# Forward-edge wing taper — narrow tip wedge that the leading
+		# edge fades into so the outer wing reads as tapered, not
+		# rectangular. Sits at the wing's outer-front corner.
+		var tip_taper := MeshInstance3D.new()
+		tip_taper.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var ttp := PrismMesh.new()
+		ttp.size = Vector3(0.45, 0.06, 0.30)
+		ttp.left_to_right = 0.0  # peaks at the outer edge
+		tip_taper.mesh = ttp
+		tip_taper.position = Vector3(sx * 1.40, 0.0, -0.05)
+		tip_taper.rotation.y = sx * deg_to_rad(-32.0) + (PI if sx > 0.0 else 0.0)
+		tip_taper.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.12)))
+		add_child(tip_taper)
 
 		# Wingtip pulse-cannon barrel.
 		var cannon := MeshInstance3D.new()
@@ -1825,13 +2066,17 @@ func _build_switchblade() -> void:
 		fin.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.15)))
 		add_child(fin)
 
-	# Cockpit canopy — emissive cool-blue slit.
+	# Cockpit canopy — slimmer + tilted forward so the silhouette
+	# slopes into the nose instead of standing up as a square box.
 	var canopy := MeshInstance3D.new()
 	canopy.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var canopy_box := BoxMesh.new()
-	canopy_box.size = Vector3(0.45, 0.18, 1.2)
+	canopy_box.size = Vector3(0.36, 0.14, 1.20)
 	canopy.mesh = canopy_box
-	canopy.position = Vector3(0, 0.32, 0.6)
+	canopy.position = Vector3(0, 0.30, 0.55)
+	# Forward rake — a small downward tilt so the front of the canopy
+	# meets the fuselage at an angle instead of a hard 90° corner.
+	canopy.rotation.x = deg_to_rad(-9.0)
 	var canopy_mat := StandardMaterial3D.new()
 	canopy_mat.albedo_color = team
 	canopy_mat.emission_enabled = true
@@ -1908,12 +2153,22 @@ func _build_switchblade() -> void:
 		var canard := MeshInstance3D.new()
 		canard.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var canard_box := BoxMesh.new()
-		canard_box.size = Vector3(0.65, 0.04, 0.45)
+		canard_box.size = Vector3(0.75, 0.04, 0.45)
 		canard.mesh = canard_box
-		canard.position = Vector3(csx * 0.55, 0.18, 1.20)
+		canard.position = Vector3(csx * 0.50, 0.18, 1.20)
 		canard.rotation.y = csx * deg_to_rad(-22.0)
 		canard.set_surface_override_material(0, canard_mat)
 		add_child(canard)
+		# Canard root fairing — small bump that ties the canard's root
+		# to the nose so it doesn't read as bolted-on plates.
+		var c_fairing := MeshInstance3D.new()
+		c_fairing.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var cfb := BoxMesh.new()
+		cfb.size = Vector3(0.14, 0.14, 0.32)
+		c_fairing.mesh = cfb
+		c_fairing.position = Vector3(csx * 0.22, 0.18, 1.20)
+		c_fairing.set_surface_override_material(0, canard_mat)
+		add_child(c_fairing)
 	# Nose probe — slim cylinder extending past the nose cone tip.
 	var probe := MeshInstance3D.new()
 	probe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -1927,29 +2182,69 @@ func _build_switchblade() -> void:
 	probe.position = Vector3(0, -0.08, 2.70)
 	probe.set_surface_override_material(0, _aircraft_metal_mat(Color(0.18, 0.18, 0.20, 1.0)))
 	add_child(probe)
-	# Twin thrust vectoring nozzles at the rear, canted outward —
-	# replaces the single-block exhaust read with a clearly-paired
-	# "two engines" silhouette.
-	var nozzle_mat := StandardMaterial3D.new()
-	nozzle_mat.albedo_color = SABLE_NEON_PALE
-	nozzle_mat.emission_enabled = true
-	nozzle_mat.emission = SABLE_NEON_PALE
-	nozzle_mat.emission_energy_multiplier = 2.6
+	# Twin thrust-vectoring nozzles at the rear, canted outward.
+	# Build them as a dark housing with the pink afterburner glow
+	# RECESSED inside — the prior solid-pink cylinders read as plastic
+	# tubes glued to the back; this reads as proper engine bells with
+	# a hot core (playtest 2026-05-15).
+	var nozzle_shell_mat: StandardMaterial3D = _aircraft_metal_mat(Color(0.05, 0.05, 0.06, 1.0))
+	var nozzle_core_mat := StandardMaterial3D.new()
+	nozzle_core_mat.albedo_color = SABLE_NEON_PALE
+	nozzle_core_mat.emission_enabled = true
+	nozzle_core_mat.emission = SABLE_NEON_PALE
+	nozzle_core_mat.emission_energy_multiplier = 4.0
+	nozzle_core_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	for nozzle_side: int in 2:
 		var nzsx: float = 1.0 if nozzle_side == 0 else -1.0
+		# Outer bell — rear flare with the back face uncapped so looking
+		# down the throat reveals the recessed glow core instead of a
+		# closed plate.
 		var nozzle := MeshInstance3D.new()
 		nozzle.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var nz_cyl := CylinderMesh.new()
-		nz_cyl.top_radius = 0.18
-		nz_cyl.bottom_radius = 0.18
-		nz_cyl.height = 0.30
-		nz_cyl.radial_segments = 8
+		nz_cyl.top_radius = 0.16
+		nz_cyl.bottom_radius = 0.22
+		nz_cyl.height = 0.40
+		nz_cyl.radial_segments = 12
+		nz_cyl.cap_bottom = false  # open rear face — view inside the bell
 		nozzle.mesh = nz_cyl
 		nozzle.rotation.x = PI * 0.5
 		nozzle.rotation.y = nzsx * deg_to_rad(-12.0)
 		nozzle.position = Vector3(nzsx * 0.30, 0.04, -1.85)
-		nozzle.set_surface_override_material(0, nozzle_mat)
+		nozzle.set_surface_override_material(0, nozzle_shell_mat)
 		add_child(nozzle)
+		# Hot core disc — sits flush with (or just behind) the rear
+		# face so the pink glow is visible from above + from behind
+		# instead of being hidden inside a dark cup. Slightly smaller
+		# than the bell aperture so the dark rim still frames the glow.
+		var glow := MeshInstance3D.new()
+		glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var glow_cyl := CylinderMesh.new()
+		glow_cyl.top_radius = 0.18
+		glow_cyl.bottom_radius = 0.18
+		glow_cyl.height = 0.06
+		glow_cyl.radial_segments = 14
+		glow.mesh = glow_cyl
+		glow.rotation.x = PI * 0.5
+		glow.rotation.y = nzsx * deg_to_rad(-12.0)
+		# Place the glow disc just at the rear aperture (slight outward
+		# offset so it pokes through visibly even at oblique RTS angles).
+		var glow_offset: Vector3 = Vector3(0.0, 0.0, -0.02).rotated(Vector3.UP, nzsx * deg_to_rad(-12.0))
+		glow.position = Vector3(nzsx * 0.30, 0.04, -2.05) + glow_offset
+		glow.set_surface_override_material(0, nozzle_core_mat)
+		add_child(glow)
+		# Side throat slit — narrow emissive band wrapping the bell's
+		# upper side so the glow reads from straight above (the standard
+		# RTS camera angle) without putting solid pink everywhere.
+		var slit := MeshInstance3D.new()
+		slit.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var slit_box := BoxMesh.new()
+		slit_box.size = Vector3(0.04, 0.06, 0.22)
+		slit.mesh = slit_box
+		slit.rotation.y = nzsx * deg_to_rad(-12.0)
+		slit.position = Vector3(nzsx * 0.30, 0.20, -1.85)
+		slit.set_surface_override_material(0, nozzle_core_mat)
+		add_child(slit)
 	# Sharper violet under-glow strip along the belly so the
 	# silhouette has a "highlighted edge" read from below.
 	var belly := MeshInstance3D.new()
@@ -1960,6 +2255,49 @@ func _build_switchblade() -> void:
 	belly.position = Vector3(0, -0.27, 0.1)
 	belly.set_surface_override_material(0, spine_mat)
 	add_child(belly)
+
+	# Asymmetric sensor pod on the right wing root — per 03_factions
+	# §"Sable Visual Language: deliberately asymmetric". One stubby
+	# housing + an angled antenna stub with a violet emissive tip,
+	# mounted on the +X side only so the silhouette breaks mirror
+	# symmetry from above. Doesn't compromise flight-shape readability.
+	var sensor_housing := MeshInstance3D.new()
+	sensor_housing.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var sh_box := BoxMesh.new()
+	sh_box.size = Vector3(0.22, 0.20, 0.36)
+	sensor_housing.mesh = sh_box
+	sensor_housing.position = Vector3(0.95, 0.18, 0.05)
+	sensor_housing.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.12)))
+	add_child(sensor_housing)
+	# Angled antenna stub on top of the housing.
+	var antenna := MeshInstance3D.new()
+	antenna.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var ant_cyl := CylinderMesh.new()
+	ant_cyl.top_radius = 0.025
+	ant_cyl.bottom_radius = 0.04
+	ant_cyl.height = 0.42
+	ant_cyl.radial_segments = 6
+	antenna.mesh = ant_cyl
+	antenna.rotation.z = deg_to_rad(-18.0)
+	antenna.position = Vector3(0.95 + sin(deg_to_rad(-18.0)) * 0.21, 0.18 + cos(deg_to_rad(-18.0)) * 0.21, 0.05)
+	antenna.set_surface_override_material(0, _aircraft_metal_mat(Color(0.10, 0.10, 0.12, 1.0)))
+	add_child(antenna)
+	# Violet emissive tip — the Sable signature dot.
+	var ant_tip := MeshInstance3D.new()
+	ant_tip.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var tip_sph := SphereMesh.new()
+	tip_sph.radius = 0.05
+	tip_sph.height = 0.10
+	ant_tip.mesh = tip_sph
+	ant_tip.position = Vector3(0.95 + sin(deg_to_rad(-18.0)) * 0.42, 0.18 + cos(deg_to_rad(-18.0)) * 0.42, 0.05)
+	var tip_mat := StandardMaterial3D.new()
+	tip_mat.albedo_color = SABLE_NEON_PALE
+	tip_mat.emission_enabled = true
+	tip_mat.emission = SABLE_NEON_PALE
+	tip_mat.emission_energy_multiplier = 2.4
+	tip_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ant_tip.set_surface_override_material(0, tip_mat)
+	add_child(ant_tip)
 
 	# Variant overlays. Dogfighter mounts twin gunpods under each
 	# wing root; Strafe Runner mounts a single longer belly cannon
@@ -2321,6 +2659,47 @@ func _build_wraith() -> void:
 	spine.position = Vector3(0, 0.15, 0.10)
 	spine.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.20)))
 	add_child(spine)
+
+	# Asymmetric command-uplink pod on the right side of the cockpit
+	# blister — per 03_factions §"Sable Visual Language: deliberately
+	# asymmetric". A short angled mast with a violet emissive sensor
+	# at the tip; only on the +X side so the silhouette breaks
+	# symmetry from above without compromising the stealth-blade read.
+	var cmd_pod := MeshInstance3D.new()
+	cmd_pod.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var cp_box := BoxMesh.new()
+	cp_box.size = Vector3(0.18, 0.14, 0.34)
+	cmd_pod.mesh = cp_box
+	cmd_pod.position = Vector3(0.42, 0.20, 0.80)
+	cmd_pod.set_surface_override_material(0, _aircraft_metal_mat(body_color.darkened(0.14)))
+	add_child(cmd_pod)
+	var cmd_mast := MeshInstance3D.new()
+	cmd_mast.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var cm_cyl := CylinderMesh.new()
+	cm_cyl.top_radius = 0.025
+	cm_cyl.bottom_radius = 0.04
+	cm_cyl.height = 0.42
+	cm_cyl.radial_segments = 6
+	cmd_mast.mesh = cm_cyl
+	cmd_mast.rotation.z = deg_to_rad(-15.0)
+	cmd_mast.position = Vector3(0.42 + sin(deg_to_rad(-15.0)) * 0.21, 0.20 + cos(deg_to_rad(-15.0)) * 0.21, 0.80)
+	cmd_mast.set_surface_override_material(0, _aircraft_metal_mat(Color(0.10, 0.10, 0.12)))
+	add_child(cmd_mast)
+	var cmd_tip := MeshInstance3D.new()
+	cmd_tip.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var ct_sph := SphereMesh.new()
+	ct_sph.radius = 0.06
+	ct_sph.height = 0.12
+	cmd_tip.mesh = ct_sph
+	cmd_tip.position = Vector3(0.42 + sin(deg_to_rad(-15.0)) * 0.42, 0.20 + cos(deg_to_rad(-15.0)) * 0.42, 0.80)
+	var cmd_tip_mat := StandardMaterial3D.new()
+	cmd_tip_mat.albedo_color = SABLE_NEON_PALE
+	cmd_tip_mat.emission_enabled = true
+	cmd_tip_mat.emission = SABLE_NEON_PALE
+	cmd_tip_mat.emission_energy_multiplier = 2.4
+	cmd_tip_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	cmd_tip.set_surface_override_material(0, cmd_tip_mat)
+	add_child(cmd_tip)
 
 
 func _build_default_aircraft() -> void:

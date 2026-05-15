@@ -1145,7 +1145,7 @@ const _FACTION_ROSTER: Dictionary = {
 	1: {
 		"label": "Meridian Protocol",
 		"engineer":      "res://resources/units/sable_rigger.tres",
-		"crawler":       "res://resources/units/anvil_crawler.tres",  # shared chassis
+		"crawler":       "res://resources/units/sable_crawler.tres",
 		"light_a":       "res://resources/units/sable_specter.tres",
 		"light_b":       "res://resources/units/sable_jackal.tres",
 		"heavy_base":    "res://resources/units/sable_harbinger.tres",
@@ -1274,7 +1274,7 @@ const _TECH_GRAPH_NODES: Array[Dictionary] = [
 	{"id": &"sam_site",            "name": "SAM Site",          "cost": "125 S / 55 F",  "prereqs": [&"basic_armory"], "roles": []},
 	{"id": &"gun_emplacement",     "name": "Gun Emplacement",   "cost": "150 S",         "prereqs": [],                "roles": [], "anvil_only": true},
 	{"id": &"gun_emplacement_basic","name": "Gun Emplacement",  "cost": "150 S",         "prereqs": [],                "roles": [], "sable_only": true},
-	{"id": &"black_pylon",         "name": "Black Pylon",       "cost": "200 S / 90 F",  "prereqs": [&"basic_armory"], "roles": ["pylon_air"], "sable_only": true},
+	{"id": &"black_pylon",         "name": "Mesh Nexus",       "cost": "200 S / 90 F",  "prereqs": [&"basic_armory"], "roles": ["pylon_air"], "sable_only": true},
 ]
 
 
@@ -1623,7 +1623,7 @@ func _faction_summary(faction_id: int) -> String:
 			+ "Site for air). Larger overall unit roster, including "
 			+ "the Courier transport and the Pulsefont caster, "
 			+ "and faster / lighter aircraft (Switchblade + Fang "
-			+ "drone swarm). Unique structure: Black Pylon (Mesh "
+			+ "drone swarm). Unique structure: Mesh Nexus (Mesh "
 			+ "anchor + unlocks the Wraith stealth bomber). Best "
 			+ "when you want flexibility, vision, and an answer for "
 			+ "every threat type rather than a single hard-anchored "

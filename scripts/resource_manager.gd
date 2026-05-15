@@ -72,6 +72,13 @@ const POWER_EFFICIENCY_FLOOR: float = 0.25
 
 
 func get_power_efficiency() -> float:
+	# Cheat hook — cashmoneten / einfachturbo set CheatManager.infinite_power
+	# so the local player isn't throttled mid-test even when consumption
+	# spikes above production. Only applies for local-player owner_id 0.
+	if owner_id == 0:
+		var cheats: Node = get_tree().current_scene.get_node_or_null("CheatManager") if get_tree() else null
+		if cheats and "infinite_power" in cheats and cheats.get("infinite_power"):
+			return 1.0
 	if power_consumption <= 0 or power_production >= power_consumption:
 		return 1.0
 	var ratio: float = float(power_production) / float(power_consumption)

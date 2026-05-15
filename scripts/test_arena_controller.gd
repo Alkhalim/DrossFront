@@ -1540,6 +1540,12 @@ const _FACTION_ROSTER: Dictionary = {
 		"light": "res://resources/units/inheritor_ashigaru.tres",
 		"medium": "res://resources/units/inheritor_wachter.tres",
 	},
+	# FactionId.HELIARCH = 3
+	3: {
+		"engineer": "res://resources/units/heliarch_stoker.tres",
+		"light": "res://resources/units/heliarch_matador.tres",
+		"medium": "res://resources/units/heliarch_cremator.tres",
+	},
 }
 
 
@@ -1668,6 +1674,15 @@ func _swap_starter_units_to_player_faction() -> void:
 				continue
 			specs.append({"pos": u.global_position, "role": role})
 			child.queue_free()
+		# Meridian (Sable, faction 1) starts with one fewer Specter per
+		# playtest 2026-05-15. Drop the FIRST "light" entry from the
+		# spawn list so the player still gets the rest of the starter
+		# army at the original world positions.
+		if player_faction == 1:
+			for i: int in specs.size():
+				if (specs[i]["role"] as String) == "light":
+					specs.remove_at(i)
+					break
 		for spec: Dictionary in specs:
 			var role: String = spec["role"] as String
 			var new_stats: UnitStatResource = _unit_for_role(player_faction, role)

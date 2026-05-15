@@ -2120,8 +2120,10 @@ func queue_unit_at_building(index: int) -> void:
 		return
 
 	if not resource_mgr.can_afford(unit_stats.cost_salvage, unit_stats.cost_fuel):
+		_emit_shortfall_alert(unit_stats, resource_mgr)
 		return
 	if not resource_mgr.has_population(unit_stats.population):
+		_emit_shortfall_alert_pop()
 		return
 
 	var scene_root: Node = get_tree().current_scene
@@ -2133,6 +2135,7 @@ func queue_unit_at_building(index: int) -> void:
 	var owner_faction_id: int = _resolve_owner_faction_id(target)
 	if mcm != null and owner_faction_id == 1:
 		if not mcm.can_afford(target.owner_id, unit_stats.contract_cost):
+			_emit_shortfall_alert_str("Contracts")
 			return
 
 	var cnm: ConveyorNetworkManager = scene_root.get_node_or_null("ConveyorNetworkManager") as ConveyorNetworkManager
@@ -2185,8 +2188,10 @@ func queue_unit_by_stat(unit_stats: UnitStatResource) -> void:
 		return
 
 	if not resource_mgr.can_afford(unit_stats.cost_salvage, unit_stats.cost_fuel):
+		_emit_shortfall_alert(unit_stats, resource_mgr)
 		return
 	if not resource_mgr.has_population(unit_stats.population):
+		_emit_shortfall_alert_pop()
 		return
 
 	var scene_root: Node = get_tree().current_scene
@@ -2195,6 +2200,7 @@ func queue_unit_by_stat(unit_stats: UnitStatResource) -> void:
 	var owner_faction_id: int = _resolve_owner_faction_id(target)
 	if mcm != null and owner_faction_id == 1:
 		if not mcm.can_afford(target.owner_id, unit_stats.contract_cost):
+			_emit_shortfall_alert_str("Contracts")
 			return
 
 	var cnm: ConveyorNetworkManager = scene_root.get_node_or_null("ConveyorNetworkManager") as ConveyorNetworkManager
@@ -2928,6 +2934,13 @@ func _confirm_build_placement(screen_pos: Vector2, keep_placing: bool = false) -
 	if not resource_mgr:
 		cancel_build_placement()
 		return
+	# Affordability gate at placement-confirm time. Building.place_building
+	# also re-checks but silently fails; we want a visible alert if the
+	# player tries to place a building they can no longer afford (price
+	# may have shifted between starting placement and confirming).
+	if _build_stats and not resource_mgr.can_afford(_build_stats.cost_salvage, _build_stats.cost_fuel):
+		_emit_shortfall_alert_for_building(_build_stats, resource_mgr)
+		return
 
 	# Find the first selected engineer
 	_prune_selection()
@@ -3135,11 +3148,13 @@ func _confirm_unit_build_placement(screen_pos: Vector2) -> void:
 	if not resource_mgr.can_afford(_unit_build_stats.cost_salvage, _unit_build_stats.cost_fuel):
 		if _audio:
 			_audio.play_error()
+		_emit_shortfall_alert(_unit_build_stats, resource_mgr)
 		cancel_unit_build_placement()
 		return
 	if not resource_mgr.has_population(_unit_build_stats.population):
 		if _audio:
 			_audio.play_error()
+		_emit_shortfall_alert_pop()
 		cancel_unit_build_placement()
 		return
 
@@ -3153,3 +3168,57 @@ func _confirm_unit_build_placement(screen_pos: Vector2) -> void:
 
 	_suppress_next_release = true
 	cancel_unit_build_placement(false)  # false = no refund; resources already spent
+
+
+func _emit_shortfall_alert(unit_stats: UnitStatResource, resource_mgr: ResourceManager) -> void:
+	## Emit a "Not enough X" alert when a player click is rejected for
+	## resource shortage. Picks the FIRST resource the player is short of
+	## (salvage > fuel) since showing one clear message reads better than
+	## "Not enough Salvage and Fuel". Routes through AlertManager so the
+	## message lands in the standard top-screen alert banner.
+	var lacking: String = ""
+	if resource_mgr.salvage < unit_stats.cost_salvage:
+		lacking = "Salvage"
+	elif resource_mgr.fuel < unit_stats.cost_fuel:
+		lacking = "Fuel"
+	else:
+		lacking = "Resources"
+	_emit_shortfall_alert_str(lacking)
+	if _audio:
+		_audio.play_error()
+
+
+func _emit_shortfall_alert_pop() -> void:
+	## Emit "Population cap reached" — different wording from a resource
+	## shortfall since pop is a cap, not a depletable.
+	_emit_shortfall_alert_str("Population")
+	if _audio:
+		_audio.play_error()
+
+
+func _emit_shortfall_alert_for_building(bstat: BuildingStatResource, resource_mgr: ResourceManager) -> void:
+	## Building-placement variant. Picks the first lacking resource
+	## (salvage > fuel) and emits the standard shortfall alert.
+	var lacking: String = ""
+	if resource_mgr.salvage < bstat.cost_salvage:
+		lacking = "Salvage"
+	elif resource_mgr.fuel < bstat.cost_fuel:
+		lacking = "Fuel"
+	else:
+		lacking = "Resources"
+	_emit_shortfall_alert_str(lacking)
+	if _audio:
+		_audio.play_error()
+
+
+func _emit_shortfall_alert_str(label: String) -> void:
+	var alert_mgr: Node = get_tree().current_scene.get_node_or_null("AlertManager") if get_tree() else null
+	if alert_mgr == null or not alert_mgr.has_method("emit_alert"):
+		return
+	var msg: String = "Not enough %s" % label
+	if label == "Population":
+		msg = "Population cap reached"
+	# Severity 1 = warning red. Dedupe key keeps repeated rejections
+	# from spamming the banner; 1.5s window is long enough that a
+	# button-mashing player gets one alert, not five.
+	alert_mgr.call("emit_alert", msg, 1, Vector3.ZERO, "shortfall_%s" % label, 1.5)

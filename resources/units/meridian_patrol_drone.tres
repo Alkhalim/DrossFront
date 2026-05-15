@@ -8,11 +8,11 @@
 script = ExtResource("2")
 weapon_name = "Patrol Pulse Cannon"
 role_tag = &"Universal"
-damage_tier = &"very_low"
+damage_tier = &"low"
 range_tier = &"short"
 rof_tier = &"moderate"
 
-damage = 8
+damage = 16
 range = 14.0
 rof_seconds = 1.0
 use_explicit_air = true
@@ -31,8 +31,8 @@ script = ExtResource("1")
 unit_name = "Patrol Drone"
 display_name = "Patrol Drone"
 unit_class = &"aircraft"
-hp_total = 60
-hp_per_unit = 60
+hp_total = 100
+hp_per_unit = 100
 armor_class = &"light_air"
 speed_tier = &"very_fast"
 sight_tier = &"long"

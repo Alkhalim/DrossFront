@@ -15,7 +15,7 @@ signal contracts_changed(owner_id: int, current: int, maximum: int)
 
 const MAX_CONTRACTS: int = 8
 const BASELINE_REGEN_INTERVAL: float = 75.0  # seconds per +1 contract (no mesh)
-const MIN_REGEN_INTERVAL: float = 2.0        # floor — heavy mesh investment cap
+const MIN_REGEN_INTERVAL: float = 5.0        # floor — heavy mesh investment cap (per 2026-05-14)
 
 ## Per-owner current count. Capped at MAX_CONTRACTS.
 var _contracts: Dictionary = {}  # owner_id -> int
@@ -154,19 +154,31 @@ func _scan_regen_interval(owner_id: int) -> float:
 				enemies_in_mesh += 1
 				break  # count each provider at most once
 
-	# Calibrated so:
-	#   No mesh:                  interval = 75.0 (baseline)
-	#   Modest mesh (1 relay+HQ): -10s → ~65s
-	#   Strong mesh (~2500 m^2):  -50s → ~45s (0.020 * 2500 = 50)
-	#   Full saturation (~2500):  -50s → 25s (capped well above MIN 2.0)
-	# Enemy presence: +0.5s reduction per provider with enemies (cap at 3 providers).
-	const AREA_TO_REDUCTION: float = 0.020  # seconds reduction per square world unit
+	# Percentage-based scaling per user playtest 2026-05-14:
+	# "one sensor array worth of mesh not overlapping with already existing
+	# mesh should maybe decrease the time to a new contract by 10%" + a
+	# follow-up: floor at ~5s but require roughly half-map mesh coverage.
+	# One Sensor Array has mesh_provider_radius = 22, area = π·484 ≈ 1521.
+	# 0.10 / 1521 ≈ 6.57e-5 per square world unit gives the requested rate.
+	# Cap raised so the 5 s floor is reachable, but only by ~10 non-
+	# overlapping Sensor Arrays (= ~15,200 m² of mesh, a sizeable portion
+	# of any reasonable RTS map).
+	#
+	# Worked examples at the new rate:
+	#   HQ alone (r=12, area ≈ 452):                   -3.0% →  72.7s
+	#   HQ + 1 Sensor Array:                           -13%  →  65.3s
+	#   HQ + 3 Sensor Arrays (no overlap, ~5015 m²):   -33%  →  50.3s
+	#   HQ + 6 Sensor Arrays (≈ quarter-map coverage): -63%  →  27.5s
+	#   ≈ Half-map coverage (~15,200 m²):              -93%  →   5.0s (floor)
+	# Enemy presence is still a flat seconds bonus (small, intel-flavour).
+	const PERCENT_PER_AREA: float = 6.57e-5      # ≈ 10% per Sensor Array of new mesh
+	const MAX_PERCENT_REDUCTION: float = 0.933    # floor: 75 × (1 - 0.933) ≈ 5.0 s
 	const ENEMY_REDUCTION_PER_PROVIDER: float = 0.5
 	const MAX_ENEMY_BONUS: float = 1.5
-	var area_reduction: float = total_area * AREA_TO_REDUCTION
+	var pct_reduction: float = minf(total_area * PERCENT_PER_AREA, MAX_PERCENT_REDUCTION)
 	var enemy_reduction: float = mini(enemies_in_mesh, 3) * ENEMY_REDUCTION_PER_PROVIDER
 	enemy_reduction = minf(enemy_reduction, MAX_ENEMY_BONUS)
-	var interval: float = BASELINE_REGEN_INTERVAL - area_reduction - enemy_reduction
+	var interval: float = BASELINE_REGEN_INTERVAL * (1.0 - pct_reduction) - enemy_reduction
 	return maxf(interval, MIN_REGEN_INTERVAL)
 
 
@@ -210,6 +222,19 @@ func spend(owner_id: int, cost: int) -> bool:
 	_contracts[owner_id] -= cost
 	contracts_changed.emit(owner_id, _contracts[owner_id], MAX_CONTRACTS)
 	return true
+
+
+## Returns spent contracts back to the owner. Called when a queued
+## Meridian unit is cancelled — without this, cancelling a Harbinger
+## refunded salvage/fuel/pop but quietly burned the 3 contracts that
+## had been deducted at queue-time. Capped at MAX_CONTRACTS so a refund
+## can't push the pool above the cap.
+func refund(owner_id: int, cost: int) -> void:
+	if cost <= 0:
+		return
+	_ensure_owner(owner_id)
+	_contracts[owner_id] = mini(_contracts[owner_id] + cost, MAX_CONTRACTS)
+	contracts_changed.emit(owner_id, _contracts[owner_id], MAX_CONTRACTS)
 
 
 ## Returns the current Intel Network tier for `owner_id`. If no

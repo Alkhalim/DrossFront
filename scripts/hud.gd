@@ -37,6 +37,31 @@ var _hq_tab_defense: Button = null
 var _last_building_id: int = -1
 var _last_unit_ids: Array[int] = []
 var _showing_build_buttons: bool = false
+
+## Hash of the producible roster + prereq state when a building panel
+## was last rebuilt. Re-checking the hash every frame is fine (a small
+## walk of producible_units) and lets the panel pick up just-unlocked
+## units (e.g. Sensor Spine completes → Meridian Light / Medium tier
+## becomes available) without forcing the player to deselect/reselect.
+var _building_panel_prereq_hash: int = -1
+## Per-second affordability/unlock refresh accumulator so the panel
+## periodically re-checks prereqs even when no scene-state change
+## fires. Walks _action_buttons cheaply once a second.
+var _building_panel_refresh_accum: float = 0.0
+const _BUILDING_PANEL_REFRESH_INTERVAL: float = 1.0
+## Set when a tab toggle wants the panel to rebuild WITHOUT looking
+## like a fresh selection (which would reset _hq_tab back to "train").
+## Used by _on_hq_tab_pressed so clicking Advanced actually sticks.
+var _panel_rebuild_pending: bool = false
+## Armory / branch-commit panels live-refresh while a commit is in
+## flight to keep the percent label ticking. Doing that EVERY HUD frame
+## (60 Hz) destroys + recreates the cancel button mid-click, so the
+## click lands on a freed control and bubbles to selection (player
+## sees the building deselect instead of cancelling). Throttle to
+## ~4 Hz — fast enough that the percent number reads as live, slow
+## enough that a click reliably hits a button that's still alive.
+var _armory_refresh_accum: float = 0.0
+const _ARMORY_REFRESH_INTERVAL: float = 0.25
 ## True when the action panel is showing Inheritor Restorer unit-build buttons
 ## (a subset of the _showing_build_buttons state). When true, the building-tab
 ## prereq rebuild does NOT fire so Restorer buttons stay in place.
@@ -1091,6 +1116,25 @@ func _build_progress_bar() -> void:
 	_progress_bar.modulate.a = 0.0
 	if _info_section:
 		_info_section.add_child(_progress_bar)
+	# Tick marks at 20/40/60/80% so the player can read progress at a
+	# glance ("about three-quarters done") without parsing the fill
+	# extent. Each tick is a thin ColorRect anchored to its percentage
+	# along the bar, drawn over the fill so it stays visible at any
+	# progress level. User feedback 2026-05-14.
+	for tick_pct: float in [0.2, 0.4, 0.6, 0.8]:
+		var tick := ColorRect.new()
+		tick.name = "ProgressTick_%d" % int(tick_pct * 100.0)
+		tick.color = Color(0.05, 0.05, 0.07, 0.85)
+		tick.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		tick.set_anchors_preset(Control.PRESET_LEFT_WIDE, true)
+		tick.anchor_left = tick_pct
+		tick.anchor_right = tick_pct
+		# Centred on the anchor: offset_left = -half-width, offset_right = +half-width.
+		tick.offset_left = -1.0
+		tick.offset_right = 1.0
+		tick.offset_top = -1.0
+		tick.offset_bottom = 1.0
+		_progress_bar.add_child(tick)
 	# Multi-slot container for Meridian HQ parallel queue visualization.
 	# Created here alongside the single progress bar so it lives in the
 	# same layout slot; shown only when the selected building is a
@@ -1396,6 +1440,17 @@ func _update_crawler_panel(crawler: SalvageCrawler) -> void:
 	## state (anchored / deploying / mobile), HP bar, and an Anchor toggle
 	## button when the upgrade is researched.
 
+	# Same tear-down as _update_unit_panel: building-only panel widgets
+	# from a prior HQ selection must be hidden before the crawler
+	# panel renders, or the production queue and multi-slot bars stay
+	# on screen.
+	_hide_progress()
+	if _queue_icons_row and is_instance_valid(_queue_icons_row):
+		_queue_icons_row.visible = false
+	if _multi_slot_container and is_instance_valid(_multi_slot_container):
+		_multi_slot_container.visible = false
+	_last_queue_signature = ""
+
 	# Rebuild buttons only when the action changes — keep state stable when
 	# selection is unchanged. ALSO force a rebuild when transitioning IN
 	# from another panel type that left _showing_build_buttons set
@@ -1496,7 +1551,11 @@ func _update_building_panel(building: Building) -> void:
 		building.stats.building_id == &"basic_armory"
 		or building.stats.building_id == &"advanced_armory"
 	)
-	var armory_in_progress: bool = is_armory and (
+	var is_meridian_branch_panel: bool = _is_meridian_branch_panel_building(building)
+	# Live-refresh while a commit is in flight covers both the Armory
+	# panels (Anvil/Combine) and the Meridian branch buildings, so the
+	# countdown / percent label stays live on the active row.
+	var armory_in_progress: bool = (is_armory or is_meridian_branch_panel) and (
 		(rm and rm.is_in_progress())
 		or (bcm_for_refresh and bcm_for_refresh.has_method("is_committing") and bcm_for_refresh.is_committing())
 	)
@@ -1510,12 +1569,58 @@ func _update_building_panel(building: Building) -> void:
 		building.stats != null
 		and not (building.get_producible_units() if building.has_method("get_producible_units") else []).is_empty()
 	)
-	if bid != _last_building_id or armory_in_progress:
+	# Roster-prereq hash for production buildings: detects newly
+	# unlocked units (e.g. Sensor Spine completes → Meridian medium
+	# tier opens) and triggers a button rebuild so the player doesn't
+	# have to deselect/reselect to see the new entries. Reuses the
+	# constructed-building hash already maintained for engineer-build
+	# menus — same signal source applies to production-button gating.
+	var new_prereq_hash: int = _compute_built_ids_hash() if has_production else 0
+	var prereq_changed: bool = has_production and new_prereq_hash != _building_panel_prereq_hash
+
+	# Periodic refresh tick — even if nothing scene-side has changed,
+	# rebuild every second so newly affordable units / late-unlock
+	# prereqs surface without a reselect (playtest 2026-05-14).
+	if has_production:
+		_building_panel_refresh_accum += get_process_delta_time()
+
+	# Armory / branch-commit refresh accumulator — only fires the rebuild
+	# when the throttle expires, so the cancel button isn't recreated on
+	# every HUD frame while a commit ticks (see _ARMORY_REFRESH_INTERVAL).
+	var armory_refresh_due: bool = false
+	if armory_in_progress:
+		_armory_refresh_accum += get_process_delta_time()
+		if _armory_refresh_accum >= _ARMORY_REFRESH_INTERVAL:
+			armory_refresh_due = true
+			_armory_refresh_accum = 0.0
+	else:
+		_armory_refresh_accum = 0.0
+
+	if bid != _last_building_id or armory_refresh_due or prereq_changed or _panel_rebuild_pending or (has_production and _building_panel_refresh_accum >= _BUILDING_PANEL_REFRESH_INTERVAL):
+		# Clear the rebuild flag now we're servicing it.
+		_panel_rebuild_pending = false
+		# Fresh selection (or coming back after a deselect) snaps the
+		# HQ tab back to the Basic / Train side. The player asked for
+		# "after training something in an advanced tab, the next time
+		# I select the building it should default back to the basic
+		# one." We don't reset on the periodic ticks (only when bid
+		# changes) so an actively browsed Advanced tab stays put.
+		if bid != _last_building_id:
+			_hq_tab = "train"
 		_last_building_id = bid
 		_last_unit_ids.clear()
 		_showing_build_buttons = false
+		_building_panel_refresh_accum = 0.0
+		if has_production:
+			_building_panel_prereq_hash = new_prereq_hash
 		if is_armory:
 			_rebuild_armory_buttons(building)
+		elif _is_meridian_branch_panel_building(building):
+			# Meridian routes branch upgrades to the unlocking buildings
+			# (Sensor Spine / Drone Bay / Black Pylon) rather than to an
+			# Armory. Faction-gated so Combine's Black Pylon stays on the
+			# default turret/production fallback.
+			_rebuild_meridian_branch_panel(building)
 		elif has_production:
 			_rebuild_production_buttons(building)
 		elif building.has_node("TurretComponent"):
@@ -1586,7 +1691,15 @@ func _update_building_panel(building: Building) -> void:
 			_progress_bar.tooltip_text = _build_queue_tooltip(building)
 	else:
 		_queue_label.text = ""
-		_hide_progress()
+		# User feedback 2026-05-14: production buildings should ALWAYS
+		# show the progress bar (empty at 0%) so the slot reads as
+		# "ready" rather than missing. Non-production buildings
+		# (turret-only, yard mid-spawn already handled above) keep
+		# the hidden behaviour.
+		if has_production:
+			_show_empty_progress()
+		else:
+			_hide_progress()
 		if _multi_slot_container:
 			_multi_slot_container.visible = false
 
@@ -1651,6 +1764,25 @@ func _hide_progress() -> void:
 		_progress_bar.modulate.a = 0.0
 		_progress_bar.value = 0.0
 		_progress_bar.tooltip_text = ""
+
+
+func _show_empty_progress() -> void:
+	## Render the bar at 0% with a dim "idle" fill color so a production
+	## building always communicates "training slot is here, just empty"
+	## rather than hiding the bar entirely. User feedback 2026-05-14.
+	if not _progress_bar:
+		return
+	_progress_bar.visible = true
+	_progress_bar.modulate.a = 0.85
+	_progress_bar.value = 0.0
+	_progress_bar.tooltip_text = "No unit in production"
+	# Reset fill style to a neutral idle tint (matches the queue accent
+	# colour at ~30% saturation so it reads "empty slot" not "active").
+	var fill_sb: StyleBoxFlat = _progress_bar.get_theme_stylebox("fill") as StyleBoxFlat
+	if fill_sb:
+		var local_fill: StyleBoxFlat = fill_sb.duplicate() as StyleBoxFlat
+		local_fill.bg_color = Color(0.35, 0.45, 0.55, 0.6)
+		_progress_bar.add_theme_stylebox_override("fill", local_fill)
 
 
 func _update_multi_slot_bars(building: Building) -> void:
@@ -2906,7 +3038,12 @@ func _on_hq_tab_pressed(tab: String) -> void:
 			_hq_tab_defense.button_pressed = _hq_tab == "defense"
 		return
 	_hq_tab = tab
-	_last_building_id = -1  # force a panel rebuild on the next tick
+	# Use the tab-rebuild flag instead of `_last_building_id = -1` —
+	# the latter looks like a fresh selection to the refresh path,
+	# which resets _hq_tab back to "train" before the rebuild runs
+	# (Advanced click never sticks). The flag triggers a rebuild
+	# without the fresh-selection branch.
+	_panel_rebuild_pending = true
 
 
 ## Anvil HQ defensive upgrade definitions. Each one-time upgrade
@@ -2923,12 +3060,12 @@ const HQ_PLATING_HP_MULT: float = 1.25
 
 func _meridian_unit_is_advanced(unit_stat: UnitStatResource) -> bool:
 	## Returns true if this unit belongs on Meridian's "Advanced" HQ tab.
-	## Advanced tab: any unit gated behind Black Pylon (Harbinger, Pulsefont,
+	## Advanced tab: any unit gated behind Intelligence Network (Harbinger, Pulsefont,
 	## Wraith). Basic tab: everything else — engineer, light, medium (Jackal),
 	## transport (Courier), crawler, and light aircraft (Switchblade, Fang).
 	if unit_stat == null:
 		return false
-	return unit_stat.unlock_prerequisite == &"black_pylon"
+	return unit_stat.unlock_prerequisite == &"intelligence_network"
 
 
 func _append_hq_upgrade_buttons(building: Building) -> void:
@@ -3616,8 +3753,13 @@ func _build_building_stat_sheet(building: Node3D, bstats: BuildingStatResource, 
 
 	# Conveyor Network summary — only for network-eligible buildings
 	# (connection_range > 0 means this building participates in the Combine
-	# Conveyor Network mechanic).
-	if building and bstats and bstats.connection_range > 0.0:
+	# Conveyor Network mechanic). Only render the chip for Combine-owned
+	# buildings; Meridian / Inheritor / Heliarch share the HQ .tres but
+	# don't actually participate in the network.
+	var conveyor_owner_faction: int = 0
+	if building and building.has_method("_resolve_faction_id"):
+		conveyor_owner_faction = building.call("_resolve_faction_id") as int
+	if building and bstats and bstats.connection_range > 0.0 and conveyor_owner_faction == 0:
 		var cnm: Node = get_tree().current_scene.get_node_or_null("ConveyorNetworkManager") if get_tree() else null
 		var net_text: String
 		if cnm and cnm.has_method("describe_network_for_building"):
@@ -3926,6 +4068,71 @@ const SABLE_ADVANCED_BRANCHED_UNITS: Array[String] = [
 	"res://resources/units/sable_courier_tank.tres",
 	"res://resources/units/sable_fang.tres",
 ]
+
+## Meridian routes branch upgrades to the buildings that unlock those
+## unit categories rather than to an Armory (which Meridian doesn't
+## have). Sensor Spine hosts Light + Medium branches, Drone Bay hosts
+## Air-swarm branches, Intelligence Network hosts Heavy + Caster branches.
+## User feedback 2026-05-14.
+const MERIDIAN_BRANCH_PANEL_BUILDINGS: Dictionary = {
+	&"sensor_spine": [
+		"res://resources/units/sable_specter.tres",
+		"res://resources/units/sable_jackal.tres",
+		"res://resources/units/sable_courier_tank.tres",
+	],
+	&"drone_bay": [
+		"res://resources/units/sable_switchblade.tres",
+		"res://resources/units/sable_fang.tres",
+	],
+	&"intelligence_network": [
+		"res://resources/units/sable_harbinger.tres",
+		"res://resources/units/sable_pulsefont.tres",
+	],
+}
+
+
+func _is_meridian_branch_panel_building(building: Building) -> bool:
+	## True when this building hosts Meridian unit-branch upgrades.
+	## Faction-gated so a Combine player's Intelligence Network doesn't surface
+	## Meridian unit branches.
+	if not building or not building.stats:
+		return false
+	if _local_player_faction() != 1:
+		return false
+	return MERIDIAN_BRANCH_PANEL_BUILDINGS.has(building.stats.building_id)
+
+
+func _rebuild_meridian_branch_panel(building: Building) -> void:
+	## Meridian branch-upgrade panel — mirrors _rebuild_armory_buttons but
+	## reads the per-building roster (Sensor Spine = Light/Medium, Drone
+	## Bay = Air, Intelligence Network = Heavy/Caster).
+	_clear_buttons()
+	var bcm: Node = get_tree().current_scene.get_node_or_null("BranchCommitManager")
+	if not bcm:
+		_action_label.text = "No commit manager"
+		return
+	var paths_v: Variant = MERIDIAN_BRANCH_PANEL_BUILDINGS.get(building.stats.building_id, [])
+	var paths: Array = paths_v as Array if paths_v is Array else []
+	if bcm.is_committing():
+		var keys: Array[String] = bcm.get_active_commit_keys() if bcm.has_method("get_active_commit_keys") else [] as Array[String]
+		var n_active: int = keys.size()
+		if n_active <= 1:
+			_action_label.text = "Commit in progress: %s" % bcm.get_commit_branch_name()
+		else:
+			_action_label.text = "%d commits in progress" % n_active
+	else:
+		_action_label.text = "%s — branch upgrades" % building.stats.building_name
+	var cost_suffix: String = "  •  %dM / %dF / %dS" % [
+		BranchCommitManager.COMMIT_COST_MICROCHIPS,
+		BranchCommitManager.COMMIT_COST_FUEL,
+		BranchCommitManager.COMMIT_COST_SALVAGE,
+	]
+	_button_grid.columns = 1
+	for path: String in paths:
+		var base_stats: UnitStatResource = load(path) as UnitStatResource
+		if not base_stats or not base_stats.branch_a_stats or not base_stats.branch_b_stats:
+			continue
+		_button_grid.add_child(_make_armory_row(base_stats, bcm, cost_suffix))
 
 
 func _rebuild_armory_buttons(building: Building) -> void:
@@ -5184,6 +5391,19 @@ func _update_unit_panel(units: Array[Node3D]) -> void:
 			valid_units.append(unit)
 	units = valid_units
 
+	# Tear down any building-only panel widgets that may still be
+	# visible from a prior HQ selection. Without these guards, the
+	# production-queue icons row and per-slot progress stack persist
+	# in the bottom panel even after switching to a unit selection
+	# (playtest report: "production queue still displayed on the bottom
+	# after selecting units").
+	_hide_progress()
+	if _queue_icons_row and is_instance_valid(_queue_icons_row):
+		_queue_icons_row.visible = false
+	if _multi_slot_container and is_instance_valid(_multi_slot_container):
+		_multi_slot_container.visible = false
+	_last_queue_signature = ""
+
 	if units.is_empty():
 		_bottom_panel.visible = false
 		_hide_progress()
@@ -5808,15 +6028,55 @@ func _refresh_ability_button(entry: Dictionary) -> void:
 			if cd < min_cd:
 				min_cd = cd
 	var hotkey: String = stat.ability_hotkey if stat.ability_hotkey != "" else "D"
+	# Wächter Deploy/Undeploy: the static ability_name is "Wächter Deploy",
+	# but the player needs to see which mode the unit is in. Compute a
+	# dynamic label that flips Deploy ↔ Undeploy based on the bucket's
+	# majority state, with a progress hint during the 3s transition.
+	var ability_label: String = stat.ability_name
+	if stat.ability_name == "Wächter Deploy":
+		ability_label = _wachter_dynamic_ability_label(units)
 	if any_ready:
 		btn.disabled = false
-		btn.text = "[%s] %s" % [hotkey, stat.ability_name]
+		btn.text = "[%s] %s" % [hotkey, ability_label]
 		btn.modulate = Color.WHITE
 	else:
 		btn.disabled = true
 		var cd_label: String = "%ds" % int(ceilf(min_cd)) if min_cd < INF else "—"
-		btn.text = "[%s] %s\n%s" % [hotkey, stat.ability_name, cd_label]
+		btn.text = "[%s] %s\n%s" % [hotkey, ability_label, cd_label]
 		btn.modulate = Color(0.78, 0.78, 0.78)
+
+
+func _wachter_dynamic_ability_label(units: Array) -> String:
+	## Returns "Deploy", "Undeploy", or "Deploying %d%%" / "Undeploying %d%%"
+	## depending on the majority state across the selected Wächter bucket.
+	## Mid-transition wins over the steady state so the player gets feedback
+	## on the 3s lock window.
+	var transitioning_unit: Node = null
+	var deployed_count: int = 0
+	var undeployed_count: int = 0
+	for raw in units:
+		if raw == null or not is_instance_valid(raw):
+			continue
+		var u: Node = raw as Node
+		if not u:
+			continue
+		if u.get("_deploy_locked") == true:
+			transitioning_unit = u
+			break
+		if u.get("is_deployed") == true:
+			deployed_count += 1
+		else:
+			undeployed_count += 1
+	if transitioning_unit:
+		var progress: float = transitioning_unit.get("_deploy_progress") as float
+		var deployed_now: bool = transitioning_unit.get("is_deployed") as bool
+		# If already deployed and the lock is on, we're undeploying.
+		if deployed_now:
+			return "Undeploying %d%%" % int(roundf((1.0 - progress) * 100.0))
+		return "Deploying %d%%" % int(roundf(progress * 100.0))
+	if deployed_count >= undeployed_count and deployed_count > 0:
+		return "Undeploy"
+	return "Deploy"
 
 
 func _paint_cost_chip(chip: Dictionary, lacking: bool) -> void:
@@ -6224,7 +6484,7 @@ func _building_role_hint(stat: BuildingStatResource) -> String:
 		&"gun_emplacement_basic": return "Defense"
 		&"aerodrome": return "Production"
 		&"sam_site": return "Defense"
-		&"black_pylon": return "Tech"
+		&"black_pylon": return "Power"
 	return "Structure"
 
 
@@ -6384,9 +6644,9 @@ func _building_description(id: StringName) -> String:
 		&"sensor_spine":
 			return "Authorizes the HQ to train Light and Medium units (Specter, Jackal, Courier). +25 population cap."
 		&"drone_bay":
-			return "Authorizes the HQ to train Air units (Switchblade, Fang). Spawns 3 patrol drones tied to the building. +25 population cap. Requires Sensor Spine."
+			return "Authorizes the HQ to train Air units (Switchblade, Fang). Spawns 3 patrol drones tied to the building. +25 population cap. Requires Dispatch Spire."
 		&"intelligence_network":
-			return "Meridian tech hub. Tier upgrades gate Heavy and Caster production and scale the HQ's concurrent build slots."
+			return "Meridian tech hub. Authorizes the HQ to train Harbinger, Pulsefont, and Wraith. Tier upgrades scale the HQ's concurrent build slots."
 		&"sensor_array":
 			return "Surveillance and defense. Projects a 22u Mesh aura and fires a weak anti-ground turret (10 dmg / 16u) to deter infantry."
 		&"mesh_relay":
@@ -6397,12 +6657,12 @@ func _building_description(id: StringName) -> String:
 			return "Fixed-mode ground turret. No profile swap, no air targeting."
 		&"aerodrome":
 			if _local_player_faction() == 1:
-				return "Aircraft hangar. Trains Switchblade; Adv Armory unlocks Fang, Black Pylon unlocks Wraith. Grants +25 population cap."
+				return "Aircraft hangar. Trains Switchblade; Adv Armory unlocks Fang, Intelligence Network unlocks Wraith. Grants +25 population cap."
 			return "Aircraft hangar. Trains Sputnik Drones; Adv Armory unlocks Hammerhead. Grants +25 population cap."
 		&"sam_site":
 			return "Anti-air missile rack. Strong against aircraft, near-zero against ground."
 		&"black_pylon":
-			return "Late-tier power source (+90 Power) with a 35u Mesh aura. Requires a geothermic vent. Authorizes the HQ to train Harbinger, Pulsefont, and Wraith."
+			return "Late-tier power source (+90 Power) with a 35u Mesh aura. Requires a geothermic vent."
 		&"resonance_pylon":
 			return "Anti-air defense. Emits an area wave every 2.5s that damages all enemy aircraft within 18u. Projects an 8u Mesh aura. Requires Intelligence Network."
 	return ""

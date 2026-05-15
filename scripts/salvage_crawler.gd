@@ -259,8 +259,18 @@ func _build_visuals() -> void:
 	# its two bogies — front bogie nose-up, rear bogie nose-down —
 	# which raises the chassis belly visibly higher.
 	var sable: bool = _faction_id() == 1
+	var heliarch: bool = _faction_id() == 3
 	for side: int in 2:
 		var sx: float = -1.95 if side == 0 else 1.95
+		if heliarch:
+			# Heliarch: five large heavy-haul wheels per side, like the
+			# wheels on a bucket-wheel excavator transporter. No tread
+			# slab — the wheels carry the chassis directly. User asked
+			# for "wheeled, a bit like those giant brown coal vehicles".
+			_build_heliarch_wheel_row(sx)
+			# Skip the Anvil/Sable sprocket + idler — Heliarch's wheel
+			# row is the full undercarriage.
+			continue
 		if sable:
 			# Two bogie sets per side, staggered front + rear with
 			# opposite X-tilts so the bogies splay outward at the
@@ -725,6 +735,8 @@ func _build_visuals() -> void:
 	# replaces the cyan beacon with a violet pulse-cap.
 	if _faction_id() == 1:
 		_apply_sable_crawler_overlay()
+	if _faction_id() == 3:
+		_apply_heliarch_crawler_overlay()
 
 
 func _build_tread_segment(sx: float, z_center: float, length: float, tilt_x_deg: float = 0.0) -> void:
@@ -843,6 +855,218 @@ func _apply_sable_crawler_overlay() -> void:
 		seam.position = Vector3(sx, 1.05 + CHASSIS_LIFT, 0.0)
 		seam.set_surface_override_material(0, visor_mat)
 		add_child(seam)
+
+
+func _build_heliarch_wheel_row(sx: float) -> void:
+	## Five large heavy-haul wheels per side, replacing the tread block
+	## for Heliarch crawlers. Each wheel is a wide cylinder rotated 90°
+	## around Z so its disc faces outward. Tire-dark albedo + a paler
+	## hub face so the wheels read as actual rolling stock from above.
+	const WHEEL_COUNT: int = 5
+	const WHEEL_RADIUS: float = 0.62
+	const WHEEL_WIDTH: float = 0.42
+	const WHEEL_ROW_LENGTH: float = 4.7  # span across the chassis
+	var tire_mat: StandardMaterial3D = _make_metal(Color(0.10, 0.10, 0.10))
+	var hub_mat: StandardMaterial3D = _make_metal(Color(0.45, 0.32, 0.18))
+	for i: int in WHEEL_COUNT:
+		var t: float = (float(i) + 0.5) / float(WHEEL_COUNT)
+		var wz: float = -WHEEL_ROW_LENGTH * 0.5 + t * WHEEL_ROW_LENGTH
+		# Tire cylinder.
+		var tire := MeshInstance3D.new()
+		var tc := CylinderMesh.new()
+		tc.top_radius = WHEEL_RADIUS
+		tc.bottom_radius = WHEEL_RADIUS
+		tc.height = WHEEL_WIDTH
+		tc.radial_segments = 18
+		tire.mesh = tc
+		tire.rotation.z = PI * 0.5
+		tire.position = Vector3(sx, WHEEL_RADIUS, wz)
+		tire.set_surface_override_material(0, tire_mat)
+		add_child(tire)
+		# Hub disc — slightly outboard of the tire so the brass face
+		# is visible on the outer side only.
+		var hub := MeshInstance3D.new()
+		var hc := CylinderMesh.new()
+		hc.top_radius = WHEEL_RADIUS * 0.55
+		hc.bottom_radius = WHEEL_RADIUS * 0.55
+		hc.height = WHEEL_WIDTH * 0.55
+		hc.radial_segments = 14
+		hub.mesh = hc
+		hub.rotation.z = PI * 0.5
+		var hub_x: float = sx + (0.08 if sx > 0.0 else -0.08)
+		hub.position = Vector3(hub_x, WHEEL_RADIUS, wz)
+		hub.set_surface_override_material(0, hub_mat)
+		add_child(hub)
+
+
+func _apply_heliarch_crawler_overlay() -> void:
+	## Heliarch Schaufelradbagger pass: forward bucket-wheel arm, a
+	## lattice support tower above the rear deck, and a counterweight
+	## block beyond the rear wheels. Sells the brown-coal-excavator
+	## silhouette while keeping the standard crawler footprint.
+	const HELIARCH_BURN := Color(1.0, 0.55, 0.20, 1.0)
+	const HELIARCH_BRASS := Color(0.55, 0.38, 0.18, 1.0)
+	const HELIARCH_IRON := Color(0.18, 0.16, 0.14, 1.0)
+	# --- Forward bucket-wheel arm ---
+	# Lattice support arm extending forward-down from the workshop
+	# front. Two parallel bars form the truss spine; a cross-brace
+	# every ~0.5u sells the lattice.
+	var arm_root := Node3D.new()
+	arm_root.name = "HeliarchBucketArm"
+	# Arm pivot at the front of the workshop, angled forward-down so
+	# the wheel sits near ground level forward of the chassis nose.
+	arm_root.position = Vector3(0.0, 1.85 + CHASSIS_LIFT, -2.30)
+	arm_root.rotation.x = deg_to_rad(35.0)  # pitch nose-down
+	add_child(arm_root)
+	const ARM_LEN: float = 3.6
+	const ARM_HALF_WIDTH: float = 0.42
+	for spine_side: int in 2:
+		var sp := MeshInstance3D.new()
+		var sb := BoxMesh.new()
+		sb.size = Vector3(0.10, 0.10, ARM_LEN)
+		sp.mesh = sb
+		var sx_local: float = -ARM_HALF_WIDTH if spine_side == 0 else ARM_HALF_WIDTH
+		sp.position = Vector3(sx_local, 0.0, -ARM_LEN * 0.5)
+		sp.set_surface_override_material(0, _make_metal(HELIARCH_IRON))
+		arm_root.add_child(sp)
+	# Cross-braces along the arm.
+	var brace_count: int = 7
+	for b_i: int in brace_count:
+		var t: float = (float(b_i) + 0.5) / float(brace_count)
+		var z_local: float = -t * ARM_LEN
+		# Horizontal rung.
+		var rung := MeshInstance3D.new()
+		var rb := BoxMesh.new()
+		rb.size = Vector3(ARM_HALF_WIDTH * 2.0, 0.06, 0.06)
+		rung.mesh = rb
+		rung.position = Vector3(0.0, 0.0, z_local)
+		rung.set_surface_override_material(0, _make_metal(HELIARCH_IRON))
+		arm_root.add_child(rung)
+		# Diagonal brace (alternating direction).
+		var diag := MeshInstance3D.new()
+		var db := BoxMesh.new()
+		db.size = Vector3(0.04, 0.04, sqrt(pow(ARM_HALF_WIDTH * 2.0, 2.0) + pow(ARM_LEN / float(brace_count), 2.0)))
+		diag.mesh = db
+		diag.position = Vector3(0.0, 0.0, z_local - (ARM_LEN / float(brace_count)) * 0.5)
+		diag.rotation.y = deg_to_rad(40.0 if b_i % 2 == 0 else -40.0)
+		diag.set_surface_override_material(0, _make_metal(HELIARCH_IRON))
+		arm_root.add_child(diag)
+	# Bucket-wheel disc at the end of the arm.
+	var wheel_pivot := Node3D.new()
+	wheel_pivot.name = "HeliarchBucketWheelPivot"
+	wheel_pivot.position = Vector3(0.0, 0.0, -ARM_LEN)
+	arm_root.add_child(wheel_pivot)
+	const WHEEL_RADIUS: float = 0.95
+	var bucket_wheel := MeshInstance3D.new()
+	var bwc := CylinderMesh.new()
+	bwc.top_radius = WHEEL_RADIUS
+	bwc.bottom_radius = WHEEL_RADIUS
+	bwc.height = 0.35
+	bwc.radial_segments = 14
+	bucket_wheel.mesh = bwc
+	bucket_wheel.rotation.z = PI * 0.5
+	bucket_wheel.set_surface_override_material(0, _make_metal(HELIARCH_BRASS))
+	wheel_pivot.add_child(bucket_wheel)
+	# Buckets around the rim — 10 small claw-like boxes radially placed.
+	const BUCKET_COUNT: int = 10
+	for bi: int in BUCKET_COUNT:
+		var theta: float = (float(bi) / float(BUCKET_COUNT)) * TAU
+		var bucket := MeshInstance3D.new()
+		var bbb := BoxMesh.new()
+		bbb.size = Vector3(0.22, 0.22, 0.30)
+		bucket.mesh = bbb
+		bucket.position = Vector3(0.0, sin(theta) * WHEEL_RADIUS, cos(theta) * WHEEL_RADIUS)
+		bucket.rotation.x = theta
+		bucket.set_surface_override_material(0, _make_metal(HELIARCH_IRON))
+		wheel_pivot.add_child(bucket)
+	# Reactor-amber glow inside the wheel hub — Heliarch identity.
+	var hub_glow := MeshInstance3D.new()
+	var hgs := SphereMesh.new()
+	hgs.radius = WHEEL_RADIUS * 0.22
+	hgs.height = WHEEL_RADIUS * 0.44
+	hub_glow.mesh = hgs
+	var hub_mat := StandardMaterial3D.new()
+	hub_mat.albedo_color = HELIARCH_BURN
+	hub_mat.emission_enabled = true
+	hub_mat.emission = HELIARCH_BURN
+	hub_mat.emission_energy_multiplier = 2.4
+	hub_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	hub_glow.set_surface_override_material(0, hub_mat)
+	wheel_pivot.add_child(hub_glow)
+	# --- Lattice tower above the rear workshop deck ---
+	var tower_root := Node3D.new()
+	tower_root.name = "HeliarchLatticeTower"
+	tower_root.position = Vector3(0.0, 2.20 + CHASSIS_LIFT, 0.6)
+	add_child(tower_root)
+	const TOWER_HEIGHT: float = 3.0
+	const TOWER_BASE: float = 0.65
+	# Four corner uprights tapering inward.
+	for tx_i: int in 2:
+		for tz_i: int in 2:
+			var upright := MeshInstance3D.new()
+			var ub := BoxMesh.new()
+			ub.size = Vector3(0.08, TOWER_HEIGHT, 0.08)
+			upright.mesh = ub
+			var bx: float = -TOWER_BASE if tx_i == 0 else TOWER_BASE
+			var bz: float = -TOWER_BASE if tz_i == 0 else TOWER_BASE
+			upright.position = Vector3(bx, TOWER_HEIGHT * 0.5, bz)
+			# Lean each upright toward the centre at the top.
+			upright.rotation.x = deg_to_rad(-3.0 * (1.0 if tz_i == 0 else -1.0))
+			upright.rotation.z = deg_to_rad(-3.0 * (1.0 if tx_i == 0 else -1.0))
+			upright.set_surface_override_material(0, _make_metal(HELIARCH_IRON))
+			tower_root.add_child(upright)
+	# Cross-rungs every 0.5u up the tower.
+	var rung_count_t: int = 6
+	for ri: int in rung_count_t:
+		var ry: float = (float(ri) + 0.5) / float(rung_count_t) * TOWER_HEIGHT
+		for axis: int in 2:
+			var trung := MeshInstance3D.new()
+			var trb := BoxMesh.new()
+			if axis == 0:
+				trb.size = Vector3(TOWER_BASE * 2.0, 0.05, 0.05)
+			else:
+				trb.size = Vector3(0.05, 0.05, TOWER_BASE * 2.0)
+			trung.mesh = trb
+			trung.position = Vector3(0.0, ry, 0.0)
+			trung.set_surface_override_material(0, _make_metal(HELIARCH_IRON))
+			tower_root.add_child(trung)
+	# Reactor-amber beacon at the top of the tower.
+	var beacon := MeshInstance3D.new()
+	var bks := SphereMesh.new()
+	bks.radius = 0.22
+	bks.height = 0.44
+	beacon.mesh = bks
+	var beacon_mat := StandardMaterial3D.new()
+	beacon_mat.albedo_color = HELIARCH_BURN
+	beacon_mat.emission_enabled = true
+	beacon_mat.emission = HELIARCH_BURN
+	beacon_mat.emission_energy_multiplier = 3.0
+	beacon_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	beacon.set_surface_override_material(0, beacon_mat)
+	beacon.position = Vector3(0.0, TOWER_HEIGHT + 0.25, 0.0)
+	tower_root.add_child(beacon)
+	var beacon_light := OmniLight3D.new()
+	beacon_light.light_color = HELIARCH_BURN
+	beacon_light.light_energy = 1.6
+	beacon_light.omni_range = 6.5
+	beacon_light.position = beacon.position
+	tower_root.add_child(beacon_light)
+	# --- Counterweight block beyond the rear wheels ---
+	var counterweight := MeshInstance3D.new()
+	var cwb := BoxMesh.new()
+	cwb.size = Vector3(2.6, 1.0, 0.9)
+	counterweight.mesh = cwb
+	counterweight.position = Vector3(0.0, 0.85 + CHASSIS_LIFT, 3.10)
+	counterweight.set_surface_override_material(0, _make_metal(Color(0.22, 0.18, 0.16)))
+	add_child(counterweight)
+	# Brass cross-band on the counterweight — Heliarch ornamentation.
+	var band := MeshInstance3D.new()
+	var bdb := BoxMesh.new()
+	bdb.size = Vector3(2.65, 0.14, 0.95)
+	band.mesh = bdb
+	band.position = Vector3(0.0, 1.05 + CHASSIS_LIFT, 3.10)
+	band.set_surface_override_material(0, _make_metal(HELIARCH_BRASS))
+	add_child(band)
 
 
 func _build_collision() -> void:
