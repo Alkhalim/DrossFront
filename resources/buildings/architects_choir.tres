@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+building_name = "Architect's Choir"
+building_id = &"architects_choir"
+hp = 720
+cost_salvage = 320
+cost_fuel = 30
+build_time = 32.0
+power_consumption = 14
+power_production = 0
+producible_units = []
+footprint_size = Vector3(3.2, 4.2, 3.2)
+placeholder_color = Color(0.42, 0.32, 0.55, 1)
+is_advanced = true
+prerequisites = [&"architect_network"]
+faction_lock = 3
+weapons = []

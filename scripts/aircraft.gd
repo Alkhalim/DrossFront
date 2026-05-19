@@ -35,6 +35,21 @@ var is_holding_position: bool = false
 var move_queue: Array[Vector3] = []
 var velocity: Vector3 = Vector3.ZERO
 
+## Return-to-base state. When stats.rtb_after_attack is set, the
+## aircraft locks into this mode the moment it discharges its primary
+## weapon and stays locked until it touches down at a friendly HQ.
+## During RTB:
+##   - command_move + selection input are ignored (handled by the
+##     selection manager checking is_returning_to_base())
+##   - combat target is cleared so it doesn't re-engage en route
+##   - the aircraft flies a single straight path to the nearest HQ
+##     and "rearms" there (resets the flag) on arrival.
+## Cleared automatically when the aircraft is within RTB_ARRIVAL_RADIUS
+## of its target HQ.
+var _returning_to_base: bool = false
+var _rtb_target_pos: Vector3 = Vector3.INF
+const RTB_ARRIVAL_RADIUS: float = 6.0
+
 var _combat: Node = null
 var _hp_bar: Node3D = null
 ## Per-drone roots for swarm aircraft (Sputnik, Fang). Each entry is a
@@ -288,6 +303,11 @@ var _ac_phys_frame: int = 0
 func _process(delta: float) -> void:
 	if alive_count <= 0:
 		return
+	# Return-to-base flight check — runs every frame (cheap, just a
+	# distance compare) so the moment the bomber crosses the HQ
+	# arrival radius it stops + becomes selectable again.
+	if _returning_to_base:
+		_tick_return_to_base(delta)
 	# HP-bar reposition runs every frame (cheap) so the bar tracks
 	# the aircraft while moving. Bar is hidden at full HP, so the
 	# only cost when undamaged is one visibility check.
@@ -480,6 +500,24 @@ func _build_visuals() -> void:
 			# Inheritor suicide-drone swarm. 6 small kamikaze munitions
 			# with Architect-violet emitters + verdigris-bronze accents.
 			_build_inheritor_swarm(6, _team_color(), Color(0.62, 0.60, 0.56), 0.50)
+		"Firefly":
+			# Heliarch incendiary drone pack — 6 small drones in a loose
+			# swarm. Warm body colour (sooted iron) + the standard drone
+			# build; the AS bomblet weapon does the visual work at
+			# fire-time, not on the drone hull itself.
+			_build_heliarch_firefly_swarm()
+		"Águila":
+			# Heliarch light gunship — single airframe with napalm
+			# tanks + AA chaingun. (File name + builder name are the
+			# legacy "Condor" because we swapped in-game names but
+			# kept internal identifiers stable.)
+			_build_heliarch_condor()
+		"Condor":
+			# Heliarch heavy bomber — much larger silhouette, thicker
+			# fuselage with a huge belly bomb bay, four engines, brass
+			# canopy + flood, big tail fin. (Builder is named for the
+			# pre-swap identity; in-game this displays as "Condor".)
+			_build_heliarch_aguila()
 		_:
 			_build_default_aircraft()
 
@@ -2702,6 +2740,844 @@ func _build_wraith() -> void:
 	add_child(cmd_tip)
 
 
+func _build_heliarch_firefly_swarm() -> void:
+	## Heliarch incendiary drone pack. Six small chunky drones in a
+	## loose V formation; warm sooted body + brass detonator bulb + a
+	## tiny amber ember glow on the underside (sells "lit / smoldering"
+	## without needing a particle system). The bomblets are spawned via
+	## the regular projectile path on fire.
+	const HELIARCH_BRASS_FF: Color = Color(0.55, 0.40, 0.20, 1.0)
+	const SOOTED_FF: Color = Color(0.22, 0.18, 0.14, 1.0)
+	const EMBER_FF: Color = Color(1.0, 0.55, 0.18, 1.0)
+	var team: Color = _team_color()
+	var drone_size: float = 0.55
+	var ring_offsets: Array[Vector3] = _v_formation_offsets(6, drone_size * 1.6)
+	for i: int in 6:
+		var drone := Node3D.new()
+		drone.position = ring_offsets[i]
+		drone.set_meta("bob_phase", randf() * TAU)
+		add_child(drone)
+		_drone_meshes.append(drone)
+		# Squat hex-prism body — short cylinder, six sides, sells
+		# "purpose-built munition" without being a fighter.
+		var body := MeshInstance3D.new()
+		body.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var body_cyl := CylinderMesh.new()
+		body_cyl.top_radius = drone_size * 0.35
+		body_cyl.bottom_radius = drone_size * 0.45
+		body_cyl.height = drone_size * 0.30
+		body_cyl.radial_segments = 6
+		body.mesh = body_cyl
+		body.set_surface_override_material(0, _aircraft_metal_mat(SOOTED_FF))
+		drone.add_child(body)
+		# Brass ring around the equator — Heliarch trim.
+		var ring := MeshInstance3D.new()
+		ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var ring_torus := TorusMesh.new()
+		ring_torus.inner_radius = drone_size * 0.38
+		ring_torus.outer_radius = drone_size * 0.46
+		ring_torus.rings = 10
+		ring_torus.ring_segments = 4
+		ring.mesh = ring_torus
+		ring.set_surface_override_material(0, _aircraft_metal_mat(HELIARCH_BRASS_FF))
+		drone.add_child(ring)
+		# Amber ember underglow — small emissive disc on the bottom.
+		var ember := MeshInstance3D.new()
+		ember.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var ember_cyl := CylinderMesh.new()
+		ember_cyl.top_radius = drone_size * 0.18
+		ember_cyl.bottom_radius = drone_size * 0.18
+		ember_cyl.height = 0.02
+		ember_cyl.radial_segments = 8
+		ember.mesh = ember_cyl
+		ember.position.y = -drone_size * 0.16
+		var ember_mat := StandardMaterial3D.new()
+		ember_mat.albedo_color = EMBER_FF
+		ember_mat.emission_enabled = true
+		ember_mat.emission = EMBER_FF
+		ember_mat.emission_energy_multiplier = 2.4
+		ember_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		ember.set_surface_override_material(0, ember_mat)
+		drone.add_child(ember)
+		# Team-colour spine stripe so owner-ID is readable.
+		var stripe := MeshInstance3D.new()
+		stripe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var stripe_box := BoxMesh.new()
+		stripe_box.size = Vector3(drone_size * 0.10, drone_size * 0.06, drone_size * 0.65)
+		stripe.mesh = stripe_box
+		stripe.position.y = drone_size * 0.18
+		var stripe_mat := StandardMaterial3D.new()
+		stripe_mat.albedo_color = team
+		stripe_mat.emission_enabled = true
+		stripe_mat.emission = team
+		stripe_mat.emission_energy_multiplier = 1.0
+		stripe.set_surface_override_material(0, stripe_mat)
+		drone.add_child(stripe)
+
+
+func _build_heliarch_condor() -> void:
+	## Heliarch Águila gunship (file/function name dates to before the
+	## 2026-05-19 in-game name swap; this IS the gunship that displays
+	## as "Águila"). Full rebuild 2026-05-19 per user feedback:
+	##   - Previous build placed the floodlight at -Z and engines at +Z.
+	##     The aircraft.gd look_at hack flips so +Z is the travel
+	##     direction, which made the old gunship visibly fly TAIL-FIRST
+	##     (floodlight pointing AWAY from the move vector).
+	##   - New build follows the +Z = forward convention everywhere.
+	##   - Replaced the twin-tail-engine layout with a VTOL silhouette:
+	##     two large wing-mounted rotors on tilt nacelles, no main
+	##     rotor on top, no tail rotor. Heavy scifi gunship aesthetic.
+	##   - Significantly more player-color (broad team-tinted spine
+	##     panels on the fuselage flanks + wing leading edges + tail
+	##     fin chevron) so the airframe is unmistakably owned at a
+	##     glance from the minimap zoom.
+	const HELIARCH_BRASS_CD: Color = Color(0.65, 0.45, 0.18, 1.0)
+	const DARK_BRASS_CD: Color = Color(0.40, 0.26, 0.10, 1.0)
+	const SOOTED_CD: Color = Color(0.18, 0.15, 0.12, 1.0)
+	const SOOTED_DARK_CD: Color = Color(0.10, 0.08, 0.06, 1.0)
+	const FLOOD_WARM_CD: Color = Color(1.0, 0.78, 0.42, 1.0)
+	const REACTOR_AMBER_CD: Color = Color(1.0, 0.55, 0.20, 1.0)
+	var team: Color = _team_color()
+
+	# --- Fuselage — chunky tapered hull. Slightly wider at the back
+	# (engine block) tapering toward the nose. +Z is the travel
+	# direction in aircraft coordinates.
+	var body := MeshInstance3D.new()
+	body.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var body_box := BoxMesh.new()
+	body_box.size = Vector3(1.40, 0.70, 2.80)
+	body.mesh = body_box
+	body.set_surface_override_material(0, _aircraft_metal_mat(SOOTED_CD))
+	add_child(body)
+	# Dorsal spine — slimmer raised top so the hull reads as multi-tier.
+	var spine := MeshInstance3D.new()
+	spine.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var sb := BoxMesh.new()
+	sb.size = Vector3(0.95, 0.28, 2.20)
+	spine.mesh = sb
+	spine.position = Vector3(0.0, 0.48, -0.10)
+	spine.set_surface_override_material(0, _aircraft_metal_mat(SOOTED_DARK_CD))
+	add_child(spine)
+	# --- Team-color flank stripe — narrower than the previous build's
+	# broad panels (per user 2026-05-19: gunship had too much player
+	# color). Slim accent strip on each flank — still readable but
+	# no longer dominating the silhouette.
+	for spine_side: int in 2:
+		var ssx: float = -1.0 if spine_side == 0 else 1.0
+		var team_panel := MeshInstance3D.new()
+		team_panel.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var tpb := BoxMesh.new()
+		tpb.size = Vector3(0.04, 0.10, 1.20)
+		team_panel.mesh = tpb
+		team_panel.position = Vector3(ssx * 0.76, 0.20, 0.0)
+		var tp_mat := StandardMaterial3D.new()
+		tp_mat.albedo_color = team
+		tp_mat.emission_enabled = true
+		tp_mat.emission = team
+		tp_mat.emission_energy_multiplier = 1.4
+		team_panel.set_surface_override_material(0, tp_mat)
+		add_child(team_panel)
+
+	# --- Forward canopy + floodlight (placed at +Z = front).
+	var canopy := MeshInstance3D.new()
+	canopy.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var canopy_box := BoxMesh.new()
+	canopy_box.size = Vector3(0.85, 0.35, 0.95)
+	canopy.mesh = canopy_box
+	canopy.position = Vector3(0.0, 0.42, 0.85)
+	canopy.set_surface_override_material(0, _aircraft_metal_mat(HELIARCH_BRASS_CD))
+	add_child(canopy)
+	# Amber cockpit slit on the canopy.
+	var canopy_slit := MeshInstance3D.new()
+	canopy_slit.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var css := BoxMesh.new()
+	css.size = Vector3(0.65, 0.08, 0.35)
+	canopy_slit.mesh = css
+	canopy_slit.position = Vector3(0.0, 0.52, 1.15)
+	var cs_mat := StandardMaterial3D.new()
+	cs_mat.albedo_color = REACTOR_AMBER_CD
+	cs_mat.emission_enabled = true
+	cs_mat.emission = REACTOR_AMBER_CD
+	cs_mat.emission_energy_multiplier = 2.2
+	cs_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	canopy_slit.set_surface_override_material(0, cs_mat)
+	add_child(canopy_slit)
+	# Nose floodlight — brass housing + warm bulb. Positive Z (front).
+	var flood := MeshInstance3D.new()
+	flood.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var flood_cyl := CylinderMesh.new()
+	flood_cyl.top_radius = 0.22
+	flood_cyl.bottom_radius = 0.20
+	flood_cyl.height = 0.22
+	flood_cyl.radial_segments = 12
+	flood.mesh = flood_cyl
+	flood.rotation.x = PI * 0.5
+	flood.position = Vector3(0.0, 0.05, 1.55)
+	flood.set_surface_override_material(0, _aircraft_metal_mat(HELIARCH_BRASS_CD))
+	add_child(flood)
+	var flood_bulb := MeshInstance3D.new()
+	flood_bulb.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var fbulb_cyl := CylinderMesh.new()
+	fbulb_cyl.top_radius = 0.17
+	fbulb_cyl.bottom_radius = 0.17
+	fbulb_cyl.height = 0.04
+	fbulb_cyl.radial_segments = 12
+	flood_bulb.mesh = fbulb_cyl
+	flood_bulb.rotation.x = PI * 0.5
+	flood_bulb.position = Vector3(0.0, 0.05, 1.68)
+	var fb_mat := StandardMaterial3D.new()
+	fb_mat.albedo_color = FLOOD_WARM_CD
+	fb_mat.emission_enabled = true
+	fb_mat.emission = FLOOD_WARM_CD
+	fb_mat.emission_energy_multiplier = 3.6
+	fb_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	flood_bulb.set_surface_override_material(0, fb_mat)
+	add_child(flood_bulb)
+
+	# --- Wings — wider stub wings with rotor nacelles at the tips.
+	var wing := MeshInstance3D.new()
+	wing.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var wing_box := BoxMesh.new()
+	wing_box.size = Vector3(3.80, 0.14, 0.95)
+	wing.mesh = wing_box
+	wing.position = Vector3(0.0, 0.0, -0.10)
+	wing.set_surface_override_material(0, _aircraft_metal_mat(SOOTED_DARK_CD))
+	add_child(wing)
+	# Team-color wing leading edge — second player-color cue, visible
+	# from above (the natural RTS viewing angle).
+	var wing_le := MeshInstance3D.new()
+	wing_le.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var wle := BoxMesh.new()
+	wle.size = Vector3(3.85, 0.10, 0.18)
+	wing_le.mesh = wle
+	wing_le.position = Vector3(0.0, 0.04, 0.32)
+	var wle_mat := StandardMaterial3D.new()
+	wle_mat.albedo_color = team
+	wle_mat.emission_enabled = true
+	wle_mat.emission = team
+	wle_mat.emission_energy_multiplier = 1.4
+	wing_le.set_surface_override_material(0, wle_mat)
+	add_child(wing_le)
+
+	# --- VTOL rotor nacelles at the wing tips. Each nacelle = brass
+	# housing + spinning rotor disc (built as a static cross of two
+	# blades since we don't animate it here; the disc visual reads as
+	# "rotor at speed" via a translucent blur ring). No top or tail
+	# rotor — these wing-tip rotors ARE the lift system.
+	for rotor_side: int in 2:
+		var rsx: float = -1.0 if rotor_side == 0 else 1.0
+		# Nacelle pylon — vertical pillar rising from the wing tip.
+		var pylon := MeshInstance3D.new()
+		pylon.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var pb := BoxMesh.new()
+		pb.size = Vector3(0.40, 0.50, 0.55)
+		pylon.mesh = pb
+		pylon.position = Vector3(rsx * 1.85, 0.20, -0.10)
+		pylon.set_surface_override_material(0, _aircraft_metal_mat(SOOTED_CD))
+		add_child(pylon)
+		# Rotor hub — brass cylinder pointing UP (rotor axis is
+		# vertical = VTOL lifter).
+		var hub := MeshInstance3D.new()
+		hub.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var hb := CylinderMesh.new()
+		hb.top_radius = 0.16
+		hb.bottom_radius = 0.20
+		hb.height = 0.22
+		hb.radial_segments = 12
+		hub.mesh = hb
+		hub.position = Vector3(rsx * 1.85, 0.55, -0.10)
+		hub.set_surface_override_material(0, _aircraft_metal_mat(HELIARCH_BRASS_CD))
+		add_child(hub)
+		# Spinning rotor disc — translucent darker grey ring + two
+		# crossed blades. Doesn't actually spin (animation deferred);
+		# the translucent disc reads as "this is rotating fast".
+		var rotor_disc := MeshInstance3D.new()
+		rotor_disc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var rdc := CylinderMesh.new()
+		rdc.top_radius = 1.05
+		rdc.bottom_radius = 1.05
+		rdc.height = 0.04
+		rdc.radial_segments = 24
+		rotor_disc.mesh = rdc
+		rotor_disc.position = Vector3(rsx * 1.85, 0.78, -0.10)
+		var rd_mat := StandardMaterial3D.new()
+		rd_mat.albedo_color = Color(0.10, 0.08, 0.06, 0.42)
+		rd_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		rd_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		rotor_disc.set_surface_override_material(0, rd_mat)
+		add_child(rotor_disc)
+		# Two crossed rotor blades — thin boxes inside the disc.
+		for blade_i: int in 2:
+			var blade := MeshInstance3D.new()
+			blade.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var blb := BoxMesh.new()
+			blb.size = Vector3(2.00, 0.05, 0.18)
+			blade.mesh = blb
+			blade.position = Vector3(rsx * 1.85, 0.79, -0.10)
+			blade.rotation.y = float(blade_i) * PI * 0.5
+			blade.set_surface_override_material(0, _aircraft_metal_mat(DARK_BRASS_CD))
+			add_child(blade)
+		# Brass support strut from nacelle base down to the wing.
+		var strut := MeshInstance3D.new()
+		strut.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var stb := BoxMesh.new()
+		stb.size = Vector3(0.10, 0.30, 0.10)
+		strut.mesh = stb
+		strut.position = Vector3(rsx * 1.85, -0.10, -0.10)
+		strut.set_surface_override_material(0, _aircraft_metal_mat(HELIARCH_BRASS_CD))
+		add_child(strut)
+
+	# --- Twin underwing napalm tanks — chunky cylinders slung under
+	# the inner wing, NOT the rotor tips. Keeps the gunship's "napalm
+	# tank" identity readable from above.
+	for tank_side: int in 2:
+		var tsx: float = -1.0 if tank_side == 0 else 1.0
+		var tank := MeshInstance3D.new()
+		tank.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var tank_cyl := CylinderMesh.new()
+		tank_cyl.top_radius = 0.16
+		tank_cyl.bottom_radius = 0.16
+		tank_cyl.height = 1.05
+		tank_cyl.radial_segments = 10
+		tank.mesh = tank_cyl
+		tank.rotation.x = PI * 0.5
+		tank.position = Vector3(tsx * 1.05, -0.22, -0.10)
+		tank.set_surface_override_material(0, _aircraft_metal_mat(HELIARCH_BRASS_CD))
+		add_child(tank)
+		# Tank nose cap — now at +Z (front) per the new convention.
+		var cap := MeshInstance3D.new()
+		cap.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var cap_sph := SphereMesh.new()
+		cap_sph.radius = 0.18
+		cap_sph.height = 0.32
+		cap.mesh = cap_sph
+		cap.position = Vector3(tsx * 1.05, -0.22, 0.45)
+		cap.set_surface_override_material(0, _aircraft_metal_mat(SOOTED_CD))
+		add_child(cap)
+
+	# --- Rear thruster pair (jet exhaust, NOT rotors). Provides forward
+	# thrust once the rotors lift the aircraft. -Z = aft.
+	for thr_side: int in 2:
+		var thsx: float = -1.0 if thr_side == 0 else 1.0
+		var thruster := MeshInstance3D.new()
+		thruster.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var thc := CylinderMesh.new()
+		thc.top_radius = 0.18
+		thc.bottom_radius = 0.22
+		thc.height = 0.55
+		thc.radial_segments = 10
+		thruster.mesh = thc
+		thruster.rotation.x = PI * 0.5
+		thruster.position = Vector3(thsx * 0.45, 0.08, -1.40)
+		thruster.set_surface_override_material(0, _aircraft_metal_mat(SOOTED_CD))
+		add_child(thruster)
+		# Amber exhaust glow at the rear.
+		var glow := MeshInstance3D.new()
+		glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var glow_cyl := CylinderMesh.new()
+		glow_cyl.top_radius = 0.15
+		glow_cyl.bottom_radius = 0.15
+		glow_cyl.height = 0.04
+		glow_cyl.radial_segments = 10
+		glow.mesh = glow_cyl
+		glow.rotation.x = PI * 0.5
+		glow.position = Vector3(thsx * 0.45, 0.08, -1.70)
+		var glow_mat := StandardMaterial3D.new()
+		glow_mat.albedo_color = REACTOR_AMBER_CD
+		glow_mat.emission_enabled = true
+		glow_mat.emission = REACTOR_AMBER_CD
+		glow_mat.emission_energy_multiplier = 3.0
+		glow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		glow.set_surface_override_material(0, glow_mat)
+		add_child(glow)
+
+	# --- Vertical tail fin — at -Z (rear). Team-color chevron makes
+	# it a third large player-color cue.
+	var fin := MeshInstance3D.new()
+	fin.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var fin_box := BoxMesh.new()
+	fin_box.size = Vector3(0.10, 0.75, 0.65)
+	fin.mesh = fin_box
+	fin.position = Vector3(0.0, 0.65, -1.10)
+	fin.set_surface_override_material(0, _aircraft_metal_mat(SOOTED_CD))
+	add_child(fin)
+	var fin_chevron := MeshInstance3D.new()
+	fin_chevron.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var fcb := BoxMesh.new()
+	fcb.size = Vector3(0.14, 0.55, 0.16)
+	fin_chevron.mesh = fcb
+	fin_chevron.position = Vector3(0.0, 0.65, -0.85)
+	var fc_mat := StandardMaterial3D.new()
+	fc_mat.albedo_color = team
+	fc_mat.emission_enabled = true
+	fc_mat.emission = team
+	fc_mat.emission_energy_multiplier = 1.5
+	fin_chevron.set_surface_override_material(0, fc_mat)
+	add_child(fin_chevron)
+	var fin_team := MeshInstance3D.new()
+	fin_team.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var ft_box := BoxMesh.new()
+	ft_box.size = Vector3(0.06, 0.55, 0.10)
+	fin_team.mesh = ft_box
+	fin_team.position = Vector3(0.0, 0.50, 0.85)
+	var ft_mat := StandardMaterial3D.new()
+	ft_mat.albedo_color = team
+	ft_mat.emission_enabled = true
+	ft_mat.emission = team
+	ft_mat.emission_energy_multiplier = 1.4
+	fin_team.set_surface_override_material(0, ft_mat)
+	add_child(fin_team)
+
+
+func _build_heliarch_aguila() -> void:
+	## Heliarch heavy bomber (in-game name "Condor" after the
+	## 2026-05-19 swap; builder still named for legacy reasons).
+	## Full rebuild 2026-05-19:
+	##   - Orientation: +Z = forward (aircraft.gd look_at flip means
+	##     +Z is the travel direction). Previous build placed
+	##     canopy at -Z, so the bomber visibly flew tail-first.
+	##   - Enlarged ~1.4× from the prior build for the "heavy
+	##     bomber dwarfs the gunship" silhouette read.
+	##   - VTOL wing-inlay rotors: circular cutouts in the wing with
+	##     spinning rotor discs visible THROUGH the wing surface
+	##     (not external nacelles). Read as a built-in lift system.
+	##   - More player color: dorsal spine stripe + wing leading
+	##     edges + tail chevron. Three big cues, not just one.
+	##   - Silhouette polish: tapered nose dome, curved engine
+	##     pods, vertical tail with brass cap. Less boxy than the
+	##     previous build's flat slabs.
+	const HELIARCH_BRASS_AG: Color = Color(0.65, 0.45, 0.18, 1.0)
+	const DARK_BRASS_AG: Color = Color(0.40, 0.26, 0.10, 1.0)
+	const SOOTED_AG: Color = Color(0.18, 0.15, 0.12, 1.0)
+	const SOOTED_DARK_AG: Color = Color(0.10, 0.08, 0.06, 1.0)
+	const FLOOD_WARM_AG: Color = Color(1.0, 0.78, 0.42, 1.0)
+	const REACTOR_AMBER_AG: Color = Color(1.0, 0.55, 0.20, 1.0)
+	const HOT_WHITE_AG: Color = Color(1.0, 0.88, 0.62, 1.0)
+	var team: Color = _team_color()
+	# Scale factor — 1.4× the previous size so the heavy bomber
+	# silhouette dominates over the lighter gunship.
+	const S: float = 1.4
+	# Main fuselage — slightly larger than the old build for a heavier
+	# silhouette + a layered top spine that breaks the otherwise-flat
+	# upper surface.
+	var body := MeshInstance3D.new()
+	body.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var body_box := BoxMesh.new()
+	body_box.size = Vector3(2.00, 0.95, 4.60)
+	body.mesh = body_box
+	body.set_surface_override_material(0, _aircraft_metal_mat(SOOTED_AG))
+	add_child(body)
+	# Upper spine — a narrower box riding the top of the fuselage so
+	# the bomber reads as multi-tiered instead of a single slab.
+	var spine := MeshInstance3D.new()
+	spine.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var sb := BoxMesh.new()
+	sb.size = Vector3(1.40, 0.32, 3.80)
+	spine.mesh = sb
+	spine.position = Vector3(0.0, 0.62, 0.10)
+	spine.set_surface_override_material(0, _aircraft_metal_mat(SOOTED_DARK_AG))
+	add_child(spine)
+	# Brass rivet rows down each flank of the fuselage — four rivets
+	# per side, spaced along the length.
+	for side: int in 2:
+		var rsx: float = -1.05 if side == 0 else 1.05
+		for rivet_i: int in 6:
+			var rivet := MeshInstance3D.new()
+			rivet.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var rs := SphereMesh.new()
+			rs.radius = 0.07
+			rs.height = 0.14
+			rivet.mesh = rs
+			var rz: float = -2.00 + float(rivet_i) * 0.80
+			rivet.position = Vector3(rsx, 0.10, rz)
+			rivet.set_surface_override_material(0, _aircraft_metal_mat(HELIARCH_BRASS_AG))
+			add_child(rivet)
+	# Brass cult plate riveted to the dorsal spine — embossed Heliarch
+	# crest, just a flat box but reads as "ritual ornamentation".
+	var dorsal_plate := MeshInstance3D.new()
+	dorsal_plate.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var dp := BoxMesh.new()
+	dp.size = Vector3(0.80, 0.06, 1.40)
+	dorsal_plate.mesh = dp
+	dorsal_plate.position = Vector3(0.0, 0.82, 0.10)
+	dorsal_plate.set_surface_override_material(0, _aircraft_metal_mat(HELIARCH_BRASS_AG))
+	add_child(dorsal_plate)
+	# Belly bomb bay — deeper recessed gondola with brass framing and
+	# two visible amber payload bulbs nestled inside.
+	var bay := MeshInstance3D.new()
+	bay.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var bay_box := BoxMesh.new()
+	bay_box.size = Vector3(1.70, 0.55, 2.60)
+	bay.mesh = bay_box
+	bay.position = Vector3(0.0, -0.60, 0.05)
+	bay.set_surface_override_material(0, _aircraft_metal_mat(SOOTED_DARK_AG))
+	add_child(bay)
+	# Brass framing around the bay opening — four thin bars.
+	for frame_side: int in 4:
+		var fr := MeshInstance3D.new()
+		fr.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var fb := BoxMesh.new()
+		match frame_side:
+			0:
+				fb.size = Vector3(1.80, 0.10, 0.10)
+				fr.position = Vector3(0.0, -0.40, 1.30)
+			1:
+				fb.size = Vector3(1.80, 0.10, 0.10)
+				fr.position = Vector3(0.0, -0.40, -1.20)
+			2:
+				fb.size = Vector3(0.10, 0.10, 2.50)
+				fr.position = Vector3(-0.85, -0.40, 0.05)
+			_:
+				fb.size = Vector3(0.10, 0.10, 2.50)
+				fr.position = Vector3(0.85, -0.40, 0.05)
+		fr.mesh = fb
+		fr.set_surface_override_material(0, _aircraft_metal_mat(HELIARCH_BRASS_AG))
+		add_child(fr)
+	# Two visible payload bulbs in the bay — amber spheres that read
+	# as the unstable fuel-air charges waiting to drop.
+	for bomb_i: int in 2:
+		var bomb := MeshInstance3D.new()
+		bomb.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var bm := SphereMesh.new()
+		bm.radius = 0.32
+		bm.height = 0.64
+		bm.radial_segments = 10
+		bm.rings = 6
+		bomb.mesh = bm
+		var bz: float = -0.60 + float(bomb_i) * 1.20
+		bomb.position = Vector3(0.0, -0.72, bz)
+		var bmm := StandardMaterial3D.new()
+		bmm.albedo_color = HELIARCH_BRASS_AG
+		bmm.emission_enabled = true
+		bmm.emission = REACTOR_AMBER_AG
+		bmm.emission_energy_multiplier = 1.8
+		bomb.set_surface_override_material(0, bmm)
+		add_child(bomb)
+	# Ember-hot ventral slit between the two bombs — sells "the
+	# payload itself is hot".
+	var hot_slit := MeshInstance3D.new()
+	hot_slit.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var hsb := BoxMesh.new()
+	hsb.size = Vector3(0.50, 0.05, 2.30)
+	hot_slit.mesh = hsb
+	hot_slit.position = Vector3(0.0, -0.95, 0.05)
+	var hs_mat := StandardMaterial3D.new()
+	hs_mat.albedo_color = REACTOR_AMBER_AG
+	hs_mat.emission_enabled = true
+	hs_mat.emission = REACTOR_AMBER_AG
+	hs_mat.emission_energy_multiplier = 3.4
+	hs_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	hot_slit.set_surface_override_material(0, hs_mat)
+	add_child(hot_slit)
+	# Brass overslung canopy — taller, with a riveted brass framework
+	# and a recessed amber cockpit slit so the canopy reads as armored
+	# rather than a clear bubble.
+	var canopy := MeshInstance3D.new()
+	canopy.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var canopy_box := BoxMesh.new()
+	canopy_box.size = Vector3(1.10, 0.45, 1.30)
+	canopy.mesh = canopy_box
+	canopy.position = Vector3(0.0, 0.60, -1.25)
+	canopy.set_surface_override_material(0, _aircraft_metal_mat(HELIARCH_BRASS_AG))
+	add_child(canopy)
+	var canopy_slit := MeshInstance3D.new()
+	canopy_slit.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var css := BoxMesh.new()
+	css.size = Vector3(0.85, 0.10, 0.45)
+	canopy_slit.mesh = css
+	canopy_slit.position = Vector3(0.0, 0.70, -1.55)
+	var cs_mat := StandardMaterial3D.new()
+	cs_mat.albedo_color = REACTOR_AMBER_AG
+	cs_mat.emission_enabled = true
+	cs_mat.emission = REACTOR_AMBER_AG
+	cs_mat.emission_energy_multiplier = 2.2
+	cs_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	canopy_slit.set_surface_override_material(0, cs_mat)
+	add_child(canopy_slit)
+	# Chin radome — small bulbous nose under the canopy.
+	var radome := MeshInstance3D.new()
+	radome.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var rm := SphereMesh.new()
+	rm.radius = 0.35
+	rm.height = 0.65
+	rm.radial_segments = 12
+	rm.rings = 8
+	radome.mesh = rm
+	radome.position = Vector3(0.0, -0.10, -2.05)
+	radome.set_surface_override_material(0, _aircraft_metal_mat(DARK_BRASS_AG))
+	add_child(radome)
+	# Large forward floodlight on the nose.
+	var flood := MeshInstance3D.new()
+	flood.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var flood_cyl := CylinderMesh.new()
+	flood_cyl.top_radius = 0.28
+	flood_cyl.bottom_radius = 0.25
+	flood_cyl.height = 0.30
+	flood_cyl.radial_segments = 14
+	flood.mesh = flood_cyl
+	flood.rotation.x = PI * 0.5
+	flood.position = Vector3(0.0, 0.0, -2.20)
+	flood.set_surface_override_material(0, _aircraft_metal_mat(HELIARCH_BRASS_AG))
+	add_child(flood)
+	var flood_bulb := MeshInstance3D.new()
+	flood_bulb.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var fbulb := CylinderMesh.new()
+	fbulb.top_radius = 0.22
+	fbulb.bottom_radius = 0.22
+	fbulb.height = 0.04
+	fbulb.radial_segments = 14
+	flood_bulb.mesh = fbulb
+	flood_bulb.rotation.x = PI * 0.5
+	flood_bulb.position = Vector3(0.0, 0.0, -2.36)
+	var fb_mat := StandardMaterial3D.new()
+	fb_mat.albedo_color = FLOOD_WARM_AG
+	fb_mat.emission_enabled = true
+	fb_mat.emission = FLOOD_WARM_AG
+	fb_mat.emission_energy_multiplier = 3.6
+	fb_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	flood_bulb.set_surface_override_material(0, fb_mat)
+	add_child(flood_bulb)
+	# Wide wings.
+	var wing := MeshInstance3D.new()
+	wing.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var wing_box := BoxMesh.new()
+	wing_box.size = Vector3(5.20, 0.16, 1.30)
+	wing.mesh = wing_box
+	wing.position = Vector3(0.0, 0.0, 0.20)
+	wing.set_surface_override_material(0, _aircraft_metal_mat(SOOTED_AG.darkened(0.10)))
+	add_child(wing)
+	# Wing-inlay rotors — replaces the previous external tail-mounted
+	# engines. Per user 2026-05-19: the Condor should have rotors
+	# INLAYED into its wings (scifi heavy lifter aesthetic, not main
+	# rotor + tail rotor). Four rotors per wing, two per side, sitting
+	# FLUSH with the wing surface. Each = brass-rimmed circular cutout
+	# + translucent grey rotor disc + two crossed dark-brass blades
+	# (static; the disc translucency reads as "spinning fast"). Also
+	# keep the rear amber exhaust glow as the forward-thrust source.
+	for rotor_xi: int in 4:
+		var rx_offsets: Array[float] = [-2.0, -0.95, 0.95, 2.0]
+		var rx: float = rx_offsets[rotor_xi]
+		# Brass rim around the rotor — flat torus inlayed on the wing
+		# surface (slightly raised above the wing top).
+		var rim_inlay := MeshInstance3D.new()
+		rim_inlay.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var rim_t := TorusMesh.new()
+		rim_t.inner_radius = 0.36
+		rim_t.outer_radius = 0.46
+		rim_t.rings = 20
+		rim_t.ring_segments = 4
+		rim_inlay.mesh = rim_t
+		rim_inlay.position = Vector3(rx, 0.08, 0.45)
+		rim_inlay.set_surface_override_material(0, _aircraft_metal_mat(HELIARCH_BRASS_AG))
+		add_child(rim_inlay)
+		# Dark recessed cavity — the wing "hole" the rotor sits in.
+		var cavity := MeshInstance3D.new()
+		cavity.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var cv := CylinderMesh.new()
+		cv.top_radius = 0.36
+		cv.bottom_radius = 0.36
+		cv.height = 0.06
+		cv.radial_segments = 18
+		cavity.mesh = cv
+		cavity.position = Vector3(rx, 0.04, 0.45)
+		cavity.set_surface_override_material(0, _aircraft_metal_mat(SOOTED_DARK_AG))
+		add_child(cavity)
+		# Translucent rotor disc — sits inside the cavity at the wing
+		# top, low alpha reads as "spinning fast" without animation.
+		var rotor_disc := MeshInstance3D.new()
+		rotor_disc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var rdc := CylinderMesh.new()
+		rdc.top_radius = 0.34
+		rdc.bottom_radius = 0.34
+		rdc.height = 0.03
+		rdc.radial_segments = 20
+		rotor_disc.mesh = rdc
+		rotor_disc.position = Vector3(rx, 0.10, 0.45)
+		var rd_mat := StandardMaterial3D.new()
+		rd_mat.albedo_color = Color(0.18, 0.16, 0.14, 0.45)
+		rd_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		rd_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		rotor_disc.set_surface_override_material(0, rd_mat)
+		add_child(rotor_disc)
+		# Two crossed rotor blades inside the disc — thin dark-brass bars.
+		for blade_i: int in 2:
+			var blade := MeshInstance3D.new()
+			blade.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var blb := BoxMesh.new()
+			blb.size = Vector3(0.62, 0.04, 0.10)
+			blade.mesh = blb
+			blade.position = Vector3(rx, 0.105, 0.45)
+			blade.rotation.y = float(blade_i) * PI * 0.5
+			blade.set_surface_override_material(0, _aircraft_metal_mat(DARK_BRASS_AG))
+			add_child(blade)
+		# Central brass hub cap.
+		var hub := MeshInstance3D.new()
+		hub.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var hubm := CylinderMesh.new()
+		hubm.top_radius = 0.10
+		hubm.bottom_radius = 0.12
+		hubm.height = 0.10
+		hubm.radial_segments = 10
+		hub.mesh = hubm
+		hub.position = Vector3(rx, 0.16, 0.45)
+		hub.set_surface_override_material(0, _aircraft_metal_mat(HELIARCH_BRASS_AG))
+		add_child(hub)
+		# Amber underglow visible through the cavity from below (the
+		# rotor draft is reactor-heated air).
+		var glow := MeshInstance3D.new()
+		glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var glow_cyl := CylinderMesh.new()
+		glow_cyl.top_radius = 0.28
+		glow_cyl.bottom_radius = 0.28
+		glow_cyl.height = 0.02
+		glow_cyl.radial_segments = 16
+		glow.mesh = glow_cyl
+		glow.position = Vector3(rx, -0.05, 0.45)
+		var glow_mat := StandardMaterial3D.new()
+		glow_mat.albedo_color = REACTOR_AMBER_AG
+		glow_mat.emission_enabled = true
+		glow_mat.emission = REACTOR_AMBER_AG
+		glow_mat.emission_energy_multiplier = 2.4
+		glow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		glow.set_surface_override_material(0, glow_mat)
+		add_child(glow)
+	# Tall vertical tail fin with brass crest.
+	var fin := MeshInstance3D.new()
+	fin.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var fin_box := BoxMesh.new()
+	fin_box.size = Vector3(0.14, 1.10, 0.80)
+	fin.mesh = fin_box
+	fin.position = Vector3(0.0, 0.80, 1.80)
+	fin.set_surface_override_material(0, _aircraft_metal_mat(SOOTED_AG))
+	add_child(fin)
+	var fin_crest := MeshInstance3D.new()
+	fin_crest.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var fc := BoxMesh.new()
+	fc.size = Vector3(0.20, 0.10, 0.65)
+	fin_crest.mesh = fc
+	fin_crest.position = Vector3(0.0, 1.40, 1.80)
+	fin_crest.set_surface_override_material(0, _aircraft_metal_mat(HELIARCH_BRASS_AG))
+	add_child(fin_crest)
+	# Team-colour leading edge on the fin.
+	var fin_team := MeshInstance3D.new()
+	fin_team.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var ft_box := BoxMesh.new()
+	ft_box.size = Vector3(0.08, 0.90, 0.10)
+	fin_team.mesh = ft_box
+	fin_team.position = Vector3(0.0, 0.80, 1.45)
+	var ft_mat := StandardMaterial3D.new()
+	ft_mat.albedo_color = team
+	ft_mat.emission_enabled = true
+	ft_mat.emission = team
+	ft_mat.emission_energy_multiplier = 1.4
+	fin_team.set_surface_override_material(0, ft_mat)
+	add_child(fin_team)
+	# Twin tail booms — slender beams flanking the main fin, capped by
+	# small amber tail-lights. Adds depth + symmetry to the rear.
+	for boom_side: int in 2:
+		var bsx: float = -1.20 if boom_side == 0 else 1.20
+		var boom := MeshInstance3D.new()
+		boom.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var bbm := BoxMesh.new()
+		bbm.size = Vector3(0.18, 0.18, 1.80)
+		boom.mesh = bbm
+		boom.position = Vector3(bsx, 0.30, 1.40)
+		boom.set_surface_override_material(0, _aircraft_metal_mat(SOOTED_DARK_AG))
+		add_child(boom)
+		var tail_light := MeshInstance3D.new()
+		tail_light.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var tls := SphereMesh.new()
+		tls.radius = 0.12
+		tls.height = 0.24
+		tail_light.mesh = tls
+		tail_light.position = Vector3(bsx, 0.30, 2.40)
+		var tl_mat := StandardMaterial3D.new()
+		tl_mat.albedo_color = REACTOR_AMBER_AG
+		tl_mat.emission_enabled = true
+		tl_mat.emission = REACTOR_AMBER_AG
+		tl_mat.emission_energy_multiplier = 2.8
+		tl_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		tail_light.set_surface_override_material(0, tl_mat)
+		add_child(tail_light)
+	# Two ritual brass chains hanging off the wing roots — short
+	# dangling boxes simulating consecrated chain ornaments per the
+	# Heliarch "ritual ornamentation" lore in §3.4. Tiny but they
+	# add the "this is a holy war engine" read.
+	for chain_side: int in 2:
+		var cnx: float = -0.90 if chain_side == 0 else 0.90
+		for link_i: int in 4:
+			var link := MeshInstance3D.new()
+			link.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var lb := BoxMesh.new()
+			lb.size = Vector3(0.07, 0.10, 0.07)
+			link.mesh = lb
+			link.position = Vector3(cnx, -0.10 - float(link_i) * 0.13, 0.55)
+			link.set_surface_override_material(0, _aircraft_metal_mat(HELIARCH_BRASS_AG))
+			add_child(link)
+	# Hot-white reactor-glow lamp along the underbelly near the nose
+	# — sells "the payload is unstable + ready to drop".
+	var underglow := OmniLight3D.new()
+	underglow.light_color = HOT_WHITE_AG
+	underglow.light_energy = 1.4
+	underglow.omni_range = 4.0
+	underglow.position = Vector3(0.0, -1.0, 0.05)
+	add_child(underglow)
+
+	# --- Player-color reinforcement (more, per user 2026-05-19).
+	# Three additional team-tinted features beyond the small fin
+	# crest the earlier build had: dorsal team-stripe along the
+	# spine, wing leading-edge strips on both wings, and a tail
+	# chevron on the rear fuselage.
+	var dorsal_stripe := MeshInstance3D.new()
+	dorsal_stripe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var dsb := BoxMesh.new()
+	dsb.size = Vector3(0.50, 0.06, 3.40)
+	dorsal_stripe.mesh = dsb
+	dorsal_stripe.position = Vector3(0.0, 0.86, 0.10)
+	var ds_mat := StandardMaterial3D.new()
+	ds_mat.albedo_color = team
+	ds_mat.emission_enabled = true
+	ds_mat.emission = team
+	ds_mat.emission_energy_multiplier = 1.5
+	dorsal_stripe.set_surface_override_material(0, ds_mat)
+	add_child(dorsal_stripe)
+	for wing_le_side: int in 2:
+		var wsx: float = -1.0 if wing_le_side == 0 else 1.0
+		var wing_le := MeshInstance3D.new()
+		wing_le.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var wleb := BoxMesh.new()
+		wleb.size = Vector3(2.40, 0.10, 0.16)
+		wing_le.mesh = wleb
+		wing_le.position = Vector3(wsx * 1.30, 0.06, -0.42)  # leading edge sits forward of the wing (-Z in current build)
+		var wle_mat := StandardMaterial3D.new()
+		wle_mat.albedo_color = team
+		wle_mat.emission_enabled = true
+		wle_mat.emission = team
+		wle_mat.emission_energy_multiplier = 1.4
+		wing_le.set_surface_override_material(0, wle_mat)
+		add_child(wing_le)
+
+	# --- Orientation correction. The build above places nose / canopy
+	# / floodlight at -Z, but aircraft.gd's look_at (line 459) flips
+	# so +Z is the travel direction — the bomber was visibly flying
+	# tail-first. Rather than rewrite every literal Z position, flip
+	# every direct child's Z + add a 180° yaw so cylinders/boxes
+	# originally facing -Z now face +Z. Self transform is not touched
+	# — the per-frame look_at owns it.
+	for child: Node in get_children():
+		if not (child is Node3D):
+			continue
+		var c: Node3D = child as Node3D
+		if c == self:
+			continue
+		c.position.z = -c.position.z
+		c.rotation.y = wrapf(c.rotation.y + PI, -PI, PI)
+	# Then scale the WHOLE thing up — heavy bomber should be visibly
+	# bulkier than the gunship. 1.4× per the rebuild plan.
+	scale = Vector3(1.4, 1.4, 1.4)
+	add_child(underglow)
+
+
 func _build_default_aircraft() -> void:
 	# Fallback for any aircraft type without a dedicated builder.
 	var team: Color = _team_color()
@@ -3307,7 +4183,119 @@ func _die() -> void:
 
 ## --- Movement commands (mirror Unit's API so SelectionManager works) ---
 
+func is_returning_to_base() -> bool:
+	## Read-only flag — selection_manager + HUD use this to skip the
+	## aircraft when the player is trying to issue commands during RTB.
+	return _returning_to_base
+
+
+func begin_return_to_base() -> void:
+	## Trigger the RTB sequence — find the nearest friendly HQ, lock
+	## the unit into RTB mode, drop any active combat target, and
+	## issue an internal move command toward the HQ. Called by the
+	## combat path right after a primary-weapon discharge on units
+	## whose stats.rtb_after_attack is set.
+	var hq_pos: Vector3 = _find_nearest_friendly_hq_pos()
+	if hq_pos == Vector3.INF:
+		# No HQ found (rare — e.g. all friendly HQs destroyed). Bail
+		# silently rather than locking the unit into a perpetual
+		# unsacked state; it'll re-trigger on next fire.
+		return
+	_returning_to_base = true
+	_rtb_target_pos = hq_pos
+	# Drop any combat target so we don't re-engage en route.
+	if _combat:
+		if "_current_target" in _combat:
+			_combat.set("_current_target", null)
+		if _combat.has_method("clear_target"):
+			_combat.call("clear_target")
+	# Issue the move through the internal command path. Pass
+	# clear_combat=false because we already cleared above.
+	_force_command_move_to_rtb(hq_pos)
+
+
+func _force_command_move_to_rtb(target: Vector3) -> void:
+	## Bypass the public command_move guard (which refuses commands
+	## during RTB) so the RTB itself can fly the unit home.
+	var mc: Node = get_node_or_null("MovementComponent")
+	if mc != null and mc is AircraftMovement:
+		(mc as AircraftMovement).goto_world(target)
+	move_target = Vector3(target.x, stats.flight_altitude if stats else global_position.y, target.z)
+	move_queue.clear()
+	has_move_order = true
+	is_holding_position = false
+
+
+func _find_nearest_friendly_hq_pos() -> Vector3:
+	## Scans the buildings group for the closest headquarters owned by
+	## the same team as this aircraft. Falls back to Vector3.INF when
+	## none exists.
+	var scene: SceneTree = get_tree()
+	if scene == null:
+		return Vector3.INF
+	var best_pos: Vector3 = Vector3.INF
+	var best_d: float = INF
+	var registry: Node = scene.current_scene.get_node_or_null("PlayerRegistry")
+	for node: Node in scene.get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var bstats_v: Variant = node.get("stats")
+		if bstats_v == null:
+			continue
+		var bstats: Resource = bstats_v as Resource
+		if bstats == null or not ("building_id" in bstats):
+			continue
+		if bstats.get("building_id") != &"headquarters":
+			continue
+		var b_owner: int = node.get("owner_id") as int
+		var friendly: bool = (b_owner == owner_id)
+		if not friendly and registry and registry.has_method("are_allied"):
+			friendly = registry.call("are_allied", owner_id, b_owner) as bool
+		if not friendly:
+			continue
+		var n3: Node3D = node as Node3D
+		if n3 == null:
+			continue
+		var d: float = n3.global_position.distance_to(global_position)
+		if d < best_d:
+			best_d = d
+			best_pos = n3.global_position
+	return best_pos
+
+
+func _tick_return_to_base(_delta: float) -> void:
+	## Called once per physics tick while _returning_to_base is set.
+	## Checks for arrival at the HQ + refreshes the move command if
+	## the original HQ disappeared mid-trip.
+	if not _returning_to_base:
+		return
+	# HQ may have been destroyed mid-trip — pick a fresh one.
+	if _rtb_target_pos == Vector3.INF:
+		_rtb_target_pos = _find_nearest_friendly_hq_pos()
+		if _rtb_target_pos == Vector3.INF:
+			# Nowhere to land. Clear RTB so the player can use the
+			# unit again (it'll just be unarmed until next reload).
+			_returning_to_base = false
+			return
+		_force_command_move_to_rtb(_rtb_target_pos)
+	# Arrival check — horizontal distance only (we're flying above).
+	var here: Vector3 = global_position
+	var dx: float = here.x - _rtb_target_pos.x
+	var dz: float = here.z - _rtb_target_pos.z
+	if dx * dx + dz * dz <= RTB_ARRIVAL_RADIUS * RTB_ARRIVAL_RADIUS:
+		# Touch-down — clear RTB, stop the aircraft, allow player
+		# control again. The unit is now ready to receive new orders.
+		_returning_to_base = false
+		_rtb_target_pos = Vector3.INF
+		stop()
+
+
 func command_move(target: Vector3, clear_combat: bool = true) -> void:
+	# RTB lockout — refuse player commands while the bomber is flying
+	# home to rearm. The bomber still finishes its return trip via
+	# _force_command_move_to_rtb; only EXTERNAL commands are blocked.
+	if _returning_to_base:
+		return
 	# Route through AircraftMovement when the new system is active (PB-6).
 	var mc: Node = get_node_or_null("MovementComponent")
 	if mc != null and mc is AircraftMovement:

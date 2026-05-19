@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+building_name = "Forge Pit"
+building_id = &"forge_pit"
+hp = 600
+cost_salvage = 240
+cost_fuel = 25
+build_time = 26.0
+power_consumption = 8
+power_production = 0
+producible_units = []
+footprint_size = Vector3(3.0, 2.4, 3.0)
+placeholder_color = Color(0.80, 0.35, 0.18, 1)
+is_advanced = false
+prerequisites = [&"catalyst_core"]
+faction_lock = 4
+weapons = []
+is_mobile = true

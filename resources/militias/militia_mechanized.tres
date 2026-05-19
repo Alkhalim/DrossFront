@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Resource" path="res://resources/units/heliarch_cremator.tres" id="2"]
+
+[ext_resource type="Resource" path="res://resources/units/heliarch_inquisitor_tank.tres" id="3"]
+
+[resource]
+script = ExtResource("1")
+unit_name = "Mechanized Militia"
+display_name = "Mechanized Militia"
+unit_class = &"medium"
+armor_class = &"medium"
+squad_size = 1
+population = 36
+cost_salvage = 880
+cost_fuel = 68
+build_time = 62.0
+built_at = &"militia_camp"
+unlock_prerequisite = &"forge_pit"
+is_militia_composition = true
+militia_units = [ExtResource("2"), ExtResource("3"), ExtResource("3")]
+special_description = "Pre-defined Heliarch band: 1× Cremator + 2× Inquisitor Tank. Armored push. Requires Forge Pit."

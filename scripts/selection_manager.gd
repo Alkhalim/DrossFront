@@ -360,6 +360,20 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 		# move path supports queueing for now (attack / assist / rally
 		# still replace).
 		var queue: bool = event.ctrl_pressed or event.shift_pressed
+		# Heliarch packed-building relocation: when the selected
+		# building is PACKED, right-click on ground teleports it
+		# to the clicked position (placeholder for the future
+		# slow-move-as-unit behaviour). Player still clicks Unpack on
+		# the HUD button when the building's at the new spot. Takes
+		# priority over rally-point setting and the usual unit
+		# dispatch because PACKED buildings own no producible_units
+		# and aren't selectable as movables.
+		if _selected_building and _selected_building.has_method("can_unpack") and _selected_building.can_unpack():
+			var relocate_pos: Vector3 = _raycast_ground(event.position)
+			if relocate_pos != Vector3.INF and _selected_building.has_method("request_packed_relocate"):
+				_selected_building.request_packed_relocate(relocate_pos)
+			get_viewport().set_input_as_handled()
+			return
 		if _selected_building and _selected_building.stats and not _selected_building.get_producible_units().is_empty() and _selection_movables_count() == 0:
 			_set_rally_point(event.position)
 		elif _attack_move_mode:
@@ -702,11 +716,13 @@ func _handle_build_hotkey(key: InputEventKey) -> void:
 		if arch_tier >= 1:
 			restorer_paths.append("res://resources/units/inheritor_wachter.tres")
 			restorer_paths.append("res://resources/units/inheritor_schwarm.tres")
+			restorer_paths.append("res://resources/units/inheritor_stahlyokai.tres")
 		var unit_index: int = -1
 		match key.keycode:
 			KEY_Q, KEY_1: unit_index = 0
 			KEY_W, KEY_2: unit_index = 1
 			KEY_E, KEY_3: unit_index = 2
+			KEY_R, KEY_4: unit_index = 3
 		if unit_index < 0 or unit_index >= restorer_paths.size():
 			return
 		var ustat: UnitStatResource = load(restorer_paths[unit_index]) as UnitStatResource
@@ -986,6 +1002,12 @@ func _finish_box_select(event: InputEventMouseButton) -> void:
 		if "owner_id" in movable and (movable.get("owner_id") as int) != 0:
 			continue
 		if "alive_count" in movable and (movable.get("alive_count") as int) <= 0:
+			continue
+		# RTB lockout — aircraft returning to base ignore commands AND
+		# can't be box-selected. Sells "the airframe is committed; you
+		# can't redirect it mid-return".
+		if is_aircraft and movable.has_method("is_returning_to_base") \
+				and (movable.call("is_returning_to_base") as bool):
 			continue
 		var screen_pos := _camera.unproject_position(movable.global_position)
 		if rect.has_point(screen_pos):
@@ -1345,6 +1367,15 @@ func _find_enemy_at(screen_pos: Vector2) -> Node3D:
 
 	var unit := _raycast_unit(screen_pos)
 	if unit and _is_attack_target(unit.owner_id, registry):
+		# Stealth gate — the player can't directly target enemy stealth
+		# units that haven't been revealed yet (a friendly has to be
+		# within detection range to surface them). Without this gate the
+		# minimap-savvy player could click anywhere a Specter is hiding
+		# and force-attack it, bypassing the whole stealth mechanic.
+		if "stealth_revealed" in unit and not (unit.get("stealth_revealed") as bool):
+			var us: UnitStatResource = unit.get("stats") as UnitStatResource
+			if us != null and us.is_stealth_capable:
+				return null
 		return unit
 
 	# Check Crawlers — they aren't Unit instances and slip past
@@ -1696,7 +1727,11 @@ func _raycast_unit(screen_pos: Vector2) -> Node3D:
 	# group membership is set in `Aircraft._ready` and doesn't depend
 	# on Godot's global class registry being warm.
 	if collider is Node3D and (collider as Node3D).is_in_group("aircraft"):
-		return collider as Node3D
+		var ac: Node3D = collider as Node3D
+		# RTB lockout — returning aircraft are not click-selectable.
+		if ac.has_method("is_returning_to_base") and (ac.call("is_returning_to_base") as bool):
+			return null
+		return ac
 	# Walk up — the collider may be a CollisionShape3D child of the
 	# aircraft's ClickArea (Area3D), which is itself a child of the
 	# Aircraft node. Both layers need traversal to find the Aircraft.
@@ -1708,7 +1743,10 @@ func _raycast_unit(screen_pos: Vector2) -> Node3D:
 		if parent is Unit:
 			return parent as Unit
 		if parent is Node3D and (parent as Node3D).is_in_group("aircraft"):
-			return parent as Node3D
+			var pac: Node3D = parent as Node3D
+			if pac.has_method("is_returning_to_base") and (pac.call("is_returning_to_base") as bool):
+				return null
+			return pac
 		node = parent
 	return null
 
@@ -2048,6 +2086,33 @@ func _set_rally_point(screen_pos: Vector2) -> void:
 		return
 	_selected_building.rally_point = ground_pos
 	_set_rally_point_visual(ground_pos)
+
+
+func command_minimap_right_click(world_pos: Vector3) -> void:
+	## Routed from the minimap right-click. Mirrors the in-world right-
+	## click priority: if the selection is just a production building
+	## (no movable units alongside it), set its rally point. Otherwise
+	## issue a move to the world position. Lets the player set rally
+	## targets across the whole map without panning the camera.
+	if _selected_building and _selected_building.stats \
+			and not _selected_building.get_producible_units().is_empty() \
+			and _selection_movables_count() == 0:
+		_selected_building.rally_point = world_pos
+		_set_rally_point_visual(world_pos)
+		return
+	command_move_to_world(world_pos, false)
+
+
+func get_selected_instance_ids() -> Array[int]:
+	## Returns the instance IDs of every currently-selected movable unit.
+	## Used by the minimap to highlight selected unit dots in white so
+	## the player can spot their selection at a glance even with the
+	## main view focused elsewhere.
+	var out: Array[int] = []
+	for u: Node3D in _selected_units:
+		if is_instance_valid(u):
+			out.append(u.get_instance_id())
+	return out
 
 
 func _hide_rally_marker() -> void:

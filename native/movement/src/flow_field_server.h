@@ -46,6 +46,10 @@ public:
         { impl_.set_cell_y_at(world_pos, y); }
 
     // Diagnostics.
+    int get_cell_cost_at(godot::Vector3 world_pos, int agent_class) const
+        { return impl_.get_cell_cost_at(world_pos, agent_class); }
+    float get_cell_y_at(godot::Vector3 world_pos) const
+        { return impl_.get_cell_y_at(world_pos); }
     int field_count() const { return impl_.field_count(); }
     bool field_exists(FieldId id) const { return impl_.field_exists(id); }
 

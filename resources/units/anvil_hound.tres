@@ -22,7 +22,7 @@ can_damage_trees = true
 
 damage = 25
 range = 15.0
-rof_seconds = 3.0
+rof_seconds = 3.3
 use_explicit_air = false
 engages_air_explicit = false
 mult_vs_unarmored_v2 = 1.0
@@ -67,7 +67,7 @@ speed_value = 7.2
 sight_tier = &"medium"
 squad_size = 3
 population = 12
-cost_salvage = 320
+cost_salvage = 300
 cost_fuel = 18
 build_time = 35.0
 built_at = &"basic_foundry"

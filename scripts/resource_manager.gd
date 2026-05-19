@@ -41,6 +41,12 @@ var population_cap: int = POPULATION_BASE
 
 var _salvage_accumulator: float = 0.0
 
+## Cumulative income tally — used by the match-end summary. Bumped on
+## every successful add_salvage / add_fuel. Independent of the running
+## income window; this one only ever grows.
+var total_salvage_earned: int = 0
+var total_fuel_earned: int = 0
+
 ## Rolling income window — list of (timestamp_seconds, salvage_gain, fuel_gain)
 ## entries. Stale entries get pruned each `add_*` call so memory stays small
 ## (a few dozen entries per minute at typical play). The HUD reads the
@@ -141,12 +147,16 @@ func add_salvage(amount: int) -> void:
 	salvage = mini(salvage + amount, SALVAGE_CAP)
 	salvage_changed.emit(salvage)
 	_record_income(amount, 0)
+	if amount > 0:
+		total_salvage_earned += amount
 
 
 func add_fuel(amount: int) -> void:
 	fuel = mini(fuel + amount, fuel_cap)
 	fuel_changed.emit(fuel)
 	_record_income(0, amount)
+	if amount > 0:
+		total_fuel_earned += amount
 
 
 func add_microchips(amount: int) -> void:

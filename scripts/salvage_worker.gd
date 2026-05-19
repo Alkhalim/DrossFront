@@ -7,6 +7,46 @@ extends CharacterBody3D
 
 enum State { IDLE, MOVING_TO_WRECK, HARVESTING, RETURNING, UNSTUCKING }
 
+## --- Salvage-worker behaviour diagnostics ------------------------------
+## Set WORKER_DEBUG_LOG = true to surface state transitions + periodic
+## RETURNING-leg snapshots so the "fully loaded, oscillating near yard"
+## bug can be traced (report 634). Logs are tagged [WK#id] and gated so
+## off-tick workers stay silent. Per-snapshot interval matches the
+## builder diagnostics (2 s) and snapshots ONLY fire for workers that
+## are RETURNING with cargo — IDLE / harvest workers are uninteresting
+## for this report and would flood the console at 30+ Hz.
+## Disabled after report 634 was resolved — flip back on for the next
+## worker-pathing investigation.
+const WORKER_DEBUG_LOG: bool = false
+const WORKER_DEBUG_SNAPSHOT_SEC: float = 1.0
+var _wk_dbg_state_prev: State = State.IDLE
+var _wk_dbg_snapshot_accum: float = 0.0
+var _wk_dbg_last_dest: Vector3 = Vector3.INF
+var _wk_dbg_last_pos: Vector3 = Vector3.INF
+
+
+func _wkdbg(msg: String) -> void:
+	if not WORKER_DEBUG_LOG:
+		return
+	var iid: int = get_instance_id() % 10000
+	var faction_tag: String = ""
+	var settings: Node = get_node_or_null("/root/MatchSettings")
+	if settings:
+		var fid: int = (settings.get("player_faction") as int) if owner_id == 0 else (settings.get("enemy_faction") as int)
+		faction_tag = "F%d " % fid
+	print("[WK#%d %sowner=%d] %s" % [iid, faction_tag, owner_id, msg])
+
+
+func _wkdbg_state_label(s: State) -> String:
+	match s:
+		State.IDLE: return "IDLE"
+		State.MOVING_TO_WRECK: return "MV2WRK"
+		State.HARVESTING: return "HARV"
+		State.RETURNING: return "RETURN"
+		State.UNSTUCKING: return "UNSTUCK"
+	return "?"
+
+
 const MOVE_SPEED: float = 6.0
 # Halved (was 15) per balance pass — workers harvest slower so a
 # wreck patch lasts longer and raids on workers feel more meaningful
@@ -57,6 +97,15 @@ var _target_wreck: Wreck = null
 var _carried_salvage: int = 0
 var _harvest_timer: float = 0.0
 var _move_target: Vector3 = Vector3.INF
+## Time accumulated in the current MOVING_TO_WRECK state. Used by the
+## near-wreck stall detector in _move_toward_wreck_new — when the worker
+## has been moving toward a wreck for longer than NEAR_WRECK_STALL_SEC
+## while staying within HARVEST_REACH_FALLBACK distance, the kernel is
+## almost certainly jittering its goal-cell snap inside the wreck's
+## dilation halo (visible as fast back-and-forth oscillation). Force
+## HARVESTING when this trips so the worker actually gathers visible
+## salvage instead of dancing 2 u away from it (report 643).
+var _move_to_wreck_elapsed: float = 0.0
 
 ## Half-frame stagger phase. Salvage workers don't need 60Hz updates —
 ## their state-machine ticks (find/harvest/return) are coarse-grained
@@ -490,6 +539,12 @@ func _physics_process(delta: float) -> void:
 		for k in stale:
 			_blacklisted_wrecks.erase(k)
 
+	# Heliarch caravan packed / in transit → suspend gather + deposit,
+	# just trail the building until it redeploys.
+	if not _home_yard_available_for_work():
+		_idle_follow_home_yard()
+		return
+
 	match state:
 		State.IDLE:
 			# Throttle the wreck scan -- walks the entire wrecks
@@ -529,6 +584,61 @@ func _physics_process(delta: float) -> void:
 ## arrive-check in _move_toward_wreck_new must see the position
 ## updated each frame to fire cleanly.
 func _per_frame_worker_tick(delta: float) -> void:
+	# --- Salvage-worker diagnostics: state transition + RETURNING leg ----
+	# Log only state TRANSITIONS for non-RETURNING states (keeps the
+	# console clean for normal operation). For RETURNING, also fire a
+	# 1 s snapshot of pos / dest / distance / cargo / velocity so the
+	# "fully loaded, drifting left-right near yard" oscillation
+	# (report 634) is visible in the trace.
+	if WORKER_DEBUG_LOG and state != _wk_dbg_state_prev:
+		var cargo_str: String = "S=%d M=%d" % [_carried_salvage, _carried_microchips]
+		_wkdbg("%s -> %s (%s)" % [
+			_wkdbg_state_label(_wk_dbg_state_prev),
+			_wkdbg_state_label(state),
+			cargo_str,
+		])
+		_wk_dbg_state_prev = state
+		_wk_dbg_snapshot_accum = 0.0
+		_wk_dbg_last_pos = global_position
+		_wk_dbg_last_dest = _move_target
+	if WORKER_DEBUG_LOG and state == State.RETURNING:
+		_wk_dbg_snapshot_accum += delta
+		if _wk_dbg_snapshot_accum >= WORKER_DEBUG_SNAPSHOT_SEC:
+			_wk_dbg_snapshot_accum = 0.0
+			var d_yard: float = INF
+			var yard_pos: Vector3 = Vector3.INF
+			if is_instance_valid(home_yard):
+				yard_pos = home_yard.global_position
+				d_yard = global_position.distance_to(yard_pos)
+			# Edge-aware distance (matches _return_to_yard_new gate) so
+			# the snapshot reports the exact value the deposit check
+			# sees, not just centre distance.
+			var yard_extent: float = 0.0
+			if is_instance_valid(home_yard) and "stats" in home_yard:
+				var hy_stats: Resource = home_yard.get("stats") as Resource
+				if hy_stats and "footprint_size" in hy_stats:
+					var fs: Vector3 = hy_stats.get("footprint_size") as Vector3
+					yard_extent = maxf(fs.x, fs.z) * 0.5
+			var d_edge: float = maxf(d_yard - yard_extent, 0.0)
+			# How much we actually moved since the last snapshot —
+			# tiny values + RETURNING == the oscillation case.
+			var travel: float = 0.0
+			if _wk_dbg_last_pos != Vector3.INF:
+				travel = global_position.distance_to(_wk_dbg_last_pos)
+			# Velocity magnitude tells us whether GroundMovement is
+			# still pushing the worker or has parked it.
+			var vmag: float = velocity.length()
+			# Did goto_world's destination move? The bounce loop often
+			# shows dest jittering between two cells in the dilation halo.
+			var dest_drift: float = 0.0
+			if _wk_dbg_last_dest != Vector3.INF:
+				dest_drift = _move_target.distance_to(_wk_dbg_last_dest)
+			_wkdbg("RETURN snap d_yard=%.2f d_edge=%.2f yard_ext=%.2f cargo=%d travel=%.2f vmag=%.2f dest_drift=%.2f" % [
+				d_yard, d_edge, yard_extent, _carried_salvage, travel, vmag, dest_drift,
+			])
+			_wk_dbg_last_pos = global_position
+			_wk_dbg_last_dest = _move_target
+
 	# Blacklist cooldown — same as legacy path.
 	if not _blacklisted_wrecks.is_empty():
 		var stale: Array = []
@@ -538,6 +648,11 @@ func _per_frame_worker_tick(delta: float) -> void:
 				stale.append(k)
 		for k in stale:
 			_blacklisted_wrecks.erase(k)
+
+	# Heliarch caravan packed / in transit → workers idle + drift.
+	if not _home_yard_available_for_work():
+		_idle_follow_home_yard()
+		return
 
 	match state:
 		State.IDLE:
@@ -563,6 +678,55 @@ func _per_frame_worker_tick(delta: float) -> void:
 			_cargo_mat.emission_enabled = fill > 0.0
 			_cargo_mat.emission = Color(1.0, 0.7, 0.2)
 			_cargo_mat.emission_energy_multiplier = fill * 1.4
+
+
+func _home_yard_available_for_work() -> bool:
+	## True when the home yard is currently in a state that accepts
+	## worker activity. Heliarch Salvage Caravans (is_mobile) freeze
+	## worker work the moment the player issues a Pack — the building
+	## starts PACKING, transitions to PACKED (and may transit to a new
+	## spot), then UNPACKING, and only resumes harvesting once it's
+	## DEPLOYED again. During the non-DEPLOYED states workers should
+	## drift toward the building rather than gather / deposit.
+	if not is_instance_valid(home_yard):
+		return true  # No yard reference — fall through to normal path.
+	if not (home_yard is Building):
+		return true  # Crawler-anchored harvest paths use this same loop.
+	var b: Building = home_yard as Building
+	if not b.has_method("is_mobile_building"):
+		return true
+	if not b.is_mobile_building():
+		return true
+	# Mobile building — only accept work when DEPLOYED.
+	# PackState enum: 0=DEPLOYED, 1=PACKING, 2=PACKED, 3=UNPACKING.
+	return (b.get("pack_state") as int) == 0
+
+
+func _idle_follow_home_yard() -> void:
+	## While the home yard is packed / in transit, workers idle but
+	## drift along with the caravan. Releases any held target wreck so
+	## it stays available for another yard's workers. Movement is
+	## handled by GroundMovement when present (goto_world); otherwise
+	## we just nudge our move_target toward the yard so the legacy
+	## physics path drifts in the right direction without burning a
+	## full state-machine cycle.
+	_target_wreck = null
+	state = State.IDLE
+	if not is_instance_valid(home_yard):
+		return
+	var dest: Vector3 = home_yard.global_position
+	# Add a small per-worker scatter so the squad doesn't pile onto the
+	# exact origin point of the caravan. Use instance id to pick a
+	# stable offset across frames.
+	var iid: int = get_instance_id()
+	var ang: float = float(iid % 360) * (TAU / 360.0)
+	dest += Vector3(cos(ang) * 1.8, 0.0, sin(ang) * 1.8)
+	_move_target = dest
+	# If GroundMovement is present, push the destination through goto_world
+	# so the new pathfinding kernel handles the drift.
+	var mc: Node = get_node_or_null("MovementComponent")
+	if mc and mc is GroundMovement and mc.has_method("goto_world"):
+		mc.call("goto_world", dest)
 
 
 func _find_wreck() -> void:
@@ -602,6 +766,7 @@ func _find_wreck() -> void:
 		_target_wreck = nearest
 		_move_target = nearest.global_position
 		state = State.MOVING_TO_WRECK
+		_move_to_wreck_elapsed = 0.0
 		return
 	# No wreck in range — if we've drifted away from the home yard /
 	# Crawler (e.g. last wreck was far out and we're still standing
@@ -862,6 +1027,7 @@ func _find_wreck_new() -> void:
 		_target_wreck = nearest
 		_move_target = nearest.global_position
 		state = State.MOVING_TO_WRECK
+		_move_to_wreck_elapsed = 0.0
 		var mc: Node = get_node_or_null("MovementComponent")
 		if mc != null and mc is GroundMovement:
 			(mc as GroundMovement).goto_world(_move_target)
@@ -889,10 +1055,13 @@ func _move_toward_wreck_new(delta: float) -> void:
 	if not is_instance_valid(_target_wreck):
 		state = State.IDLE
 		_target_wreck = null
+		_move_to_wreck_elapsed = 0.0
 		var mc: Node = get_node_or_null("MovementComponent")
 		if mc != null and mc is GroundMovement:
 			(mc as GroundMovement).clear_target()
 		return
+
+	_move_to_wreck_elapsed += delta
 
 	# Keep destination fresh in case the wreck drifts (shouldn't
 	# normally happen, but guards against floating wrecks).
@@ -908,6 +1077,35 @@ func _move_toward_wreck_new(delta: float) -> void:
 	if dist < ARRIVE_THRESHOLD:
 		state = State.HARVESTING
 		_harvest_timer = 0.0
+		_move_to_wreck_elapsed = 0.0
+		var mc: Node = get_node_or_null("MovementComponent")
+		if mc != null and mc is GroundMovement:
+			(mc as GroundMovement).clear_target()
+		return
+
+	# Near-wreck stall detector (report 643): the user observed workers
+	# walking into the same spot and back out again in very quick
+	# intervals next to clearly visible wrecks. Root cause is the
+	# flowfield kernel snapping its goal cell to a slightly different
+	# spot inside the wreck's dilation halo every refresh, so the
+	# worker's velocity vector flips direction at sub-second cadence
+	# while never closing the last few units to the wreck. The legacy
+	# path_unreachable signal doesn't fire (kernel thinks it's making
+	# progress), so this case slips past the harvest-on-fail branch in
+	# _on_movement_path_unreachable. When the worker has been in
+	# MOVING_TO_WRECK for NEAR_WRECK_STALL_SEC while staying within
+	# HARVEST_REACH_FALLBACK of the wreck, force HARVESTING — the
+	# harvest pass doesn't care about exact positioning, only that
+	# _target_wreck is valid, so we lose nothing by gathering at
+	# 5-7 u offset.
+	const HARVEST_REACH_FALLBACK: float = 7.5
+	const NEAR_WRECK_STALL_SEC: float = 1.2
+	if dist < HARVEST_REACH_FALLBACK and _move_to_wreck_elapsed > NEAR_WRECK_STALL_SEC:
+		if WORKER_DEBUG_LOG:
+			_wkdbg("near-wreck stall d=%.2f elapsed=%.2f -> HARVESTING" % [dist, _move_to_wreck_elapsed])
+		state = State.HARVESTING
+		_harvest_timer = 0.0
+		_move_to_wreck_elapsed = 0.0
 		var mc: Node = get_node_or_null("MovementComponent")
 		if mc != null and mc is GroundMovement:
 			(mc as GroundMovement).clear_target()
@@ -949,6 +1147,10 @@ func _return_to_yard_new(delta: float) -> void:
 			yard_extent = maxf(fs.x, fs.z) * 0.5
 	var d_to_edge: float = maxf(d_to_center - yard_extent, 0.0)
 	if d_to_edge < 2.0 or d_to_center < DROPOFF_RADIUS:
+		if WORKER_DEBUG_LOG:
+			_wkdbg("deposit fire d_center=%.2f d_edge=%.2f cargo=S%d/M%d" % [
+				d_to_center, d_to_edge, _carried_salvage, _carried_microchips,
+			])
 		if resource_manager:
 			resource_manager.add_salvage(_carried_salvage)
 			if _carried_microchips > 0 and resource_manager.has_method("add_microchips"):
@@ -988,6 +1190,34 @@ func _return_to_yard_new(delta: float) -> void:
 ## a different salvage target rather than grinding indefinitely.
 ## Replaces the legacy custom stuck detection for the new path.
 func _on_movement_path_unreachable(_reason: int) -> void:
+	if WORKER_DEBUG_LOG:
+		var d_str: String = "?"
+		if is_instance_valid(home_yard):
+			d_str = "%.2f" % global_position.distance_to(home_yard.global_position)
+		_wkdbg("path_unreachable reason=%d state=%s cargo=%d d_yard=%s" % [
+			_reason, _wkdbg_state_label(state), _carried_salvage, d_str,
+		])
+	# Harvest-on-fail (report 643): if we were trying to reach a wreck
+	# that the kernel keeps reporting "unreachable" but the worker is
+	# already physically close to it (within HARVEST_REACH_FALLBACK),
+	# just enter HARVESTING instead of blacklisting + walking home.
+	# Mirrors the deposit-on-fail fallback in the cargo branch below.
+	# Without this, the worker bounces between the wreck and the yard
+	# every 6 s (blacklist cooldown) and never harvests visible salvage.
+	const HARVEST_REACH_FALLBACK: float = 8.0
+	if (state == State.MOVING_TO_WRECK
+			and is_instance_valid(_target_wreck)
+			and _carried_salvage < CARRY_CAPACITY):
+		var d_w: float = global_position.distance_to(_target_wreck.global_position)
+		if d_w < HARVEST_REACH_FALLBACK:
+			if WORKER_DEBUG_LOG:
+				_wkdbg("harvest-on-fail d_wreck=%.2f -> HARVESTING" % d_w)
+			state = State.HARVESTING
+			_harvest_timer = 0.0
+			var mc_h: Node = get_node_or_null("MovementComponent")
+			if mc_h != null and mc_h is GroundMovement:
+				(mc_h as GroundMovement).clear_target()
+			return
 	# Blacklist the wreck we were trying to reach so the next
 	# _find_wreck_new scan skips it for a few seconds.
 	if is_instance_valid(_target_wreck):

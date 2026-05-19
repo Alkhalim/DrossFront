@@ -154,6 +154,42 @@ func _setup_attack_spread(dest: Vector3, server: Object, kernel: Object) -> void
 	var n: int = members.size()
 	var spread_half_width: float = clampf(3.0 + float(n) * 1.5, 4.0, 18.0)
 
+	# Partition the squad into melee + ranged. Melee members get a
+	# tight RADIAL spread around the target (a ring of spots at touch
+	# distance) so they converge from all sides instead of queueing up
+	# along the approach axis ("deep line" report 2026-05-18). Ranged
+	# members get the wide lateral arc as before.
+	# Two counts let us index melee members 0..M-1 and ranged members
+	# 0..R-1 into their respective formations without holes.
+	var melee_indices: Array[int] = []
+	var ranged_indices: Array[int] = []
+	for j: int in members.size():
+		var mj: Node = members[j]
+		if not is_instance_valid(mj):
+			continue
+		var is_melee_j: bool = false
+		if "stats" in mj:
+			var stats_j: UnitStatResource = mj.get("stats") as UnitStatResource
+			if stats_j and stats_j.primary_weapon:
+				var wj: WeaponResource = stats_j.primary_weapon
+				if wj.range_tier == &"melee" or wj.resolved_range() <= 3.0:
+					is_melee_j = true
+		if is_melee_j:
+			melee_indices.append(j)
+		else:
+			ranged_indices.append(j)
+
+	# Melee ring radius — 2.0 u sits just outside an enemy's typical
+	# 1.5 u collision radius, so each ring goal lands on a clear cell
+	# adjacent to the enemy. Tighter values (the previous 1.0 u attempt)
+	# put goal cells inside the enemy's collision footprint, where
+	# peer-separation between melee squad-mates fought the formation
+	# and the squad clumped on one side. 2.0 u + the per-unit
+	# arrival_radius=0.3 settles the ring at touch distance, well
+	# inside melee weapon ranges (Matador 3.0, Conquistador Hammer
+	# 3.5).
+	var melee_ring_radius: float = 2.0
+
 	for i: int in members.size():
 		var m: Node = members[i]
 		if not is_instance_valid(m):
@@ -162,10 +198,26 @@ func _setup_attack_spread(dest: Vector3, server: Object, kernel: Object) -> void
 		if mc == null or not "kernel_handle" in mc:
 			continue
 
-		# Compute this member's laterally-offset destination.
-		var lateral_t: float = (float(i) / float(n - 1)) * 2.0 - 1.0
-		var lateral_offset: float = lateral_t * spread_half_width
-		var squad_dest: Vector3 = dest + perp * lateral_offset
+		var squad_dest: Vector3
+		var melee_slot: int = melee_indices.find(i)
+		if melee_slot >= 0:
+			# Melee — place at one of MELEE-COUNT evenly-spaced spots
+			# around the target. The first slot biases toward the
+			# approach direction so the lead unit closes from the
+			# squad's own side; the rest fan out clockwise.
+			var melee_n: int = melee_indices.size()
+			var approach_angle: float = atan2(approach_dir.x, approach_dir.z)
+			var slot_angle: float = approach_angle + TAU * (float(melee_slot) / float(maxi(melee_n, 1)))
+			squad_dest = dest + Vector3(sin(slot_angle) * melee_ring_radius, 0.0, cos(slot_angle) * melee_ring_radius)
+		else:
+			# Ranged — wide lateral arc for a firing line.
+			var ranged_slot: int = ranged_indices.find(i)
+			var ranged_n: int = ranged_indices.size()
+			var lateral_t: float = 0.0
+			if ranged_n > 1:
+				lateral_t = (float(ranged_slot) / float(ranged_n - 1)) * 2.0 - 1.0
+			var lateral_offset: float = lateral_t * spread_half_width
+			squad_dest = dest + perp * lateral_offset
 
 		if (mc as MovementComponent)._opts_unit_is_aircraft():
 			# Apply the same arc-spread to aircraft via goto_world with offset pos.

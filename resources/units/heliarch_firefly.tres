@@ -1,0 +1,69 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[ext_resource type="Resource" path="res://resources/units/heliarch_firefly_cluster.tres" id="3"]
+
+[ext_resource type="Resource" path="res://resources/units/heliarch_firefly_burrower.tres" id="4"]
+
+[sub_resource type="Resource" id="weapon_incendiary_bomblets"]
+script = ExtResource("2")
+weapon_name = "Incendiary Bomblet Launcher"
+role_tag = &"AP"
+damage_tier = &"low"
+range_tier = &"medium"
+range_value = 15.0
+rof_tier = &"volley"
+projectile_style = &"missile"
+base_accuracy = 0.78
+splash_radius = 2.2
+splash_damage_mult = 0.55
+salvo_count = 3
+salvo_stagger_sec = 0.12
+can_damage_trees = true
+
+damage = 18
+range = 15.0
+rof_seconds = 2.2
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.4
+mult_vs_light_v2 = 1.1
+mult_vs_medium_v2 = 0.7
+mult_vs_heavy_v2 = 0.35
+mult_vs_structure_v2 = 0.7
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
+
+[resource]
+script = ExtResource("1")
+unit_name = "Firefly"
+display_name = "Firefly"
+unit_class = &"aircraft"
+hp_total = 430
+hp_per_unit = 70
+armor_class = &"light"
+speed_tier = &"fast"
+sight_tier = &"medium"
+squad_size = 6
+population = 6
+cost_salvage = 220
+cost_fuel = 10
+build_time = 20.0
+built_at = &"headquarters"
+unlock_prerequisite = &"drone_nest"
+primary_weapon = SubResource("weapon_incendiary_bomblets")
+branch_a_stats = ExtResource("3")
+branch_b_stats = ExtResource("4")
+branch_a_name = "Cluster"
+branch_b_name = "Burrower"
+is_aircraft = true
+flight_altitude = 6.0
+flight_speed = 13.0
+special_description = "Heliarch incendiary drone pack — Firefly. Squad of 6 small drones drift at medium range lobbing incendiary bomblets that create persistent fire patches. Survive their attacks and reposition. Heliarch's ranged area-denial. Requires Crucible Spire."
+
+speed = 13.0
+sight_radius = 20.0
+armor_reduction = 0.10

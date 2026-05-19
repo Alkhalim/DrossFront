@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+building_name = "Militia Camp"
+building_id = &"militia_camp"
+hp = 700
+cost_salvage = 280
+cost_fuel = 15
+build_time = 28.0
+power_consumption = 8
+power_production = 0
+producible_units = []
+footprint_size = Vector3(4.0, 2.6, 4.0)
+placeholder_color = Color(0.70, 0.45, 0.20, 1)
+is_advanced = false
+prerequisites = []
+faction_lock = 4
+weapons = []
+is_mobile = true
+provides_population = 25

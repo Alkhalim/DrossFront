@@ -28,6 +28,10 @@ void FlowFieldServer::_bind_methods() {
                          &FlowFieldServer::mark_soft_cost);
     ClassDB::bind_method(D_METHOD("set_cell_y_at", "world_pos", "y"),
                          &FlowFieldServer::set_cell_y_at);
+    ClassDB::bind_method(D_METHOD("get_cell_cost_at", "world_pos", "agent_class"),
+                         &FlowFieldServer::get_cell_cost_at);
+    ClassDB::bind_method(D_METHOD("get_cell_y_at", "world_pos"),
+                         &FlowFieldServer::get_cell_y_at);
 #endif
 }
 

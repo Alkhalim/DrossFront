@@ -3353,6 +3353,14 @@ func _spawn_walkable_plateau(center: Vector3, top_size: Vector2, height: float, 
 	# and units couldn't path on/off them.
 	root.add_to_group("elevation")
 	root.add_to_group("terrain")
+	# Marks this body as a plateau whose Box collider TOP face is a
+	# walkable surface. The movement bootstrap's terrain-prop sweep reads
+	# this meta to keep the plateau footprint OUT of the flow-field cost
+	# grid's obstacle set — the cliff edge is enforced by the C++
+	# Dijkstra's cell_y / MAX_Y_DELTA guard, not by a hard obstacle mark.
+	# Without the meta the sweep can't tell a plateau body from a ramp
+	# side wall (both BoxShape3D) and blanket-blocks the whole top.
+	root.set_meta("_plateau_walkable_top", true)
 	# Plateaus + ramps are permanent landmarks. Once explored they
 	# stay at full brightness even when not in current vision -- the
 	# FOW dim overlay composited with the side-wall material was
@@ -5130,6 +5138,42 @@ func _setup_buildable_buildings() -> void:
 			# Architect's Network: 3-tier tech hub replacing Armory + Annex.
 			"res://resources/buildings/reliquary.tres",
 			"res://resources/buildings/architect_network.tres",
+			# Advanced authorization buildings — each gates a specific
+			# tier-2 unit at the Restorer field-build palette.
+			"res://resources/buildings/monolith_vault.tres",
+			"res://resources/buildings/architects_choir.tres",
+			"res://resources/buildings/choir_sanctum.tres",
+			"res://resources/buildings/sky_lattice.tres",
+			"res://resources/buildings/heavy_lattice_foundry.tres",
+			# Heliarch buildings (faction_lock = 4 = Heliarch only).
+			# Salvage Caravan: Heliarch's mobile faction-specific salvage
+			# yard. Costs +50 over the standard yard but folds + relocates
+			# to chase wreck fields.
+			"res://resources/buildings/salvage_caravan.tres",
+			# Catalyst Core: Tier 1 mobile power building, vent-gated,
+			# prereq for the Forge Pit chain.
+			"res://resources/buildings/catalyst_core.tres",
+			# Forge Pit: authorization (unlocks Inquisitor Tank +
+			# Mechanized Militia). Prereq for Crucible Spire.
+			"res://resources/buildings/forge_pit.tres",
+			# Crucible Spire: Tier 2 mobile power building, gates the
+			# Águila heavy bomber and hosts Matador + Cremator branches.
+			"res://resources/buildings/crucible_spire.tres",
+			# Militia Camp: Heliarch production. Recruits pre-defined
+			# mixed-unit bands (Skirmish, Mixed, Press Gang, etc.) per
+			# §"Militia Production".
+			"res://resources/buildings/militia_camp.tres",
+			# Advanced Militia Camp — tier-2 elite militia hub. Gated
+			# behind Crucible Spire + Militia Camp via prerequisites
+			# on the .tres. Hosts Air Strike Wing, Flame Choir, Hover
+			# Inquisition, Invictus Command.
+			"res://resources/buildings/advanced_militia_camp.tres",
+			# Remaining authorization buildings — each gates a specific
+			# unit at the HQ + unlocks the matching militia composition.
+			"res://resources/buildings/crucible_foundry.tres",
+			"res://resources/buildings/pyre_hall.tres",
+			"res://resources/buildings/drone_nest.tres",
+			"res://resources/buildings/aerie.tres",
 		]
 		var player_faction: int = _faction_id_for_player(0)
 		# Meridian Protocol rework: Foundries and Aerodrome are inert for
@@ -5149,12 +5193,26 @@ func _setup_buildable_buildings() -> void:
 			&"basic_foundry", &"advanced_foundry", &"aerodrome",
 			&"basic_armory", &"advanced_armory",
 		]
+		# Heliarch rework: Heliarch units come from HQ + Militia Camp.
+		# Generic Combine foundries/armory, the standard Salvage Yard,
+		# AND the generic power generators are excluded — Heliarch has
+		# its own faction-specific options for every slot:
+		#   power → Catalyst Core (T1) + Crucible Spire (T2)
+		#   salvage → Salvage Caravan
+		#   production → Militia Camp + HQ
+		const _HELIARCH_OBSOLETE: Array[StringName] = [
+			&"basic_foundry", &"advanced_foundry", &"aerodrome",
+			&"basic_armory", &"advanced_armory",
+			&"basic_generator",     # Heliarch power = Catalyst Core (faction-specific)
+			&"advanced_generator",  # Heliarch power = Crucible Spire (faction-specific)
+			&"salvage_yard",        # Heliarch salvage = Salvage Caravan (faction-specific)
+		]
 		for path: String in stat_paths:
 			var stat: BuildingStatResource = load(path) as BuildingStatResource
 			if not stat:
 				continue
 			# faction_lock 0 = universal, 1 = Anvil only, 2 = Sable/Meridian only,
-			# 3 = Inheritor only. Pattern: lock = faction_id + 1.
+			# 3 = Inheritor only, 4 = Heliarch only. Pattern: lock = faction_id + 1.
 			if stat.faction_lock != 0 and stat.faction_lock != (player_faction + 1):
 				continue
 			# Exclude legacy producer buildings from the Meridian build menu.
@@ -5162,6 +5220,9 @@ func _setup_buildable_buildings() -> void:
 				continue
 			# Exclude legacy producer + armory buildings from the Inheritor build menu.
 			if player_faction == 2 and stat.building_id in _INHERITOR_OBSOLETE:
+				continue
+			# Exclude legacy producer + armory buildings from the Heliarch build menu.
+			if player_faction == 3 and stat.building_id in _HELIARCH_OBSOLETE:
 				continue
 			buildable_buildings.append(stat)
 	selection_mgr.set_buildable_buildings(buildable_buildings)

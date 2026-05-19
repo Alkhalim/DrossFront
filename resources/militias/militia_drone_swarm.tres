@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Resource" path="res://resources/units/heliarch_firefly.tres" id="2"]
+
+[ext_resource type="Resource" path="res://resources/units/heliarch_cremator.tres" id="3"]
+
+[resource]
+script = ExtResource("1")
+unit_name = "Drone Swarm"
+display_name = "Drone Swarm"
+unit_class = &"aircraft"
+armor_class = &"light"
+squad_size = 1
+population = 30
+cost_salvage = 655
+cost_fuel = 42
+build_time = 52.0
+built_at = &"militia_camp"
+unlock_prerequisite = &"drone_nest"
+is_militia_composition = true
+militia_units = [ExtResource("2"), ExtResource("2"), ExtResource("2"), ExtResource("3")]
+special_description = "Pre-defined Heliarch band: 3× Firefly + 1× Cremator. Swarm-led harassment. Requires Drone Nest."

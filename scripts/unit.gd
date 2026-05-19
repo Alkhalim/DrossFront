@@ -60,6 +60,31 @@ var _turn_speed: float = 6.0
 var member_hp: Array[int] = []
 var alive_count: int = 0
 
+## Wall-clock timestamp of the most recent damage taken. Used by the
+## nanite-regen passive (stats.nanite_regen_per_sec > 0) to gate
+## heal-while-out-of-combat. Initialised to 0 so a fresh unit that
+## has never been hit is considered out-of-combat from spawn.
+var _last_damage_taken_msec: int = 0
+
+## Hover-tank visual phase counter (Inquisitor Tank). Advances at
+## HOVER_BOB_RATE rad/s in _per_frame_bookkeeping so the chassis
+## bobs on a slow sine-wave Y offset.
+var _hover_phase: float = 0.0
+const HOVER_BOB_RATE: float = 2.4        # rad/sec — ~2.6 s full bob cycle
+const HOVER_BOB_AMPL: float = 0.10       # ±0.10 u vertical sway
+const HOVER_BANK_PER_UNIT_SPEED: float = 0.10  # rad of lean per 1 u/s lateral
+const HOVER_BANK_MAX_RAD: float = 0.35   # ~20° max lean
+const HOVER_BANK_LERP_RATE: float = 4.0  # smoothing factor for bank changes
+## Fractional HP that hasn't yet rounded up to a full point. Lets
+## sub-1-HP/sec regen rates accumulate cleanly across physics ticks.
+var _nanite_regen_accum: float = 0.0
+## Seconds without taking damage before the unit is considered
+## out-of-combat for regen purposes. Long enough that mid-skirmish
+## pauses (between volleys) don't trickle HP back, short enough
+## that disengaging to retreat starts the heal before the player
+## gives up on the unit.
+const NANITE_OUT_OF_COMBAT_SEC: float = 6.0
+
 ## Seconds remaining on an EChO override / EMP paralysis. While
 ## > 0 the unit's velocity is forced to zero in _physics_process
 ## (movement halts even if a move command is queued) and the
@@ -273,6 +298,20 @@ var _deflect_angle_deg: float = 50.0
 ## so self-damage respects the integer take_damage path. Only active on
 ## Heliarch units (_faction_id() == HELIARCH) — all branches are gated.
 var _heat_drain_accum: float = 0.0
+## Per-shot heat ramp added to a Heliarch unit's heat_pct each time it
+## fires a weapon (called from CombatComponent._fire_weapon via
+## notify_heat_ramp_fire). 5 % per primary shot means a unit reaches
+## Tier 2 (66 %) in ~14 shots of sustained fire and Tier 3 (100 %) at
+## ~20 shots. Balance: a slow heavy weapon (Cremator flame, 3-4 ticks
+## per second on the salvo) hits the cap in under 6 s of continuous
+## fire, which is the spec's intent — sustained combat punishes Heliarch
+## via the Heat tax.
+const HEAT_RAMP_PER_FIRE: float = 0.05
+## Per-second passive heat decay applied in _tick_heliarch_heat_drain
+## while NOT in emergency cooldown. ~4 %/s → unit goes from 100 % to
+## 0 % in 25 s of disengagement. Slower than the per-shot ramp so a
+## firing unit climbs toward the tier thresholds.
+const HEAT_PASSIVE_DECAY_PER_SEC: float = 0.04
 ## Seconds remaining in Emergency Cooldown. While > 0 the unit is:
 ##   - immobile (EMP-paralysis mechanism re-used)
 ##   - fire-suppressed (silence re-applied each tick as a watchdog)
@@ -334,6 +373,10 @@ const FORMATION_OFFSETS: Dictionary = {
 	# 5-member formation: 4 corners + 1 center, so the squad still reads
 	# as a coherent group rather than a line.
 	5: [Vector2(-1.0, 0.85), Vector2(1.0, 0.85), Vector2(-1.0, -0.85), Vector2(1.0, -0.85), Vector2(0.0, 0.0)],
+	# 6-member formation: 2 rows of 3, slightly staggered so the squad
+	# reads as a wider phalanx (Ashigaru bumped to squad_size=6).
+	6: [Vector2(-1.20, 0.85), Vector2(0.0, 0.85), Vector2(1.20, 0.85),
+		Vector2(-1.20, -0.85), Vector2(0.0, -0.85), Vector2(1.20, -0.85)],
 }
 
 ## Mech anatomy per class. All values are sizes/positions in member-local space.
@@ -514,16 +557,18 @@ func _ready() -> void:
 		# pre-add_child override. Same pattern salvage_worker.gd uses.
 		if stats.can_build:
 			gm.arrival_radius = 1.5
-		# Melee combat units (Ashigaru, anything with a melee-tier weapon
-		# or resolved range ≤ 3u) need to physically reach their target.
-		# The GroundMovement 6u default leaves them stranded outside
-		# weapon range — chase_position keeps re-issuing but the unit
-		# considers itself "arrived" each time. Tight 1.5u arrival lets
-		# the chase loop drive the unit into actual melee distance.
+		# Melee combat units need to physically reach their target —
+		# the GroundMovement 6 u default leaves them stranded outside
+		# weapon range. Tightened to 0.3 u (was 0.7, originally 1.5) so
+		# the unit pushes hard against the enemy's collision until
+		# separation pins it at touch distance. Combined with the
+		# group_aura 1.0 u melee ring and chase_position returning
+		# enemy_pos directly, this should close the "clumps up but
+		# doesn't reach" gap (playtest 2026-05-18).
 		if stats.primary_weapon != null:
 			var pw: WeaponResource = stats.primary_weapon
 			if pw.range_tier == &"melee" or pw.resolved_range() <= 3.0:
-				gm.arrival_radius = 1.5
+				gm.arrival_radius = 0.3
 		_movement_cached = gm
 	else:
 		# Legacy NavigationAgent3D path
@@ -983,6 +1028,55 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 			if wroot is Node3D:
 				(wroot as Node3D).scale = Vector3(0.9, 0.9, 0.9)
 		return wachter_result
+	# Inquisitor Tank dispatch — Heliarch hover tank. unit_class is
+	# "medium" but it needs the tank-vehicle silhouette (low wide hull,
+	# hover skirts, centred plasma turret, forward floodlight). Without
+	# this dispatch the unit rendered as a humanoid mech holding a
+	# 'flashlight-looking gun' (playtest 2026-05-16: "inquisitor tank
+	# currently is not a tank and got an odd flashlight looking gun").
+	if stats and stats.unit_name.findn("Inquisitor Tank") >= 0:
+		var inq_result: Dictionary = _build_inquisitor_hover_tank_member(index, offset, team_color)
+		if "root" in inq_result:
+			var iqroot: Variant = inq_result["root"]
+			if iqroot is Node3D:
+				# 0.78 instead of 0.95 — the previous scale was too
+				# bulky for the squad-of-3 footprint AND made the
+				# chassis read as a tracked tank rather than a hover
+				# craft. Combined with the redesigned single-disc base
+				# inside the builder, this makes the unit visually
+				# distinct from the Combine ground tanks.
+				(iqroot as Node3D).scale = Vector3(0.78, 0.78, 0.78)
+		return inq_result
+	# Conquistador dispatch — centaur silhouette: wide quadruped lower
+	# body + humanoid upper torso with the Heat Hammer. Per playtest
+	# 2026-05-16: "conquistador should be melee unit ... maybe scaled
+	# down slightly and get humanoid upper body above basically a
+	# centaur design". The default humanoid biped read as too generic
+	# for a heavy melee bruiser.
+	if stats and stats.unit_name.findn("Conquistador") >= 0:
+		var conq_result: Dictionary = _build_conquistador_centaur_member(index, offset, team_color)
+		if "root" in conq_result:
+			var cqroot: Variant = conq_result["root"]
+			if cqroot is Node3D:
+				(cqroot as Node3D).scale = Vector3(0.88, 0.88, 0.88)
+		return conq_result
+	# Sol Invictus dispatch — Heliarch apex "walking sun". Custom huge
+	# silhouette (~3× the default apex chassis) with a head-mounted
+	# Solar Lance + arm-mounted plasma turrets + crown of solar spires.
+	# Per user 2026-05-19: "sol invictus should be triple its current
+	# size and have details added to still look good that large. beam
+	# weapon from head, arm cannons = plasma turrets."
+	if stats and stats.unit_name.findn("Sol Invictus") >= 0:
+		return _build_sol_invictus_member(index, offset, team_color)
+	# Herald dispatch — pyre-priest caster. Tall slim mech with a
+	# chest-mounted acoustic horn array + hanging brass chains.
+	if stats and stats.unit_name.findn("Herald") >= 0:
+		return _build_herald_priest_member(index, offset, team_color)
+	# Censer dispatch — walking thurible / elite chemical caster.
+	# Domed reactor-temple chassis on legs with a swinging cloud
+	# launcher pendant.
+	if stats and stats.unit_name.findn("Censer") >= 0:
+		return _build_censer_thurible_member(index, offset, team_color)
 	# Boyar / Breacher Tank dispatch by name. The Boyar branches
 	# (Dozer/Plow) live in unit_class="medium" for stat-formula
 	# purposes but visually MUST be tracked tanks, not the medium
@@ -2093,12 +2187,18 @@ func _build_mech_member(index: int, offset: Vector3, shape: Dictionary, team_col
 				_apply_ashigaru_base_overlay(torso_pivot, torso_size, base_color, mats)
 			"Rook":
 				_apply_rook_base_overlay(member, torso_pivot, torso_size, head_size, mats)
+			"Hound":
+				_apply_hound_base_overlay(member, torso_pivot, torso_size, head_size, base_color, mats)
 			"Stoker":
 				_apply_stoker_base_overlay(torso_pivot, torso_size, head_size, base_color, mats)
 			"Matador":
 				_apply_matador_base_overlay(torso_pivot, torso_size, base_color, mats)
 			"Cremator":
 				_apply_cremator_base_overlay(torso_pivot, torso_size, base_color, mats)
+			"Inquisitor Tank":
+				_apply_inquisitor_tank_base_overlay(torso_pivot, torso_size, base_color, mats)
+			"Conquistador":
+				_apply_conquistador_base_overlay(torso_pivot, torso_size, base_color, mats)
 			"Specter":
 				_apply_specter_base_overlay(torso_pivot, torso_size, head_size, base_color, mats)
 			"Specter (Ghost)":
@@ -3395,6 +3495,114 @@ func _apply_hound_tracker_overlay(torso_pivot: Node3D, torso_size: Vector3) -> v
 	torso_pivot.add_child(dish)
 
 
+func _apply_hound_base_overlay(member: Node3D, torso_pivot: Node3D, torso_size: Vector3, head_size: Vector3, base_color: Color, mats: Array[StandardMaterial3D]) -> void:
+	## Borzoi base — was using only the bare default mech build, which
+	## read as a flat-textured "missing detail" silhouette compared to
+	## Strelet/Bulwark which both got brass + sigil passes. This overlay
+	## adds: brass shoulder pauldron caps, a multi-barrel autogun (so the
+	## chest gun reads as autogun not single cannon), a back-mounted
+	## missile pod for the salvo missile attack, and a small sensor mast.
+	## Playtest 2026-05-15.
+	const WEATHERED_BRASS: Color = Color(0.55, 0.42, 0.18, 1.0)
+	# Multi-barrel autogun — replace the single chest cannon look by
+	# adding TWO additional thinner barrels flanking the existing main
+	# barrel. From front it reads as a tri-barrel autogun cluster.
+	var cannon_pivot: Node3D = torso_pivot.get_node_or_null("CannonPivot_0") as Node3D
+	if cannon_pivot:
+		for side: int in 2:
+			var sx: float = (-1.0 if side == 0 else 1.0) * 0.10
+			var aux := MeshInstance3D.new()
+			var ab_cyl := CylinderMesh.new()
+			ab_cyl.top_radius = 0.035
+			ab_cyl.bottom_radius = 0.035
+			ab_cyl.height = 0.55
+			ab_cyl.radial_segments = 8
+			aux.mesh = ab_cyl
+			aux.rotate_object_local(Vector3.RIGHT, PI * 0.5)
+			aux.position = Vector3(sx, 0.04, -0.30)
+			aux.set_surface_override_material(0, _make_metal_mat(Color(0.10, 0.10, 0.10)))
+			cannon_pivot.add_child(aux)
+		# Brass cooling jacket midway down the main barrel.
+		var jacket := MeshInstance3D.new()
+		var jc := CylinderMesh.new()
+		jc.top_radius = 0.085
+		jc.bottom_radius = 0.085
+		jc.height = 0.10
+		jc.radial_segments = 12
+		jacket.mesh = jc
+		jacket.rotate_object_local(Vector3.RIGHT, PI * 0.5)
+		jacket.position = Vector3(0.0, 0.0, -0.20)
+		jacket.set_surface_override_material(0, _make_metal_mat(WEATHERED_BRASS))
+		cannon_pivot.add_child(jacket)
+	# Back-mounted missile pod — small angled box on the upper back with
+	# four visible launch tubes facing up + slightly forward. Reads as
+	# the salvo-missile launcher Borzoi uses for its anti-armor punch.
+	var pod := MeshInstance3D.new()
+	var pb := BoxMesh.new()
+	pb.size = Vector3(torso_size.x * 0.55, torso_size.y * 0.18, torso_size.z * 0.50)
+	pod.mesh = pb
+	pod.rotate_object_local(Vector3.RIGHT, deg_to_rad(-22.0))
+	pod.position = Vector3(0.0, torso_size.y * 0.92, torso_size.z * 0.28)
+	var pod_mat := _make_metal_mat(Color(0.16, 0.16, 0.18))
+	pod.set_surface_override_material(0, pod_mat)
+	torso_pivot.add_child(pod)
+	mats.append(pod_mat)
+	# Four launch tubes in a 2x2 array, angled up-forward to match the
+	# pod tilt so missiles read as fired UP and OVER in a salvo.
+	for tx_i: int in 2:
+		for ty_i: int in 2:
+			var tube := MeshInstance3D.new()
+			var tc := CylinderMesh.new()
+			tc.top_radius = 0.05
+			tc.bottom_radius = 0.05
+			tc.height = 0.20
+			tc.radial_segments = 8
+			tube.mesh = tc
+			# Tubes face -Z then we tilt the whole pod via parent rotation.
+			# Easier: just make them vertical, then rotate same as pod.
+			tube.rotation = Vector3(deg_to_rad(-22.0), 0.0, 0.0)
+			var off_x: float = (-1.0 if tx_i == 0 else 1.0) * torso_size.x * 0.16
+			var off_z: float = (-1.0 if ty_i == 0 else 1.0) * 0.10
+			tube.position = Vector3(off_x, torso_size.y * 1.04, torso_size.z * 0.30 + off_z)
+			tube.set_surface_override_material(0, _make_metal_mat(Color(0.08, 0.08, 0.08)))
+			torso_pivot.add_child(tube)
+	# Brass shoulder pauldron caps — two small angled brass plates
+	# capping the existing shoulder boxes so the silhouette has a
+	# visible "Combine brass kit" identity.
+	for shoulder_side: int in 2:
+		var ssx: float = -1.0 if shoulder_side == 0 else 1.0
+		var cap := MeshInstance3D.new()
+		var cb := BoxMesh.new()
+		cb.size = Vector3(torso_size.x * 0.30, 0.06, torso_size.z * 0.42)
+		cap.mesh = cb
+		cap.rotation.z = -ssx * deg_to_rad(8.0)
+		cap.position = Vector3(ssx * torso_size.x * 0.40, torso_size.y * 0.78 + 0.06, 0.0)
+		cap.set_surface_override_material(0, _make_metal_mat(WEATHERED_BRASS))
+		torso_pivot.add_child(cap)
+	# Small sensor mast on the head — short brass-tipped rod so the
+	# Borzoi reads as a "scout" with optics rather than just a plain head.
+	var mast := MeshInstance3D.new()
+	var mc := CylinderMesh.new()
+	mc.top_radius = 0.02
+	mc.bottom_radius = 0.03
+	mc.height = 0.18
+	mc.radial_segments = 6
+	mast.mesh = mc
+	mast.position = Vector3(head_size.x * 0.28, torso_size.y + head_size.y + mc.height * 0.5, head_size.z * 0.25)
+	mast.set_surface_override_material(0, _make_metal_mat(Color(0.14, 0.14, 0.14)))
+	torso_pivot.add_child(mast)
+	var mast_tip := MeshInstance3D.new()
+	var mt_box := BoxMesh.new()
+	mt_box.size = Vector3(0.05, 0.05, 0.05)
+	mast_tip.mesh = mt_box
+	mast_tip.position = Vector3(head_size.x * 0.28, torso_size.y + head_size.y + mc.height + 0.025, head_size.z * 0.25)
+	mast_tip.set_surface_override_material(0, _make_metal_mat(WEATHERED_BRASS))
+	torso_pivot.add_child(mast_tip)
+	# Hammer-and-anvil chest sigil reuse — keeps the Borzoi within the
+	# Combine brass-kit visual family.
+	_apply_combine_hammer_anvil_sigil(member)
+
+
 func _apply_hound_ripper_overlay(torso_pivot: Node3D, torso_size: Vector3) -> void:
 	# Shoulder shotgun pod -- a chunky drum on the right shoulder
 	# with three barrel mouths poking forward. Pairs with the
@@ -3660,19 +3868,19 @@ func _apply_bulwark_siegebreaker_overlay(torso_pivot: Node3D, torso_size: Vector
 
 
 func _apply_cremator_base_overlay(torso_pivot: Node3D, torso_size: Vector3, _base_color: Color, mats: Array[StandardMaterial3D]) -> void:
-	## Heliarch medium assault — Heat Lance carrier. Long forward-
-	## projected lance barrel mounted on the chest, big chest furnace
-	## visible through a wider ribbed grille (the docs §3.4 chest-
-	## furnace silhouette), and a hanging brass ceremonial chain on
-	## the right shoulder.
+	## Heliarch medium mainline — Heavy Flamethrower + Phosphorus
+	## Mortar. Squat chest furnace, short stubby flamethrower nozzle on
+	## the LEFT chest (wide flared tip — reads as a flame projector,
+	## not a lance), shoulder-mounted mortar tube angled upward on the
+	## RIGHT, and a hanging brass ceremonial chain.
+	## Replaces the previous tall forward-projected lance which read as
+	## off-balance / goofy and didn't match the spec'd loadout (Lancer
+	## is a BRANCH, not the base unit).
 	const REACTOR_AMBER: Color = Color(1.0, 0.55, 0.20, 1.0)
 	const HEAT_WHITE_HOT: Color = Color(1.0, 0.85, 0.55, 1.0)
 	const HELIARCH_BRASS: Color = Color(0.55, 0.40, 0.20, 1.0)
 	const SOOTED_IRON: Color = Color(0.18, 0.16, 0.14, 1.0)
-	# --- Bigger chest furnace (wider than Matador's spine core, on the
-	# FRONT). The base Heliarch chest grille is already there from the
-	# faction pass; this layer expands it into a clear "furnace plate".
-	# Sooted-iron housing.
+	# --- Chest furnace plate (back of torso). Sooted-iron housing.
 	var furnace_back := MeshInstance3D.new()
 	var fb := BoxMesh.new()
 	fb.size = Vector3(torso_size.x * 0.72, torso_size.y * 0.55, 0.08)
@@ -3695,7 +3903,7 @@ func _apply_cremator_base_overlay(torso_pivot: Node3D, torso_size: Vector3, _bas
 	furnace_glow.set_surface_override_material(0, fg_mat)
 	torso_pivot.add_child(furnace_glow)
 	mats.append(fg_mat)
-	# Five wider brass grille bars across the furnace.
+	# Five brass grille bars across the furnace.
 	for grille_i: int in 5:
 		var bar := MeshInstance3D.new()
 		var bar_box := BoxMesh.new()
@@ -3705,94 +3913,547 @@ func _apply_cremator_base_overlay(torso_pivot: Node3D, torso_size: Vector3, _bas
 		bar.position = Vector3(0.0, ry, -torso_size.z * 0.5 - 0.13)
 		bar.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
 		torso_pivot.add_child(bar)
-	# Furnace omni light — brighter than Matador's so the Cremator
-	# casts more amber on its surroundings.
+	# Furnace omni light.
 	var furnace_light := OmniLight3D.new()
 	furnace_light.light_color = REACTOR_AMBER
 	furnace_light.light_energy = 1.0
 	furnace_light.omni_range = torso_size.x * 2.4
 	furnace_light.position = Vector3(0.0, torso_size.y * 0.46, -torso_size.z * 0.5 - 0.10)
 	torso_pivot.add_child(furnace_light)
-	# --- Long Heat Lance barrel mounted on the chest, pointing forward.
-	# Single barrel, hot-white-orange tip so the weapon visibly reads
-	# as a thermal beam projector.
-	var lance_root := Node3D.new()
-	lance_root.name = "CremnatorLance"
-	lance_root.position = Vector3(0.0, torso_size.y * 0.85, -torso_size.z * 0.5 - 0.10)
-	torso_pivot.add_child(lance_root)
-	# Lance housing (mantlet).
-	var mantlet := MeshInstance3D.new()
-	var mb := BoxMesh.new()
-	mb.size = Vector3(0.32, 0.22, 0.30)
-	mantlet.mesh = mb
-	mantlet.position = Vector3(0.0, 0.0, -0.06)
-	mantlet.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
-	lance_root.add_child(mantlet)
-	# Long lance barrel.
-	var lance_len: float = 1.45
-	var lance := MeshInstance3D.new()
-	var lance_cyl := CylinderMesh.new()
-	lance_cyl.top_radius = 0.10
-	lance_cyl.bottom_radius = 0.13
-	lance_cyl.height = lance_len
-	lance_cyl.radial_segments = 14
-	lance.mesh = lance_cyl
-	lance.rotation.x = PI * 0.5  # face -Z
-	lance.position = Vector3(0.0, 0.0, -lance_len * 0.5 - 0.20)
-	lance.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
-	lance_root.add_child(lance)
-	# Three brass cooling rings around the barrel.
-	for ring_i: int in 3:
+
+	# --- Forward floodlight on the RIGHT chest — the Heliarch lamp
+	# motif, mirroring Stoker / Inquisitor / Conquistador. Small enough
+	# that it sits alongside the flamethrower nozzle without competing
+	# for silhouette dominance. Warm amber-white emissive disc inside
+	# a brass housing.
+	const FLOOD_WARM_CREM: Color = Color(1.0, 0.78, 0.42, 1.0)
+	var flood_root := Node3D.new()
+	flood_root.position = Vector3(torso_size.x * 0.32, torso_size.y * 0.55, -torso_size.z * 0.5 - 0.05)
+	torso_pivot.add_child(flood_root)
+	var flood_housing := MeshInstance3D.new()
+	var fhouse := CylinderMesh.new()
+	fhouse.top_radius = 0.13
+	fhouse.bottom_radius = 0.11
+	fhouse.height = 0.14
+	fhouse.radial_segments = 12
+	flood_housing.mesh = fhouse
+	flood_housing.rotation.x = PI * 0.5
+	flood_housing.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	flood_root.add_child(flood_housing)
+	var flood_bulb := MeshInstance3D.new()
+	var fbulb := CylinderMesh.new()
+	fbulb.top_radius = 0.09
+	fbulb.bottom_radius = 0.09
+	fbulb.height = 0.03
+	fbulb.radial_segments = 12
+	flood_bulb.mesh = fbulb
+	flood_bulb.rotation.x = PI * 0.5
+	flood_bulb.position = Vector3(0.0, 0.0, -0.08)
+	var fb_mat := StandardMaterial3D.new()
+	fb_mat.albedo_color = FLOOD_WARM_CREM
+	fb_mat.emission_enabled = true
+	fb_mat.emission = FLOOD_WARM_CREM
+	fb_mat.emission_energy_multiplier = 3.2
+	fb_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	flood_bulb.set_surface_override_material(0, fb_mat)
+	flood_root.add_child(flood_bulb)
+	mats.append(fb_mat)
+	# Small omni so the lamp visibly casts on nearby geometry.
+	var flood_light := OmniLight3D.new()
+	flood_light.light_color = FLOOD_WARM_CREM
+	flood_light.light_energy = 0.45
+	flood_light.omni_range = 3.5
+	flood_light.position = Vector3(0.0, 0.0, -0.14)
+	flood_root.add_child(flood_light)
+
+	# --- Heavy Flamethrower nozzle on the LEFT chest. Short stubby
+	# barrel with a flared cone tip (the wide aperture reads as a
+	# flame projector, not a precision weapon).
+	# Mounted further off-centre (LEFT-side hip-shoulder) so it reads as
+	# a side-arm and the silhouette stays asymmetrical (per playtest
+	# 2026-05-18: "should be attached a bit more to the side instead of
+	# center"). Rotated slightly inward toward the centerline so the
+	# nozzle still points forward despite the side mounting.
+	var flamer_root := Node3D.new()
+	flamer_root.name = "CremnatorFlamer"
+	flamer_root.position = Vector3(-torso_size.x * 0.62, torso_size.y * 0.45, -torso_size.z * 0.35)
+	flamer_root.rotation.y = deg_to_rad(12.0)  # nozzle angles inward to forward
+	torso_pivot.add_child(flamer_root)
+	# Sooted housing — squarer and a touch larger to give the side-mount
+	# more visual weight.
+	var flamer_housing := MeshInstance3D.new()
+	var fh := BoxMesh.new()
+	fh.size = Vector3(0.30, 0.30, 0.34)
+	flamer_housing.mesh = fh
+	flamer_housing.position = Vector3(0.0, 0.0, -0.05)
+	flamer_housing.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+	flamer_root.add_child(flamer_housing)
+	# Longer thicker brass barrel — was 0.45 / very stubby (read as a
+	# mushroom). Now 0.65 with a more pronounced taper so the silhouette
+	# reads as a directed flame projector, not a vent cap.
+	var flamer_barrel_len: float = 0.65
+	var flamer_barrel := MeshInstance3D.new()
+	var fbl := CylinderMesh.new()
+	fbl.top_radius = 0.08
+	fbl.bottom_radius = 0.11
+	fbl.height = flamer_barrel_len
+	fbl.radial_segments = 12
+	flamer_barrel.mesh = fbl
+	flamer_barrel.rotation.x = PI * 0.5
+	flamer_barrel.position = Vector3(0.0, 0.0, -flamer_barrel_len * 0.5 - 0.20)
+	flamer_barrel.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	flamer_root.add_child(flamer_barrel)
+	# Two brass cooling rings along the barrel — visible bulkhead beats
+	# the mushroom-cone read.
+	for ring_i: int in 2:
+		var cring := MeshInstance3D.new()
+		var crt := TorusMesh.new()
+		crt.inner_radius = 0.10
+		crt.outer_radius = 0.14
+		crt.rings = 10
+		crt.ring_segments = 4
+		cring.mesh = crt
+		cring.rotation.x = PI * 0.5
+		cring.position = Vector3(0.0, 0.0, -0.35 - float(ring_i) * 0.20)
+		cring.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+		flamer_root.add_child(cring)
+	# Compact muzzle nozzle — narrow opening, not the previous wide flared
+	# cone (the flare made it look like a mushroom cap).
+	var flamer_muzzle_ring := MeshInstance3D.new()
+	var fmr := TorusMesh.new()
+	fmr.inner_radius = 0.08
+	fmr.outer_radius = 0.12
+	fmr.rings = 10
+	fmr.ring_segments = 4
+	flamer_muzzle_ring.mesh = fmr
+	flamer_muzzle_ring.rotation.x = PI * 0.5
+	flamer_muzzle_ring.position = Vector3(0.0, 0.0, -flamer_barrel_len - 0.22)
+	flamer_muzzle_ring.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	flamer_root.add_child(flamer_muzzle_ring)
+	# Pilot-light glow at the nozzle — small, kept the visible "lit"
+	# read but no longer the visual mushroom-cap.
+	var pilot_glow := MeshInstance3D.new()
+	var pg := SphereMesh.new()
+	pg.radius = 0.06
+	pg.height = 0.12
+	pilot_glow.mesh = pg
+	pilot_glow.position = Vector3(0.0, 0.0, -flamer_barrel_len - 0.22)
+	var pg_mat := StandardMaterial3D.new()
+	pg_mat.albedo_color = HEAT_WHITE_HOT
+	pg_mat.emission_enabled = true
+	pg_mat.emission = HEAT_WHITE_HOT
+	pg_mat.emission_energy_multiplier = 2.4
+	pg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	pilot_glow.set_surface_override_material(0, pg_mat)
+	flamer_root.add_child(pilot_glow)
+	mats.append(pg_mat)
+	# Muzzle marker — at the nozzle aperture. Tagged FlamerMuzzle so the
+	# combat side's per-weapon muzzle resolver (see
+	# get_muzzle_positions_for_weapon) can fire the flame stream from the
+	# actual flamethrower nozzle instead of the unit's chest centre.
+	var muzzle_mk := Marker3D.new()
+	muzzle_mk.name = "FlamerMuzzle"
+	muzzle_mk.position = Vector3(0.0, 0.0, -flamer_barrel_len - 0.30)
+	flamer_root.add_child(muzzle_mk)
+	# Backpack fuel cylinder feeding the flamer (small cylinder on the
+	# back-left of the torso). Sells "this thing burns chemical fuel".
+	var fuel_tank := MeshInstance3D.new()
+	var ft := CylinderMesh.new()
+	ft.top_radius = 0.13
+	ft.bottom_radius = 0.13
+	ft.height = 0.55
+	ft.radial_segments = 10
+	fuel_tank.mesh = ft
+	fuel_tank.position = Vector3(-torso_size.x * 0.30, torso_size.y * 0.55, torso_size.z * 0.42)
+	fuel_tank.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	torso_pivot.add_child(fuel_tank)
+
+	# --- Heavy armor plating. Bolted-on chest + side slab plates
+	# sell the "armored religious soldier" silhouette and visually
+	# justify the Medium armor class. Plates are deliberately thick
+	# and proud of the chassis so they read at RTS zoom.
+	# Front chest plate — wide slab covering most of the torso front.
+	var chest_plate := MeshInstance3D.new()
+	var cp_box := BoxMesh.new()
+	cp_box.size = Vector3(torso_size.x * 0.85, torso_size.y * 0.62, 0.10)
+	chest_plate.mesh = cp_box
+	chest_plate.position = Vector3(0.0, torso_size.y * 0.55, -torso_size.z * 0.5 - 0.02)
+	chest_plate.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+	torso_pivot.add_child(chest_plate)
+	# Brass rivet rows along the chest plate edge — 4 rivets per side.
+	for rivet_side: int in 2:
+		var rsx: float = -1.0 if rivet_side == 0 else 1.0
+		for rivet_i: int in 4:
+			var rivet := MeshInstance3D.new()
+			var rs := SphereMesh.new()
+			rs.radius = 0.04
+			rs.height = 0.08
+			rivet.mesh = rs
+			var ry: float = torso_size.y * 0.30 + float(rivet_i) * torso_size.y * 0.16
+			var rx: float = rsx * (torso_size.x * 0.36)
+			rivet.position = Vector3(rx, ry, -torso_size.z * 0.5 - 0.10)
+			rivet.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+			torso_pivot.add_child(rivet)
+	# Side armor pauldrons — flared shoulder slabs angled outward.
+	for pauldron_side: int in 2:
+		var psx: float = -1.0 if pauldron_side == 0 else 1.0
+		var pauldron := MeshInstance3D.new()
+		var pb := BoxMesh.new()
+		pb.size = Vector3(0.22, torso_size.y * 0.40, torso_size.z * 0.65)
+		pauldron.mesh = pb
+		pauldron.position = Vector3(psx * (torso_size.x * 0.55 + 0.05), torso_size.y * 0.85, 0.0)
+		pauldron.rotation.z = psx * deg_to_rad(8.0)
+		pauldron.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+		torso_pivot.add_child(pauldron)
+		# Brass trim along the pauldron's outer edge.
+		var trim := MeshInstance3D.new()
+		var tb := BoxMesh.new()
+		tb.size = Vector3(0.06, torso_size.y * 0.40, 0.05)
+		trim.mesh = tb
+		trim.position = Vector3(psx * (torso_size.x * 0.55 + 0.16), torso_size.y * 0.85, torso_size.z * 0.30)
+		trim.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+		torso_pivot.add_child(trim)
+	# Hip skirt plates — angled slabs covering the upper legs/hip.
+	for hip_side: int in 2:
+		var hsx: float = -1.0 if hip_side == 0 else 1.0
+		var hip := MeshInstance3D.new()
+		var hb := BoxMesh.new()
+		hb.size = Vector3(torso_size.x * 0.42, 0.32, 0.10)
+		hip.mesh = hb
+		hip.position = Vector3(hsx * torso_size.x * 0.22, torso_size.y * 0.10, -torso_size.z * 0.5 - 0.02)
+		hip.rotation.z = hsx * deg_to_rad(14.0)
+		hip.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+		torso_pivot.add_child(hip)
+
+	# --- Phosphorus Mortar tube mounted on the BACK, angled steeply
+	# upward. Sits high on the rear chassis so the silhouette reads
+	# 'shoulder-launcher of mortar shells over the head'. Replaces
+	# the previous right-shoulder mount per playtest 2026-05-16
+	# ("mortar attached to his back").
+	var mortar_root := Node3D.new()
+	mortar_root.name = "CremnatorMortar"
+	mortar_root.position = Vector3(0.0, torso_size.y * 1.05, torso_size.z * 0.5 + 0.08)
+	mortar_root.rotation.x = -deg_to_rad(58.0)  # steep upward arc launch
+	torso_pivot.add_child(mortar_root)
+	# Mortar tube.
+	var mortar_len: float = 0.95
+	var mortar_tube := MeshInstance3D.new()
+	var mt_cyl := CylinderMesh.new()
+	mt_cyl.top_radius = 0.14
+	mt_cyl.bottom_radius = 0.16
+	mt_cyl.height = mortar_len
+	mt_cyl.radial_segments = 12
+	mortar_tube.mesh = mt_cyl
+	mortar_tube.rotation.x = PI * 0.5
+	mortar_tube.position = Vector3(0.0, 0.0, -mortar_len * 0.5)
+	mortar_tube.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+	mortar_root.add_child(mortar_tube)
+	# Backplate / mounting block — sells "bolted to the back".
+	var mortar_mount := MeshInstance3D.new()
+	var mm := BoxMesh.new()
+	mm.size = Vector3(0.40, 0.25, 0.20)
+	mortar_mount.mesh = mm
+	mortar_mount.position = Vector3(0.0, 0.05, 0.10)
+	mortar_mount.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	mortar_root.add_child(mortar_mount)
+	# Brass cooling rings around the tube.
+	for ring_i: int in 2:
 		var ring := MeshInstance3D.new()
 		var rt := TorusMesh.new()
-		rt.inner_radius = 0.13
-		rt.outer_radius = 0.18
-		rt.rings = 14
+		rt.inner_radius = 0.16
+		rt.outer_radius = 0.21
+		rt.rings = 12
 		rt.ring_segments = 6
 		ring.mesh = rt
 		ring.rotation.x = PI * 0.5
-		var rz: float = -0.40 - float(ring_i) * 0.40
-		ring.position = Vector3(0.0, 0.0, rz)
-		ring.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
-		lance_root.add_child(ring)
-	# Hot white-orange muzzle bulb at the barrel tip.
-	var muzzle_glow := MeshInstance3D.new()
-	var mg_sph := SphereMesh.new()
-	mg_sph.radius = 0.13
-	mg_sph.height = 0.26
-	muzzle_glow.mesh = mg_sph
-	muzzle_glow.position = Vector3(0.0, 0.0, -lance_len - 0.20)
-	var mg_mat := StandardMaterial3D.new()
-	mg_mat.albedo_color = HEAT_WHITE_HOT
-	mg_mat.emission_enabled = true
-	mg_mat.emission = HEAT_WHITE_HOT
-	mg_mat.emission_energy_multiplier = 3.2
-	mg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	muzzle_glow.set_surface_override_material(0, mg_mat)
-	lance_root.add_child(muzzle_glow)
-	mats.append(mg_mat)
-	# Muzzle marker.
-	var muzzle_mk := Marker3D.new()
-	muzzle_mk.name = "Muzzle"
-	muzzle_mk.position = Vector3(0.0, 0.0, -lance_len - 0.30)
-	lance_root.add_child(muzzle_mk)
-	# --- Brass ceremonial chain drape on the RIGHT shoulder. 6 small
-	# linked sphere pieces hanging in an arc.
+		ring.position = Vector3(0.0, 0.0, -0.30 - float(ring_i) * 0.30)
+		ring.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+		mortar_root.add_child(ring)
+	# Brass muzzle ring at the mortar tube tip.
+	var mortar_ring := MeshInstance3D.new()
+	var mr := TorusMesh.new()
+	mr.inner_radius = 0.16
+	mr.outer_radius = 0.21
+	mr.rings = 12
+	mr.ring_segments = 6
+	mortar_ring.mesh = mr
+	mortar_ring.rotation.x = PI * 0.5
+	mortar_ring.position = Vector3(0.0, 0.0, -mortar_len - 0.05)
+	mortar_ring.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	mortar_root.add_child(mortar_ring)
+
+	# --- Brass ceremonial chain drape on the RIGHT hip — short.
+	# Less of a feature now that the back is busy with the mortar.
 	var chain_root := Node3D.new()
-	chain_root.position = Vector3(torso_size.x * 0.48, torso_size.y * 0.78, 0.0)
+	chain_root.position = Vector3(torso_size.x * 0.50, torso_size.y * 0.40, 0.0)
 	torso_pivot.add_child(chain_root)
-	for link_i: int in 6:
+	for link_i: int in 4:
 		var link := MeshInstance3D.new()
 		var ls := SphereMesh.new()
-		ls.radius = 0.06
-		ls.height = 0.12
+		ls.radius = 0.05
+		ls.height = 0.10
 		link.mesh = ls
-		var t: float = float(link_i) / 5.0
-		var arc_x: float = t * 0.14
-		var arc_y: float = -t * t * 0.65
+		var t: float = float(link_i) / 3.0
+		var arc_x: float = t * 0.06
+		var arc_y: float = -t * t * 0.40
 		link.position = Vector3(arc_x, arc_y, 0.0)
 		link.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
 		chain_root.add_child(link)
+	# Heliarch miner helmet with central forward floodlight — shared
+	# faction-flavour piece (also on Matador). Sells the industrial
+	# work-crew silhouette.
+	_apply_heliarch_miner_helmet(torso_pivot, torso_size, mats)
+
+
+func _apply_inquisitor_tank_base_overlay(torso_pivot: Node3D, torso_size: Vector3, _base_color: Color, mats: Array[StandardMaterial3D]) -> void:
+	## Heliarch medium hover tank. Squat angular hull (extra-low chassis
+	## silhouette via flatter side plates), a centred plasma-cannon turret
+	## with a long forward barrel + emissive plasma bulb at the muzzle,
+	## an auxiliary flamer nozzle on the front-left chest, and twin
+	## brass thruster vents on the rear to sell the "hover" identity.
+	const REACTOR_AMBER: Color = Color(1.0, 0.55, 0.20, 1.0)
+	const PLASMA_BLUE: Color = Color(0.55, 0.75, 1.00, 1.0)
+	const HELIARCH_BRASS: Color = Color(0.55, 0.40, 0.20, 1.0)
+	const SOOTED_IRON: Color = Color(0.18, 0.16, 0.14, 1.0)
+	# --- Low side skirts (sells the hover-tank low silhouette).
+	for skirt_side: int in 2:
+		var ssx: float = -1.0 if skirt_side == 0 else 1.0
+		var skirt := MeshInstance3D.new()
+		var sb := BoxMesh.new()
+		sb.size = Vector3(0.18, torso_size.y * 0.28, torso_size.z * 0.95)
+		skirt.mesh = sb
+		skirt.position = Vector3(ssx * (torso_size.x * 0.55 + 0.05), torso_size.y * 0.20, 0.0)
+		skirt.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+		torso_pivot.add_child(skirt)
+	# --- Plasma turret housing on top centre.
+	var turret_pivot := Node3D.new()
+	turret_pivot.name = "TurretPivot"
+	turret_pivot.position = Vector3(0.0, torso_size.y * 1.05, 0.0)
+	torso_pivot.add_child(turret_pivot)
+	var turret_base := MeshInstance3D.new()
+	var tb := CylinderMesh.new()
+	tb.top_radius = torso_size.x * 0.28
+	tb.bottom_radius = torso_size.x * 0.34
+	tb.height = 0.18
+	tb.radial_segments = 12
+	turret_base.mesh = tb
+	turret_base.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+	turret_pivot.add_child(turret_base)
+	# Cannon mantlet.
+	var mantlet := MeshInstance3D.new()
+	var mb := BoxMesh.new()
+	mb.size = Vector3(0.32, 0.22, 0.32)
+	mantlet.mesh = mb
+	mantlet.position = Vector3(0.0, 0.10, -0.10)
+	mantlet.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+	turret_pivot.add_child(mantlet)
+	# Long plasma barrel.
+	var barrel_len: float = 1.20
+	var barrel := MeshInstance3D.new()
+	var bc := CylinderMesh.new()
+	bc.top_radius = 0.10
+	bc.bottom_radius = 0.13
+	bc.height = barrel_len
+	bc.radial_segments = 14
+	barrel.mesh = bc
+	barrel.rotation.x = PI * 0.5
+	barrel.position = Vector3(0.0, 0.10, -barrel_len * 0.5 - 0.25)
+	barrel.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	turret_pivot.add_child(barrel)
+	# Plasma bulb at muzzle — bright blue emissive.
+	var bulb := MeshInstance3D.new()
+	var bs := SphereMesh.new()
+	bs.radius = 0.13
+	bs.height = 0.26
+	bulb.mesh = bs
+	bulb.position = Vector3(0.0, 0.10, -barrel_len - 0.25)
+	var bulb_mat := StandardMaterial3D.new()
+	bulb_mat.albedo_color = PLASMA_BLUE
+	bulb_mat.emission_enabled = true
+	bulb_mat.emission = PLASMA_BLUE
+	bulb_mat.emission_energy_multiplier = 3.0
+	bulb_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bulb.set_surface_override_material(0, bulb_mat)
+	turret_pivot.add_child(bulb)
+	mats.append(bulb_mat)
+	# Muzzle marker.
+	var muzzle := Marker3D.new()
+	muzzle.name = "Muzzle"
+	muzzle.position = Vector3(0.0, 0.10, -barrel_len - 0.36)
+	turret_pivot.add_child(muzzle)
+	# --- Twin rear thrusters — short cylinders with amber glow.
+	for thr_side: int in 2:
+		var tsx: float = -1.0 if thr_side == 0 else 1.0
+		var thruster := MeshInstance3D.new()
+		var tc := CylinderMesh.new()
+		tc.top_radius = 0.10
+		tc.bottom_radius = 0.13
+		tc.height = 0.22
+		tc.radial_segments = 10
+		thruster.mesh = tc
+		thruster.rotation.x = PI * 0.5
+		thruster.position = Vector3(tsx * torso_size.x * 0.32, torso_size.y * 0.40, torso_size.z * 0.5 + 0.12)
+		thruster.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+		torso_pivot.add_child(thruster)
+		# Inner glow disc.
+		var glow := MeshInstance3D.new()
+		var gd := CylinderMesh.new()
+		gd.top_radius = 0.09
+		gd.bottom_radius = 0.09
+		gd.height = 0.03
+		gd.radial_segments = 10
+		glow.mesh = gd
+		glow.rotation.x = PI * 0.5
+		glow.position = Vector3(tsx * torso_size.x * 0.32, torso_size.y * 0.40, torso_size.z * 0.5 + 0.24)
+		var glow_mat := StandardMaterial3D.new()
+		glow_mat.albedo_color = REACTOR_AMBER
+		glow_mat.emission_enabled = true
+		glow_mat.emission = REACTOR_AMBER
+		glow_mat.emission_energy_multiplier = 2.4
+		glow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		glow.set_surface_override_material(0, glow_mat)
+		torso_pivot.add_child(glow)
+		mats.append(glow_mat)
+
+
+func _apply_conquistador_base_overlay(torso_pivot: Node3D, torso_size: Vector3, _base_color: Color, mats: Array[StandardMaterial3D]) -> void:
+	## Heliarch heavy brawler. Bulky chassis with massive shoulder pauldrons,
+	## a huge two-handed Heat Hammer held diagonally across the body, twin
+	## shoulder-mounted plasma cannons firing forward over the head, and a
+	## chest-furnace exhaust crown. Reads as "armored religious soldier
+	## carrying a giant hammer."
+	const HEAT_WHITE_HOT: Color = Color(1.0, 0.85, 0.55, 1.0)
+	const PLASMA_BLUE: Color = Color(0.55, 0.75, 1.00, 1.0)
+	const HELIARCH_BRASS: Color = Color(0.55, 0.40, 0.20, 1.0)
+	const SOOTED_IRON: Color = Color(0.18, 0.16, 0.14, 1.0)
+	# --- Massive shoulder pauldrons (much bigger than Cremator's).
+	for pauldron_side: int in 2:
+		var psx: float = -1.0 if pauldron_side == 0 else 1.0
+		var pauldron := MeshInstance3D.new()
+		var pb := BoxMesh.new()
+		pb.size = Vector3(0.42, torso_size.y * 0.55, torso_size.z * 0.95)
+		pauldron.mesh = pb
+		pauldron.position = Vector3(psx * (torso_size.x * 0.55 + 0.10), torso_size.y * 0.90, 0.0)
+		pauldron.rotation.z = psx * deg_to_rad(12.0)
+		pauldron.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+		torso_pivot.add_child(pauldron)
+		# Brass rim along the front edge.
+		var rim := MeshInstance3D.new()
+		var rb := BoxMesh.new()
+		rb.size = Vector3(0.46, 0.08, 0.30)
+		rim.mesh = rb
+		rim.position = Vector3(psx * (torso_size.x * 0.55 + 0.10), torso_size.y * 0.90 + torso_size.y * 0.28, -torso_size.z * 0.40)
+		rim.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+		torso_pivot.add_child(rim)
+	# --- Two-handed Heat Hammer — the unit's primary identity. Built
+	# OVERSIZED so it dominates the silhouette and the unit reads as
+	# a melee bruiser. Haft is longer + thicker, head is a massive
+	# anvil-like block with a wide hot face. Carried diagonally across
+	# the chest from lower-left up to over the right shoulder
+	# (warrior's "ready-to-swing" pose, not parade-rest).
+	var hammer_root := Node3D.new()
+	hammer_root.name = "ConquistadorHammer"
+	hammer_root.position = Vector3(-torso_size.x * 0.18, torso_size.y * 0.50, -torso_size.z * 0.5 - 0.20)
+	hammer_root.rotation.z = deg_to_rad(48.0)
+	# Tag as melee pivot. The Conquistador swings the hammer overhead
+	# (rotation.z arc) rather than thrusting forward, so the swing
+	# tween uses the Z axis for this unit's pivot.
+	hammer_root.add_to_group("melee_pivots")
+	hammer_root.set_meta("melee_rest_rot", hammer_root.rotation)
+	hammer_root.set_meta("melee_swing_axis", "z")
+	torso_pivot.add_child(hammer_root)
+	# Haft — longer + thicker so the hammer feels weighty.
+	var haft_len: float = 2.00
+	var haft := MeshInstance3D.new()
+	var hc := CylinderMesh.new()
+	hc.top_radius = 0.11
+	hc.bottom_radius = 0.11
+	hc.height = haft_len
+	hc.radial_segments = 12
+	haft.mesh = hc
+	haft.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	hammer_root.add_child(haft)
+	# Brass grip wrap near the lower hand.
+	var grip_wrap := MeshInstance3D.new()
+	var gw := CylinderMesh.new()
+	gw.top_radius = 0.14
+	gw.bottom_radius = 0.14
+	gw.height = 0.32
+	gw.radial_segments = 10
+	grip_wrap.mesh = gw
+	grip_wrap.position = Vector3(0.0, -haft_len * 0.40, 0.0)
+	grip_wrap.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+	hammer_root.add_child(grip_wrap)
+	# Hammer head — massive anvil block, much bigger than before.
+	var head := MeshInstance3D.new()
+	var head_box := BoxMesh.new()
+	head_box.size = Vector3(0.90, 0.65, 0.52)
+	head.mesh = head_box
+	head.position = Vector3(0.0, haft_len * 0.5 + 0.25, 0.0)
+	head.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+	hammer_root.add_child(head)
+	# Brass collar where head meets haft.
+	var collar := MeshInstance3D.new()
+	var col_box := BoxMesh.new()
+	col_box.size = Vector3(0.40, 0.18, 0.40)
+	collar.mesh = col_box
+	collar.position = Vector3(0.0, haft_len * 0.5 + 0.05, 0.0)
+	collar.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	hammer_root.add_child(collar)
+	# Hot face on the hammer head — large emissive plate (the striking
+	# face). Bright orange-white so it reads as superheated.
+	var hot_face := MeshInstance3D.new()
+	var hf := BoxMesh.new()
+	hf.size = Vector3(0.84, 0.58, 0.06)
+	hot_face.mesh = hf
+	hot_face.position = Vector3(0.0, haft_len * 0.5 + 0.25, -0.28)
+	var hot_mat := StandardMaterial3D.new()
+	hot_mat.albedo_color = HEAT_WHITE_HOT
+	hot_mat.emission_enabled = true
+	hot_mat.emission = Color(1.0, 0.55, 0.18, 1.0)
+	hot_mat.emission_energy_multiplier = 3.0
+	hot_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	hot_face.set_surface_override_material(0, hot_mat)
+	hammer_root.add_child(hot_face)
+	mats.append(hot_mat)
+	# Muzzle marker at the hammer head — melee swing VFX spawns here.
+	var muzzle := Marker3D.new()
+	muzzle.name = "Muzzle"
+	muzzle.position = Vector3(0.0, haft_len * 0.5 + 0.55, 0.0)
+	hammer_root.add_child(muzzle)
+	# --- Twin shoulder plasma cannons — small and tucked, since
+	# they're purely the secondary (passive auto-fire support while
+	# closing). Reduced from a prominent feature to discreet greebles
+	# so they don't compete with the hammer for silhouette dominance.
+	for cannon_side: int in 2:
+		var csx: float = -1.0 if cannon_side == 0 else 1.0
+		var cannon := MeshInstance3D.new()
+		var cc := CylinderMesh.new()
+		cc.top_radius = 0.045
+		cc.bottom_radius = 0.055
+		cc.height = 0.40
+		cc.radial_segments = 8
+		cannon.mesh = cc
+		cannon.rotation.x = PI * 0.5
+		cannon.position = Vector3(csx * torso_size.x * 0.55, torso_size.y * 1.05, -torso_size.z * 0.20)
+		cannon.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+		torso_pivot.add_child(cannon)
+		# Smaller blue bulb tip.
+		var c_bulb := MeshInstance3D.new()
+		var cb := SphereMesh.new()
+		cb.radius = 0.05
+		cb.height = 0.10
+		c_bulb.mesh = cb
+		c_bulb.position = Vector3(csx * torso_size.x * 0.55, torso_size.y * 1.05, -torso_size.z * 0.20 - 0.28)
+		var cb_mat := StandardMaterial3D.new()
+		cb_mat.albedo_color = PLASMA_BLUE
+		cb_mat.emission_enabled = true
+		cb_mat.emission = PLASMA_BLUE
+		cb_mat.emission_energy_multiplier = 2.0
+		cb_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		c_bulb.set_surface_override_material(0, cb_mat)
+		torso_pivot.add_child(c_bulb)
+		mats.append(cb_mat)
 
 
 func _apply_matador_base_overlay(torso_pivot: Node3D, torso_size: Vector3, _base_color: Color, mats: Array[StandardMaterial3D]) -> void:
@@ -3844,61 +4505,128 @@ func _apply_matador_base_overlay(torso_pivot: Node3D, torso_size: Vector3, _base
 	core_light.omni_range = torso_size.x * 1.8
 	core_light.position = Vector3(0.0, torso_size.y * 0.50, torso_size.z * 0.5 + 0.10)
 	torso_pivot.add_child(core_light)
-	# --- Front-mounted incendiary cluster launcher. Mounted on the
-	# upper chest, slightly proud of the torso. Three forward-facing
-	# canister tubes in a row so the silhouette reads as a launcher
-	# rather than a single cannon.
-	var launcher_root := Node3D.new()
-	launcher_root.name = "MatadorLauncher"
-	launcher_root.position = Vector3(0.0, torso_size.y * 0.62, -torso_size.z * 0.5 - 0.12)
-	torso_pivot.add_child(launcher_root)
-	# Backing housing.
-	var l_housing := MeshInstance3D.new()
-	var lh := BoxMesh.new()
-	lh.size = Vector3(torso_size.x * 0.55, torso_size.y * 0.28, 0.16)
-	l_housing.mesh = lh
-	l_housing.position = Vector3(0.0, 0.0, 0.10)
-	l_housing.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
-	launcher_root.add_child(l_housing)
-	# Three forward canister tubes.
-	for tube_i: int in 3:
-		var tx: float = (float(tube_i) - 1.0) * torso_size.x * 0.16
-		var canister := MeshInstance3D.new()
-		var ct := CylinderMesh.new()
-		ct.top_radius = 0.07
-		ct.bottom_radius = 0.07
-		ct.height = 0.36
-		ct.radial_segments = 10
-		canister.mesh = ct
-		canister.rotation.x = PI * 0.5
-		canister.position = Vector3(tx, 0.0, -0.18)
-		canister.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
-		launcher_root.add_child(canister)
-		# Bore — dark hollow at the tube mouth.
-		var bore := MeshInstance3D.new()
-		var bc := CylinderMesh.new()
-		bc.top_radius = 0.04
-		bc.bottom_radius = 0.04
-		bc.height = 0.05
-		bc.radial_segments = 8
-		bore.mesh = bc
-		bore.rotation.x = PI * 0.5
-		bore.position = Vector3(tx, 0.0, -0.36)
-		var bore_mat := StandardMaterial3D.new()
-		bore_mat.albedo_color = Color(0.04, 0.04, 0.05, 1.0)
-		bore_mat.emission_enabled = true
-		bore_mat.emission = Color(0.04, 0.04, 0.05, 1.0)
-		bore_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		bore.set_surface_override_material(0, bore_mat)
-		launcher_root.add_child(bore)
-		mats.append(bore_mat)
-	# Muzzle marker — centred at the launcher front so tracers fire
-	# from where the canisters mouth.
-	var muzzle := Marker3D.new()
-	muzzle.name = "Muzzle"
-	muzzle.position = Vector3(0.0, 0.0, -0.46)
-	launcher_root.add_child(muzzle)
-	# --- Brass embossed sigil on the chest front (above the launcher),
+	# --- Dual Flame Daggers (one each side) — twin blades held in a
+	# low fighting stance, fanned slightly OUTWARD from the chassis
+	# and tilted down so they read as "held in two hands at the hip"
+	# rather than straight-ahead T-pose extensions. Each dagger: brass
+	# hilt at the body, sooted-iron blade angled forward/down, hot
+	# white-orange glowing tip.
+	# Orientation fix (2026-05-16): previous `rotation.y = sx * 12°`
+	# fanned the daggers INWARD (right blade pointed left, left blade
+	# pointed right — Y+ rotation is counterclockwise from above).
+	# Negated to fan outward + bumped to 22° for a clearer matador-
+	# stance silhouette + 15° downward tilt for the held-at-hip pose.
+	const HEAT_WHITE_HOT: Color = Color(1.0, 0.85, 0.55, 1.0)
+	for side: int in 2:
+		var sx: float = -1.0 if side == 0 else 1.0
+		var dagger_root := Node3D.new()
+		dagger_root.name = "MatadorDagger_%d" % side
+		# Held at hip height (lower than before so the silhouette
+		# reads as "blades close to the body, not stuck out at chest").
+		dagger_root.position = Vector3(sx * torso_size.x * 0.45, torso_size.y * 0.38, -torso_size.z * 0.5 - 0.05)
+		# Outward fan (negated previous sign) + downward blade tilt.
+		dagger_root.rotation.y = -sx * deg_to_rad(22.0)
+		dagger_root.rotation.x = deg_to_rad(18.0)
+		# Tag as melee pivot so play_melee_anim's swing tween finds it.
+		# stores the rest rotation in meta so the tween can return to
+		# it after the swing.
+		dagger_root.add_to_group("melee_pivots")
+		dagger_root.set_meta("melee_rest_rot", dagger_root.rotation)
+		dagger_root.set_meta("melee_swing_axis", "x")
+		torso_pivot.add_child(dagger_root)
+		# Brass hilt cube nearest the body.
+		var hilt := MeshInstance3D.new()
+		var hilt_box := BoxMesh.new()
+		hilt_box.size = Vector3(0.10, 0.12, 0.18)
+		hilt.mesh = hilt_box
+		hilt.position = Vector3(0.0, 0.0, -0.04)
+		hilt.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+		dagger_root.add_child(hilt)
+		# Crossguard.
+		var guard := MeshInstance3D.new()
+		var guard_box := BoxMesh.new()
+		guard_box.size = Vector3(0.18, 0.04, 0.06)
+		guard.mesh = guard_box
+		guard.position = Vector3(0.0, 0.0, -0.18)
+		guard.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+		dagger_root.add_child(guard)
+		# Blade — flat tapered slab. Sooted near the hilt, hot at the tip.
+		var blade_len: float = 0.55
+		var blade := MeshInstance3D.new()
+		var blade_box := BoxMesh.new()
+		blade_box.size = Vector3(0.05, 0.10, blade_len)
+		blade.mesh = blade_box
+		blade.position = Vector3(0.0, 0.0, -0.18 - blade_len * 0.5)
+		blade.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+		dagger_root.add_child(blade)
+		# Hot edge highlight on the blade — narrow emissive strip
+		# along the cutting edge so the dagger looks heated.
+		var edge := MeshInstance3D.new()
+		var edge_box := BoxMesh.new()
+		edge_box.size = Vector3(0.012, 0.10, blade_len * 0.85)
+		edge.mesh = edge_box
+		var edge_x: float = sx * 0.022
+		edge.position = Vector3(edge_x, 0.0, -0.18 - blade_len * 0.5)
+		var edge_mat := StandardMaterial3D.new()
+		edge_mat.albedo_color = Color(1.0, 0.55, 0.18, 1.0)
+		edge_mat.emission_enabled = true
+		edge_mat.emission = Color(1.0, 0.55, 0.18, 1.0)
+		edge_mat.emission_energy_multiplier = 1.6
+		edge_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		edge.set_surface_override_material(0, edge_mat)
+		dagger_root.add_child(edge)
+		mats.append(edge_mat)
+		# Tip-orb removed per playtest 2026-05-18 — the bright sphere at
+		# the dagger point read as a flashlight bulb stuck on the blade.
+		# The hot-edge emissive strip alone tells the "heated blade"
+		# story; the orb was over-reading. Kept the variable comment as
+		# a marker so future passes know what was here.
+		# Muzzle marker on the dominant (right) dagger so melee swings
+		# spawn their flame VFX from the blade tip rather than the
+		# unit centre. Only one Muzzle marker — Unit.gd's lookup uses
+		# the first match.
+		if side == 1:
+			var dagger_muzzle := Marker3D.new()
+			dagger_muzzle.name = "Muzzle"
+			dagger_muzzle.position = Vector3(0.0, 0.0, -0.18 - blade_len - 0.10)
+			dagger_root.add_child(dagger_muzzle)
+	# --- Small forward floodlight on the chest centre — Heliarch lamp
+	# motif applied to the light unit. Sized down so it doesn't compete
+	# with the dagger silhouette below or the back reactor core above.
+	const HELIARCH_BRASS_MAT: Color = Color(0.55, 0.40, 0.20, 1.0)
+	const FLOOD_WARM_MAT: Color = Color(1.0, 0.78, 0.42, 1.0)
+	var flood_root_mat := Node3D.new()
+	flood_root_mat.position = Vector3(0.0, torso_size.y * 0.62, -torso_size.z * 0.5 - 0.04)
+	torso_pivot.add_child(flood_root_mat)
+	var flood_housing_mat := MeshInstance3D.new()
+	var fhouse_mat := CylinderMesh.new()
+	fhouse_mat.top_radius = 0.10
+	fhouse_mat.bottom_radius = 0.085
+	fhouse_mat.height = 0.10
+	fhouse_mat.radial_segments = 10
+	flood_housing_mat.mesh = fhouse_mat
+	flood_housing_mat.rotation.x = PI * 0.5
+	flood_housing_mat.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS_MAT))
+	flood_root_mat.add_child(flood_housing_mat)
+	var flood_bulb_mat := MeshInstance3D.new()
+	var fbulb_mat := CylinderMesh.new()
+	fbulb_mat.top_radius = 0.07
+	fbulb_mat.bottom_radius = 0.07
+	fbulb_mat.height = 0.03
+	fbulb_mat.radial_segments = 10
+	flood_bulb_mat.mesh = fbulb_mat
+	flood_bulb_mat.rotation.x = PI * 0.5
+	flood_bulb_mat.position = Vector3(0.0, 0.0, -0.06)
+	var fb_mat_mat := StandardMaterial3D.new()
+	fb_mat_mat.albedo_color = FLOOD_WARM_MAT
+	fb_mat_mat.emission_enabled = true
+	fb_mat_mat.emission = FLOOD_WARM_MAT
+	fb_mat_mat.emission_energy_multiplier = 3.0
+	fb_mat_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	flood_bulb_mat.set_surface_override_material(0, fb_mat_mat)
+	flood_root_mat.add_child(flood_bulb_mat)
+	mats.append(fb_mat_mat)
+	# Brass embossed sigil on the chest front (above the launcher),
 	# rectangular tablet with a hot-amber emissive emblem.
 	var sigil_back := MeshInstance3D.new()
 	var sb_box := BoxMesh.new()
@@ -3922,6 +4650,104 @@ func _apply_matador_base_overlay(torso_pivot: Node3D, torso_size: Vector3, _base
 	sigil.set_surface_override_material(0, sigil_mat)
 	torso_pivot.add_child(sigil)
 	mats.append(sigil_mat)
+	# Heliarch miner helmet — wide brim + central floodlight, replaces
+	# the generic head silhouette. Sells "industrial reactor priest in
+	# work safety gear" rather than the previous bare-cockpit look.
+	_apply_heliarch_miner_helmet(torso_pivot, torso_size, mats)
+
+
+func _apply_heliarch_miner_helmet(torso_pivot: Node3D, torso_size: Vector3, mats: Array[StandardMaterial3D]) -> void:
+	## Adds a wide-brimmed mining helmet with a large central forward
+	## floodlight on top of the unit's torso. Shared between Matador and
+	## Cremator (and any future Heliarch infantry / mech) so the faction
+	## reads as "industrial work crew". Per playtest 2026-05-18: head
+	## should "look more like miner equipment and have a large central
+	## lamp designwise". Anchored to torso_pivot at head height.
+	const HELIARCH_BRASS_MH: Color = Color(0.55, 0.40, 0.20, 1.0)
+	const SOOTED_MH: Color = Color(0.22, 0.18, 0.14, 1.0)
+	const FLOOD_WARM_MH: Color = Color(1.0, 0.78, 0.42, 1.0)
+	# Head approximate Y — sits just above the torso top.
+	var head_y: float = torso_size.y + 0.18
+	# Helmet dome — short flat-topped cylinder (the hard hat). Per
+	# playtest 2026-05-19 the previous build was too large for the
+	# Matador chassis; sizes scaled to ~70% across the helmet.
+	var dome := MeshInstance3D.new()
+	var dc := CylinderMesh.new()
+	dc.top_radius = 0.15
+	dc.bottom_radius = 0.20
+	dc.height = 0.14
+	dc.radial_segments = 12
+	dome.mesh = dc
+	dome.position = Vector3(0.0, head_y + dc.height * 0.5, 0.0)
+	dome.set_surface_override_material(0, _make_metal_mat(SOOTED_MH))
+	torso_pivot.add_child(dome)
+	# Wide brim — flat disc around the base of the dome.
+	var brim := MeshInstance3D.new()
+	var brimc := CylinderMesh.new()
+	brimc.top_radius = 0.26
+	brimc.bottom_radius = 0.26
+	brimc.height = 0.03
+	brimc.radial_segments = 14
+	brim.mesh = brimc
+	brim.position = Vector3(0.0, head_y + 0.02, 0.0)
+	brim.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS_MH))
+	torso_pivot.add_child(brim)
+	# Forward brim extension — flat slab sticking out the front.
+	var visor := MeshInstance3D.new()
+	var visorb := BoxMesh.new()
+	visorb.size = Vector3(0.36, 0.04, 0.14)
+	visor.mesh = visorb
+	visor.position = Vector3(0.0, head_y + 0.04, -0.22)
+	visor.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS_MH))
+	torso_pivot.add_child(visor)
+	# --- Central forward floodlight on the helmet dome — the signature.
+	# Brass housing + warm bulb + OmniLight so the lamp casts on the
+	# ground in front of the unit. Also scaled down with the rest.
+	var lamp_housing := MeshInstance3D.new()
+	var lhc := CylinderMesh.new()
+	lhc.top_radius = 0.09
+	lhc.bottom_radius = 0.08
+	lhc.height = 0.12
+	lhc.radial_segments = 12
+	lamp_housing.mesh = lhc
+	lamp_housing.rotation.x = PI * 0.5
+	lamp_housing.position = Vector3(0.0, head_y + dc.height * 0.55, -0.13)
+	lamp_housing.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS_MH))
+	torso_pivot.add_child(lamp_housing)
+	# Bright lamp bulb.
+	var lamp_bulb := MeshInstance3D.new()
+	var lbc := CylinderMesh.new()
+	lbc.top_radius = 0.07
+	lbc.bottom_radius = 0.07
+	lbc.height = 0.03
+	lbc.radial_segments = 12
+	lamp_bulb.mesh = lbc
+	lamp_bulb.rotation.x = PI * 0.5
+	lamp_bulb.position = Vector3(0.0, head_y + dc.height * 0.55, -0.20)
+	var lb_mat := StandardMaterial3D.new()
+	lb_mat.albedo_color = FLOOD_WARM_MH
+	lb_mat.emission_enabled = true
+	lb_mat.emission = FLOOD_WARM_MH
+	lb_mat.emission_energy_multiplier = 3.6
+	lb_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	lamp_bulb.set_surface_override_material(0, lb_mat)
+	torso_pivot.add_child(lamp_bulb)
+	mats.append(lb_mat)
+	# Small amber-cast OmniLight at the lamp position.
+	var lamp_light := OmniLight3D.new()
+	lamp_light.light_color = FLOOD_WARM_MH
+	lamp_light.light_energy = 0.55
+	lamp_light.omni_range = 3.5
+	lamp_light.position = Vector3(0.0, head_y + dc.height * 0.55, -0.35)
+	torso_pivot.add_child(lamp_light)
+	# Brass chinstrap — small short bar under the helmet.
+	var strap := MeshInstance3D.new()
+	var stb := BoxMesh.new()
+	stb.size = Vector3(0.36, 0.04, 0.06)
+	strap.mesh = stb
+	strap.position = Vector3(0.0, head_y - 0.04, 0.0)
+	strap.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS_MH))
+	torso_pivot.add_child(strap)
 
 
 func _apply_stoker_base_overlay(torso_pivot: Node3D, torso_size: Vector3, head_size: Vector3, _base_color: Color, mats: Array[StandardMaterial3D]) -> void:
@@ -4112,36 +4938,46 @@ func _apply_rook_base_overlay(member: Node3D, torso_pivot: Node3D, torso_size: V
 	# the barrel.
 	var cannon_pivot: Node3D = torso_pivot.get_node_or_null("CannonPivot_0") as Node3D
 	if cannon_pivot:
-		# Drum body — a thin disc sitting below the barrel line.
+		# Smaller drum body (was 0.20 radius — playtest 2026-05-15: too
+		# beefy compared to the gun itself). Now a tighter ~0.14 disc that
+		# reads as a clip-on magazine rather than a bucket.
 		var drum := MeshInstance3D.new()
 		var drum_cyl := CylinderMesh.new()
-		drum_cyl.top_radius = 0.20
-		drum_cyl.bottom_radius = 0.20
-		drum_cyl.height = 0.08
-		drum_cyl.radial_segments = 18
+		drum_cyl.top_radius = 0.14
+		drum_cyl.bottom_radius = 0.14
+		drum_cyl.height = 0.06
+		drum_cyl.radial_segments = 14
 		drum.mesh = drum_cyl
 		# Drum is horizontal disc oriented like a pancake under the gun.
-		drum.position = Vector3(0.0, -0.18, -0.10)
+		drum.position = Vector3(0.0, -0.16, -0.10)
 		var drum_mat := _make_metal_mat(WEATHERED_BRASS)
 		drum.set_surface_override_material(0, drum_mat)
 		cannon_pivot.add_child(drum)
 		mats.append(drum_mat)
-		# Semicircular rim — half-torus on the forward half of the drum
-		# so the magazine silhouette has a curved "ammo drum" lip from
-		# the side. Built by rotating a torus + masking the rear half
-		# is cumbersome; a low-segment-count cylinder around the front
-		# arc reads correctly enough at gameplay zoom.
+		# Semicircular rim — half-torus on the forward half of the drum.
 		var rim := MeshInstance3D.new()
 		var rim_torus := TorusMesh.new()
-		rim_torus.inner_radius = 0.18
-		rim_torus.outer_radius = 0.24
-		rim_torus.rings = 12
+		rim_torus.inner_radius = 0.13
+		rim_torus.outer_radius = 0.17
+		rim_torus.rings = 10
 		rim_torus.ring_segments = 4
 		rim.mesh = rim_torus
-		# Lay the torus flat; mount it just above the drum disc.
-		rim.position = Vector3(0.0, -0.13, -0.10)
+		rim.position = Vector3(0.0, -0.12, -0.10)
 		rim.set_surface_override_material(0, _make_metal_mat(WEATHERED_BRASS.darkened(0.10)))
 		cannon_pivot.add_child(rim)
+		# Brass accent collar on the gun barrel itself — small ring near
+		# the muzzle so the gun reads as having a brass cooling sleeve.
+		var collar := MeshInstance3D.new()
+		var collar_cyl := CylinderMesh.new()
+		collar_cyl.top_radius = 0.07
+		collar_cyl.bottom_radius = 0.07
+		collar_cyl.height = 0.05
+		collar_cyl.radial_segments = 12
+		collar.mesh = collar_cyl
+		collar.rotate_object_local(Vector3.RIGHT, PI * 0.5)
+		collar.position = Vector3(0.0, 0.0, -0.30)
+		collar.set_surface_override_material(0, _make_metal_mat(WEATHERED_BRASS))
+		cannon_pivot.add_child(collar)
 		# Two short brass strap mounts holding the drum to the gun
 		# undercarriage — sells "this is a clip-on magazine".
 		for strap_side: int in 2:
@@ -4197,6 +5033,23 @@ func _apply_ashigaru_base_overlay(torso_pivot: Node3D, torso_size: Vector3, base
 		# with the new katana hilt.
 		for child: Node in cannon_pivot.get_children():
 			child.queue_free()
+		# Lower the pivot toward the hip + angle the blade slightly down
+		# and across the body — sells "katana held in two hands at the
+		# waist in a ready stance" instead of the previous T-pose
+		# straight-forward extension (playtest 2026-05-16). Recoil still
+		# animates on top of this transform via play_melee_anim, so the
+		# lunge thrust reads from the new low ready position.
+		# Drop the pivot to roughly the chassis waistline (0.40 of torso
+		# height, was at shoulder ~1.0). Move it slightly forward of the
+		# torso front so the blade clears the chest plate.
+		cannon_pivot.position.y = torso_size.y * 0.40
+		cannon_pivot.position.z = -torso_size.z * 0.5 - 0.06
+		# Tilt the pivot: rotate down 22° (blade tip angles toward the
+		# ground in front), and yaw 10° toward the body centre line for
+		# the cross-body "held in two hands" silhouette.
+		cannon_pivot.rotation.x = deg_to_rad(22.0)
+		var yaw_sign: float = -1.0 if cannon_pivot.position.x < 0.0 else 1.0
+		cannon_pivot.rotation.y = -yaw_sign * deg_to_rad(10.0)
 		# Build the katana along the pivot's -Z axis (forward).
 		# Order from pivot outward: grip → tsuba (handguard) → blade → tip.
 		# --- Grip (handle): short cylinder bound in dark wrap.
@@ -5348,6 +6201,35 @@ func _maybe_override_shape_for_unit(base: Dictionary) -> Dictionary:
 		# Wider footprint demands a touch more spacing in formation.
 		ovh["formation_spacing"] = (ovh["formation_spacing"] as float) * 1.06
 		return ovh
+	if stats.unit_name == "Inquisitor Tank":
+		# Heliarch medium hover-tank. Chassis is wider than the medium
+		# baseline (twin hover skirts at ±1.05 → ~2.80u total width)
+		# so the default medium spacing packs the squad into an
+		# overlapping cluster. Bumped to 3.0 in an earlier pass, then
+		# tightened to 2.5 per playtest 2026-05-19 ("formation can be
+		# a little bit tighter"). The new single-disc hover-base
+		# replaced the wider twin-skirts, so the chassis footprint is
+		# smaller now and 2.5u between centres keeps the squad
+		# visibly separated without leaving them feeling spread out.
+		var ovit: Dictionary = base.duplicate()
+		ovit["formation_spacing"] = 2.5
+		ovit["cannon_kind"] = "none"
+		return ovit
+	if stats.unit_name == "Wächter" or stats.unit_name == "Wachter":
+		# Inheritor medium tank-vehicle. Slow armored chassis; the
+		# default medium spacing leaves the 3-member row touching.
+		# 2.8u between centres gives a visible gap without making the
+		# squad feel split.
+		var ovwc: Dictionary = base.duplicate()
+		ovwc["formation_spacing"] = 2.8
+		return ovwc
+	if stats.unit_name == "Stahlyokai" or stats.unit_name.findn("Stahlyokai") >= 0:
+		# Inheritor adaptive medium biped. Squad of 2 with a wider
+		# adaptive chassis — bump spacing so the pair reads as two
+		# separate frames rather than one wide silhouette.
+		var ovsy: Dictionary = base.duplicate()
+		ovsy["formation_spacing"] = 2.4
+		return ovsy
 	if stats.unit_name == "Cremator":
 		# Heliarch medium assault. No shoulder cannons — overlay mounts
 		# a long forward-projected Heat Lance and a bigger chest furnace
@@ -5894,6 +6776,1735 @@ func _build_breacher_tank_member(index: int, offset: Vector3, team_color: Color)
 		"bob_amount": 0.0,
 		"idle_phase": randf_range(0.0, TAU),
 		"idle_speed": 0.0,
+	}
+
+
+func _build_inquisitor_hover_tank_member(index: int, offset: Vector3, _team_color: Color) -> Dictionary:
+	## Heliarch Inquisitor Tank — hover chassis. Per playtest 2026-05-19
+	## the previous build read as a traditional tracked tank (twin side
+	## skirts + rectangular hull + sloped bow) AND sat too low to the
+	## ground (the bottom of the skirts scraped terrain mid-bob). This
+	## rebuild:
+	##   - replaces the twin skirts with a single CENTRED hover-disc
+	##     (saucer-shaped antigrav base, glowing amber ring around the
+	##     bottom rim);
+	##   - swaps the rectangular bow / hull for a chamfered + tapered
+	##     hexagonal hull that reads as "armored hover platform" rather
+	##     than "boxy tank";
+	##   - lifts the whole assembly HOVER_BASE_LIFT_Y above ground so
+	##     the disc bottom sits clearly above the terrain even at the
+	##     bottom of the hover bob;
+	## Turret + barrel + floodlight + thrusters carry over so the unit
+	## still has the readable Inquisitor silhouette from above.
+	const REACTOR_AMBER: Color = Color(1.0, 0.55, 0.20, 1.0)
+	const PLASMA_BLUE: Color = Color(0.55, 0.75, 1.00, 1.0)
+	const FLOOD_WARM: Color = Color(1.0, 0.78, 0.42, 1.0)
+	const HELIARCH_BRASS: Color = Color(0.55, 0.40, 0.20, 1.0)
+	const SOOTED_IRON: Color = Color(0.18, 0.16, 0.14, 1.0)
+	const DARK_HULL: Color = Color(0.22, 0.18, 0.14, 1.0)
+	## Ground clearance for the hover base. Adds to every Y position
+	## below so the bottom of the disc sits HOVER_BASE_LIFT_Y above
+	## the ground at rest. The hover bob amplitude (±0.10 from
+	## _per_frame_bookkeeping) is well under this lift, so the unit
+	## never visually scrapes terrain.
+	const HOVER_BASE_LIFT_Y: float = 0.55
+
+	var member := Node3D.new()
+	member.name = "Member_%d" % index
+	member.position = offset
+	add_child(member)
+
+	var mats: Array[StandardMaterial3D] = []
+
+	# --- Single central hover disc — replaces the twin side skirts.
+	# Reads as a saucer-shaped antigrav base, not as rectangular treads.
+	var disc_radius: float = 1.30
+	var disc_height: float = 0.32
+	var disc_y: float = HOVER_BASE_LIFT_Y + disc_height * 0.5
+	var disc := MeshInstance3D.new()
+	var disc_mesh := CylinderMesh.new()
+	disc_mesh.top_radius = disc_radius * 0.88  # slightly smaller top → chamfered
+	disc_mesh.bottom_radius = disc_radius
+	disc_mesh.height = disc_height
+	disc_mesh.radial_segments = 18
+	disc.mesh = disc_mesh
+	disc.position = Vector3(0.0, disc_y, 0.0)
+	disc.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+	member.add_child(disc)
+	# Amber underglow ring around the disc's bottom rim — the "antigrav
+	# vent" read. Drawn as a torus that sits flush with the disc base.
+	var underglow := MeshInstance3D.new()
+	var ug_mesh := TorusMesh.new()
+	ug_mesh.inner_radius = disc_radius * 0.78
+	ug_mesh.outer_radius = disc_radius * 1.00
+	ug_mesh.rings = 24
+	ug_mesh.ring_segments = 6
+	underglow.mesh = ug_mesh
+	underglow.position = Vector3(0.0, HOVER_BASE_LIFT_Y + 0.04, 0.0)
+	var ug_mat := StandardMaterial3D.new()
+	ug_mat.albedo_color = REACTOR_AMBER
+	ug_mat.emission_enabled = true
+	ug_mat.emission = REACTOR_AMBER
+	ug_mat.emission_energy_multiplier = 2.8
+	ug_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	underglow.set_surface_override_material(0, ug_mat)
+	member.add_child(underglow)
+	mats.append(ug_mat)
+	# Six radial vent slits around the disc's outer wall — equally spaced
+	# brass-rimmed amber slits selling "the antigrav vents are running hot".
+	for slit_i: int in 6:
+		var ang: float = float(slit_i) / 6.0 * TAU
+		var slit := MeshInstance3D.new()
+		var slb := BoxMesh.new()
+		slb.size = Vector3(0.08, disc_height * 0.55, 0.18)
+		slit.mesh = slb
+		slit.position = Vector3(cos(ang) * disc_radius * 0.94, disc_y, sin(ang) * disc_radius * 0.94)
+		slit.rotation.y = ang
+		var slm := StandardMaterial3D.new()
+		slm.albedo_color = REACTOR_AMBER
+		slm.emission_enabled = true
+		slm.emission = REACTOR_AMBER
+		slm.emission_energy_multiplier = 1.6
+		slm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		slit.set_surface_override_material(0, slm)
+		member.add_child(slit)
+		mats.append(slm)
+	# Soft amber omni-light beneath the disc — the antigrav field bleeds
+	# warm light onto the ground when hovering close to terrain.
+	var hover_light := OmniLight3D.new()
+	hover_light.light_color = REACTOR_AMBER
+	hover_light.light_energy = 0.8
+	hover_light.omni_range = 3.0
+	hover_light.position = Vector3(0.0, HOVER_BASE_LIFT_Y - 0.20, 0.0)
+	member.add_child(hover_light)
+
+	# --- Main hull — chamfered hexagonal platform that sits on top
+	# of the disc. Reads as a faceted armored platform rather than a
+	# boxy tank casemate. The "hexagonal" effect comes from a slimmer
+	# top cylinder sitting on a wider bottom cylinder.
+	var hull_w: float = 1.60   # was 1.95 — slimmer for the hover read
+	var hull_len: float = 2.55  # was 3.00 — shorter
+	var hull_h: float = 0.42
+	var hull_y: float = HOVER_BASE_LIFT_Y + disc_height + 0.20
+	var hull := MeshInstance3D.new()
+	var hull_box := BoxMesh.new()
+	hull_box.size = Vector3(hull_w, hull_h, hull_len)
+	hull.mesh = hull_box
+	hull.position = Vector3(0.0, hull_y, 0.0)
+	hull.set_surface_override_material(0, _make_metal_mat(DARK_HULL))
+	member.add_child(hull)
+	# Sloped flanks — angled plates on the LEFT + RIGHT (not the bow).
+	# The bow stays open / curved; the flanks lean inward for the
+	# chamfered hexagon silhouette.
+	for flank_side: int in 2:
+		var fsx: float = -1.0 if flank_side == 0 else 1.0
+		var flank := MeshInstance3D.new()
+		var fb := BoxMesh.new()
+		fb.size = Vector3(0.22, hull_h * 0.90, hull_len * 0.95)
+		flank.mesh = fb
+		flank.position = Vector3(fsx * (hull_w * 0.5 + 0.04), hull_y, 0.0)
+		flank.rotation.z = fsx * deg_to_rad(-12.0)
+		flank.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+		member.add_child(flank)
+	# Bow chamfer — short angled plate on the FRONT corners only
+	# (replaces the old square bow). Sells the hexagonal tapered nose.
+	for bow_side: int in 2:
+		var bsx: float = -1.0 if bow_side == 0 else 1.0
+		var bcham := MeshInstance3D.new()
+		var bcb := BoxMesh.new()
+		bcb.size = Vector3(0.45, hull_h * 0.85, 0.55)
+		bcham.mesh = bcb
+		bcham.position = Vector3(bsx * (hull_w * 0.36), hull_y + 0.02, -hull_len * 0.5 + 0.05)
+		bcham.rotation.y = bsx * deg_to_rad(-22.0)
+		bcham.set_surface_override_material(0, _make_metal_mat(DARK_HULL))
+		member.add_child(bcham)
+	# Brass rivet rows along the chamfered flank, fewer + smaller than
+	# the old build (the rivet density was reading as boxy plating).
+	for rivet_side: int in 2:
+		var rsx: float = -1.0 if rivet_side == 0 else 1.0
+		for rivet_i: int in 3:
+			var rivet := MeshInstance3D.new()
+			var rs := SphereMesh.new()
+			rs.radius = 0.045
+			rs.height = 0.09
+			rivet.mesh = rs
+			var rz: float = -hull_len * 0.30 + float(rivet_i) * hull_len * 0.30
+			rivet.position = Vector3(rsx * hull_w * 0.48, hull_y + 0.10, rz)
+			rivet.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+			member.add_child(rivet)
+
+	# --- Forward floodlight — the lamp aesthetic. Mounted on the front
+	# face of the chamfered hull. Bright warm beam-bulb that catches the
+	# eye in fog.
+	var flood_root := Node3D.new()
+	flood_root.position = Vector3(0.0, hull_y + 0.25, -hull_len * 0.5 - 0.06)
+	member.add_child(flood_root)
+	var flood_housing := MeshInstance3D.new()
+	var fh := CylinderMesh.new()
+	fh.top_radius = 0.18
+	fh.bottom_radius = 0.16
+	fh.height = 0.22
+	fh.radial_segments = 12
+	flood_housing.mesh = fh
+	flood_housing.rotation.x = PI * 0.5
+	flood_housing.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	flood_root.add_child(flood_housing)
+	# Inner amber beam-bulb.
+	var flood_bulb := MeshInstance3D.new()
+	var fbulb := CylinderMesh.new()
+	fbulb.top_radius = 0.14
+	fbulb.bottom_radius = 0.14
+	fbulb.height = 0.03
+	fbulb.radial_segments = 12
+	flood_bulb.mesh = fbulb
+	flood_bulb.rotation.x = PI * 0.5
+	flood_bulb.position = Vector3(0.0, 0.0, -0.12)
+	var fb_mat := StandardMaterial3D.new()
+	fb_mat.albedo_color = FLOOD_WARM
+	fb_mat.emission_enabled = true
+	fb_mat.emission = FLOOD_WARM
+	fb_mat.emission_energy_multiplier = 3.4
+	fb_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	flood_bulb.set_surface_override_material(0, fb_mat)
+	flood_root.add_child(flood_bulb)
+	mats.append(fb_mat)
+	# Small warm OmniLight so the beam actually paints nearby geometry.
+	var flood_light := OmniLight3D.new()
+	flood_light.light_color = FLOOD_WARM
+	flood_light.light_energy = 0.65
+	flood_light.omni_range = 5.0
+	flood_light.position = Vector3(0.0, 0.0, -0.20)
+	flood_root.add_child(flood_light)
+
+	# --- Plasma turret — centred on the hull, rotates to aim.
+	var turret_pivot := Node3D.new()
+	turret_pivot.name = "TurretPivot"
+	turret_pivot.position = Vector3(0.0, hull_y + hull_h * 0.5 + 0.02, 0.10)
+	member.add_child(turret_pivot)
+	# Turret ring (low cylinder).
+	var ring := MeshInstance3D.new()
+	var rc := CylinderMesh.new()
+	rc.top_radius = 0.52
+	rc.bottom_radius = 0.58
+	rc.height = 0.16
+	rc.radial_segments = 14
+	ring.mesh = rc
+	ring.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+	turret_pivot.add_child(ring)
+	# Turret bulb (the dome above the ring).
+	var dome := MeshInstance3D.new()
+	var db := BoxMesh.new()
+	db.size = Vector3(0.78, 0.36, 0.85)
+	dome.mesh = db
+	dome.position = Vector3(0.0, 0.26, -0.08)
+	dome.set_surface_override_material(0, _make_metal_mat(DARK_HULL))
+	turret_pivot.add_child(dome)
+	# Brass crest on top of the turret — religious-cult flair.
+	var crest := MeshInstance3D.new()
+	var crb := BoxMesh.new()
+	crb.size = Vector3(0.42, 0.06, 0.22)
+	crest.mesh = crb
+	crest.position = Vector3(0.0, 0.48, -0.10)
+	crest.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	turret_pivot.add_child(crest)
+	# Cannon mantlet at the turret front.
+	var cannon_pivot := Node3D.new()
+	cannon_pivot.name = "CannonPivot_0"
+	cannon_pivot.position = Vector3(0.0, 0.22, -0.46)
+	turret_pivot.add_child(cannon_pivot)
+	var mantlet := MeshInstance3D.new()
+	var mb := BoxMesh.new()
+	mb.size = Vector3(0.36, 0.30, 0.30)
+	mantlet.mesh = mb
+	mantlet.position = Vector3(0.0, 0.0, -0.04)
+	mantlet.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+	cannon_pivot.add_child(mantlet)
+	# Plasma barrel — thicker + shorter than the previous "flashlight",
+	# with cooling fins along the length.
+	var barrel_len: float = 1.05
+	var barrel := MeshInstance3D.new()
+	var bc := CylinderMesh.new()
+	bc.top_radius = 0.14
+	bc.bottom_radius = 0.17
+	bc.height = barrel_len
+	bc.radial_segments = 14
+	barrel.mesh = bc
+	barrel.rotation.x = PI * 0.5
+	barrel.position = Vector3(0.0, 0.0, -barrel_len * 0.5 - 0.16)
+	barrel.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	cannon_pivot.add_child(barrel)
+	# Three brass cooling rings spaced along the barrel.
+	for ring_i: int in 3:
+		var cring := MeshInstance3D.new()
+		var crt := TorusMesh.new()
+		crt.inner_radius = 0.17
+		crt.outer_radius = 0.23
+		crt.rings = 14
+		crt.ring_segments = 6
+		cring.mesh = crt
+		cring.rotation.x = PI * 0.5
+		cring.position = Vector3(0.0, 0.0, -0.30 - float(ring_i) * 0.28)
+		cring.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+		cannon_pivot.add_child(cring)
+	# Plasma bulb at muzzle.
+	var bulb := MeshInstance3D.new()
+	var bs := SphereMesh.new()
+	bs.radius = 0.17
+	bs.height = 0.34
+	bulb.mesh = bs
+	bulb.position = Vector3(0.0, 0.0, -barrel_len - 0.20)
+	var bulb_mat := StandardMaterial3D.new()
+	bulb_mat.albedo_color = PLASMA_BLUE
+	bulb_mat.emission_enabled = true
+	bulb_mat.emission = PLASMA_BLUE
+	bulb_mat.emission_energy_multiplier = 3.2
+	bulb_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bulb.set_surface_override_material(0, bulb_mat)
+	cannon_pivot.add_child(bulb)
+	mats.append(bulb_mat)
+	var muzzle_mk := Marker3D.new()
+	muzzle_mk.name = "Muzzle"
+	muzzle_mk.position = Vector3(0.0, 0.0, -barrel_len - 0.34)
+	cannon_pivot.add_child(muzzle_mk)
+
+	# --- Rear thrusters — visible exhaust nozzles on the back deck.
+	for thr_side: int in 2:
+		var tsx: float = -1.0 if thr_side == 0 else 1.0
+		var thruster := MeshInstance3D.new()
+		var tc := CylinderMesh.new()
+		tc.top_radius = 0.13
+		tc.bottom_radius = 0.16
+		tc.height = 0.30
+		tc.radial_segments = 10
+		thruster.mesh = tc
+		thruster.rotation.x = PI * 0.5
+		thruster.position = Vector3(tsx * hull_w * 0.32, hull_y + hull_h * 0.5 + 0.05, hull_len * 0.5 + 0.10)
+		thruster.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+		member.add_child(thruster)
+		var glow := MeshInstance3D.new()
+		var gd := CylinderMesh.new()
+		gd.top_radius = 0.11
+		gd.bottom_radius = 0.11
+		gd.height = 0.03
+		gd.radial_segments = 10
+		glow.mesh = gd
+		glow.rotation.x = PI * 0.5
+		glow.position = Vector3(tsx * hull_w * 0.32, hull_y + hull_h * 0.5 + 0.05, hull_len * 0.5 + 0.25)
+		var glow_mat := StandardMaterial3D.new()
+		glow_mat.albedo_color = REACTOR_AMBER
+		glow_mat.emission_enabled = true
+		glow_mat.emission = REACTOR_AMBER
+		glow_mat.emission_energy_multiplier = 2.8
+		glow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		glow.set_surface_override_material(0, glow_mat)
+		member.add_child(glow)
+		mats.append(glow_mat)
+
+	# Bookkeeping mirrors the other tank builders.
+	var cannons: Array = [cannon_pivot]
+	var rest_z_arr: Array = []
+	var recoil_arr: Array = []
+	for c: Node3D in cannons:
+		rest_z_arr.append(c.position.z)
+		recoil_arr.append(0.0)
+	return {
+		"root": member,
+		"legs": [] as Array,
+		"leg_phases": [] as Array,
+		"shoulders": [] as Array,
+		"cannons": cannons,
+		"cannon_rest_z": rest_z_arr,
+		"cannon_muzzle_z": [muzzle_mk.position.z] as Array,
+		"torso": null,
+		"head": null,
+		"mats": mats,
+		"recoil": recoil_arr,
+		"stride_phase": 0.0,
+		"stride_speed": 0.0,
+		"stride_swing": 0.0,
+		"bob_amount": 0.0,
+		"idle_phase": randf_range(0.0, TAU),
+		"idle_speed": 0.0,
+	}
+
+
+func _build_conquistador_centaur_member(index: int, offset: Vector3, _team_color: Color) -> Dictionary:
+	## Heliarch Conquistador — centaur silhouette. Wide armored lower
+	## chassis on four short stout legs (the "horse" body), surmounted
+	## by a humanoid torso wielding a massive two-handed Heat Hammer.
+	## Shoulder plasma cannons are deliberately small (passive secondary
+	## while closing). Forward floodlight on the chest sells the
+	## Heliarch lamp aesthetic on a heavy chassis.
+	const REACTOR_AMBER: Color = Color(1.0, 0.55, 0.20, 1.0)
+	const HEAT_WHITE_HOT: Color = Color(1.0, 0.85, 0.55, 1.0)
+	const FLOOD_WARM: Color = Color(1.0, 0.78, 0.42, 1.0)
+	const PLASMA_BLUE: Color = Color(0.55, 0.75, 1.00, 1.0)
+	const HELIARCH_BRASS: Color = Color(0.55, 0.40, 0.20, 1.0)
+	const SOOTED_IRON: Color = Color(0.18, 0.16, 0.14, 1.0)
+	const DARK_HULL: Color = Color(0.22, 0.18, 0.14, 1.0)
+
+	var member := Node3D.new()
+	member.name = "Member_%d" % index
+	member.position = offset
+	add_child(member)
+
+	var mats: Array[StandardMaterial3D] = []
+
+	# --- Quadruped legs — four short stout pillars at the corners of
+	# the chassis. Static (no per-leg gait animation); the heavy weight
+	# + small lateral footprint sells "stomping forward".
+	var chassis_w: float = 1.65
+	var chassis_h: float = 0.70
+	var chassis_len: float = 2.20
+	var chassis_y: float = 0.85
+	const LEG_HEIGHT: float = 0.85
+	const LEG_THICK: float = 0.26
+	for leg_xi: int in 2:
+		for leg_zi: int in 2:
+			var leg_x: float = -chassis_w * 0.40 if leg_xi == 0 else chassis_w * 0.40
+			var leg_z: float = -chassis_len * 0.35 if leg_zi == 0 else chassis_len * 0.35
+			var leg := MeshInstance3D.new()
+			var lb := BoxMesh.new()
+			lb.size = Vector3(LEG_THICK, LEG_HEIGHT, LEG_THICK)
+			leg.mesh = lb
+			leg.position = Vector3(leg_x, LEG_HEIGHT * 0.5, leg_z)
+			leg.set_surface_override_material(0, _make_metal_mat(DARK_HULL))
+			member.add_child(leg)
+			# Brass knee/joint cap at the top of each leg.
+			var knee := MeshInstance3D.new()
+			var kb := SphereMesh.new()
+			kb.radius = LEG_THICK * 0.65
+			kb.height = LEG_THICK * 1.3
+			knee.mesh = kb
+			knee.position = Vector3(leg_x, LEG_HEIGHT, leg_z)
+			knee.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+			member.add_child(knee)
+			# Foot pad — wide low cylinder.
+			var foot := MeshInstance3D.new()
+			var fc := CylinderMesh.new()
+			fc.top_radius = LEG_THICK * 0.80
+			fc.bottom_radius = LEG_THICK * 0.95
+			fc.height = 0.10
+			fc.radial_segments = 8
+			foot.mesh = fc
+			foot.position = Vector3(leg_x, 0.05, leg_z)
+			foot.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+			member.add_child(foot)
+
+	# --- Lower chassis (the "horse" body) — wide armored slab spanning
+	# the four legs.
+	var chassis := MeshInstance3D.new()
+	var cb := BoxMesh.new()
+	cb.size = Vector3(chassis_w, chassis_h, chassis_len)
+	chassis.mesh = cb
+	chassis.position = Vector3(0.0, chassis_y, 0.0)
+	chassis.set_surface_override_material(0, _make_metal_mat(DARK_HULL))
+	member.add_child(chassis)
+	# Side armor plates — angled slabs hanging off the chassis flanks.
+	for side: int in 2:
+		var ssx: float = -1.0 if side == 0 else 1.0
+		var flank := MeshInstance3D.new()
+		var fb := BoxMesh.new()
+		fb.size = Vector3(0.12, chassis_h * 0.80, chassis_len * 0.95)
+		flank.mesh = fb
+		flank.position = Vector3(ssx * (chassis_w * 0.5 + 0.04), chassis_y, 0.0)
+		flank.rotation.z = ssx * deg_to_rad(8.0)
+		flank.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+		member.add_child(flank)
+		# Brass rivet row along each flank.
+		for rivet_i: int in 4:
+			var rivet := MeshInstance3D.new()
+			var rs := SphereMesh.new()
+			rs.radius = 0.05
+			rs.height = 0.10
+			rivet.mesh = rs
+			var rz: float = -chassis_len * 0.30 + float(rivet_i) * chassis_len * 0.20
+			rivet.position = Vector3(ssx * (chassis_w * 0.5 + 0.10), chassis_y, rz)
+			rivet.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+			member.add_child(rivet)
+	# Front chest plate — sloped armor across the front of the chassis.
+	var bow := MeshInstance3D.new()
+	var bowb := BoxMesh.new()
+	bowb.size = Vector3(chassis_w * 0.95, 0.50, 0.70)
+	bow.mesh = bowb
+	bow.position = Vector3(0.0, chassis_y + 0.05, -chassis_len * 0.5 + 0.25)
+	bow.rotation.x = deg_to_rad(-22.0)
+	bow.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+	member.add_child(bow)
+
+	# --- Forward floodlight on the chest plate (Heliarch lamp aesthetic).
+	var flood_root := Node3D.new()
+	flood_root.position = Vector3(0.0, chassis_y + 0.35, -chassis_len * 0.5 - 0.10)
+	member.add_child(flood_root)
+	var flood_housing := MeshInstance3D.new()
+	var fhouse := CylinderMesh.new()
+	fhouse.top_radius = 0.16
+	fhouse.bottom_radius = 0.14
+	fhouse.height = 0.18
+	fhouse.radial_segments = 12
+	flood_housing.mesh = fhouse
+	flood_housing.rotation.x = PI * 0.5
+	flood_housing.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	flood_root.add_child(flood_housing)
+	var flood_bulb := MeshInstance3D.new()
+	var fbulb := CylinderMesh.new()
+	fbulb.top_radius = 0.12
+	fbulb.bottom_radius = 0.12
+	fbulb.height = 0.03
+	fbulb.radial_segments = 12
+	flood_bulb.mesh = fbulb
+	flood_bulb.rotation.x = PI * 0.5
+	flood_bulb.position = Vector3(0.0, 0.0, -0.10)
+	var fb_mat := StandardMaterial3D.new()
+	fb_mat.albedo_color = FLOOD_WARM
+	fb_mat.emission_enabled = true
+	fb_mat.emission = FLOOD_WARM
+	fb_mat.emission_energy_multiplier = 3.4
+	fb_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	flood_bulb.set_surface_override_material(0, fb_mat)
+	flood_root.add_child(flood_bulb)
+	mats.append(fb_mat)
+	var flood_light := OmniLight3D.new()
+	flood_light.light_color = FLOOD_WARM
+	flood_light.light_energy = 0.55
+	flood_light.omni_range = 4.5
+	flood_light.position = Vector3(0.0, 0.0, -0.18)
+	flood_root.add_child(flood_light)
+
+	# --- Humanoid upper torso — mounted CENTRE-TOP of the chassis,
+	# rising out of it like a centaur rider. Smaller than the chassis
+	# so the proportions read centaur, not "humanoid mech on a wagon".
+	var torso_pivot := Node3D.new()
+	torso_pivot.name = "TorsoPivot"
+	torso_pivot.position = Vector3(0.0, chassis_y + chassis_h * 0.5 + 0.02, 0.20)
+	member.add_child(torso_pivot)
+	var torso_size: Vector3 = Vector3(1.05, 1.10, 0.85)
+	var torso := MeshInstance3D.new()
+	var torso_box := BoxMesh.new()
+	torso_box.size = torso_size
+	torso.mesh = torso_box
+	torso.position.y = torso_size.y * 0.5
+	torso.set_surface_override_material(0, _make_metal_mat(DARK_HULL))
+	torso_pivot.add_child(torso)
+	# Chest furnace plate — emissive amber slot framed by brass grille bars.
+	var furnace := MeshInstance3D.new()
+	var fnb := BoxMesh.new()
+	fnb.size = Vector3(torso_size.x * 0.60, torso_size.y * 0.45, 0.04)
+	furnace.mesh = fnb
+	furnace.position = Vector3(0.0, torso_size.y * 0.55, -torso_size.z * 0.5 - 0.04)
+	var furn_mat := StandardMaterial3D.new()
+	furn_mat.albedo_color = REACTOR_AMBER
+	furn_mat.emission_enabled = true
+	furn_mat.emission = REACTOR_AMBER
+	furn_mat.emission_energy_multiplier = 2.4
+	furn_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	furnace.set_surface_override_material(0, furn_mat)
+	torso_pivot.add_child(furnace)
+	mats.append(furn_mat)
+	for grille_i: int in 4:
+		var bar := MeshInstance3D.new()
+		var grb := BoxMesh.new()
+		grb.size = Vector3(torso_size.x * 0.62, 0.04, 0.06)
+		bar.mesh = grb
+		var ry: float = torso_size.y * 0.36 + float(grille_i) * torso_size.y * 0.13
+		bar.position = Vector3(0.0, ry, -torso_size.z * 0.5 - 0.07)
+		bar.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+		torso_pivot.add_child(bar)
+	# Head/cowl — a hooded slab on top.
+	var head := MeshInstance3D.new()
+	var hb := BoxMesh.new()
+	hb.size = Vector3(0.42, 0.36, 0.42)
+	head.mesh = hb
+	head.position = Vector3(0.0, torso_size.y + 0.18, -0.04)
+	head.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+	torso_pivot.add_child(head)
+	# Brass crest on the head.
+	var crest := MeshInstance3D.new()
+	var crb := BoxMesh.new()
+	crb.size = Vector3(0.16, 0.10, 0.42)
+	crest.mesh = crb
+	crest.position = Vector3(0.0, torso_size.y + 0.40, -0.04)
+	crest.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	torso_pivot.add_child(crest)
+
+	# Pauldrons — massive shoulder slabs flanking the torso.
+	for pauldron_side: int in 2:
+		var psx: float = -1.0 if pauldron_side == 0 else 1.0
+		var pauldron := MeshInstance3D.new()
+		var pb := BoxMesh.new()
+		pb.size = Vector3(0.40, torso_size.y * 0.45, torso_size.z * 0.85)
+		pauldron.mesh = pb
+		pauldron.position = Vector3(psx * (torso_size.x * 0.5 + 0.10), torso_size.y * 0.82, 0.0)
+		pauldron.rotation.z = psx * deg_to_rad(10.0)
+		pauldron.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+		torso_pivot.add_child(pauldron)
+		# Brass rim on the pauldron.
+		var rim := MeshInstance3D.new()
+		var rrb := BoxMesh.new()
+		rrb.size = Vector3(0.46, 0.06, 0.30)
+		rim.mesh = rrb
+		rim.position = Vector3(psx * (torso_size.x * 0.5 + 0.10), torso_size.y * 0.82 + torso_size.y * 0.24, -torso_size.z * 0.30)
+		rim.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+		torso_pivot.add_child(rim)
+
+	# --- Heat Hammer — held diagonally across the body via cannon_pivot
+	# so play_melee_anim's lunge animates the whole weapon. The hammer
+	# is the silhouette focal point.
+	var cannon_pivot := Node3D.new()
+	cannon_pivot.name = "CannonPivot_0"
+	cannon_pivot.position = Vector3(-torso_size.x * 0.20, torso_size.y * 0.55, -torso_size.z * 0.5 - 0.20)
+	cannon_pivot.rotation.z = deg_to_rad(48.0)
+	torso_pivot.add_child(cannon_pivot)
+	# Haft.
+	var haft_len: float = 1.80
+	var haft := MeshInstance3D.new()
+	var hc := CylinderMesh.new()
+	hc.top_radius = 0.10
+	hc.bottom_radius = 0.10
+	hc.height = haft_len
+	hc.radial_segments = 12
+	haft.mesh = hc
+	haft.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	cannon_pivot.add_child(haft)
+	# Grip wrap near the lower hand.
+	var grip_wrap := MeshInstance3D.new()
+	var gw := CylinderMesh.new()
+	gw.top_radius = 0.13
+	gw.bottom_radius = 0.13
+	gw.height = 0.28
+	gw.radial_segments = 10
+	grip_wrap.mesh = gw
+	grip_wrap.position = Vector3(0.0, -haft_len * 0.42, 0.0)
+	grip_wrap.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+	cannon_pivot.add_child(grip_wrap)
+	# Hammer head — anvil block.
+	var hhead := MeshInstance3D.new()
+	var hhb := BoxMesh.new()
+	hhb.size = Vector3(0.80, 0.58, 0.46)
+	hhead.mesh = hhb
+	hhead.position = Vector3(0.0, haft_len * 0.5 + 0.22, 0.0)
+	hhead.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+	cannon_pivot.add_child(hhead)
+	# Brass collar.
+	var collar := MeshInstance3D.new()
+	var col_box := BoxMesh.new()
+	col_box.size = Vector3(0.36, 0.16, 0.36)
+	collar.mesh = col_box
+	collar.position = Vector3(0.0, haft_len * 0.5 + 0.04, 0.0)
+	collar.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	cannon_pivot.add_child(collar)
+	# Hot striking face.
+	var hot_face := MeshInstance3D.new()
+	var hfb := BoxMesh.new()
+	hfb.size = Vector3(0.74, 0.52, 0.05)
+	hot_face.mesh = hfb
+	hot_face.position = Vector3(0.0, haft_len * 0.5 + 0.22, -0.26)
+	var hot_mat := StandardMaterial3D.new()
+	hot_mat.albedo_color = HEAT_WHITE_HOT
+	hot_mat.emission_enabled = true
+	hot_mat.emission = Color(1.0, 0.55, 0.18, 1.0)
+	hot_mat.emission_energy_multiplier = 3.0
+	hot_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	hot_face.set_surface_override_material(0, hot_mat)
+	cannon_pivot.add_child(hot_face)
+	mats.append(hot_mat)
+	var muzzle_mk := Marker3D.new()
+	muzzle_mk.name = "Muzzle"
+	muzzle_mk.position = Vector3(0.0, haft_len * 0.5 + 0.50, 0.0)
+	cannon_pivot.add_child(muzzle_mk)
+
+	# Small shoulder plasma cannons — passive secondary, discreet.
+	for cannon_side: int in 2:
+		var csx: float = -1.0 if cannon_side == 0 else 1.0
+		var cannon := MeshInstance3D.new()
+		var ccyl := CylinderMesh.new()
+		ccyl.top_radius = 0.045
+		ccyl.bottom_radius = 0.055
+		ccyl.height = 0.38
+		ccyl.radial_segments = 8
+		cannon.mesh = ccyl
+		cannon.rotation.x = PI * 0.5
+		cannon.position = Vector3(csx * (torso_size.x * 0.5 + 0.12), torso_size.y * 0.95, -torso_size.z * 0.20)
+		cannon.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+		torso_pivot.add_child(cannon)
+		var c_bulb := MeshInstance3D.new()
+		var cbsph := SphereMesh.new()
+		cbsph.radius = 0.05
+		cbsph.height = 0.10
+		c_bulb.mesh = cbsph
+		c_bulb.position = Vector3(csx * (torso_size.x * 0.5 + 0.12), torso_size.y * 0.95, -torso_size.z * 0.20 - 0.26)
+		var cb_mat := StandardMaterial3D.new()
+		cb_mat.albedo_color = PLASMA_BLUE
+		cb_mat.emission_enabled = true
+		cb_mat.emission = PLASMA_BLUE
+		cb_mat.emission_energy_multiplier = 2.0
+		cb_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		c_bulb.set_surface_override_material(0, cb_mat)
+		torso_pivot.add_child(c_bulb)
+		mats.append(cb_mat)
+
+	var cannons: Array = [cannon_pivot]
+	var rest_z_arr: Array = []
+	var recoil_arr: Array = []
+	for c: Node3D in cannons:
+		rest_z_arr.append(c.position.z)
+		recoil_arr.append(0.0)
+	return {
+		"root": member,
+		"legs": [] as Array,
+		"leg_phases": [] as Array,
+		"shoulders": [] as Array,
+		"cannons": cannons,
+		"cannon_rest_z": rest_z_arr,
+		"cannon_muzzle_z": [muzzle_mk.position.z] as Array,
+		"torso": torso,
+		"head": head,
+		"mats": mats,
+		"recoil": recoil_arr,
+		"stride_phase": 0.0,
+		"stride_speed": 0.0,
+		"stride_swing": 0.0,
+		"bob_amount": 0.0,
+		"idle_phase": randf_range(0.0, TAU),
+		"idle_speed": 0.0,
+	}
+
+
+func _sol_invictus_emissive(c: Color, energy: float) -> StandardMaterial3D:
+	## Local helper for the Sol Invictus build — there's no generic
+	## emissive-material helper on Unit, and copy-pasting the 6-line
+	## StandardMaterial setup at every glow surface was making the
+	## builder hard to read.
+	var m := StandardMaterial3D.new()
+	m.albedo_color = c
+	m.emission_enabled = true
+	m.emission = c
+	m.emission_energy_multiplier = energy
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	return m
+
+
+func _build_sol_invictus_member(index: int, offset: Vector3, _team_color: Color) -> Dictionary:
+	## Heliarch apex — Sol Invictus, the walking sun. Triple-scale
+	## humanoid silhouette with a head-mounted Solar Lance beam emitter
+	## + arm-mounted plasma turret pods + crown of solar spires + an
+	## exposed central reactor core glowing through chest grilles.
+	## Detail density is deliberately heavy because the chassis is
+	## ~12u tall — empty spaces at that size read as a blocky cube
+	## instead of a holy war engine.
+	const REACTOR_AMBER: Color = Color(1.0, 0.55, 0.20, 1.0)
+	const HEAT_WHITE_HOT: Color = Color(1.0, 0.88, 0.55, 1.0)
+	const PLASMA_BLUE: Color = Color(0.55, 0.75, 1.00, 1.0)
+	const HELIARCH_BRASS: Color = Color(0.65, 0.45, 0.18, 1.0)
+	const DARK_BRASS: Color = Color(0.35, 0.24, 0.10, 1.0)
+	const SOOTED_IRON: Color = Color(0.16, 0.14, 0.12, 1.0)
+	const DARK_HULL: Color = Color(0.22, 0.18, 0.14, 1.0)
+
+	var member := Node3D.new()
+	member.name = "Member_%d" % index
+	member.position = offset
+	add_child(member)
+
+	var mats: Array[StandardMaterial3D] = []
+
+	# --- Two huge biped legs wrapped in hip pivots so _apply_walk_bob
+	# can swing them on the X axis. The unit is ~12u tall; each leg
+	# is ~4.5u from hip to foot. Hip-pivot Node3D sits at the hip
+	# joint (Y = LEG_HEIGHT), child meshes are positioned RELATIVE
+	# to it (negative local Y descending). Rotation around X hinges
+	# the entire limb forward / back.
+	const LEG_THICK: float = 1.05
+	const LEG_HEIGHT: float = 4.50
+	const FOOT_W: float = 1.50
+	var leg_roots: Array[Node3D] = []
+	for leg_i: int in 2:
+		var lsx: float = -1.10 if leg_i == 0 else 1.10
+		var hip_pivot := Node3D.new()
+		hip_pivot.name = "SolInvictusHip_%d" % leg_i
+		hip_pivot.position = Vector3(lsx, LEG_HEIGHT, 0.0)
+		member.add_child(hip_pivot)
+		leg_roots.append(hip_pivot)
+		# Upper thigh — descends from the hip pivot (negative local Y).
+		var thigh := MeshInstance3D.new()
+		var thmesh := CylinderMesh.new()
+		thmesh.top_radius = LEG_THICK * 0.55
+		thmesh.bottom_radius = LEG_THICK * 0.70
+		thmesh.height = LEG_HEIGHT * 0.55
+		thmesh.radial_segments = 10
+		thigh.mesh = thmesh
+		thigh.position = Vector3(0.0, -LEG_HEIGHT * 0.28, 0.0)
+		thigh.set_surface_override_material(0, _make_metal_mat(DARK_HULL))
+		hip_pivot.add_child(thigh)
+		# Knee disc — brass plate where upper + lower leg meet.
+		var knee := MeshInstance3D.new()
+		var kn := SphereMesh.new()
+		kn.radius = LEG_THICK * 0.85
+		kn.height = LEG_THICK * 1.20
+		knee.mesh = kn
+		knee.position = Vector3(0.0, -LEG_HEIGHT * 0.55, 0.10)
+		knee.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+		hip_pivot.add_child(knee)
+		# Lower shin — narrower at the ankle.
+		var shin := MeshInstance3D.new()
+		var shmesh := CylinderMesh.new()
+		shmesh.top_radius = LEG_THICK * 0.50
+		shmesh.bottom_radius = LEG_THICK * 0.38
+		shmesh.height = LEG_HEIGHT * 0.42
+		shmesh.radial_segments = 10
+		shin.mesh = shmesh
+		shin.position = Vector3(0.0, -LEG_HEIGHT * 0.78, 0.05)
+		shin.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+		hip_pivot.add_child(shin)
+		# Foot — broad armored slab at the bottom of the leg.
+		var foot := MeshInstance3D.new()
+		var fb := BoxMesh.new()
+		fb.size = Vector3(FOOT_W, 0.35, FOOT_W * 1.10)
+		foot.mesh = fb
+		foot.position = Vector3(0.0, -LEG_HEIGHT + 0.18, 0.20)
+		foot.set_surface_override_material(0, _make_metal_mat(DARK_HULL))
+		hip_pivot.add_child(foot)
+		# Amber vent line along the inside of each shin.
+		var vent := MeshInstance3D.new()
+		var vb := BoxMesh.new()
+		vb.size = Vector3(0.12, LEG_HEIGHT * 0.32, 0.18)
+		vent.mesh = vb
+		vent.position = Vector3(-lsx * 0.30, -LEG_HEIGHT * 0.78, 0.55)
+		vent.set_surface_override_material(0, _sol_invictus_emissive(REACTOR_AMBER, 2.2))
+		hip_pivot.add_child(vent)
+
+	# --- Lower hip block — wide armored band linking the two legs.
+	var hip_y: float = LEG_HEIGHT * 0.92
+	var hip := MeshInstance3D.new()
+	var hipb := BoxMesh.new()
+	hipb.size = Vector3(3.30, 1.20, 2.40)
+	hip.mesh = hipb
+	hip.position = Vector3(0.0, hip_y, 0.0)
+	hip.set_surface_override_material(0, _make_metal_mat(DARK_HULL))
+	member.add_child(hip)
+	# Brass cinch around the hip.
+	for cinch_i: int in 3:
+		var cinch := MeshInstance3D.new()
+		var cib := BoxMesh.new()
+		cib.size = Vector3(3.42, 0.16, 0.32)
+		cinch.mesh = cib
+		cinch.position = Vector3(0.0, hip_y - 0.40 + float(cinch_i) * 0.40, -1.05)
+		cinch.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+		member.add_child(cinch)
+
+	# --- Main torso. Massive humanoid chest 4.8u wide, with a recessed
+	# reactor cavity in the middle that glows amber.
+	var torso_y: float = hip_y + 2.10
+	var torso := MeshInstance3D.new()
+	var tb := BoxMesh.new()
+	tb.size = Vector3(4.80, 3.50, 3.00)
+	torso.mesh = tb
+	torso.position = Vector3(0.0, torso_y, 0.0)
+	torso.set_surface_override_material(0, _make_metal_mat(DARK_HULL))
+	member.add_child(torso)
+	# --- Layered armor plates on top of the torso block (per user
+	# 2026-05-19: "main body has too few parts atm, is basically just
+	# a few large blocks"). Adds three angled armor slabs across the
+	# front, a brass collar where torso meets neck, two side hip
+	# pauldrons hanging below the shoulders, and a row of brass
+	# rivets along the chest seam.
+	# Front armor slabs — three tilted-forward plates stacked vertically
+	# so the chest reads as layered scale armor rather than a flat box.
+	for plate_i: int in 3:
+		var plate := MeshInstance3D.new()
+		var pbm := BoxMesh.new()
+		pbm.size = Vector3(3.40 - float(plate_i) * 0.30, 0.55, 0.14)
+		plate.mesh = pbm
+		var py: float = torso_y + 0.95 - float(plate_i) * 0.85
+		plate.position = Vector3(0.0, py, -1.50)
+		plate.rotation.x = deg_to_rad(-14.0)
+		plate.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+		member.add_child(plate)
+	# Brass collar at the top of the torso, just below where the neck
+	# meets the head.
+	var torso_collar := MeshInstance3D.new()
+	var tcb := BoxMesh.new()
+	tcb.size = Vector3(4.90, 0.22, 3.10)
+	torso_collar.mesh = tcb
+	torso_collar.position = Vector3(0.0, torso_y + 1.65, 0.0)
+	torso_collar.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	member.add_child(torso_collar)
+	# Hip pauldron pair — sloped armor slabs hanging off each lower
+	# torso flank. Sells "the chassis has skirt armor over the hip".
+	for hp_side: int in 2:
+		var hpsx: float = -1.0 if hp_side == 0 else 1.0
+		var hip_pauld := MeshInstance3D.new()
+		var hpb := BoxMesh.new()
+		hpb.size = Vector3(0.90, 1.40, 1.85)
+		hip_pauld.mesh = hpb
+		hip_pauld.position = Vector3(hpsx * 2.20, torso_y - 1.30, 0.0)
+		hip_pauld.rotation.z = hpsx * deg_to_rad(8.0)
+		hip_pauld.set_surface_override_material(0, _make_metal_mat(DARK_HULL))
+		member.add_child(hip_pauld)
+	# Brass rivet row across the chest seam — six rivets along the
+	# centre band, breaking up the flat plate.
+	for rivet_i: int in 6:
+		var rivet := MeshInstance3D.new()
+		var rs := SphereMesh.new()
+		rs.radius = 0.10
+		rs.height = 0.20
+		rivet.mesh = rs
+		var rx: float = -1.65 + float(rivet_i) * 0.66
+		rivet.position = Vector3(rx, torso_y + 0.40, -1.55)
+		rivet.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+		member.add_child(rivet)
+	# Vertical brass pipework running from the torso top down to the
+	# hip block — one pipe on each side, breaks up the otherwise-flat
+	# back of the torso.
+	for pipe_side: int in 2:
+		var psx: float = -1.0 if pipe_side == 0 else 1.0
+		var pipe := MeshInstance3D.new()
+		var pmm := CylinderMesh.new()
+		pmm.top_radius = 0.16
+		pmm.bottom_radius = 0.20
+		pmm.height = 3.20
+		pmm.radial_segments = 10
+		pipe.mesh = pmm
+		pipe.position = Vector3(psx * 1.95, torso_y - 0.20, 1.30)
+		pipe.set_surface_override_material(0, _make_metal_mat(DARK_BRASS))
+		member.add_child(pipe)
+	# Reactor cavity — a recessed amber sphere mounted in the chest
+	# centre. The "exposed reactor core" the lore promises.
+	var reactor_cavity := MeshInstance3D.new()
+	var rc := BoxMesh.new()
+	rc.size = Vector3(2.20, 2.20, 0.40)
+	reactor_cavity.mesh = rc
+	reactor_cavity.position = Vector3(0.0, torso_y, -1.45)
+	reactor_cavity.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+	member.add_child(reactor_cavity)
+	var reactor_core := MeshInstance3D.new()
+	var rsph := SphereMesh.new()
+	rsph.radius = 0.85
+	rsph.height = 1.70
+	rsph.radial_segments = 16
+	rsph.rings = 12
+	reactor_core.mesh = rsph
+	reactor_core.position = Vector3(0.0, torso_y, -1.55)
+	var reactor_mat := _sol_invictus_emissive(REACTOR_AMBER, 4.5)
+	reactor_core.set_surface_override_material(0, reactor_mat)
+	member.add_child(reactor_core)
+	mats.append(reactor_mat)
+	# Three horizontal grille bars across the cavity so the glow is
+	# split by structural ribs (sells "the reactor is contained, barely").
+	for grille_i: int in 3:
+		var grille := MeshInstance3D.new()
+		var gb := BoxMesh.new()
+		gb.size = Vector3(2.30, 0.12, 0.20)
+		grille.mesh = gb
+		grille.position = Vector3(0.0, torso_y - 0.70 + float(grille_i) * 0.70, -1.55)
+		grille.set_surface_override_material(0, _make_metal_mat(DARK_BRASS))
+		member.add_child(grille)
+	# Brass shoulder pauldrons — broad armored caps where the arms attach.
+	for pauld_i: int in 2:
+		var psx: float = -2.55 if pauld_i == 0 else 2.55
+		var pauld := MeshInstance3D.new()
+		var pb := SphereMesh.new()
+		pb.radius = 1.10
+		pb.height = 1.80
+		pb.radial_segments = 12
+		pb.rings = 8
+		pauld.mesh = pb
+		pauld.position = Vector3(psx, torso_y + 1.10, 0.0)
+		pauld.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+		member.add_child(pauld)
+	# Vent stacks rising from the rear of the torso (heat exhaust).
+	for stack_i: int in 4:
+		var stack := MeshInstance3D.new()
+		var sm := CylinderMesh.new()
+		sm.top_radius = 0.22
+		sm.bottom_radius = 0.30
+		sm.height = 2.10
+		sm.radial_segments = 8
+		stack.mesh = sm
+		var sx_off: float = -1.50 + float(stack_i) * 1.00
+		stack.position = Vector3(sx_off, torso_y + 2.30, 1.20)
+		stack.set_surface_override_material(0, _make_metal_mat(DARK_BRASS))
+		member.add_child(stack)
+		# Stack tip cap — small dark-brass collar, NO amber glow ball
+		# (per user 2026-05-19: "should not have those orange glowing
+		# balls on top of the spires/smokestacks on his head and
+		# shoulders/back"). Replaces the previous emissive sphere.
+		var stack_cap := MeshInstance3D.new()
+		var stcm := CylinderMesh.new()
+		stcm.top_radius = 0.18
+		stcm.bottom_radius = 0.26
+		stcm.height = 0.16
+		stcm.radial_segments = 8
+		stack_cap.mesh = stcm
+		stack_cap.position = Vector3(sx_off, torso_y + 3.40, 1.20)
+		stack_cap.set_surface_override_material(0, _make_metal_mat(DARK_BRASS))
+		member.add_child(stack_cap)
+
+	# --- Dedicated shoulder-mounted plasma cannons. Per user request
+	# (2026-05-19): replace the previous arm-with-wrist-pod build with
+	# dangerous-looking dedicated weapon mounts. Each cannon is a
+	# fat forward-pointing barrel on a brass shoulder yoke with three
+	# cooling fins along its length and a glowing blue plasma reactor
+	# bulb at the back. The whole thing pivots so the muzzle stays
+	# tipped at the same forward direction as the head's Solar Lance.
+	# No more "arm + hand" silhouette — the gun IS the limb.
+	var arm_pivots: Array[Node3D] = []
+	for arm_i: int in 2:
+		var asx: float = -2.85 if arm_i == 0 else 2.85
+		# Shoulder yoke — heavy brass mount block on the torso flank.
+		var yoke := MeshInstance3D.new()
+		var ykb := BoxMesh.new()
+		ykb.size = Vector3(0.95, 1.30, 1.20)
+		yoke.mesh = ykb
+		yoke.position = Vector3(asx, torso_y + 0.40, 0.0)
+		yoke.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+		member.add_child(yoke)
+		# Yoke ridge — vertical brass band across the front of the yoke.
+		var ridge := MeshInstance3D.new()
+		var rgb := BoxMesh.new()
+		rgb.size = Vector3(1.05, 1.40, 0.20)
+		ridge.mesh = rgb
+		ridge.position = Vector3(asx, torso_y + 0.40, -0.65)
+		ridge.set_surface_override_material(0, _make_metal_mat(DARK_BRASS))
+		member.add_child(ridge)
+		# Cannon pivot — origin sits at the yoke front. Cannon meshes
+		# parent here so combat rotates the whole assembly via the
+		# cannon pivot's Z axis if needed in future.
+		var cannon_pivot := Node3D.new()
+		cannon_pivot.position = Vector3(asx, torso_y + 0.30, -0.85)
+		member.add_child(cannon_pivot)
+		arm_pivots.append(cannon_pivot)
+		# Plasma reactor block — heavy box at the back of the cannon
+		# (the "breech"). Glowing blue from internal containment.
+		var breech := MeshInstance3D.new()
+		var brb := BoxMesh.new()
+		brb.size = Vector3(0.95, 0.95, 0.95)
+		breech.mesh = brb
+		breech.position = Vector3(0.0, 0.0, 0.45)  # behind the cannon
+		breech.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+		cannon_pivot.add_child(breech)
+		# Blue reactor glow window on the breech (front face).
+		var breech_glow := MeshInstance3D.new()
+		var bgb := BoxMesh.new()
+		bgb.size = Vector3(0.55, 0.55, 0.06)
+		breech_glow.mesh = bgb
+		breech_glow.position = Vector3(0.0, 0.0, -0.05)
+		var bg_mat: StandardMaterial3D = _sol_invictus_emissive(PLASMA_BLUE, 4.0)
+		breech_glow.set_surface_override_material(0, bg_mat)
+		cannon_pivot.add_child(breech_glow)
+		mats.append(bg_mat)
+		# Main barrel — fat forward-pointing cylinder. Tapers slightly
+		# at the muzzle for the "heavy artillery piece" read.
+		var barrel := MeshInstance3D.new()
+		var bbm := CylinderMesh.new()
+		bbm.top_radius = 0.48   # at muzzle (+Y after rotation = forward)
+		bbm.bottom_radius = 0.62  # at breech end
+		bbm.height = 2.80
+		bbm.radial_segments = 14
+		barrel.mesh = bbm
+		# CylinderMesh axis is +Y; rotate so it points -Z (forward).
+		barrel.rotation.x = -PI * 0.5
+		barrel.position = Vector3(0.0, 0.0, -1.40)
+		barrel.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+		cannon_pivot.add_child(barrel)
+		# Three brass cooling rings spaced along the barrel — heavy
+		# weapon read (the rings need to dissipate plasma heat).
+		for ring_i: int in 3:
+			var cring := MeshInstance3D.new()
+			var crt := TorusMesh.new()
+			crt.inner_radius = 0.60
+			crt.outer_radius = 0.78
+			crt.rings = 16
+			crt.ring_segments = 8
+			cring.mesh = crt
+			cring.rotation.x = PI * 0.5
+			cring.position = Vector3(0.0, 0.0, -0.50 - float(ring_i) * 0.75)
+			cring.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+			cannon_pivot.add_child(cring)
+		# Muzzle plasma bulb — large glowing sphere at the barrel tip
+		# that pulses when the cannon is charging.
+		var muzzle_bulb := MeshInstance3D.new()
+		var mbm := SphereMesh.new()
+		mbm.radius = 0.48
+		mbm.height = 0.96
+		mbm.radial_segments = 14
+		mbm.rings = 8
+		muzzle_bulb.mesh = mbm
+		muzzle_bulb.position = Vector3(0.0, 0.0, -2.90)
+		var mb_mat: StandardMaterial3D = _sol_invictus_emissive(PLASMA_BLUE, 3.5)
+		muzzle_bulb.set_surface_override_material(0, mb_mat)
+		cannon_pivot.add_child(muzzle_bulb)
+		mats.append(mb_mat)
+		# Forward muzzle marker — combat reads this for plasma orb spawn.
+		var muzzle := Marker3D.new()
+		muzzle.name = "ArmPlasmaMuzzle_%d" % arm_i
+		muzzle.position = Vector3(0.0, 0.0, -3.40)
+		cannon_pivot.add_child(muzzle)
+
+	# --- Head — heavy faceted block above the shoulders carrying the
+	# Solar Lance emitter on its forward face.
+	var head_y: float = torso_y + 2.65
+	var head := MeshInstance3D.new()
+	var hdb := BoxMesh.new()
+	hdb.size = Vector3(2.20, 1.80, 2.10)
+	head.mesh = hdb
+	head.position = Vector3(0.0, head_y, 0.0)
+	head.set_surface_override_material(0, _make_metal_mat(DARK_HULL))
+	member.add_child(head)
+	# Brass collar around the head base.
+	var head_collar := MeshInstance3D.new()
+	var hcb := BoxMesh.new()
+	hcb.size = Vector3(2.40, 0.30, 2.30)
+	head_collar.mesh = hcb
+	head_collar.position = Vector3(0.0, head_y - 0.95, 0.0)
+	head_collar.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	member.add_child(head_collar)
+	# Solar Lance emitter — large amber lens on the front face that
+	# the beam visibly fires from. Sells "the lance shoots from the
+	# head" without the player having to read tooltips.
+	var lens_housing := MeshInstance3D.new()
+	var lhh := CylinderMesh.new()
+	lhh.top_radius = 0.72
+	lhh.bottom_radius = 0.62
+	lhh.height = 0.40
+	lhh.radial_segments = 16
+	lens_housing.mesh = lhh
+	lens_housing.rotation.x = -PI * 0.5
+	lens_housing.position = Vector3(0.0, head_y, -1.20)
+	lens_housing.set_surface_override_material(0, _make_metal_mat(DARK_BRASS))
+	member.add_child(lens_housing)
+	var lens := MeshInstance3D.new()
+	var ll := SphereMesh.new()
+	ll.radius = 0.55
+	ll.height = 1.10
+	lens.mesh = ll
+	lens.position = Vector3(0.0, head_y, -1.42)
+	var lens_mat: StandardMaterial3D = _sol_invictus_emissive(HEAT_WHITE_HOT, 5.0)
+	lens.set_surface_override_material(0, lens_mat)
+	member.add_child(lens)
+	mats.append(lens_mat)
+	# Head Solar Lance muzzle marker (combat queries this for beam
+	# spawn position).
+	var head_muzzle := Marker3D.new()
+	head_muzzle.name = "SolarLanceMuzzle"
+	head_muzzle.position = Vector3(0.0, head_y, -1.85)
+	member.add_child(head_muzzle)
+	# Two side eye-slits — narrow amber bars so the head reads as
+	# vigilant even with the lens off.
+	for eye_i: int in 2:
+		var eye := MeshInstance3D.new()
+		var eb := BoxMesh.new()
+		eb.size = Vector3(0.18, 0.10, 0.60)
+		eye.mesh = eb
+		var exo: float = -0.85 if eye_i == 0 else 0.85
+		eye.position = Vector3(exo, head_y + 0.20, -1.10)
+		eye.set_surface_override_material(0, _sol_invictus_emissive(REACTOR_AMBER, 2.0))
+		member.add_child(eye)
+
+	# --- Solar spire crown. Eight radial spires of varying heights
+	# rising from a brass crown ring above the head — the "crowned
+	# with reactor-spires that radiate visible heat" silhouette per
+	# 03_factions.md §3.4.
+	var crown_y: float = head_y + 1.15
+	var crown_ring := MeshInstance3D.new()
+	var crm := CylinderMesh.new()
+	crm.top_radius = 1.10
+	crm.bottom_radius = 1.30
+	crm.height = 0.35
+	crm.radial_segments = 16
+	crown_ring.mesh = crm
+	crown_ring.position = Vector3(0.0, crown_y, 0.0)
+	crown_ring.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	member.add_child(crown_ring)
+	for spire_i: int in 8:
+		var ang: float = float(spire_i) / 8.0 * TAU
+		var spire_h: float = 1.20 if spire_i % 2 == 0 else 1.80  # alternating tall/short
+		var spire := MeshInstance3D.new()
+		var sb := CylinderMesh.new()
+		sb.top_radius = 0.06
+		sb.bottom_radius = 0.22
+		sb.height = spire_h
+		sb.radial_segments = 8
+		spire.mesh = sb
+		var sx: float = cos(ang) * 1.10
+		var sz: float = sin(ang) * 1.10
+		spire.position = Vector3(sx, crown_y + spire_h * 0.5, sz)
+		spire.set_surface_override_material(0, _make_metal_mat(DARK_BRASS))
+		member.add_child(spire)
+		# (Removed amber pip on each spire tip per user 2026-05-19 —
+		# the row of glowing balls on the crown read as cartoony.
+		# The brass spire alone carries the silhouette without
+		# the lollipop look.)
+
+	# Bright amber omni-light at the reactor core — sells "the unit is
+	# emitting visible heat onto the surrounding ground" at dusk.
+	var reactor_light := OmniLight3D.new()
+	reactor_light.light_color = REACTOR_AMBER
+	reactor_light.light_energy = 1.8
+	reactor_light.omni_range = 9.0
+	reactor_light.position = Vector3(0.0, torso_y, -1.45)
+	member.add_child(reactor_light)
+
+	# Cannons array carries the arm pivots so the recoil tick can
+	# tap them. Even though we don't animate the arms back-and-forth
+	# every fire, the array shape lets the bookkeeping reach in.
+	var cannons: Array = []
+	for ap: Node3D in arm_pivots:
+		cannons.append(ap)
+	var rest_z_arr: Array = []
+	var recoil_arr: Array = []
+	for c: Node3D in cannons:
+		rest_z_arr.append(c.position.z)
+		recoil_arr.append(0.0)
+
+	return {
+		"root": member,
+		"legs": leg_roots,
+		"leg_phases": [0.0, PI] as Array,  # biped alternating stride
+		"shoulders": [] as Array,
+		"cannons": cannons,
+		"cannon_rest_z": rest_z_arr,
+		"cannon_muzzle_z": [-3.40, -3.40] as Array,
+		"torso": torso,
+		"head": head,
+		"mats": mats,
+		"recoil": recoil_arr,
+		"stride_phase": 0.0,
+		"stride_speed": 4.5,  # slow heavy stride
+		"stride_swing": 0.32,  # narrow swing — apex chassis is ponderous
+		"bob_amount": 0.10,
+		"idle_phase": randf_range(0.0, TAU),
+		"idle_speed": 0.6,
+	}
+
+
+func _build_herald_priest_member(index: int, offset: Vector3, _team_color: Color) -> Dictionary:
+	## Heliarch Herald — compact tripod walker (rebuilt 2026-05-19).
+	## Reads as an "industrial walking bunker" — armored chassis on
+	## three short stocky legs, with a forward-mounted turret carrying
+	## a single oversized acoustic horn. No more biped + chest horn
+	## cluster; the rebuild replaces the prior goofy "preacher with
+	## three trumpets glued to the chest" silhouette.
+	const REACTOR_AMBER: Color = Color(1.0, 0.55, 0.20, 1.0)
+	const HELIARCH_BRASS: Color = Color(0.65, 0.45, 0.18, 1.0)
+	const DARK_BRASS: Color = Color(0.35, 0.24, 0.10, 1.0)
+	const SOOTED_IRON: Color = Color(0.18, 0.16, 0.13, 1.0)
+	const DARK_HULL: Color = Color(0.22, 0.18, 0.14, 1.0)
+
+	var member := Node3D.new()
+	member.name = "Member_%d" % index
+	member.position = offset
+	add_child(member)
+	var mats: Array[StandardMaterial3D] = []
+
+	# --- Three short stocky legs in a tripod layout: one rear
+	# (centered behind chassis), two forward (left + right of chassis).
+	# Each leg = hip pivot + thigh + foot. Hip rotates around X for
+	# stride.
+	const TRIPOD_HIP_Y: float = 1.30
+	var leg_roots: Array[Node3D] = []
+	var leg_layout: Array = [
+		Vector3(-0.85, TRIPOD_HIP_Y, -0.55),  # front-left
+		Vector3(0.85, TRIPOD_HIP_Y, -0.55),   # front-right
+		Vector3(0.0, TRIPOD_HIP_Y, 0.80),     # rear-center
+	]
+	for leg_i: int in leg_layout.size():
+		var hip_pos: Vector3 = leg_layout[leg_i]
+		var hip := Node3D.new()
+		hip.name = "HeraldTripodHip_%d" % leg_i
+		hip.position = hip_pos
+		member.add_child(hip)
+		leg_roots.append(hip)
+		# Thick angled thigh — narrows from hip to ankle.
+		var thigh := MeshInstance3D.new()
+		var thm := CylinderMesh.new()
+		thm.top_radius = 0.30
+		thm.bottom_radius = 0.22
+		thm.height = 1.05
+		thm.radial_segments = 10
+		thigh.mesh = thm
+		thigh.position = Vector3(0.0, -0.55, 0.0)
+		thigh.set_surface_override_material(0, _make_metal_mat(DARK_HULL))
+		hip.add_child(thigh)
+		# Brass knee collar at the joint level.
+		var knee := MeshInstance3D.new()
+		var kn := SphereMesh.new()
+		kn.radius = 0.28
+		kn.height = 0.42
+		knee.mesh = kn
+		knee.position = Vector3(0.0, -1.05, 0.05)
+		knee.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+		hip.add_child(knee)
+		# Lower shin — thicker armor block.
+		var shin := MeshInstance3D.new()
+		var shm := BoxMesh.new()
+		shm.size = Vector3(0.32, 0.45, 0.32)
+		shin.mesh = shm
+		shin.position = Vector3(0.0, -1.30, 0.05)
+		shin.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+		hip.add_child(shin)
+		# Foot — wide circular pad for the "lumbering tripod" stance.
+		var foot := MeshInstance3D.new()
+		var fc := CylinderMesh.new()
+		fc.top_radius = 0.42
+		fc.bottom_radius = 0.50
+		fc.height = 0.14
+		fc.radial_segments = 10
+		foot.mesh = fc
+		foot.position = Vector3(0.0, -1.30, 0.10)
+		foot.set_surface_override_material(0, _make_metal_mat(DARK_HULL))
+		hip.add_child(foot)
+
+	# --- Chassis core — wider boxy hull sitting on top of the tripod.
+	# Layered: a base block, a smaller upper deck with sloped front
+	# armor + a brass rim around the perimeter.
+	var chassis_y: float = TRIPOD_HIP_Y + 0.20
+	var chassis := MeshInstance3D.new()
+	var cbm := BoxMesh.new()
+	cbm.size = Vector3(2.10, 0.80, 2.00)
+	chassis.mesh = cbm
+	chassis.position = Vector3(0.0, chassis_y, 0.0)
+	chassis.set_surface_override_material(0, _make_metal_mat(DARK_HULL))
+	member.add_child(chassis)
+	# Brass rim — thin band around the chassis top edge.
+	var rim := MeshInstance3D.new()
+	var rmb := BoxMesh.new()
+	rmb.size = Vector3(2.20, 0.10, 2.10)
+	rim.mesh = rmb
+	rim.position = Vector3(0.0, chassis_y + 0.45, 0.0)
+	rim.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	member.add_child(rim)
+	# Sloped front armor plate — angled forward for that "walking
+	# bunker tipping into the enemy" read.
+	var front_armor := MeshInstance3D.new()
+	var fab := BoxMesh.new()
+	fab.size = Vector3(2.10, 0.85, 0.18)
+	front_armor.mesh = fab
+	front_armor.position = Vector3(0.0, chassis_y + 0.10, -1.00)
+	front_armor.rotation.x = deg_to_rad(-25.0)
+	front_armor.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+	member.add_child(front_armor)
+	# Brass rivets along the front armor.
+	for rivet_i: int in 5:
+		var rivet := MeshInstance3D.new()
+		var rs := SphereMesh.new()
+		rs.radius = 0.07
+		rs.height = 0.14
+		rivet.mesh = rs
+		var rx: float = -0.90 + float(rivet_i) * 0.45
+		rivet.position = Vector3(rx, chassis_y + 0.30, -1.05)
+		rivet.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+		member.add_child(rivet)
+	# Side armor plates — angled outward on each flank.
+	for armor_side: int in 2:
+		var asx: float = -1.0 if armor_side == 0 else 1.0
+		var sa := MeshInstance3D.new()
+		var sab := BoxMesh.new()
+		sab.size = Vector3(0.16, 0.75, 1.80)
+		sa.mesh = sab
+		sa.position = Vector3(asx * 1.18, chassis_y, 0.0)
+		sa.rotation.z = asx * deg_to_rad(-10.0)
+		sa.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+		member.add_child(sa)
+	# Rear exhaust stacks — two brass vents on the back deck.
+	for stack_i: int in 2:
+		var ssx: float = -0.5 if stack_i == 0 else 0.5
+		var stack := MeshInstance3D.new()
+		var sm := CylinderMesh.new()
+		sm.top_radius = 0.14
+		sm.bottom_radius = 0.18
+		sm.height = 0.50
+		sm.radial_segments = 8
+		stack.mesh = sm
+		stack.position = Vector3(ssx, chassis_y + 0.70, 0.85)
+		stack.set_surface_override_material(0, _make_metal_mat(DARK_BRASS))
+		member.add_child(stack)
+
+	# --- Turret on top of the chassis. Forward-facing acoustic horn
+	# mounted on a brass yoke. Single oversized horn replaces the
+	# previous three-trumpet cluster (which read as goofy).
+	var turret_pivot := Node3D.new()
+	turret_pivot.name = "HeraldTurret"
+	turret_pivot.position = Vector3(0.0, chassis_y + 0.60, -0.30)
+	member.add_child(turret_pivot)
+	# Yoke base — short box mounted on the turret pivot.
+	var yoke := MeshInstance3D.new()
+	var ykb := BoxMesh.new()
+	ykb.size = Vector3(0.85, 0.40, 0.85)
+	yoke.mesh = ykb
+	yoke.position = Vector3(0.0, 0.0, 0.0)
+	yoke.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	turret_pivot.add_child(yoke)
+	# Yoke side arms — vertical brass plates that hold the horn pivot.
+	for yarm_side: int in 2:
+		var ysx: float = -1.0 if yarm_side == 0 else 1.0
+		var yarm := MeshInstance3D.new()
+		var yab := BoxMesh.new()
+		yab.size = Vector3(0.12, 0.55, 0.45)
+		yarm.mesh = yab
+		yarm.position = Vector3(ysx * 0.45, 0.45, -0.10)
+		yarm.set_surface_override_material(0, _make_metal_mat(DARK_BRASS))
+		turret_pivot.add_child(yarm)
+	# The horn itself — large forward-pointing tapered cone. Wider
+	# mouth at the front, narrow throat at the back. Slightly tilted
+	# upward for a "broadcasting" pose.
+	var horn := MeshInstance3D.new()
+	var hm := CylinderMesh.new()
+	hm.top_radius = 0.62
+	hm.bottom_radius = 0.18
+	hm.height = 1.40
+	hm.radial_segments = 16
+	horn.mesh = hm
+	horn.rotation.x = -PI * 0.5  # mouth points -Z (forward)
+	horn.position = Vector3(0.0, 0.50, -0.95)
+	horn.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	turret_pivot.add_child(horn)
+	# Inner amber chamber — visible deep inside the horn mouth.
+	var horn_chamber := MeshInstance3D.new()
+	var hcm := SphereMesh.new()
+	hcm.radius = 0.18
+	hcm.height = 0.36
+	horn_chamber.mesh = hcm
+	horn_chamber.position = Vector3(0.0, 0.50, -0.30)
+	var hc_mat := _sol_invictus_emissive(REACTOR_AMBER, 2.4)
+	horn_chamber.set_surface_override_material(0, hc_mat)
+	turret_pivot.add_child(horn_chamber)
+	mats.append(hc_mat)
+	# Brass reinforcement rings along the horn — two short tori.
+	for ring_i: int in 2:
+		var hring := MeshInstance3D.new()
+		var ht := TorusMesh.new()
+		ht.inner_radius = 0.30
+		ht.outer_radius = 0.40
+		ht.rings = 16
+		ht.ring_segments = 6
+		hring.mesh = ht
+		hring.rotation.x = PI * 0.5
+		hring.position = Vector3(0.0, 0.50, -0.55 - float(ring_i) * 0.30)
+		hring.set_surface_override_material(0, _make_metal_mat(DARK_BRASS))
+		turret_pivot.add_child(hring)
+	# Muzzle marker — at the horn mouth, where the sound wave spawns.
+	var horn_muzzle := Marker3D.new()
+	horn_muzzle.name = "AcousticHornMuzzle"
+	horn_muzzle.position = Vector3(0.0, 0.50, -1.65)
+	turret_pivot.add_child(horn_muzzle)
+
+	# Soft amber light from the horn chamber.
+	var light := OmniLight3D.new()
+	light.light_color = REACTOR_AMBER
+	light.light_energy = 1.0
+	light.omni_range = 4.5
+	light.position = Vector3(0.0, chassis_y + 1.10, -1.20)
+	member.add_child(light)
+
+	# Cannons array carries the turret pivot so the combat fire path
+	# can resolve a muzzle position. The recoil system is a no-op for
+	# the turret (single horn, no recoil arm).
+	var cannons: Array = [turret_pivot]
+	# Tripod gait — left-front + rear together (phase 0), then
+	# right-front alone (phase π). Loose approximation of a 3-leg trot.
+	var leg_phases_arr: Array = [0.0, PI, 0.0]
+	return {
+		"root": member,
+		"legs": leg_roots,
+		"leg_phases": leg_phases_arr,
+		"shoulders": [] as Array,
+		"cannons": cannons,
+		"cannon_rest_z": [turret_pivot.position.z] as Array,
+		"cannon_muzzle_z": [1.65] as Array,
+		"torso": chassis,
+		"head": yoke,
+		"mats": mats,
+		"recoil": [0.0] as Array,
+		"stride_phase": randf_range(0.0, TAU),
+		"stride_speed": 5.0,
+		"stride_swing": 0.28,
+		"bob_amount": 0.05,
+		"idle_phase": randf_range(0.0, TAU),
+		"idle_speed": 0.9,
+	}
+
+
+func _build_censer_thurible_member(index: int, offset: Vector3, _team_color: Color) -> Dictionary:
+	## Heliarch Censer — elite chemical caster, REBUILT 2026-05-19 per
+	## user feedback ("looks too much like a table with a bong without a
+	## real direction"). New silhouette: elongated front-to-back armored
+	## reliquary hull on four short legs. Forward end carries a brass
+	## faceplate with toxic-green vent grilles + side cooling vents;
+	## the chemical launcher angles UP+forward from the dorsal hull,
+	## NOT vertically. A small ceremonial dome sits between the launcher
+	## and the rear of the chassis. Reads as "consecrated armored
+	## war-thurible" with clear forward orientation, no longer a coffee
+	## table with a vertical tube glued on top.
+	const REACTOR_AMBER: Color = Color(1.0, 0.55, 0.20, 1.0)
+	const TOXIC_GREEN: Color = Color(0.55, 0.80, 0.35, 1.0)
+	const HELIARCH_BRASS: Color = Color(0.65, 0.45, 0.18, 1.0)
+	const DARK_BRASS: Color = Color(0.35, 0.24, 0.10, 1.0)
+	const SOOTED_IRON: Color = Color(0.18, 0.16, 0.13, 1.0)
+	const DARK_HULL: Color = Color(0.22, 0.18, 0.14, 1.0)
+
+	var member := Node3D.new()
+	member.name = "Member_%d" % index
+	member.position = offset
+	add_child(member)
+	var mats: Array[StandardMaterial3D] = []
+
+	# --- Four short legs in a rectangular layout. Elongated chassis
+	# (longer than wide) gives the unit a clear forward axis at a
+	# glance. Each leg = hip pivot + thigh + foot.
+	var chassis_w: float = 1.55
+	var chassis_len: float = 2.85  # ~1.85× width = elongated
+	var leg_roots: Array[Node3D] = []
+	var leg_corner_idx: int = 0
+	for leg_xi: int in 2:
+		for leg_zi: int in 2:
+			var lx: float = -chassis_w * 0.42 if leg_xi == 0 else chassis_w * 0.42
+			var lz: float = -chassis_len * 0.36 if leg_zi == 0 else chassis_len * 0.36
+			var hip := Node3D.new()
+			hip.name = "CenserHip_%d" % leg_corner_idx
+			leg_corner_idx += 1
+			hip.position = Vector3(lx, 1.00, lz)
+			member.add_child(hip)
+			leg_roots.append(hip)
+			var leg := MeshInstance3D.new()
+			var lb := BoxMesh.new()
+			lb.size = Vector3(0.32, 1.00, 0.32)
+			leg.mesh = lb
+			leg.position = Vector3(0.0, -0.50, 0.0)
+			leg.set_surface_override_material(0, _make_metal_mat(DARK_HULL))
+			hip.add_child(leg)
+			var foot := MeshInstance3D.new()
+			var fc := CylinderMesh.new()
+			fc.top_radius = 0.22
+			fc.bottom_radius = 0.30
+			fc.height = 0.14
+			fc.radial_segments = 10
+			foot.mesh = fc
+			foot.position = Vector3(0.0, -0.93, 0.0)
+			foot.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+			hip.add_child(foot)
+
+	# --- Main hull. Elongated armored slab. Slightly taller at the
+	# back (where the chemical reservoir sits) than the front (where
+	# the launcher mouth pokes out).
+	var chassis_y: float = 1.20
+	var chassis := MeshInstance3D.new()
+	var cb := BoxMesh.new()
+	cb.size = Vector3(chassis_w, 0.65, chassis_len)
+	chassis.mesh = cb
+	chassis.position = Vector3(0.0, chassis_y, 0.0)
+	chassis.set_surface_override_material(0, _make_metal_mat(DARK_HULL))
+	member.add_child(chassis)
+	# Dorsal hump — slightly raised armored spine running front-to-back.
+	# Wider at the back to read as the chemical reservoir, narrower at
+	# the front. Reads as "this thing has direction".
+	var hump := MeshInstance3D.new()
+	var humpb := BoxMesh.new()
+	humpb.size = Vector3(chassis_w * 0.55, 0.45, chassis_len * 0.75)
+	hump.mesh = humpb
+	hump.position = Vector3(0.0, chassis_y + 0.50, 0.35)  # offset toward rear
+	hump.set_surface_override_material(0, _make_metal_mat(SOOTED_IRON))
+	member.add_child(hump)
+	# Brass perimeter rim — clear visual band marking the hull.
+	var rim := MeshInstance3D.new()
+	var rmb := BoxMesh.new()
+	rmb.size = Vector3(chassis_w + 0.10, 0.08, chassis_len + 0.10)
+	rim.mesh = rmb
+	rim.position = Vector3(0.0, chassis_y + 0.36, 0.0)
+	rim.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	member.add_child(rim)
+
+	# --- FORWARD-FACING BRASS FACEPLATE. The dominant silhouette cue
+	# that this chassis has a front. Angled forward, brass with toxic-
+	# green vent grilles + a central reactor eye.
+	var face_z: float = -chassis_len * 0.5 - 0.10
+	var faceplate := MeshInstance3D.new()
+	var fpb := BoxMesh.new()
+	fpb.size = Vector3(chassis_w * 0.95, 0.80, 0.20)
+	faceplate.mesh = fpb
+	faceplate.position = Vector3(0.0, chassis_y + 0.20, face_z)
+	faceplate.rotation.x = deg_to_rad(-14.0)  # tipped forward
+	faceplate.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	member.add_child(faceplate)
+	# Central reactor eye — glowing toxic-green spheroid mounted on
+	# the faceplate. Anchors the "this is the front" read.
+	var eye := MeshInstance3D.new()
+	var eyem := SphereMesh.new()
+	eyem.radius = 0.18
+	eyem.height = 0.36
+	eyem.radial_segments = 14
+	eyem.rings = 8
+	eye.mesh = eyem
+	eye.position = Vector3(0.0, chassis_y + 0.30, face_z - 0.12)
+	var eye_mat := _sol_invictus_emissive(TOXIC_GREEN, 2.8)
+	eye.set_surface_override_material(0, eye_mat)
+	member.add_child(eye)
+	mats.append(eye_mat)
+	# Vent grille slits flanking the eye — four thin emissive bars
+	# (two per side) signaling "chemical exhaust forward".
+	for vent_side: int in 2:
+		var vsx: float = -1.0 if vent_side == 0 else 1.0
+		for vent_i: int in 2:
+			var vent := MeshInstance3D.new()
+			var vb := BoxMesh.new()
+			vb.size = Vector3(0.08, 0.50, 0.10)
+			vent.mesh = vb
+			vent.position = Vector3(vsx * (0.30 + float(vent_i) * 0.16), chassis_y + 0.30, face_z - 0.05)
+			var v_mat := _sol_invictus_emissive(TOXIC_GREEN, 1.4)
+			vent.set_surface_override_material(0, v_mat)
+			member.add_child(vent)
+			mats.append(v_mat)
+	# Forward floodlight on top of the faceplate (lamp aesthetic).
+	var floodlight := OmniLight3D.new()
+	floodlight.light_color = TOXIC_GREEN
+	floodlight.light_energy = 1.3
+	floodlight.omni_range = 4.0
+	floodlight.position = Vector3(0.0, chassis_y + 0.30, face_z - 0.20)
+	member.add_child(floodlight)
+
+	# --- SIDE COOLING VENTS along each flank of the chassis. Long
+	# horizontal brass-rimmed slits with toxic green peeking through —
+	# the chemical brewing is venting out the sides. Adds detail to
+	# the elongated hull AND reinforces the front-to-back direction.
+	for flank_side: int in 2:
+		var fksx: float = -1.0 if flank_side == 0 else 1.0
+		# Outer brass frame.
+		var vent_frame := MeshInstance3D.new()
+		var vfb := BoxMesh.new()
+		vfb.size = Vector3(0.10, 0.30, chassis_len * 0.65)
+		vent_frame.mesh = vfb
+		vent_frame.position = Vector3(fksx * (chassis_w * 0.5 + 0.03), chassis_y + 0.10, -0.05)
+		vent_frame.set_surface_override_material(0, _make_metal_mat(DARK_BRASS))
+		member.add_child(vent_frame)
+		# Inner toxic glow strip.
+		var vent_glow := MeshInstance3D.new()
+		var vgb := BoxMesh.new()
+		vgb.size = Vector3(0.06, 0.16, chassis_len * 0.58)
+		vent_glow.mesh = vgb
+		vent_glow.position = Vector3(fksx * (chassis_w * 0.5 + 0.05), chassis_y + 0.10, -0.05)
+		var vg_mat := _sol_invictus_emissive(TOXIC_GREEN, 1.6)
+		vent_glow.set_surface_override_material(0, vg_mat)
+		member.add_child(vent_glow)
+		mats.append(vg_mat)
+
+	# --- Small ceremonial dome on the dorsal hump (NOT the dominant
+	# feature anymore). Sits between the launcher and the back of the
+	# chassis. Brass with a short spike finial.
+	var small_dome_y: float = chassis_y + 1.05
+	var small_dome := MeshInstance3D.new()
+	var sdm := SphereMesh.new()
+	sdm.radius = 0.42
+	sdm.height = 0.52
+	sdm.radial_segments = 14
+	sdm.rings = 8
+	small_dome.mesh = sdm
+	small_dome.position = Vector3(0.0, small_dome_y, 0.85)  # toward rear
+	small_dome.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	member.add_child(small_dome)
+	var small_finial := MeshInstance3D.new()
+	var sfm := CylinderMesh.new()
+	sfm.top_radius = 0.03
+	sfm.bottom_radius = 0.08
+	sfm.height = 0.32
+	sfm.radial_segments = 8
+	small_finial.mesh = sfm
+	small_finial.position = Vector3(0.0, small_dome_y + 0.40, 0.85)
+	small_finial.set_surface_override_material(0, _make_metal_mat(DARK_BRASS))
+	member.add_child(small_finial)
+
+	# --- DORSAL CHEMICAL LAUNCHER. Mounted on the front of the hump,
+	# angled UP+FORWARD at ~30° elevation so barrels arc onto target.
+	# Distinct from the previous vertical pole + dome setup: this is
+	# a tilted mortar pointing where the unit is facing.
+	var launcher_base_y: float = chassis_y + 0.55
+	var pendant_pivot := Node3D.new()
+	pendant_pivot.position = Vector3(0.0, launcher_base_y, -0.10)  # forward of dome
+	# Tilt 30° forward (mouth points up + forward, NOT straight up).
+	pendant_pivot.rotation.x = deg_to_rad(-30.0)
+	member.add_child(pendant_pivot)
+	# Outer launcher tube — fat brass mortar pointing along local +Y.
+	var tube := MeshInstance3D.new()
+	var tbm := CylinderMesh.new()
+	tbm.top_radius = 0.32
+	tbm.bottom_radius = 0.40
+	tbm.height = 1.40
+	tbm.radial_segments = 14
+	tube.mesh = tbm
+	tube.position = Vector3(0.0, 0.60, 0.0)
+	tube.set_surface_override_material(0, _make_metal_mat(HELIARCH_BRASS))
+	pendant_pivot.add_child(tube)
+	# Two brass reinforcement rings along the tube.
+	for ring_i: int in 2:
+		var hoop := MeshInstance3D.new()
+		var ht := TorusMesh.new()
+		ht.inner_radius = 0.34
+		ht.outer_radius = 0.44
+		ht.rings = 14
+		ht.ring_segments = 6
+		hoop.mesh = ht
+		hoop.rotation.x = PI * 0.5
+		hoop.position = Vector3(0.0, 0.20 + float(ring_i) * 0.70, 0.0)
+		hoop.set_surface_override_material(0, _make_metal_mat(DARK_BRASS))
+		pendant_pivot.add_child(hoop)
+	# Visible chambered round near the tube mouth.
+	var charged_round := MeshInstance3D.new()
+	var crsm := SphereMesh.new()
+	crsm.radius = 0.26
+	crsm.height = 0.52
+	crsm.radial_segments = 12
+	crsm.rings = 8
+	charged_round.mesh = crsm
+	charged_round.position = Vector3(0.0, 1.20, 0.0)
+	var cr_mat := _sol_invictus_emissive(TOXIC_GREEN, 2.4)
+	charged_round.set_surface_override_material(0, cr_mat)
+	pendant_pivot.add_child(charged_round)
+	mats.append(cr_mat)
+	# Muzzle marker — at the tube mouth.
+	var pendant_muzzle := Marker3D.new()
+	pendant_muzzle.name = "CenserMuzzle"
+	pendant_muzzle.position = Vector3(0.0, 1.50, 0.0)
+	pendant_pivot.add_child(pendant_muzzle)
+	# Mortar mount base — short brass cradle where the tube hinges
+	# off the hump.
+	var mount_cradle := MeshInstance3D.new()
+	var mcb := BoxMesh.new()
+	mcb.size = Vector3(0.65, 0.30, 0.55)
+	mount_cradle.mesh = mcb
+	mount_cradle.position = Vector3(0.0, launcher_base_y - 0.08, -0.10)
+	mount_cradle.set_surface_override_material(0, _make_metal_mat(DARK_BRASS))
+	member.add_child(mount_cradle)
+
+	# Toxic green light from the launcher chamber — bathes the
+	# surrounding area in chemical glow.
+	var pendant_light := OmniLight3D.new()
+	pendant_light.light_color = TOXIC_GREEN
+	pendant_light.light_energy = 1.4
+	pendant_light.omni_range = 5.5
+	pendant_light.position = Vector3(0.0, launcher_base_y + 0.80, -0.10)
+	member.add_child(pendant_light)
+
+	var cannons: Array = [pendant_pivot]
+	# Quadruped trot — diagonal pair phases. corner_idx order from the
+	# leg loop is: 0=FL-back, 1=FL-front, 2=FR-back, 3=FR-front.
+	# Diagonal trot: {0,3} together, {1,2} together.
+	var leg_phases_arr: Array = [0.0, PI, PI, 0.0]
+	return {
+		"root": member,
+		"legs": leg_roots,
+		"leg_phases": leg_phases_arr,
+		"shoulders": [] as Array,
+		"cannons": cannons,
+		"cannon_rest_z": [pendant_pivot.position.z] as Array,
+		"cannon_muzzle_z": [0.65] as Array,
+		"torso": chassis,
+		"head": faceplate,
+		"mats": mats,
+		"recoil": [0.0] as Array,
+		"stride_phase": randf_range(0.0, TAU),
+		"stride_speed": 6.5,
+		"stride_swing": 0.30,
+		"bob_amount": 0.04,
+		"idle_phase": randf_range(0.0, TAU),
+		"idle_speed": 1.0,
 	}
 
 
@@ -7177,11 +9788,14 @@ func _build_legs_quadruped(member: Node3D, shape: Dictionary, mats: Array[Standa
 		pivot.position = Vector3(c.x, hip_y, c.y)
 		member.add_child(pivot)
 
-		# Hip: thigh rotates OUTWARD slightly (knee away from body) and
-		# leans forward/back so each leg has a distinct stance silhouette.
+		# Hip: thigh leans at ~45° from vertical (forward for front legs,
+		# back for rear) so the knee is clearly bent rather than the
+		# stick-straight stance the smaller 0.32 lean produced (playtest
+		# 2026-05-15 — Voron Walker legs read as right-angle stilts).
+		# Shin counter-rotates by the same magnitude below, so the shin
+		# ends up vertical and the foot lands under the hip.
 		var thigh_rot := Node3D.new()
-		# Pitch: front legs lean forward, rear legs lean backward.
-		thigh_rot.rotation.x = 0.32 if is_front else -0.32
+		thigh_rot.rotation.x = 0.78 if is_front else -0.78  # ~45°
 		# Roll outward just a touch so the legs splay.
 		thigh_rot.rotation.z = -0.12 if c.x < 0.0 else 0.12
 		pivot.add_child(thigh_rot)
@@ -7201,11 +9815,12 @@ func _build_legs_quadruped(member: Node3D, shape: Dictionary, mats: Array[Standa
 		knee.position.y = -thigh_len
 		thigh_rot.add_child(knee)
 
-		# Shin counter-rotates so the leg's overall "world" angle ends
-		# near vertical — the foot lands roughly under the hip. Front
-		# legs bend back, rear legs bend forward (classic horse stance).
+		# Shin counter-rotates by the same magnitude as the thigh so the
+		# shin's world angle ends up vertical (knee is the only bend) and
+		# the foot lands directly under the hip. Front legs bend back,
+		# rear legs bend forward (classic horse stance, sharper now).
 		var shin_rot := Node3D.new()
-		shin_rot.rotation.x = -0.55 if is_front else 0.55
+		shin_rot.rotation.x = -0.78 if is_front else 0.78
 		knee.add_child(shin_rot)
 
 		var shin_mesh := MeshInstance3D.new()
@@ -8083,11 +10698,18 @@ func _tick_heliarch_heat_drain(delta: float) -> void:
 			_on_emergency_cooldown_end()
 		return
 
-	# Normal Tier 2/3 passive drain. Not active during Emergency Cooldown.
-	# Heat gauge values are placeholder 0-100 percents stored in the
-	# Heliarch unit stats (Phase 3); for now we read from the stat resource.
-	# Until Heliarch units exist this branch never fires because _faction_id()
-	# will never return 3 for the current unit roster.
+	# Passive Heat decay — every Heliarch unit cools off slowly while
+	# not firing. CombatComponent.notify_heat_ramp_fire pushes it back
+	# up faster than this decay, so a unit in sustained combat climbs
+	# toward Tier 2/3; a unit that has disengaged drops below the
+	# drain threshold within ~10 seconds. Keeps the Heat tax dynamic
+	# instead of letting a unit linger at max heat indefinitely.
+	var heat_now: float = _read_heat_pct()
+	if heat_now > 0.0:
+		var decayed: float = heat_now - HEAT_PASSIVE_DECAY_PER_SEC * delta
+		_set_heat_pct(maxf(decayed, 0.0))
+
+	# Normal Tier 2/3 passive HP drain. Not active during Emergency Cooldown.
 	var heat_pct: float = _read_heat_pct()
 	var tier: int = _heat_tier(heat_pct)
 	if tier == 2:
@@ -8123,6 +10745,20 @@ func _set_heat_pct(value: float) -> void:
 	## Uses the same meta-property path as _read_heat_pct so Phase 3
 	## can swap to a typed field without touching the call sites.
 	set_meta("heat_pct", clampf(value, 0.0, 1.0))
+
+
+func notify_heat_ramp_fire() -> void:
+	## Called by CombatComponent every time the unit's primary weapon
+	## fires. Bumps the unit's heat_pct by HEAT_RAMP_PER_FIRE. No-op for
+	## non-Heliarch units (the caller already faction-gates) — also
+	## clamped so heat can never exceed 1.0 except when the Emergency
+	## Cooldown handler explicitly zeroes it.
+	if _faction_id() != 3:
+		return
+	if _emergency_cooldown_remaining > 0.0:
+		return
+	var cur: float = _read_heat_pct()
+	_set_heat_pct(cur + HEAT_RAMP_PER_FIRE)
 
 
 func _heat_tier(heat_pct: float) -> int:
@@ -8977,6 +11613,61 @@ func _physics_process(delta: float) -> void:
 ## new MovementComponent path landed (Plan B Phase 0) so flag-on units
 ## still get animations, HP bars, ability cooldowns, etc.
 func _per_frame_bookkeeping(delta: float) -> void:
+	# Hover-tank bob + bank (Inquisitor Tank). Slow sine-wave Y offset
+	# + bank-into-turns based on horizontal velocity. Pure cosmetic
+	# overlay on each member's root — movement / collision unchanged.
+	# Skipped early for non-hover units to keep the per-tick cost
+	# trivial (one bool read).
+	if stats and "is_hover_tank" in stats and (stats.get("is_hover_tank") as bool) and alive_count > 0:
+		_hover_phase = fmod(_hover_phase + delta * HOVER_BOB_RATE, TAU)
+		var bob_y: float = sin(_hover_phase) * HOVER_BOB_AMPL
+		# Bank — tilt around forward axis based on lateral velocity.
+		# velocity is body-space when local-axis movement is used, but
+		# under GroundMovement it's world-space; project onto the
+		# unit's right axis to get a stable "lean into the turn" value.
+		var lateral: float = 0.0
+		var v: Vector3 = velocity
+		v.y = 0.0
+		if v.length_squared() > 0.04:
+			var right: Vector3 = transform.basis.x
+			right.y = 0.0
+			if right.length_squared() > 0.001:
+				lateral = right.normalized().dot(v)
+		var bank_rad: float = clampf(lateral * HOVER_BANK_PER_UNIT_SPEED, -HOVER_BANK_MAX_RAD, HOVER_BANK_MAX_RAD)
+		for i: int in _member_data.size():
+			if i >= member_hp.size() or member_hp[i] <= 0:
+				continue
+			var member: Node3D = _member_data[i]["root"] as Node3D
+			if not is_instance_valid(member):
+				continue
+			# Preserve the per-member rest-y so the bob is purely additive.
+			var rest_y: float = (_member_data[i].get("hover_rest_y", member.position.y)) as float
+			if not _member_data[i].has("hover_rest_y"):
+				_member_data[i]["hover_rest_y"] = rest_y
+			member.position.y = rest_y + bob_y
+			# Smooth-lerp the bank angle so direction changes aren't snappy.
+			member.rotation.z = lerp(member.rotation.z, -bank_rad, clampf(delta * HOVER_BANK_LERP_RATE, 0.0, 1.0))
+	# Nanite passive regen (Stahlyokai Predator branch).
+	# Heals total nanite_regen_per_sec HP / sec across the squad while
+	# out of combat (no damage taken in NANITE_OUT_OF_COMBAT_SEC).
+	# Fractional accumulator means a 4 HP/sec regen ticks 1 HP every
+	# 0.25 s instead of waiting a full second for an int boundary.
+	if stats and "nanite_regen_per_sec" in stats:
+		var regen_rate: float = stats.nanite_regen_per_sec
+		# Ceiling is alive-member HP only — dead members don't regen;
+		# apply_heal converts overflow into respawns only via the
+		# heal-overflow path, which we don't want a passive regen to
+		# tap. Cheap early-out also saves the get_ticks_msec call when
+		# the squad is already topped up.
+		var alive_cap: int = alive_count * stats.hp_per_unit
+		if regen_rate > 0.0 and alive_count > 0 and get_total_hp() < alive_cap:
+			var since_dmg: float = float(Time.get_ticks_msec() - _last_damage_taken_msec) / 1000.0
+			if _last_damage_taken_msec == 0 or since_dmg >= NANITE_OUT_OF_COMBAT_SEC:
+				_nanite_regen_accum += regen_rate * delta
+				if _nanite_regen_accum >= 1.0:
+					var heal_amt: int = int(_nanite_regen_accum)
+					_nanite_regen_accum -= float(heal_amt)
+					apply_heal(heal_amt)
 	# New-system arrival: legacy clears has_move_order inside
 	# _legacy_movement_step when the unit reaches its destination, but that
 	# path is skipped under MovementComponent. Without an equivalent here,
@@ -9136,6 +11827,36 @@ func _per_frame_bookkeeping(delta: float) -> void:
 		var pos_h: float = (_cached_total_height if _cached_total_height > 0.0 else _mech_total_height()) + 0.4
 		_hp_bar.global_position = global_position + Vector3(0, pos_h, 0)
 
+	# --- Camera-distance cull flag (used by every-frame + staggered work).
+	if not _camera_cached or not is_instance_valid(_camera_cached):
+		_camera_cached = get_viewport().get_camera_3d() if get_viewport() else null
+	var anim_culled: bool = false
+	if _camera_cached:
+		anim_culled = global_position.distance_squared_to(_camera_cached.global_position) > ANIM_CULL_DIST_SQ
+
+	# --- EVERY-FRAME walk animation. Leg sin() rotation runs at 60 Hz
+	# (NOT gated by the 1-in-3 stagger below) so the gait reads smooth
+	# instead of flickering. Cheap: one sin + one Vector3 write per
+	# leg per frame, ~6 legs per squad-member tops. Per playtest
+	# 2026-05-19 the previous staggered path made walk cycles flicker
+	# at ~20 Hz, especially on the big-stride apex / caster mechs.
+	_idle_time += delta
+	if velocity.length_squared() > 1.0:
+		_anim_time += delta * 8.0
+		if not anim_culled:
+			_apply_walk_bob()
+	else:
+		_anim_time = 0.0
+		_idle_anim_throttle += 1
+		if _idle_anim_throttle >= IDLE_ANIM_THROTTLE_FRAMES:
+			_idle_anim_throttle = 0
+			if not anim_culled:
+				_reset_walk_bob()
+	# Recoil decay must also run every frame so the muzzle-recoil
+	# return-to-rest reads smooth (otherwise it ticks at 20 Hz too).
+	if not anim_culled and Time.get_ticks_msec() < _recoil_active_until_msec:
+		_tick_recoil(delta)
+
 	if (_physics_frame_counter % 3) != _walk_bob_phase:
 		return
 
@@ -9156,47 +11877,10 @@ func _per_frame_bookkeeping(delta: float) -> void:
 		if smooth_should_show:
 			_update_reload_bar()
 
-	# Camera-distance cull flag. AI / pathing / combat still run; only
-	# the per-frame cosmetic work (walk-bob, HP bar reposition, dust,
-	# recoil) skips when the unit is off-camera.
-	if not _camera_cached or not is_instance_valid(_camera_cached):
-		_camera_cached = get_viewport().get_camera_3d() if get_viewport() else null
-	var anim_culled: bool = false
-	if _camera_cached:
-		anim_culled = global_position.distance_squared_to(_camera_cached.global_position) > ANIM_CULL_DIST_SQ
-
-	# Walking animation. _anim_time only advances while moving so legs always
-	# resume from a clean stride; _idle_time runs continuously to drive the
-	# small standing sway.
-	_idle_time += delta
-	if velocity.length_squared() > 1.0:
-		# `delta` here represents one physics frame (~16ms) but with the
-		# outer 1-in-3 stagger this branch only runs every 3rd frame —
-		# advance _anim_time by 3× delta so the leg phase keeps the
-		# same wall-clock cadence as before.
-		_anim_time += delta * 8.0 * 3.0
-		# Skip cosmetic work when the unit is off-camera. The animation
-		# state still advances so legs resume mid-stride when the
-		# camera pans back, but no per-leg sin / position writes fire.
-		if not anim_culled:
-			_apply_walk_bob()
-			_tick_walking_dust(delta * 3.0)
-	else:
-		_anim_time = 0.0
-		# Idle sway is invisibly subtle at 60Hz; throttle to ~15Hz with
-		# round-robin staggering so 88 units don't all run reset_walk_bob
-		# in the same physics frame.
-		_idle_anim_throttle += 1
-		if _idle_anim_throttle >= IDLE_ANIM_THROTTLE_FRAMES:
-			_idle_anim_throttle = 0
-			if not anim_culled:
-				_reset_walk_bob()
-
-	# Skip the recoil loop entirely when no member is recoiling, OR when
-	# the unit is off-camera (recoil is purely visual — the gun fires
-	# either way via combat_component).
-	if not anim_culled and Time.get_ticks_msec() < _recoil_active_until_msec:
-		_tick_recoil(delta)
+	# Heavier walking-dust spawn — kept on the 1-in-3 stagger
+	# (particle alloc is cheap but adds up at 60 Hz × many units).
+	if not anim_culled and velocity.length_squared() > 1.0:
+		_tick_walking_dust(delta * 3.0)
 
 	if is_building:
 		_animate_build_claw()
@@ -9627,6 +12311,14 @@ func _apply_tank_chassis_tilt(delta: float) -> void:
 
 
 func _apply_walk_bob() -> void:
+	# Hover-tank guard: the hover bob in _per_frame_bookkeeping owns
+	# position.y for is_hover_tank units. _apply_walk_bob's torso bob
+	# (legs absent on hover, bob_amount = 0 → bob = 0) would overwrite
+	# the hover offset with 0 every 3rd frame, producing the small
+	# vertical jitter on top of the bob the player reported. Bail
+	# early so hover units stay smooth.
+	if stats and "is_hover_tank" in stats and (stats.get("is_hover_tank") as bool):
+		return
 	# Mech walk: swing each leg around its hip and bob the torso slightly.
 	# Per-member stride speed/phase/swing makes the squad feel like four
 	# individuals walking together rather than a parade.
@@ -9691,6 +12383,11 @@ func _apply_walk_bob() -> void:
 
 
 func _reset_walk_bob() -> void:
+	# Hover-tank guard: see _apply_walk_bob comment. _reset_walk_bob's
+	# tiny idle sway (sin(idle_phase) * 0.012) would overwrite the
+	# hover bob every ~15Hz tick, beating against the smooth bob.
+	if stats and "is_hover_tank" in stats and (stats.get("is_hover_tank") as bool):
+		return
 	# Idle: lerp legs back to neutral, then add a slow weight-shift sway so
 	# the mechs don't look frozen while standing.
 	var t_idle: float = _idle_time
@@ -9752,6 +12449,88 @@ func play_shoot_anim() -> void:
 			recoil[ri] = 1.0
 
 
+func play_melee_anim() -> void:
+	## Melee swing animation. Two layers:
+	##   (1) Forward chassis lunge — drives any registered cannon
+	##       pivots forward by RECOIL_DISTANCE via the recoil tick.
+	##       Mostly a no-op for melee-only units (no cannons), but
+	##       harmless when cannons happen to be present.
+	##   (2) Weapon swing tween — every Node3D in the "melee_pivots"
+	##       group under each alive member gets a short tween that
+	##       rotates the pivot ~55° forward (around its `melee_swing_axis`
+	##       meta — "x" for daggers, "z" for hammer) then snaps back to
+	##       the rest rotation cached in `melee_rest_rot`. Sells the
+	##       blade thrust / hammer overhead-swing visibly at RTS zoom.
+	## Called by CombatComponent on every melee strike; idle squads pay
+	## zero cost.
+	_recoil_active_until_msec = Time.get_ticks_msec() + 260
+	for i: int in _member_data.size():
+		if i >= member_hp.size() or member_hp[i] <= 0:
+			continue
+		var member: Node3D = _member_data[i]["root"]
+		if not is_instance_valid(member) or not member.visible:
+			continue
+		var recoil: Array = _member_data[i]["recoil"] as Array
+		for ri: int in recoil.size():
+			recoil[ri] = -1.0  # negative = forward lunge instead of aft recoil
+		# Weapon swing tween — walk the member's subtree for any
+		# Node3D registered in "melee_pivots" and animate it.
+		_swing_melee_pivots_for_member(member)
+
+
+func _swing_melee_pivots_for_member(member: Node3D) -> void:
+	## Finds every "melee_pivot"-tagged Node3D in the member's subtree
+	## and launches a quick swing tween. Each pivot's rest rotation
+	## (stored in meta on build) is the return target.
+	## Swing arc: ~55° forward in 0.10s, then back to rest in 0.18s.
+	## Tween auto-frees itself.
+	const SWING_RAD: float = 0.96   # ~55°
+	const SWING_OUT_SEC: float = 0.10
+	const SWING_BACK_SEC: float = 0.18
+	for child: Node in _flatten_subtree(member):
+		if not (child is Node3D):
+			continue
+		if not (child as Node).is_in_group("melee_pivots"):
+			continue
+		var pivot: Node3D = child as Node3D
+		if not is_instance_valid(pivot):
+			continue
+		var rest_rot: Vector3 = pivot.get_meta("melee_rest_rot", pivot.rotation) as Vector3
+		var axis: String = pivot.get_meta("melee_swing_axis", "x") as String
+		var swing_rot: Vector3 = rest_rot
+		match axis:
+			"x": swing_rot.x = rest_rot.x - SWING_RAD  # forward = -X (toward target)
+			"z": swing_rot.z = rest_rot.z - SWING_RAD  # overhead chop
+			_: swing_rot.x = rest_rot.x - SWING_RAD
+		# Cancel any in-flight melee tween on this pivot — back-to-back
+		# strikes shouldn't queue up overlapping arcs.
+		var prev_tween_v: Variant = pivot.get_meta("melee_tween", null)
+		if prev_tween_v != null and prev_tween_v is Tween:
+			var prev_tween: Tween = prev_tween_v as Tween
+			if prev_tween.is_valid():
+				prev_tween.kill()
+		var tw: Tween = pivot.create_tween()
+		tw.tween_property(pivot, "rotation", swing_rot, SWING_OUT_SEC).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		tw.tween_property(pivot, "rotation", rest_rot, SWING_BACK_SEC).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN_OUT)
+		pivot.set_meta("melee_tween", tw)
+
+
+func _flatten_subtree(root: Node) -> Array[Node]:
+	## DFS-flatten a node's subtree. Used by the melee-swing dispatch
+	## to find every "melee_pivots"-tagged descendant in a member's
+	## tree. Cheap for typical squad-member subtrees (~30 nodes).
+	var out: Array[Node] = []
+	var stack: Array[Node] = [root]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if not is_instance_valid(n):
+			continue
+		out.append(n)
+		for c: Node in n.get_children():
+			stack.append(c)
+	return out
+
+
 func _tick_recoil(delta: float) -> void:
 	const RECOIL_DECAY: float = 8.0
 	const RECOIL_DISTANCE: float = 0.18
@@ -9763,15 +12542,23 @@ func _tick_recoil(delta: float) -> void:
 		var changed: bool = false
 		for c: int in cannons.size():
 			var r: float = recoil[c] as float
-			if r <= 0.0:
+			# Skip rest-state cannons. r > 0 = aft kick (gun recoil);
+			# r < 0 = forward lunge (melee swing). Both decay back to 0.
+			if r == 0.0:
 				continue
-			r = maxf(0.0, r - delta * RECOIL_DECAY)
+			# Decay magnitude toward zero, preserving sign so a melee
+			# lunge (r=-1.0) decays through (-0.8, -0.6, ...) → 0.
+			if r > 0.0:
+				r = maxf(0.0, r - delta * RECOIL_DECAY)
+			else:
+				r = minf(0.0, r + delta * RECOIL_DECAY)
 			recoil[c] = r
 			var pivot: Node3D = cannons[c]
 			if is_instance_valid(pivot):
 				# Recoil is an OFFSET on top of the cannon's rest position; the
 				# rest may be non-zero (e.g., Bulwark's hull-mounted gun sits at
 				# the chassis front), so we must add to it instead of replacing.
+				# Positive r → aft (+RECOIL_DISTANCE); negative r → forward.
 				var base_z: float = 0.0
 				if c < rest_z.size():
 					base_z = rest_z[c] as float
@@ -10044,6 +12831,17 @@ func _damage_priority_order() -> Array[int]:
 func take_damage(amount: int, attacker: Node3D = null) -> void:
 	if alive_count <= 0:
 		return
+	# Nanite regen out-of-combat gate (stats.nanite_regen_per_sec > 0).
+	# Stamping on every incoming damage call keeps the regen suppressed
+	# for NANITE_OUT_OF_COMBAT_SEC after the most recent hit, regardless
+	# of whether members died from it.
+	_last_damage_taken_msec = Time.get_ticks_msec()
+	# Reset the fractional accumulator so a hit interrupts a heal that
+	# was mid-accumulation instead of preserving it across the combat
+	# window — feels weird otherwise (HP ticks up the instant you stop
+	# being shot, even mid-fight, because the accum from 6 s ago was
+	# already at 0.9 HP).
+	_nanite_regen_accum = 0.0
 
 	# Barrier Bloom (Phalanx Shield) and any future incoming-damage
 	# aura applies BEFORE armor and member splitting -- the shield
@@ -10254,6 +13052,20 @@ func _die() -> void:
 	_spawn_squad_death_explosion()
 	_request_camera_shake(0.35)
 
+	# Death detonation passive (Matador Martyr branch). When the squad
+	# is fully wiped, deal AS-flavoured AoE damage to all hostile
+	# entities in stats.death_detonation_radius. Uses the unit's
+	# armor_class to map a sensible role mult: anti-structure damage
+	# bites unarmored / light hardest, with structures taking a chip.
+	# Reuses ParticleEmitterManager flash + smoke for VFX so the AoE
+	# reads visually distinct from the regular squad-death cluster
+	# fx.
+	if stats and "death_detonation_radius" in stats and "death_detonation_damage" in stats:
+		var det_radius: float = stats.death_detonation_radius
+		var det_damage: int = stats.death_detonation_damage
+		if det_radius > 0.0 and det_damage > 0:
+			_apply_death_detonation(det_radius, det_damage)
+
 	var wreck: Node = Wreck.create_from_unit(stats, global_position)
 	get_tree().current_scene.add_child(wreck)
 
@@ -10273,6 +13085,46 @@ func _die() -> void:
 		audio.play_unit_destroyed(global_position, heavy)
 
 	queue_free()
+
+
+func _apply_death_detonation(radius: float, base_dmg: int) -> void:
+	## Matador Martyr death-AoE. Applies AS-flavour role mult vs each
+	## target's armor class via CombatTables so the same 50 dmg cluster
+	## bites unarmored for full damage but only chips heavies — keeps
+	## the Martyr's role as "anti-light skirmisher with kamikaze
+	## finisher" instead of a heavy-tank counter.
+	var det_pos: Vector3 = global_position
+	var shooter_owner: int = owner_id
+	var scene: Node = get_tree().current_scene if get_tree() else null
+	var idx: SpatialIndex = SpatialIndex.get_instance(scene) if scene else null
+	var candidates: Array = idx.nearby(det_pos, radius) if idx else []
+	for raw: Variant in candidates:
+		if raw == null or not is_instance_valid(raw):
+			continue
+		var ent: Node = raw as Node
+		if ent == null or ent == self:
+			continue
+		if not ent.has_method("take_damage"):
+			continue
+		var ent_owner: int = (ent.get("owner_id") as int) if "owner_id" in ent else 0
+		if ent_owner == shooter_owner:
+			continue
+		if "alive_count" in ent and (ent.get("alive_count") as int) <= 0:
+			continue
+		var t_armor: StringName = &"unarmored"
+		if "stats" in ent:
+			var ts: Resource = ent.get("stats")
+			if ts and "armor_class" in ts:
+				t_armor = ts.get("armor_class") as StringName
+		var role_mult: float = CombatTables.get_role_modifier(&"AS", t_armor)
+		var armored_dmg: int = maxi(int(float(base_dmg) * role_mult), 1)
+		(ent as Node).call("take_damage", armored_dmg, self)
+	# Explosion VFX — mirrors _kamikaze_detonate (CombatComponent).
+	var pem: Node = scene.get_node_or_null("ParticleEmitterManager") if scene else null
+	if pem and pem.has_method("emit_flash"):
+		pem.emit_flash(det_pos, Color(1.0, 0.6, 0.1, 1.0))
+	if pem and pem.has_method("emit_smoke"):
+		pem.emit_smoke(det_pos, Vector3(0.0, 1.5, 0.0), Color(0.3, 0.2, 0.15, 0.8))
 
 
 func _apply_damage_flash() -> void:
@@ -10381,6 +13233,80 @@ func get_member_positions() -> Array[Vector3]:
 		if is_instance_valid(member) and member.visible:
 			positions.append(member.global_position + Vector3(0, chest_offset, 0))
 	return positions
+
+
+func get_muzzle_positions_for_weapon(weapon: WeaponResource) -> Array[Vector3]:
+	## Per-weapon muzzle override. Most units fire every weapon from
+	## the same cannons array (returned by get_muzzle_positions), but
+	## a few apex units mount different weapons on different parts of
+	## the chassis. Sol Invictus is the canonical case: the Solar
+	## Lance beam fires from the head-mounted lens, while the Body
+	## Plasma Turrets fire from the wrist pods. Returns an empty array
+	## when the default behaviour is acceptable so combat falls back
+	## to get_muzzle_positions.
+	if weapon == null:
+		return [] as Array[Vector3]
+	if stats == null:
+		return [] as Array[Vector3]
+	# Sol Invictus per-weapon muzzles.
+	if stats.unit_name.findn("Sol Invictus") >= 0:
+		var positions: Array[Vector3] = []
+		# Solar Lance → head muzzle marker. Body Plasma Turrets →
+		# generic cannons list (which IS the arm pivots for this build).
+		if weapon.weapon_name == "Solar Lance":
+			for i: int in _member_data.size():
+				if i >= member_hp.size() or member_hp[i] <= 0:
+					continue
+				var data: Dictionary = _member_data[i]
+				var member: Node3D = data["root"]
+				if not is_instance_valid(member):
+					continue
+				var marker: Node3D = member.get_node_or_null("SolarLanceMuzzle") as Node3D
+				if is_instance_valid(marker):
+					positions.append(marker.global_position)
+			return positions
+		# Plasma turrets — fall through to the default arm-cannon path.
+	# Flame weapons — spawn the projectile from the actual flamethrower
+	# nozzle on each member instead of the chassis centre. Walks the
+	# member subtree for a Marker3D named "FlamerMuzzle"; falls back to
+	# the default cannons list when a member doesn't carry one (e.g.
+	# units that mount a flame weapon in data but lack a dedicated mesh
+	# nozzle, like Inquisitor Tank's auxiliary flamer).
+	var ws: String = String(weapon.projectile_style) if "projectile_style" in weapon else ""
+	if ws == "flame":
+		var fpositions: Array[Vector3] = []
+		for i: int in _member_data.size():
+			if i >= member_hp.size() or member_hp[i] <= 0:
+				continue
+			var data: Dictionary = _member_data[i]
+			var member: Node3D = data["root"]
+			if not is_instance_valid(member):
+				continue
+			var marker: Node3D = _find_marker_named(member, "FlamerMuzzle")
+			if is_instance_valid(marker):
+				fpositions.append(marker.global_position)
+		if not fpositions.is_empty():
+			return fpositions
+		# Fall through to default for units without a FlamerMuzzle node.
+	return [] as Array[Vector3]
+
+
+func _find_marker_named(root: Node, marker_name: StringName) -> Node3D:
+	## Depth-first search for a child Marker3D / Node3D with the given
+	## name under `root`. Returns null when nothing matches. Used by
+	## get_muzzle_positions_for_weapon to locate weapon-specific muzzle
+	## markers that aren't direct children of the member root (e.g.
+	## the Cremator's FlamerMuzzle is nested inside CremnatorFlamer →
+	## torso_pivot → member).
+	if not is_instance_valid(root):
+		return null
+	for child in root.get_children():
+		if child.name == marker_name and child is Node3D:
+			return child as Node3D
+		var nested: Node3D = _find_marker_named(child, marker_name)
+		if nested != null:
+			return nested
+	return null
 
 
 func get_muzzle_positions() -> Array[Vector3]:

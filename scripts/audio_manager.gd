@@ -285,13 +285,18 @@ func _setup_voiceline_bus() -> void:
 		chorus.set_voice_rate_hz(0, 0.7)
 		chorus.set_voice_level_db(0, -6.0)
 	AudioServer.add_bus_effect(idx, chorus)
-	# Bus level — pushed +5 dB so the bandpass-attenuated VO is
-	# clearly audible against the combat SFX. Per-faction tweaks happen
-	# at the per-call level (Anvil VO gets a small extra dB boost in
-	# `_play_voiceline`). The +5 dB here is a pre-amp on a bus that the
-	# Voiceline slider will modulate; slider default is 40% (≈ -8 dB),
-	# so the effective level is +5 + linear_to_db(0.4) ≈ -3 dB overall.
-	AudioServer.set_bus_volume_db(idx, 5.0)
+	# Pre-amp the bandpass-attenuated VO via an Amplify EFFECT (not the
+	# bus volume) so the Voiceline slider can drive bus volume cleanly
+	# without losing the boost. Previously the +5 dB was on bus volume,
+	# which the settings slider then read back as ≈178% linear, clamped
+	# to 100% (playtest 2026-05-15: opening the in-game pause menu
+	# cranked the Voices slider to max).
+	var preamp := AudioEffectAmplify.new()
+	preamp.volume_db = 5.0
+	AudioServer.add_bus_effect(idx, preamp)
+	# Bus level matches the slider's intended 40% default so reading
+	# the bus volume back round-trips to ~40% on the slider.
+	AudioServer.set_bus_volume_db(idx, linear_to_db(0.4))
 	AudioServer.set_bus_mute(idx, false)
 	_vl_bus_idx = idx
 

@@ -1,0 +1,85 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_twin_lasers"]
+script = ExtResource("2")
+weapon_name = "Twin Laser Beams"
+role_tag = &"AAir"
+damage_tier = &"moderate"
+range_tier = &"long"
+range_value = 26.0
+rof_tier = &"fast"
+projectile_style = &"beam"
+base_accuracy = 0.92
+salvo_count = 2
+
+damage = 28
+range = 26.0
+rof_seconds = 0.55
+use_explicit_air = true
+engages_air_explicit = true
+air_damage_mult = 1.0
+mult_vs_unarmored_v2 = 0.8
+mult_vs_light_v2 = 1.0
+mult_vs_medium_v2 = 1.1
+mult_vs_heavy_v2 = 0.7
+mult_vs_structure_v2 = 0.4
+mult_vs_light_air_v2 = 1.3
+mult_vs_heavy_air_v2 = 1.0
+
+[sub_resource type="Resource" id="weapon_guided_missile"]
+script = ExtResource("2")
+weapon_name = "Guided Heavy Missile"
+role_tag = &"AP"
+damage_tier = &"very_high"
+range_tier = &"long"
+range_value = 28.0
+rof_tier = &"slow"
+projectile_style = &"missile"
+base_accuracy = 0.92
+splash_radius = 2.5
+splash_damage_mult = 0.55
+
+damage = 180
+range = 28.0
+rof_seconds = 30.0
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 1.2
+mult_vs_medium_v2 = 1.3
+mult_vs_heavy_v2 = 1.2
+mult_vs_structure_v2 = 1.0
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
+
+[resource]
+script = ExtResource("1")
+unit_name = "Valkyrie Striker"
+display_name = "Valkyrie Striker"
+unit_class = &"aircraft"
+hp_total = 380
+hp_per_unit = 380
+armor_class = &"light"
+speed_tier = &"very_fast"
+sight_tier = &"long"
+squad_size = 1
+population = 8
+cost_salvage = 280
+cost_fuel = 30
+build_time = 32.0
+built_at = &"inheritor_construction_site"
+unlock_prerequisite = &"sky_lattice"
+primary_weapon = SubResource("weapon_twin_lasers")
+secondary_weapon = SubResource("weapon_guided_missile")
+is_aircraft = true
+flight_altitude = 9.0
+flight_speed = 16.0
+special_description = "Inheritor light air — Valkyrie Striker. Twin laser beams (AAir, Moderate, Long, fast hitscan) cover air superiority; Guided Heavy Missile (AP, Very High, 30s rearm) for ground strike. Requires Architect's Network."
+
+speed = 16.0
+sight_radius = 26.0
+armor_reduction = 0.15

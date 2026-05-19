@@ -12,6 +12,33 @@ extends Control
 class _BuildingDotsOverlay extends Control:
 	## Back-reference set immediately after construction.
 	var mm: Minimap = null
+	## Sticky cache of enemy buildings + units that have been spotted
+	## at least once. AoE-style memory: the moment the player's FoW
+	## explores the cell under an enemy entity, the instance id is
+	## added here and the entity's dot draws unconditionally on every
+	## subsequent frame. Removes the entire class of flicker caused by
+	## fog cells cycling VISIBLE ↔ EXPLORED at sight-disc edges, AND
+	## the dot-per-frame draw cadence racing against the FoW grid
+	## update cadence (different rates → minimap dots blink between
+	## redraws).
+	var _ever_seen: Dictionary = {}
+	## Last-known XZ position per enemy unit iid. Updated every frame
+	## the unit is currently visible; the minimap draws the dot at
+	## the LAST KNOWN position for a few seconds after the unit leaves
+	## vision, then it fades out. This matches RTS standard "scouting
+	## memory" while preventing the per-frame on/off flicker that came
+	## from raw is_visible_world checks.
+	var _unit_last_seen: Dictionary = {}  # iid -> { pos: Vector2, msec: int }
+	## How long a previously-seen enemy unit dot stays on the minimap
+	## after vision is lost. Beyond this window the dot fades + removes.
+	const UNIT_MEMORY_MSEC: int = 2500
+
+	func _process(_delta: float) -> void:
+		# Repaint every frame so the cache lookups + dot rebuilds
+		# always reflect the latest game state — minimum cost (just
+		# walks buildings + units groups), and the previous 3 Hz cadence
+		# was racing against the fog grid update rate.
+		queue_redraw()
 
 	func _draw() -> void:
 		if mm == null:
@@ -26,11 +53,17 @@ class _BuildingDotsOverlay extends Control:
 			if not is_instance_valid(node):
 				continue
 			var b_owner: int = node.get("owner_id") as int
-			# Enemy buildings only show once explored (AoE-style memory);
-			# friendly / ally buildings always appear.
-			if fow and b_owner != 0 \
-					and not fow.is_explored_world((node as Node3D).global_position):
-				continue
+			var iid: int = node.get_instance_id()
+			# Local player + ally buildings always show. Enemy buildings
+			# show once their cell has been explored at least once —
+			# after that, the sticky cache pins them visible regardless
+			# of subsequent fog churn.
+			if b_owner != 0:
+				if not _ever_seen.has(iid):
+					if fow and fow.is_explored_world((node as Node3D).global_position):
+						_ever_seen[iid] = true
+					else:
+						continue
 			var pos: Vector2 = mm._world_to_map(
 				(node as Node3D).global_position, map_size, half_world
 			)
@@ -42,6 +75,52 @@ class _BuildingDotsOverlay extends Control:
 				),
 				color,
 			)
+		# --- Enemy unit "last seen" memory. Same flicker-suppression
+		# logic for unit dots: when an enemy unit is currently visible,
+		# stamp its position + the current msec. When it isn't, draw it
+		# at the cached position for up to UNIT_MEMORY_MSEC, then drop
+		# the entry. Friendly units don't need this — they're always
+		# visible to the player.
+		var now_msec: int = Time.get_ticks_msec()
+		var fresh_units: Dictionary = {}
+		for node: Node in get_tree().get_nodes_in_group("units"):
+			if not is_instance_valid(node):
+				continue
+			var u_owner: int = node.get("owner_id") as int
+			if u_owner == 0:
+				continue  # friendlies drawn by the main minimap pass
+			if "alive_count" in node and (node.get("alive_count") as int) <= 0:
+				continue
+			var n3: Node3D = node as Node3D
+			if n3 == null:
+				continue
+			var uiid: int = node.get_instance_id()
+			var live_visible: bool = (fow != null and fow.is_visible_world(n3.global_position))
+			if live_visible:
+				var live_pos: Vector2 = mm._world_to_map(n3.global_position, map_size, half_world)
+				fresh_units[uiid] = {"pos": live_pos, "msec": now_msec}
+		# Merge fresh sightings into the rolling cache, evict expired entries.
+		for k_v: Variant in fresh_units.keys():
+			_unit_last_seen[k_v] = fresh_units[k_v]
+		var stale_keys: Array = []
+		for k2_v: Variant in _unit_last_seen.keys():
+			var entry: Dictionary = _unit_last_seen[k2_v] as Dictionary
+			if now_msec - (entry["msec"] as int) > UNIT_MEMORY_MSEC:
+				stale_keys.append(k2_v)
+		for k3_v: Variant in stale_keys:
+			_unit_last_seen.erase(k3_v)
+		# Draw cached enemy unit pips. The main minimap pass STILL draws
+		# currently-visible enemy units on top of these (so a live dot
+		# replaces the cached one seamlessly when both fire on the same
+		# frame); the cache exists for the FROM-LAST-SEEN gap.
+		for cached_v: Variant in _unit_last_seen.values():
+			var cached_entry: Dictionary = cached_v as Dictionary
+			var cached_pos: Vector2 = cached_entry["pos"] as Vector2
+			var age_msec: int = now_msec - (cached_entry["msec"] as int)
+			var fade_t: float = clampf(1.0 - float(age_msec) / float(UNIT_MEMORY_MSEC), 0.0, 1.0)
+			var ec: Color = mm._enemy_color
+			ec.a = fade_t * 0.85
+			draw_circle(cached_pos, 2.0, ec)
 
 const MAP_WORLD_SIZE: float = 300.0
 const DOT_SIZE: float = 3.0
@@ -55,7 +134,11 @@ var _wreck_color := Color(0.4, 0.35, 0.25, 0.5)
 ## Satellite-pile wrecks ping bright on the minimap regardless of fog
 ## of war. They're the player's incentive to scout to that point — the
 ## "go investigate" signal — and dimming/hiding them defeats the purpose.
-var _satellite_wreck_color := Color(1.00, 0.85, 0.30, 1.0)
+## Chip-holding satellite piles ping in microchip violet (matches the
+## resource chip color in the HUD: RES_COLOR_MICROCHIPS) so the player
+## learns "purple dot = chips here" at a glance. Was amber, swapped to
+## violet per playtest 2026-05-15.
+var _satellite_wreck_color := Color(0.85, 0.55, 1.00, 1.0)
 
 ## Faction-coloured decorative border + ping flash overlay. Border is
 ## drawn each frame around the actual map area; pings are short-lived
@@ -226,6 +309,12 @@ void fragment() {
 	_building_dots_rect.mm = self
 	# Match parent size so _world_to_map coordinate mapping is identical.
 	_building_dots_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Force the overlay above the fog tint rect regardless of tree
+	# order. The tree-order rule already puts it on top because we
+	# added it second, but a non-default render_priority on the fog
+	# shader could otherwise lift the fog above it and re-introduce
+	# the flicker. Explicit z_index makes the layering bulletproof.
+	_building_dots_rect.z_index = 5
 	add_child(_building_dots_rect)
 
 
@@ -508,6 +597,15 @@ func _draw() -> void:
 				continue
 			draw_circle(pos, 2.0, _wreck_color)
 
+	# Selected-unit highlight set — instance IDs of every unit in the
+	# active selection. Drawn in WHITE on top of the faction color so
+	# the player can spot their squad from any camera position.
+	var selected_iids: Dictionary = {}
+	var sm_node: Node = get_tree().current_scene.get_node_or_null("SelectionManager") if get_tree() else null
+	if sm_node and sm_node.has_method("get_selected_instance_ids"):
+		for iid: int in (sm_node.call("get_selected_instance_ids") as Array[int]):
+			selected_iids[iid] = true
+
 	# Draw units. Aircraft get a slightly larger ring + a small
 	# diamond-shape pip so the player can tell at a glance whether
 	# a dot is on the ground or in the air. Stealthed enemy units
@@ -534,6 +632,9 @@ func _draw() -> void:
 			continue
 		var pos: Vector2 = _world_to_map(node.global_position, map_size, half_world)
 		var color: Color = _color_for_owner(node.get("owner_id") as int)
+		# Selected friendlies override to white so they pop on the minimap.
+		if selected_iids.has(node.get_instance_id()):
+			color = Color.WHITE
 		var is_air: bool = node.is_in_group("aircraft")
 		if is_air:
 			# Aircraft pip — outer ring + filled diamond inside.
@@ -655,9 +756,19 @@ func _click_minimap(local_pos: Vector2) -> void:
 
 
 func _minimap_move_command(local_pos: Vector2) -> void:
+	## Right-click on the minimap. Routes through the SelectionManager
+	## helper that prioritizes rally-point setting when the selection is
+	## a production-capable building with no units alongside it, falling
+	## back to a normal move-to-world otherwise. Mirrors the in-world
+	## right-click priority order so the minimap feels identical to
+	## clicking on the actual ground.
 	var world_pos: Vector3 = _local_to_world(local_pos)
 	var sm: Node = get_tree().current_scene.get_node_or_null("SelectionManager") if get_tree() else null
-	if sm and sm.has_method("command_move_to_world"):
+	if sm == null:
+		return
+	if sm.has_method("command_minimap_right_click"):
+		sm.call("command_minimap_right_click", world_pos)
+	elif sm.has_method("command_move_to_world"):
 		sm.call("command_move_to_world", world_pos, false)
 
 

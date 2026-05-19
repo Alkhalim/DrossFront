@@ -78,6 +78,16 @@ var _first_strike_target_id: int = 0
 var _ramp_target_id: int = 0
 var _ramp_hit_count: int = 0
 
+## Sustain rampup bookkeeping (WeaponResource.sustain_rampup_*).
+## Tracks wall-clock seconds the unit has been firing at the SAME
+## target so fire rate can ramp up over time. Distinct from
+## _ramp_target_id (hit-count damage ramp) because sustain ramps
+## even on misses or between salvo cycles — it's about target dwell,
+## not hit accumulation. Used by Boyar Salvo (Multi-Rocket Thrower)
+## to spool up its rocket cadence the longer Dozer holds aim.
+var _sustain_target_id: int = 0
+var _sustain_engagement_start_msec: int = 0
+
 var _glowing_volley_mult: float = 0.0
 ## When true, the queued glowing volley fires as a 5-pellet shotgun
 ## salvo (Harbinger Heavy Volley). When false, it fires as a SINGLE
@@ -159,6 +169,12 @@ var _combat_tick_count: int = 0
 ## explicit attack-target click.
 const COMBAT_LOCKOUT_DURATION_MSEC: int = 2000
 var _chase_lockout_until_msec: int = 0
+## Per-unit throttle on the melee-specific chase re-issue path. Melee
+## units bypass the chase lockout to continuously pile in toward the
+## enemy, but we still don't want to spam command_move every physics
+## frame — 4 Hz (250 ms) is plenty for "close the gap" behaviour and
+## keeps the kernel + flow-field churn under control.
+var _melee_pile_next_msec: int = 0
 ## Cached result of `_unit.is_in_group("aircraft")`. Constant for the
 ## unit's lifetime, so cache once on _ready instead of paying the
 ## string-keyed group lookup on every combat tick + every search +
@@ -184,6 +200,31 @@ var _sight_radius_cached: float = 20.0
 ## SpatialIndex.get_instance every call adds up under sustained
 ## combat.
 var _spatial_idx_cached: SpatialIndex = null
+
+## Sustained-beam channel state — used by weapons whose
+## WeaponResource.is_sustained_beam is true (Sol Invictus Solar Lance).
+## While `_sustained_active` is true the combat tick applies damage
+## per-frame to `_sustained_target` and updates the beam visual's
+## intensity, instead of firing single shots. The channel cancels
+## on target death, target change, or the shooter receiving a move
+## order. Entering channel sets _fire_cooldown to the weapon's
+## rof_seconds + duration so we don't re-trigger fire mid-channel.
+var _sustained_active: bool = false
+var _sustained_remaining: float = 0.0
+var _sustained_duration: float = 0.0
+var _sustained_target_iid: int = 0
+var _sustained_weapon: WeaponResource = null
+## Sustained beam visual — typed loosely (Node3D, not the
+## SustainedSolarBeam class) so combat_component.gd doesn't fail to
+## parse before Godot has refreshed its class_name registry for the
+## newly added SustainedSolarBeam script. We load + instantiate the
+## script via preload below to side-step the class_name dependency.
+var _sustained_visual: Node3D = null
+const SUSTAINED_BEAM_SCRIPT: GDScript = preload("res://scripts/sustained_solar_beam.gd")
+## Damage accumulator — fractional damage from the per-frame ramp
+## adds up here; whenever it crosses 1, we apply that many points
+## of damage and subtract. Avoids losing < 1 dmg/tick to int rounding.
+var _sustained_dmg_accum: float = 0.0
 
 const SEARCH_INTERVAL: float = 0.5
 
@@ -411,7 +452,44 @@ func _chase_position(target: Node3D, primary_range: float) -> Vector3:
 	if unit_is_kamikaze:
 		return enemy_pos  # aim exactly at enemy; detonation check handles kill
 	if is_melee:
-		return enemy_pos + to_unit * 0.3
+		# Building-target carve-out: building centres are INSIDE the
+		# footprint (a 3.5u-wide structure has its centre 1.75u
+		# inside the wall). A 3u melee weapon homing to the centre
+		# can never reach it — the unit walks INTO the building's
+		# footprint and gets pushed out, never landing in firing
+		# range. Per playtest 2026-05-19, this made melee units
+		# unable to attack buildings at all. Fix: aim for the
+		# building's NEAREST EDGE along the approach direction +
+		# the standard 0.6u side-of-enemy offset.
+		var building_extent: float = 0.0
+		if "stats" in target and target.get("stats") != null:
+			var bstats: Resource = target.get("stats") as Resource
+			if bstats and "footprint_size" in bstats:
+				var fs: Vector3 = bstats.get("footprint_size") as Vector3
+				# Square-footprint approximation. Use max(x, z) /2
+				# so a slightly-rectangular footprint still snaps
+				# the unit outside the longest edge.
+				building_extent = maxf(fs.x, fs.z) * 0.5
+		if building_extent > 0.01:
+			# Aim 0.4u OUTSIDE the building's nearest edge along the
+			# approach direction. Sits the unit just past the wall
+			# where the melee weapon can reach the building body.
+			return enemy_pos + to_unit * (building_extent + 0.4)
+		# Per-unit approach: aim 0.6 u from the enemy along the
+		# DIRECTION OF THIS UNIT'S CURRENT POSITION. Each squad member
+		# naturally approaches from its own side, so the formation
+		# spreads around the enemy organically instead of every unit
+		# stacking on top of the same approach cell.
+		# Math: to_unit = (unit - enemy).normalized(), so chase_target
+		# = enemy + 0.6 u toward the unit. Unit walks toward that
+		# target; arrival_radius=0.3 keeps it ~0.3–0.9 u from the
+		# enemy on its own side. Well inside Matador (3.0 u),
+		# Ashigaru (2.0 u), Conquistador Hammer (3.5 u) ranges.
+		# Previously the chase returned enemy_pos directly which
+		# UNDID group_aura's radial ring spread (every melee unit
+		# converged on the same single cell, producing the "clump
+		# but don't reach" pattern the player reported 2026-05-18).
+		return enemy_pos + to_unit * 0.6
 
 	# Chase-distance factor — how far INSIDE primary_range to aim.
 	# Aircraft use 0.5: aircraft arrival_radius is 6u (intentionally wide
@@ -540,6 +618,12 @@ func _physics_process(delta: float) -> void:
 	_fire_cooldown -= delta
 	_secondary_cooldown -= delta
 	_search_timer -= delta
+	# Sustained-beam channel tick — runs while the Solar Lance is
+	# channelling. Tick handles cancel detection + damage ramp +
+	# beam visual updates; returns early naturally when the channel
+	# isn't active.
+	if _sustained_active:
+		_tick_sustained_channel(delta)
 	if _silence_remaining > 0.0:
 		_silence_remaining = maxf(0.0, _silence_remaining - delta)
 	if _damage_mult_remaining > 0.0:
@@ -800,6 +884,18 @@ func _physics_process(delta: float) -> void:
 		_unit.global_position, _current_target.global_position, _shooter_is_air_cached,
 		_current_target.is_in_group("aircraft")
 	)
+	# Building-edge correction: building target centres sit INSIDE
+	# the footprint, so the raw distance to centre is artificially
+	# long. Subtract the footprint extent so dist reads as
+	# unit-to-wall-edge distance. Without this melee weapons (range
+	# 2.5-3.5u) NEVER satisfy `dist <= primary_range` on building
+	# targets, because the unit's at the wall but dist says it's
+	# still 1.5-2u from the building centre (playtest 2026-05-19).
+	if _current_target and "stats" in _current_target:
+		var ts_v: Variant = _current_target.get("stats")
+		if ts_v != null and "footprint_size" in ts_v:
+			var fs: Vector3 = ts_v.get("footprint_size") as Vector3
+			dist = maxf(0.0, dist - maxf(fs.x, fs.z) * 0.5)
 	var stats: UnitStatResource = _stats_cached
 	var primary: WeaponResource = _primary_weapon_cached
 	var primary_range: float = _primary_range_cached
@@ -867,6 +963,19 @@ func _physics_process(delta: float) -> void:
 	var engage_threshold: float = primary_range
 	if _was_in_range:
 		engage_threshold = primary_range * 1.10
+	# Melee re-chase carve-out (playtest 2026-05-19: "melee units have
+	# issues closing in / keeping fights going as squads die"). After
+	# the first hit lands, _was_in_range latches true, which suppresses
+	# re-chase even if the enemy walks away. For melee weapons that's
+	# fatal — a target drifting 0.5u out of reach kills the engagement.
+	# When the unit is melee AND `dist` has crept past 1.2× weapon
+	# range, drop the latch so the chase branch re-fires.
+	var is_unit_melee_now: bool = false
+	if primary and (primary.range_tier == &"melee" or primary.resolved_range() <= 3.0):
+		is_unit_melee_now = true
+	if _was_in_range and is_unit_melee_now and dist > primary_range * 1.20:
+		_was_in_range = false
+		engage_threshold = primary_range  # reset the hysteresis margin
 	if dist <= engage_threshold:
 		_was_in_range = true
 		# Halt the unit, then fire. Firing only happens within the actual
@@ -897,6 +1006,12 @@ func _physics_process(delta: float) -> void:
 		if dist <= primary_range and primary and _fire_cooldown <= 0.0 and _silence_remaining <= 0.0:
 			if not target_is_air or primary.engages_air():
 				_fire_weapon(primary, true)
+				# RTB lockout — aircraft with rtb_after_attack on their
+				# stats fly back to the nearest friendly HQ after each
+				# primary discharge. Used by the Heliarch heavy bomber
+				# so a single thermobaric drop commits the airframe.
+				if stats.rtb_after_attack and _unit and _unit.has_method("begin_return_to_base"):
+					_unit.call("begin_return_to_base")
 
 		# Autocast hook — units whose stats define an ability with
 		# ability_autocast = true (Hammerhead's Missile Barrage)
@@ -928,7 +1043,44 @@ func _physics_process(delta: float) -> void:
 		# threshold yet (_was_in_range stays false until first fire). Lock
 		# for COMBAT_LOCKOUT_DURATION_MSEC so we don't re-issue every tick
 		# while the kernel walks the unit toward the target.
-		if forced_target and not _was_in_range and not chase_locked:
+		# Lockout-override: if the unit has effectively arrived at its
+		# chase destination (settled, low velocity) but still isn't in
+		# range — the target was moving and our chase point went stale —
+		# bypass the lockout and re-chase the target's NEW position.
+		# Without this override a chasing unit could "follow but never
+		# shoot" a kiting enemy for the full 2s lockout window each
+		# stale chase, never closing the gap (report 2026-05-16).
+		var chase_settled: bool = false
+		if chase_locked and forced_target and _unit:
+			var v: Vector3 = (_unit.get("velocity") as Vector3) if "velocity" in _unit else Vector3.ZERO
+			# 1.5u/s ≈ "no longer making meaningful progress toward chase
+			# destination". Picked above the kernel's separation-jitter
+			# noise floor so a unit shoved sideways by neighbours doesn't
+			# count as settled, but well below any real walking speed.
+			if Vector2(v.x, v.z).length() < 1.5:
+				chase_settled = true
+		# Melee-specific override: melee units should pile in continuously
+		# while out of range. Even mid-walk, if the enemy has drifted
+		# significantly from the cached chase target (forced_target.position
+		# moved or a different ring slot would now be closer), re-issue.
+		# Without this override a chasing melee unit walks to its initial
+		# chase target, finds the enemy has moved 2 m, and waits up to
+		# 2 s for the lockout to expire before adjusting. The user
+		# reported melee units "not piling in to close gaps" (2026-05-18).
+		# Gate: only when the unit is genuinely melee (range ≤ 3 u) so
+		# ranged chasers still respect the lockout cadence.
+		var chase_melee_pile: bool = false
+		if chase_locked and forced_target and not _was_in_range and _stats_cached and _stats_cached.primary_weapon:
+			var pw_chase: WeaponResource = _stats_cached.primary_weapon
+			if pw_chase.range_tier == &"melee" or pw_chase.resolved_range() <= 3.0:
+				# Re-evaluate at most every ~250 ms even for melee so we
+				# don't hammer command_move every physics frame. Stored on
+				# a separate var so the 2-second lockout for OTHER chase
+				# decisions stays intact.
+				if now_msec >= _melee_pile_next_msec:
+					chase_melee_pile = true
+					_melee_pile_next_msec = now_msec + 250
+		if forced_target and not _was_in_range and (not chase_locked or chase_settled or chase_melee_pile):
 			_unit.command_move(_chase_position(_current_target, primary_range), false)
 			_chase_lockout_until_msec = now_msec + COMBAT_LOCKOUT_DURATION_MSEC
 
@@ -1221,6 +1373,139 @@ func _is_valid_target(target: Node3D) -> bool:
 	return true
 
 
+## ============================================================
+## Sustained-beam channel — Solar Lance pattern.
+## ============================================================
+
+func _begin_sustained_channel(weapon: WeaponResource, is_primary: bool) -> void:
+	## Enter the channel state. Sets cooldown to (duration + rof) so the
+	## firing loop doesn't re-trigger mid-channel — when the channel
+	## ends, _fire_cooldown will naturally roll over into the standard
+	## post-fire cooldown the rof_seconds already accounts for.
+	_sustained_active = true
+	_sustained_weapon = weapon
+	_sustained_duration = weapon.sustain_duration_sec
+	_sustained_remaining = weapon.sustain_duration_sec
+	_sustained_target_iid = _current_target.get_instance_id() if _current_target else 0
+	_sustained_dmg_accum = 0.0
+	_has_fired_at_current_target = true
+	# Block normal fire dispatch for (duration + base rof) seconds.
+	var lock_sec: float = weapon.sustain_duration_sec + weapon.resolved_rof_seconds()
+	if is_primary:
+		_fire_cooldown = lock_sec
+		_fire_cooldown_max = maxf(_fire_cooldown, 0.0001)
+		_fire_cooldown_set_at_msec = Time.get_ticks_msec()
+	else:
+		_secondary_cooldown = lock_sec
+	# Spawn the visual beam, parented to the scene root. Uses the
+	# Sol Invictus head muzzle marker when present (so the beam
+	# emanates from the head lens, not the unit centre).
+	var muzzle_marker: Node3D = null
+	if _unit:
+		muzzle_marker = _unit.get_node_or_null("SolarLanceMuzzle") as Node3D
+		if muzzle_marker == null:
+			# Walk down through the first member to find the marker.
+			for child: Node in _unit.get_children():
+				if child is Node3D:
+					var m: Node3D = (child as Node3D).get_node_or_null("SolarLanceMuzzle") as Node3D
+					if m:
+						muzzle_marker = m
+						break
+	if _unit and _current_target:
+		# Instantiate via the preloaded script so combat_component.gd
+		# doesn't depend on the SustainedSolarBeam class_name being
+		# in Godot's class registry yet. SUSTAINED_BEAM_SCRIPT.new()
+		# returns the Node3D instance; setup() configures it.
+		var beam: Node3D = SUSTAINED_BEAM_SCRIPT.new() as Node3D
+		if beam and beam.has_method("setup"):
+			beam.call("setup", _unit, _current_target, muzzle_marker)
+		_sustained_visual = beam
+		var scene_root: Node = get_tree().current_scene if get_tree() else null
+		if scene_root and _sustained_visual:
+			scene_root.add_child(_sustained_visual)
+			if _sustained_visual.has_method("set_intensity"):
+				_sustained_visual.call("set_intensity", 0.0)
+
+
+func _tick_sustained_channel(delta: float) -> void:
+	## Per-physics-tick channel update. Validates the channel can
+	## continue, applies fractional damage on the ramp, drives the
+	## beam visual's intensity. Called from _physics_process when
+	## _sustained_active is true.
+	if not _sustained_active:
+		return
+
+	# --- Cancel checks ---
+	var cancel: bool = false
+	# Move order cancels the channel.
+	if _unit and "has_move_order" in _unit and (_unit.get("has_move_order") as bool):
+		cancel = true
+	# Target invalid or destroyed.
+	if not cancel and _current_target == null:
+		cancel = true
+	elif not cancel and not is_instance_valid(_current_target):
+		cancel = true
+	# Target changed mid-channel.
+	if not cancel and _current_target and _current_target.get_instance_id() != _sustained_target_iid:
+		cancel = true
+	# Squad alive_count zeroed (target died).
+	if not cancel and _current_target and "alive_count" in _current_target:
+		if (_current_target.get("alive_count") as int) <= 0:
+			cancel = true
+	if cancel:
+		_end_sustained_channel()
+		return
+
+	# --- Ramped damage tick ---
+	_sustained_remaining -= delta
+	var progress: float = clampf(1.0 - (_sustained_remaining / _sustained_duration), 0.0, 1.0)
+	# Damage ramp: 0.5 at progress=0, 1.0 at progress=1. Integral over
+	# [0,1] = 0.75, so total dmg ≈ weapon.damage * 0.75. Adding the
+	# end-burst (final 25%) brings the full-channel total to ≈ weapon.damage.
+	var ramp: float = 0.5 + 0.5 * progress
+	var per_sec: float = float(_sustained_weapon.resolved_damage()) / _sustained_duration
+	_sustained_dmg_accum += per_sec * ramp * delta
+	if _sustained_dmg_accum >= 1.0:
+		var apply_amt: int = int(_sustained_dmg_accum)
+		_sustained_dmg_accum -= float(apply_amt)
+		if _current_target and is_instance_valid(_current_target) and _current_target.has_method("take_damage"):
+			# Apply role-vs-armor modifier so the channel damage
+			# respects the same armor math as a single-shot beam.
+			var target_armor: StringName = _get_target_armor()
+			var role_mod: float = _sustained_weapon.get_role_mult_for(target_armor)
+			var scaled: int = maxi(int(float(apply_amt) * role_mod), 1)
+			_current_target.call("take_damage", scaled, _unit)
+
+	# Update beam visual intensity.
+	if _sustained_visual and is_instance_valid(_sustained_visual):
+		_sustained_visual.set_intensity(progress)
+
+	# Natural end — apply a final "completion burst" then dismiss.
+	if _sustained_remaining <= 0.0:
+		# Final burst — additional ~25% damage for the dramatic peak.
+		if _current_target and is_instance_valid(_current_target) and _current_target.has_method("take_damage"):
+			var burst: int = maxi(int(float(_sustained_weapon.resolved_damage()) * 0.25), 1)
+			var target_armor2: StringName = _get_target_armor()
+			var role_mod2: float = _sustained_weapon.get_role_mult_for(target_armor2)
+			_current_target.call("take_damage", maxi(int(float(burst) * role_mod2), 1), _unit)
+		_end_sustained_channel()
+
+
+func _end_sustained_channel() -> void:
+	## Clean up the channel state. Called both on natural completion
+	## and on cancel. Beam visual fades out cleanly; the standard
+	## post-fire cooldown that was set in _begin_sustained_channel
+	## continues to tick down.
+	_sustained_active = false
+	_sustained_remaining = 0.0
+	_sustained_target_iid = 0
+	_sustained_weapon = null
+	_sustained_dmg_accum = 0.0
+	if _sustained_visual and is_instance_valid(_sustained_visual):
+		_sustained_visual.dismiss()
+	_sustained_visual = null
+
+
 func _face_target() -> void:
 	if not _current_target:
 		return
@@ -1273,6 +1558,16 @@ func _can_engage(target: Node) -> bool:
 
 func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	if not weapon or not _current_target:
+		return
+	# Sustained-beam dispatch — if this weapon channels and we're
+	# not already mid-channel on it, BEGIN the channel and bail
+	# (single shot doesn't fire; the per-tick handler in
+	# _physics_process does the rest). If we ARE mid-channel, the
+	# normal cooldown should have prevented re-entry; bail anyway
+	# defensively.
+	if "is_sustained_beam" in weapon and weapon.is_sustained_beam:
+		if not _sustained_active:
+			_begin_sustained_channel(weapon, is_primary)
 		return
 	# First shot at this target — mark as committed so the pre-engagement
 	# target-switch path no longer overrides this choice.
@@ -1327,6 +1622,27 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 			var rof_cut: float = float(hits_so_far) * ramp_per
 			rof_cut = minf(rof_cut, ramp_cap)
 			rof *= 1.0 - rof_cut
+	# Sustain rampup (WeaponResource.sustain_rampup): wall-clock dwell
+	# on the same target accelerates fire rate up to sustain_rampup_max_mult
+	# over sustain_rampup_time_sec. Independent of hit-count damage ramp
+	# above — applies even between salvo cycles or on misses. Reset when
+	# target changes; first shot on a new target sees mult=1.0. `in`
+	# guards mirror the rof_ramp branch above so older cached
+	# WeaponResources (without the new schema) silently no-op.
+	if _current_target and is_instance_valid(_current_target) \
+			and "sustain_rampup" in weapon and (weapon.get("sustain_rampup") as bool):
+		var s_max_mult: float = weapon.get("sustain_rampup_max_mult") as float
+		var s_time_sec: float = weapon.get("sustain_rampup_time_sec") as float
+		if s_max_mult > 1.0 and s_time_sec > 0.0:
+			var s_tid: int = _current_target.get_instance_id()
+			var now_msec: int = Time.get_ticks_msec()
+			if s_tid != _sustain_target_id:
+				_sustain_target_id = s_tid
+				_sustain_engagement_start_msec = now_msec
+			var s_dwell: float = float(now_msec - _sustain_engagement_start_msec) / 1000.0
+			var s_t: float = clampf(s_dwell / s_time_sec, 0.0, 1.0)
+			var s_mult: float = lerpf(1.0, s_max_mult, s_t)
+			rof /= s_mult
 	if is_primary:
 		# Burst pattern for very high RoF: BURST_SHOTS quick shots, then a
 		# longer pause that keeps the average DPS the same.
@@ -1449,7 +1765,13 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	# directly — the previous `load()` per fire was a dictionary lookup
 	# that the cumulative profile flagged at ~435 calls / session.
 	var muzzle_positions: Array[Vector3] = []
-	if _unit.has_method("get_muzzle_positions"):
+	# Some units expose per-weapon muzzles (e.g. Sol Invictus head
+	# beam vs arm plasma turrets). Prefer that hook when the unit
+	# supports it so the projectile actually leaves the correct
+	# emitter; fall back to the generic muzzle list otherwise.
+	if _unit.has_method("get_muzzle_positions_for_weapon"):
+		muzzle_positions = _unit.call("get_muzzle_positions_for_weapon", weapon)
+	if muzzle_positions.is_empty() and _unit.has_method("get_muzzle_positions"):
 		muzzle_positions = _unit.get_muzzle_positions()
 	if muzzle_positions.is_empty() and _unit.has_method("get_member_positions"):
 		muzzle_positions = _unit.get_member_positions()
@@ -1560,12 +1882,21 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 	var damage_is_instant: bool = (
 		effective_style == "beam"
 		or effective_style == "flame"  # flame cone is continuous hitscan, same as beam
+		or effective_style == "soundwave"  # Herald sound wave — cone damage on fire-tick
 		or effective_style == "bullet"  # bullets are hitscan (see drossfront-docs/superpowers/plans/2026-05-12-hitscan-bullets.md)
 		or effective_style == "tesla"  # tesla bolts are visually segmented but mechanically beams
 		or effective_style == "lightning"  # synonym; same hitscan damage path
+		or effective_style == "melee"  # melee strike applies on swing — no projectile spawned
 		or weapon.is_drone_release
 		or is_shotgun  # shotgun pellets stay instant for now -- the cone is the whole damage event
 	)
+	# Melee weapons render no projectile — the visual is the unit's swing
+	# animation. Without this skip, the projectile-spawn block below would
+	# call ProjectileManager.fire(style="melee") which has no renderer
+	# registered, silently dropping the visual AND the damage. Result was
+	# Matador / Ashigaru / Conquistador standing on top of an enemy
+	# perpetually unable to hit it (report 2026-05-16).
+	var is_melee_strike: bool = (effective_style == "melee")
 
 	# Mortar focus-fire accuracy buildup. Every consecutive shot at the
 	# same target with a mortar-style weapon increments _mortar_focus_seconds,
@@ -1580,24 +1911,36 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 		# a wall-clock rate regardless of stagger delta.
 		_mortar_focus_seconds = minf(_mortar_focus_seconds + rof, MORTAR_FOCUS_FULL_SEC)
 
-	# Flame-cone geometry. When the weapon style is "flame", apply
-	# damage to ALL enemies in a forward cone (25° half-angle, weapon
-	# range length) instead of single-target. Primary target already
-	# receives damage via the take_damage call below; the cone scan
-	# deals the same damage to every other hostile inside the cone.
-	# Runs once per fire event (not per shot in the salvo loop below).
-	var is_flame_cone: bool = (effective_style == "flame")
-	if is_flame_cone and _current_target:
+	# Cone weapons — flame + Herald sound wave both apply damage to ALL
+	# enemies in a forward 25° half-angle cone up to weapon range,
+	# instead of single-target. Primary target already receives damage
+	# via take_damage below; the cone scan deals the same damage to
+	# every other hostile inside the cone. Runs once per fire event
+	# (not per shot in the salvo loop below).
+	var is_cone_weapon: bool = (effective_style == "flame" or effective_style == "soundwave")
+	if is_cone_weapon and _current_target:
 		_fire_flame_cone(per_member_dmg, weapon)
 	var splash_r: float = weapon.splash_radius if "splash_radius" in weapon else 0.0
+	# Staggered-salvo flag — when the weapon has a positive
+	# salvo_stagger_sec, damage should ride the staggered timer so it
+	# arrives in time with the visuals. Otherwise (Cremator flame, etc.)
+	# all damage lands on the first frame and the staggered visuals
+	# trail in silence, producing the "huge spike then idle animations"
+	# pattern the player reported 2026-05-18. salvo_count > 1 alone
+	# isn't enough — Bulwark's twin-cannon (no stagger) still bursts.
+	var weapon_stagger_now: float = weapon.salvo_stagger_sec if "salvo_stagger_sec" in weapon else 0.0
+	var use_deferred_damage: bool = (weapon_stagger_now > 0.0)
 	for i: int in shots:
 		var hit: bool = randf() < hit_chance
-		if hit and damage_is_instant and not weapon.is_drone_release:
+		# Apply damage at fire-tick ONLY for non-staggered shots. The
+		# staggered path defers damage to its timer callback so it
+		# lands in sync with each visible flame puff. The first shot
+		# (i==0, stagger=0) still fires immediately so the impact
+		# isn't perceptibly delayed.
+		var apply_immediate_damage: bool = hit and damage_is_instant and not weapon.is_drone_release \
+			and (not use_deferred_damage or i == 0)
+		if apply_immediate_damage:
 			_current_target.take_damage(per_member_dmg, _unit)
-			# Splash for instant-damage weapons -- mirrors the
-			# pre-deferral behaviour. Mortar / missile splash now
-			# applies on projectile impact instead (handled inside
-			# Projectile._spawn_impact via the payload).
 			if splash_r > 0.0:
 				_apply_instant_splash(per_member_dmg, _current_target, splash_r, weapon.splash_damage_mult)
 
@@ -1658,6 +2001,13 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 				_spawn_drone(per_member_dmg, weapon.role_tag, weapon.drone_variant, weapon.max_active_drones)
 			continue
 
+		# Melee strike — no projectile, no muzzle flash beam. Damage was
+		# applied in the damage_is_instant block above; the visual is the
+		# unit's swing animation (play_shoot_anim is fired below for the
+		# whole squad). Skip the rest of this iteration entirely so we
+		# don't spawn a phantom projectile or muzzle tracer.
+		if is_melee_strike:
+			continue
 		if firing_visible:
 			var fire_pos: Vector3 = _unit.global_position
 			# Modulo so salvo shots (i past the muzzle count) cycle
@@ -1702,18 +2052,20 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 								(_unit.get("owner_id") as int) if (_unit and "owner_id" in _unit) else -1)
 			else:
 				# Salvo stagger -- when the weapon ships salvo_stagger_sec
-				# > 0 (Bulwark triple cannon, Boyar twin cannon) the
-				# i-th projectile in the salvo is deferred so the
-				# barrels visibly fire one-after-another instead of all
-				# spawning on the same physics frame. Damage was
-				# already applied above so DPS stays unchanged whether
-				# the visual stagger is 0 or 0.20s. Shot i==0 always
-				# fires immediately; only the trailing shots wait.
-				# `in` guard: stale cached WeaponResources from before
-				# salvo_stagger_sec was added would crash on the
-				# property access otherwise.
+				# > 0 (Bulwark triple cannon, Boyar twin cannon, Cremator
+				# flame, Firefly bomblets) the i-th projectile in the
+				# salvo is deferred so the visuals spread over time.
+				# Stagger is WRAPPED by salvo_count so a squad of N
+				# members each gets its own salvo of `salvo_count` ticks,
+				# all overlapping into the same `salvo_count *
+				# salvo_stagger_sec` window — instead of running
+				# `shots * salvo_stagger_sec` (e.g. 6.4 s for a Cremator
+				# squad) which bled into the next rof cycle and produced
+				# the "huge damage spike then idle animation loop" the
+				# player reported 2026-05-18.
 				var weapon_stagger: float = weapon.salvo_stagger_sec if "salvo_stagger_sec" in weapon else 0.0
-				var stagger_sec: float = weapon_stagger * float(i) if weapon_stagger > 0.0 else 0.0
+				var salvo_n_now: int = maxi(int(weapon.salvo_count), 1)
+				var stagger_sec: float = float(i % salvo_n_now) * weapon_stagger if weapon_stagger > 0.0 else 0.0
 				if stagger_sec <= 0.0:
 					# Resolve effective style + speed + color the same way
 					# Projectile.create did (mirrors ROF_STYLES + ROLE_COLORS dispatch).
@@ -1740,22 +2092,71 @@ func _fire_weapon(weapon: WeaponResource, is_primary: bool) -> void:
 							weapon.rof_tier, weapon.projectile_style, _shooter_faction_id(),
 							weapon.damage_tier)
 						get_tree().current_scene.add_child(proj)
+					elif p_style == "plasma":
+						# Slow piercing blue orb. Damage is applied per
+						# pierced target by the orb's own loop — we send
+						# the full payload (not the deferred p_dmg the
+						# manager would carry) so each enemy in the
+						# line takes the hit cleanly.
+						var plasma_dmg: int = per_member_dmg if (hit and not damage_is_instant) else per_member_dmg
+						var plasma_owner: int = (_unit.get("owner_id") as int) if (_unit and "owner_id" in _unit) else -1
+						var plasma: PlasmaProjectile = PlasmaProjectile.create(
+							fire_pos, aim_pos, plasma_dmg, _unit, plasma_owner, _current_target,
+						)
+						get_tree().current_scene.add_child(plasma)
+					elif p_style == "barrel":
+						# Tumbling oil-barrel projectile that arcs onto
+						# target and spawns a persistent ChemicalCloud
+						# for the area DPS. Censer-only.
+						var barrel_dmg: int = per_member_dmg if hit else 0
+						var barrel_owner: int = (_unit.get("owner_id") as int) if (_unit and "owner_id" in _unit) else -1
+						var barrel: OilBarrelProjectile = OilBarrelProjectile.create(
+							fire_pos, aim_pos, barrel_dmg, _unit, barrel_owner,
+						)
+						get_tree().current_scene.add_child(barrel)
+					elif p_style == "soundwave":
+						# Herald sound-wave VFX. Cone damage was applied
+						# via _fire_flame_cone above; this just spawns
+						# the expanding squiggly-ring visual.
+						var sw: SoundWaveProjectile = SoundWaveProjectile.create(fire_pos, aim_pos)
+						get_tree().current_scene.add_child(sw)
 					else:
 						var pm: ProjectileManager = ProjectileManager.get_instance(get_tree().current_scene if get_tree() else null)
 						if pm != null:
 							pm.fire(fire_pos, aim_pos, p_style, p_color, p_speed, p_dmg,
 								_current_target, _unit, splash_r, p_splash_dmg, p_owner)
 				else:
-					_spawn_staggered_projectile(stagger_sec, weapon, fire_pos, aim_pos, is_glowing_volley, per_member_dmg if (hit and not damage_is_instant) else 0, splash_r, weapon.splash_damage_mult)
+					# Damage payload for the staggered tick. For
+					# non-instant (missile / mortar / bomb) the projectile
+					# carries damage on impact — same as before. For
+					# instant styles WITH stagger (Cremator flame), we
+					# also defer damage so each visual flame puff lands
+					# its hit at its own moment instead of all on the
+					# salvo's first frame. The non-staggered i=0 shot
+					# above already applied damage immediately, so this
+					# only covers the i>0 trailing shots.
+					var payload_dmg: int = per_member_dmg if hit else 0
+					_spawn_staggered_projectile(stagger_sec, weapon, fire_pos, aim_pos, is_glowing_volley, payload_dmg, splash_r, weapon.splash_damage_mult)
 
 	# Muzzle flash on each member — colored by the weapon's role.
 	# Recoil animation runs even off-screen so units that re-enter
 	# vision mid-burst don't snap-pose; the muzzle flash + sound are
 	# the bits that should respect FOW.
-	if firing_visible:
+	# Melee strikes skip the muzzle flash (no powder, no tracer) but
+	# still play the swing animation so the squad visibly attacks.
+	if firing_visible and not is_melee_strike:
 		_spawn_squad_muzzle_flash(_muzzle_color_for(weapon))
-	if _unit.has_method("play_shoot_anim"):
+	if is_melee_strike and _unit.has_method("play_melee_anim"):
+		_unit.play_melee_anim()
+	elif _unit.has_method("play_shoot_anim"):
 		_unit.play_shoot_anim()
+	# Heliarch Heat ramp — every primary fire bumps the unit's heat
+	# meter. notify_heat_ramp_fire is faction-gated on the Unit side
+	# (no-op for non-Heliarch), so we don't need the check here. Only
+	# fires on the PRIMARY weapon's swing so secondaries (Cremator
+	# mortar, Conquistador shoulder plasma) don't double-ramp.
+	if is_primary and _unit.has_method("notify_heat_ramp_fire"):
+		_unit.call("notify_heat_ramp_fire")
 
 	# Sound — pass the weapon so the audio manager can color the layered
 	# generators based on damage tier, fire rate, and role. Skip when
@@ -1928,29 +2329,124 @@ func _spawn_staggered_projectile(delay_sec: float, weapon: WeaponResource, fire_
 	if is_glowing_volley:
 		p_color = p_color.lerp(Color(1.0, 0.85, 0.20, 1.0), 0.7)
 	var p_owner: int = faction  # owner_id not available here; faction doubles as owner key
+	# Capture the original style so the callback can detect a flame
+	# stream specifically (style was resolved to "beam" for ProjectileManager
+	# routing in p_style, but Projectile.create still receives the
+	# original `style` and renders flame-jet vs beam from it).
+	var orig_style: StringName = style
 	var timer: SceneTreeTimer = get_tree().create_timer(delay_sec)
 	timer.timeout.connect(func() -> void:
 		if not is_inside_tree():
 			return
-		# Resolve the WeakRefs inside the timer callback -- the target
-		# may have been freed between scheduling and firing.
 		var ct: Node3D = target_ref.get_ref() as Node3D
 		var cs: Node3D = shooter_ref.get_ref() as Node3D
-		# Beams keep the legacy single-Node3D path.
+		if cs == null or not is_instance_valid(cs):
+			return
+		# Stream-fire cancellation: if the shooter is now moving under a
+		# player / AI order, kill the rest of the stagger. Without this
+		# a Cremator that started a 2.2-second flame burst keeps spawning
+		# flame jets at its old position for the full duration even
+		# after the player has walked it away (playtest 2026-05-18:
+		# "if I shoot with a flamethrower and then my units move, the
+		# flamethrower attack should stop").
+		# Also cancel if the unit's target has changed mid-burst — the
+		# old aim point is stale and would spray flame in the wrong
+		# direction. Both cancel paths return early before the spawn.
+		if "has_move_order" in cs and (cs.get("has_move_order") as bool):
+			return
+		var live_target_id: int = 0
+		if ct != null and is_instance_valid(ct):
+			live_target_id = ct.get_instance_id()
+		# Combat-state check — only run when the shooter actually
+		# exposes get_combat. Aircraft, workers, and any future entity
+		# that uses CombatComponent via a non-Unit parent won't have
+		# this method; in that case we skip the target-change check
+		# rather than crash.
+		if cs.has_method("get_combat"):
+			var combat_v: Variant = cs.call("get_combat")
+			if combat_v != null and combat_v is Node:
+				var combat_now: Node = combat_v as Node
+				if is_instance_valid(combat_now) and "_current_target" in combat_now:
+					var ct_now_v: Variant = combat_now.get("_current_target")
+					if ct_now_v == null and live_target_id != 0:
+						return  # combat ended
+					if ct_now_v != null and ct_now_v is Node3D:
+						var ct_now_node: Node3D = ct_now_v as Node3D
+						if is_instance_valid(ct_now_node) and ct_now_node.get_instance_id() != live_target_id:
+							return  # target changed
+		# Re-resolve fire + aim positions to the unit's CURRENT location
+		# and the target's CURRENT location. Previously the closure
+		# captured fire_pos / aim_pos by value at the FIRST salvo tick,
+		# so a Cremator firing a 10-tick stagger spawned every flame jet
+		# at the same XYZ even though it was visibly walking around
+		# (playtest 2026-05-18: "cones will continue getting shot from
+		# that position even if my unit isn't there anymore"). Re-reading
+		# the live positions makes the flame stream visibly track the
+		# unit + the target.
+		var live_fire_pos: Vector3 = cs.global_position
+		# Aircraft and tall units want a slight Y bump so the flame
+		# leaves the muzzle, not the floor — match the +1 lift the
+		# Projectile.create code applies.
+		if live_fire_pos.y < 0.5:
+			live_fire_pos.y += 1.0
+		var live_aim_pos: Vector3 = aim_pos
+		if ct != null and is_instance_valid(ct):
+			live_aim_pos = ct.global_position
+		# Beams keep the legacy single-Node3D path. For instant-damage
+		# beam-route styles (flame especially), the projectile carries
+		# no damage payload — it's just the visual. We apply damage
+		# here at timer-fire time so each visible flame puff lands
+		# its hit. Splash mirrors the same per-tick application.
 		if p_style == "beam":
-			var proj: Node3D = Projectile.create(fire_pos, aim_pos, role, rof_tier, style, faction, dmg_tier)
+			if payload_damage > 0 and ct != null and is_instance_valid(ct):
+				if ct.has_method("take_damage"):
+					ct.call("take_damage", payload_damage, cs)
+				if payload_splash_r > 0.0 and cs != null and is_instance_valid(cs) and cs.has_method("get_combat"):
+					var splash_combat_v: Variant = cs.call("get_combat")
+					if splash_combat_v != null and splash_combat_v is Node and (splash_combat_v as Node).has_method("_apply_instant_splash"):
+						var splash_dmg_payload: int = maxi(int(round(float(payload_damage) * payload_splash_mult)), 1)
+						(splash_combat_v as Node).call("_apply_instant_splash", splash_dmg_payload, ct, payload_splash_r, payload_splash_mult)
+			var proj: Node3D = Projectile.create(live_fire_pos, live_aim_pos, role, rof_tier, orig_style, faction, dmg_tier)
 			get_tree().current_scene.add_child(proj)
+		elif p_style == "plasma":
+			# Plasma orb — slow blueish projectile with oscillating
+			# flightpath that pierces every enemy it touches en route.
+			# Damage is applied PER pierced target by the orb's own
+			# loop, not deferred to impact, so we DON'T pass
+			# payload_damage through the manager.
+			var owner_oid: int = 0
+			if cs != null and "owner_id" in cs:
+				owner_oid = cs.get("owner_id") as int
+			var plasma: PlasmaProjectile = PlasmaProjectile.create(
+				live_fire_pos, live_aim_pos, payload_damage,
+				cs, owner_oid, ct,
+			)
+			get_tree().current_scene.add_child(plasma)
+		elif p_style == "barrel":
+			# Tumbling oil-barrel — spawns a persistent ChemicalCloud
+			# at impact for area DPS.
+			var barrel_oid: int = 0
+			if cs != null and "owner_id" in cs:
+				barrel_oid = cs.get("owner_id") as int
+			var barrel: OilBarrelProjectile = OilBarrelProjectile.create(
+				live_fire_pos, live_aim_pos, payload_damage,
+				cs, barrel_oid,
+			)
+			get_tree().current_scene.add_child(barrel)
+		elif p_style == "soundwave":
+			# Herald sound-wave VFX (deferred-stagger path).
+			var sw: SoundWaveProjectile = SoundWaveProjectile.create(live_fire_pos, live_aim_pos)
+			get_tree().current_scene.add_child(sw)
 		else:
 			var pm: ProjectileManager = ProjectileManager.get_instance(get_tree().current_scene if get_tree() else null)
 			if pm != null:
 				var p_dmg_resolved: int = 0
 				var p_splash_dmg: int = 0
-				# payload_damage is already 0 when caller passed (miss / instant-style).
 				if payload_damage > 0 and ct != null and is_instance_valid(ct):
 					p_dmg_resolved = payload_damage
 					if payload_splash_r > 0.0:
 						p_splash_dmg = maxi(int(round(float(payload_damage) * payload_splash_mult)), 1)
-				pm.fire(fire_pos, aim_pos, p_style, p_color, p_speed, p_dmg_resolved,
+				pm.fire(live_fire_pos, live_aim_pos, p_style, p_color, p_speed, p_dmg_resolved,
 					ct, cs, payload_splash_r, p_splash_dmg, p_owner)
 	)
 

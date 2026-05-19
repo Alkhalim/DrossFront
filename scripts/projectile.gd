@@ -69,7 +69,12 @@ static func create(from: Vector3, to: Vector3, role_tag: StringName,
 	var style: String = ROF_STYLES.get(rof_tier, "bullet") as String
 	if style_override != &"":
 		style = String(style_override)
-	if style != "beam":
+	# tesla / lightning / flame intentionally route through this beam
+	# path: tesla + lightning use _create_tesla_beam_mesh, flame uses the
+	# default beam visual as the muzzle tracer (the cone AoE is dispatched
+	# separately in CombatComponent._fire_flame_cone). All three are safe
+	# here — only OTHER non-beam styles indicate a routing bug.
+	if style != "beam" and style != "tesla" and style != "lightning" and style != "flame":
 		push_error("Projectile.create called with non-beam style '%s' (rof_tier=%s) — should route through ProjectileManager" % [style, rof_tier])
 	var proj := Projectile.new()
 	# Only lift the spawn point off the ground when the caller passed
@@ -120,10 +125,131 @@ static func create(from: Vector3, to: Vector3, role_tag: StringName,
 	# separate function so the legacy straight-beam path stays simple.
 	if style_override == &"tesla" or style_override == &"lightning":
 		proj._create_tesla_beam_mesh(color, proj.start_pos, proj.target_pos, beam_width)
+	elif style_override == &"flame":
+		# Flame stream — bright orange, fat, short (clipped to true
+		# weapon range so it reads as a jet, not a hitscan beam),
+		# emissive haze around it. Replaces the laser-tracer look the
+		# Cremator's Heavy Flamethrower was getting from the default
+		# beam path (report 2026-05-16: "Cremator visually shoots
+		# laser beam weapons currently, they would need flamethrowing
+		# visuals").
+		var flame_color: Color = Color(1.0, 0.55, 0.15, 1.0)
+		proj._create_flame_jet_mesh(flame_color, proj.start_pos, proj.target_pos, beam_width)
 	else:
 		proj._create_beam_mesh(color, proj.start_pos, proj.target_pos, beam_width)
 	proj.speed = 999.0
+	# Flame visuals fade fast so the next salvo tick paints fresh —
+	# the regular beam fade (~125 ms) is fine for the flame tracer too.
 	return proj
+
+
+func _create_flame_jet_mesh(color: Color, from: Vector3, to: Vector3, width_scale: float = 1.0) -> void:
+	## Flame-jet visual: a fat, bright-orange tapered tube + a softer
+	## yellow glow halo + scattered "ember" billboards along the
+	## length. Mimics a flamethrower's stream visually without spawning
+	## a per-particle system. Same lifetime as the beam fade so it's
+	## a drop-in replacement on the firing tick.
+	var dir: Vector3 = to - from
+	var length: float = dir.length()
+	if length < 0.01:
+		return
+	# Inner orange core — much thinner than the previous "fat tube"
+	# build, with a NARROW taper (max 0.45 width vs the old 0.85) so
+	# the flame stops reading as a wide laser cone. The user reported
+	# 2026-05-18 that the flame "looks more like wide lasers" than
+	# fire — slimmer, more organic taper helps.
+	# CylinderMesh's `top_radius` sits at +Y (target end after basis),
+	# `bottom_radius` at -Y (muzzle end).
+	_mesh = MeshInstance3D.new()
+	var core_mesh := CylinderMesh.new()
+	core_mesh.top_radius = width_scale * 0.45  # narrower fat end
+	core_mesh.bottom_radius = width_scale * 0.06  # very narrow at muzzle
+	core_mesh.height = length
+	core_mesh.radial_segments = 8
+	_mesh.mesh = core_mesh
+	var core_mat := StandardMaterial3D.new()
+	# More transparent (0.70 vs the old 0.95) so the flame reads as a
+	# luminous gas envelope rather than a solid tube.
+	core_mat.albedo_color = Color(1.0, 0.45, 0.10, 0.70)
+	core_mat.emission_enabled = true
+	core_mat.emission = Color(1.0, 0.55, 0.15, 1.0)
+	core_mat.emission_energy_multiplier = 2.8
+	core_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	core_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	core_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_mesh.set_surface_override_material(0, core_mat)
+	add_child(_mesh)
+	# Outer yellow haze — also slimmer, more transparent.
+	var halo := MeshInstance3D.new()
+	var halo_mesh := CylinderMesh.new()
+	halo_mesh.top_radius = width_scale * 0.85  # was 1.40 — too wide read as a cone
+	halo_mesh.bottom_radius = width_scale * 0.12
+	halo_mesh.height = length
+	halo_mesh.radial_segments = 8
+	halo.mesh = halo_mesh
+	var halo_mat := StandardMaterial3D.new()
+	halo_mat.albedo_color = Color(1.0, 0.75, 0.25, 0.18)  # more transparent (0.30 -> 0.18)
+	halo_mat.emission_enabled = true
+	halo_mat.emission = Color(1.0, 0.70, 0.20, 1.0)
+	halo_mat.emission_energy_multiplier = 1.1
+	halo_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	halo_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	halo_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	halo.set_surface_override_material(0, halo_mat)
+	add_child(halo)
+	# Three small "ember" billboard puffs scattered along the jet
+	# length, breaking up the otherwise-clean tube silhouette and
+	# selling "this is fire, not a beam". Each is a bright orange
+	# sphere placed at varying offsets along the from→to axis with
+	# slight lateral jitter.
+	for ember_i: int in 3:
+		var ember := MeshInstance3D.new()
+		var es := SphereMesh.new()
+		es.radius = width_scale * randf_range(0.10, 0.22)
+		es.height = es.radius * 2.0
+		es.radial_segments = 6
+		es.rings = 4
+		ember.mesh = es
+		var ember_mat := StandardMaterial3D.new()
+		# Mix of hot orange and brighter yellow — randomised so the
+		# embers look like genuine fire bubbles, not stamped sprites.
+		var ember_warm: bool = randf() < 0.5
+		var ember_albedo: Color = Color(1.0, 0.85, 0.40, 0.85) if ember_warm else Color(1.0, 0.50, 0.15, 0.85)
+		ember_mat.albedo_color = ember_albedo
+		ember_mat.emission_enabled = true
+		ember_mat.emission = ember_albedo
+		ember_mat.emission_energy_multiplier = 2.6
+		ember_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		ember_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		ember.set_surface_override_material(0, ember_mat)
+		add_child(ember)
+		# Position embers along the jet between 30% and 90% of length.
+		# Stored as the local-space midpoint and then translated below
+		# by the same basis logic the core/halo use.
+		var ember_t: float = lerp(0.3, 0.9, float(ember_i) / 2.0)
+		var ember_pos_along: Vector3 = from.lerp(to, ember_t)
+		# Lateral jitter perpendicular to the flow direction.
+		var dir_e: Vector3 = (to - from).normalized()
+		var jitter_x: Vector3 = Vector3(-dir_e.z, 0.0, dir_e.x) * randf_range(-0.18, 0.18) * width_scale
+		var jitter_y: Vector3 = Vector3(0.0, randf_range(-0.10, 0.18), 0.0) * width_scale
+		ember.position = ember_pos_along + jitter_x + jitter_y - position
+	# Orient + position both meshes along (from -> to). CylinderMesh's
+	# axis is +Y, so we rotate so +Y points along the flow direction
+	# and translate to the midpoint.
+	var midpoint: Vector3 = (from + to) * 0.5
+	# `position` (local) is fine — caller adds the projectile to the
+	# scene root, identity transform.
+	_mesh.position = midpoint - position
+	halo.position = midpoint - position
+	var dir_n: Vector3 = dir / length
+	# Build a basis whose +Y is dir_n. Pick any perpendicular axis as
+	# the X reference; if dir_n is too close to UP, fall back to FWD.
+	var up_ref: Vector3 = Vector3.UP if absf(dir_n.dot(Vector3.UP)) < 0.95 else Vector3.FORWARD
+	var x_axis: Vector3 = up_ref.cross(dir_n).normalized()
+	var z_axis: Vector3 = dir_n.cross(x_axis).normalized()
+	var basis := Basis(x_axis, dir_n, z_axis)
+	_mesh.basis = basis
+	halo.basis = basis
 
 
 func _create_beam_mesh(color: Color, from: Vector3, to: Vector3, width_scale: float = 1.0) -> void:

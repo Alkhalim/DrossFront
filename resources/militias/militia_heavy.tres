@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Resource" path="res://resources/units/heliarch_inquisitor_tank.tres" id="2"]
+
+[ext_resource type="Resource" path="res://resources/units/heliarch_conquistador.tres" id="3"]
+
+[resource]
+script = ExtResource("1")
+unit_name = "Heavy Militia"
+display_name = "Heavy Militia"
+unit_class = &"heavy"
+armor_class = &"heavy"
+squad_size = 1
+population = 36
+cost_salvage = 705
+cost_fuel = 80
+build_time = 70.0
+built_at = &"militia_camp"
+unlock_prerequisite = &"forge_pit"
+is_militia_composition = true
+militia_units = [ExtResource("3"), ExtResource("2")]
+special_description = "Pre-defined Heliarch band: 1× Conquistador + 1× Inquisitor Tank. Heavy ground + hover-tank pair. Requires Forge Pit."

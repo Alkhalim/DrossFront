@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+building_name = "Catalyst Core"
+building_id = &"catalyst_core"
+hp = 520
+cost_salvage = 220
+cost_fuel = 0
+build_time = 25.0
+power_consumption = 0
+power_production = 28
+producible_units = []
+footprint_size = Vector3(2.8, 3.6, 2.8)
+placeholder_color = Color(0.85, 0.50, 0.20, 1)
+is_advanced = false
+prerequisites = []
+faction_lock = 4
+weapons = []
+is_mobile = true
+requires_geothermic_vent = true

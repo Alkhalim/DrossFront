@@ -21,15 +21,16 @@ can_damage_trees = true
 damage = 25
 range = 15.0
 rof_seconds = 3.0
-use_explicit_air = false
-engages_air_explicit = false
+use_explicit_air = true
+engages_air_explicit = true
+air_damage_mult = 0.7
 mult_vs_unarmored_v2 = 1.0
 mult_vs_light_v2 = 1.0
 mult_vs_medium_v2 = 0.7
 mult_vs_heavy_v2 = 0.4
 mult_vs_structure_v2 = 0.8
-mult_vs_light_air_v2 = 0.0
-mult_vs_heavy_air_v2 = 0.0
+mult_vs_light_air_v2 = 0.7
+mult_vs_heavy_air_v2 = 0.4
 
 [resource]
 script = ExtResource("1")

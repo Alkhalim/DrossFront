@@ -752,6 +752,30 @@ func _apply_entity_visibility() -> void:
 				if b3d.visible:
 					b3d.visible = false
 				continue
+		# Enemy foundations that ARE under construction (collision is
+		# live, the engineer is actively working on them) auto-reveal to
+		# the player IF the cell has been scouted at some point. The
+		# original intent was making the under-construction collision
+		# clickable + attackable; that only matters for cells the player
+		# could plausibly aim at. Without the explored-cell gate, every
+		# foundry the AI started anywhere on the map became visible
+		# through fog (report 2026-05-16 — "I have vision on all enemy
+		# buildings through fog of war"). With the gate, foundations
+		# stay hidden in unexplored fog (no leaking the AI's expansion
+		# pattern) but become visible the moment the player has scouted
+		# their cell — preserving the click-to-attack behaviour for
+		# anything they could realistically reach. Once they finish
+		# (is_constructed=true) they fall back to normal AoE-style FoW.
+		if "construction_started" in node and (node.get("construction_started") as bool):
+			if "is_constructed" in node and not (node.get("is_constructed") as bool):
+				if is_explored_world(b3d.global_position):
+					if not b3d.visible:
+						b3d.visible = true
+					_apply_fog_dim(b3d, false)
+				else:
+					if b3d.visible:
+						b3d.visible = false
+				continue
 		# Cache early-out: stationary buildings rarely change cell or
 		# state, so the dominant case is 'no change since last tick'.
 		# Skipping the recompute drops the per-tick cost of the

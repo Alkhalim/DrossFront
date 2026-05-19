@@ -1,0 +1,53 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_resonance_channel"]
+script = ExtResource("2")
+weapon_name = "Resonance Channel"
+role_tag = &"AP"
+damage_tier = &"high"
+range_tier = &"long"
+range_value = 26.0
+rof_tier = &"continuous"
+projectile_style = &"beam"
+base_accuracy = 0.98
+
+damage = 60
+range = 26.0
+rof_seconds = 0.40
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.1
+mult_vs_light_v2 = 1.2
+mult_vs_medium_v2 = 1.3
+mult_vs_heavy_v2 = 1.4
+mult_vs_structure_v2 = 0.7
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
+
+[resource]
+script = ExtResource("1")
+unit_name = "Kamigeist"
+display_name = "Kamigeist"
+unit_class = &"medium"
+hp_total = 800
+hp_per_unit = 800
+armor_class = &"medium"
+speed_tier = &"moderate"
+sight_tier = &"long"
+squad_size = 1
+population = 12
+cost_salvage = 520
+cost_fuel = 55
+build_time = 50.0
+built_at = &"inheritor_construction_site"
+unlock_prerequisite = &"choir_sanctum"
+primary_weapon = SubResource("weapon_resonance_channel")
+special_description = "Inheritor mid-tier caster — Kamigeist. Resonance Channel (AP, High, Long, channeled hitscan beam) — sustained focus on one target stacks damage; targets killed under channel may reformat into Inheritor Ashigaru (Reformat Mark mechanic — code TBD). Requires Architect's Network."
+
+speed = 7.0
+sight_radius = 26.0
+armor_reduction = 0.30

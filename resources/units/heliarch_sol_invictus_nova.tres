@@ -1,0 +1,83 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_nova_lance"]
+script = ExtResource("2")
+weapon_name = "Nova Lance"
+role_tag = &"AP"
+damage_tier = &"extreme"
+range_tier = &"very_long"
+range_value = 42.0
+rof_tier = &"single"
+projectile_style = &"beam"
+base_accuracy = 0.98
+is_sustained_beam = true
+sustain_duration_sec = 6.0
+
+damage = 520
+range = 42.0
+rof_seconds = 12.0
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 1.3
+mult_vs_medium_v2 = 1.5
+mult_vs_heavy_v2 = 1.7
+mult_vs_structure_v2 = 1.8
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
+
+[sub_resource type="Resource" id="weapon_nova_plasma_turrets"]
+script = ExtResource("2")
+weapon_name = "Body Plasma Turrets"
+role_tag = &"AP"
+damage_tier = &"high"
+range_tier = &"medium"
+range_value = 18.0
+rof_tier = &"moderate"
+projectile_style = &"plasma"
+base_accuracy = 0.92
+salvo_count = 2
+salvo_stagger_sec = 0.20
+
+damage = 110
+range = 18.0
+rof_seconds = 1.4
+use_explicit_air = true
+engages_air_explicit = true
+air_damage_mult = 0.7
+mult_vs_unarmored_v2 = 0.7
+mult_vs_light_v2 = 1.0
+mult_vs_medium_v2 = 1.2
+mult_vs_heavy_v2 = 1.0
+mult_vs_structure_v2 = 0.7
+mult_vs_light_air_v2 = 0.9
+mult_vs_heavy_air_v2 = 0.5
+
+[resource]
+script = ExtResource("1")
+unit_name = "Sol Invictus (Nova Engine)"
+display_name = "Sol Invictus (Nova Engine)"
+unit_class = &"apex"
+hp_total = 3200
+hp_per_unit = 3200
+armor_class = &"heavy"
+speed_tier = &"very_slow"
+sight_tier = &"very_long"
+squad_size = 1
+population = 22
+cost_salvage = 1450
+cost_fuel = 220
+build_time = 120.0
+built_at = &"headquarters"
+unlock_prerequisite = &"crucible_spire"
+primary_weapon = SubResource("weapon_nova_lance")
+secondary_weapon = SubResource("weapon_nova_plasma_turrets")
+special_description = "Sol Invictus — Nova Engine. Solar Lance becomes a 6-second orbital-grade sustained beam (+63% damage, +10% range). The big swing for siege engagements."
+branch_summary = "Lance sustains 6s instead of 5s, +63% damage, +10% range. Siege variant."
+speed = 3.5
+sight_radius = 42.0
+armor_reduction = 0.55

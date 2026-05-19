@@ -10,33 +10,27 @@
 
 [sub_resource type="Resource" id="weapon_breacher_cannon"]
 script = ExtResource("2")
-weapon_name = "Heavy Howitzer"
+weapon_name = "Boyar Cannon"
 role_tag = &"AP"
 damage_tier = &"high"
 range_tier = &"long"
 rof_tier = &"slow"
-damage_value = 120
-rof_seconds_value = 4.5
-projectile_style = &"mortar"
-base_accuracy = 0.75
+projectile_style = &"shell"
+base_accuracy = 0.90
 can_damage_trees = true
-splash_radius = 3.0
-splash_damage_mult = 0.6
-mult_vs_light = 1.0
-mult_vs_medium = 0.85
-mult_vs_heavy = 0.60
-structure_damage_mult = 1.20
+splash_radius = 0.0
+splash_damage_mult = 0.0
 
-damage = 120
-range = 25.0
-rof_seconds = 4.5
+damage = 110
+range = 22.0
+rof_seconds = 3.6
 use_explicit_air = true
 engages_air_explicit = false
-mult_vs_unarmored_v2 = 1.0
-mult_vs_light_v2 = 1.0
-mult_vs_medium_v2 = 0.85
+mult_vs_unarmored_v2 = 0.8
+mult_vs_light_v2 = 0.8
+mult_vs_medium_v2 = 1.2
 mult_vs_heavy_v2 = 0.6
-mult_vs_structure_v2 = 1.2
+mult_vs_structure_v2 = 0.7
 mult_vs_light_air_v2 = 0.0
 mult_vs_heavy_air_v2 = 0.0
 
@@ -79,7 +73,7 @@ build_time = 38.0
 built_at = &"basic_foundry"
 primary_weapon = SubResource("weapon_breacher_cannon")
 secondary_weapon = SubResource("weapon_coaxial_mg")
-special_description = "Combine's Boyar medium assault tank. Heavy Howitzer fires with arc trajectory — can shell over terrain and friendly units. Slow reload but devastating impact. Front armor +20% vs AP. Secondary Coaxial MG for close defense."
+special_description = "Combine medium assault tank. Boyar Cannon is a direct-fire AP shell tuned for anti-medium engagements — flat trajectory + sharp accuracy. Secondary Coaxial MG covers close infantry. Branches retune the gun: Dozer trades the cannon for a rocket battery (anti-heavy + structures, fire rate ramps on a sustained target); Plow swaps it for a long-range mortar (anti-light, arcs over terrain)."
 branch_a_name = "Dozer"
 branch_b_name = "Plow"
 branch_a_stats = ExtResource("3")

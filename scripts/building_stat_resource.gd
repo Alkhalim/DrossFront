@@ -77,6 +77,15 @@ extends Resource
 ## the HQ.
 @export var requires_geothermic_vent: bool = false
 
+## Mobile-building flag (Heliarch faction mechanic per
+## drossfront-docs/docs/11_faction_mechanics.md §"Mobile Infrastructure").
+## When true, the building supports pack/unpack — it can be folded into
+## a transit form, relocated, and unpacked at a new spot. The pack/unpack
+## state machine is implemented by HeliarchPackManager (separate); this
+## flag is the data hook the manager + HUD pack-button read. Default
+## false so non-Heliarch buildings stay fixed.
+@export var is_mobile: bool = false
+
 @export_group("Turret weapons")
 ## Weapons available on this building's turret(s). Empty for buildings
 ## that don't have a TurretComponent (Generators, Foundries, Yard).

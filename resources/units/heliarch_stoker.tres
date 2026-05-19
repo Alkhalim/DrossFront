@@ -7,7 +7,7 @@
 [sub_resource type="Resource" id="weapon_stoker_torch"]
 script = ExtResource("2")
 weapon_name = "Reactor Torch"
-role_tag = &"AS"
+role_tag = &"AP"
 damage_tier = &"low"
 range_tier = &"melee"
 range_value = 2.5
@@ -33,8 +33,8 @@ script = ExtResource("1")
 unit_name = "Stoker"
 display_name = "Stoker"
 unit_class = &"engineer"
-hp_total = 800
-hp_per_unit = 200
+hp_total = 640
+hp_per_unit = 160
 armor_class = &"light"
 speed_tier = &"moderate"
 sight_tier = &"medium"

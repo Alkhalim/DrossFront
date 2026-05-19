@@ -1,0 +1,88 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[ext_resource type="Resource" path="res://resources/units/heliarch_inquisitor_slag_sprayer.tres" id="3"]
+
+[ext_resource type="Resource" path="res://resources/units/heliarch_inquisitor_piercer.tres" id="4"]
+
+[sub_resource type="Resource" id="weapon_plasma_cannon"]
+script = ExtResource("2")
+weapon_name = "Plasma Cannon"
+role_tag = &"Universal"
+damage_tier = &"high"
+range_tier = &"medium"
+range_value = 18.0
+rof_tier = &"moderate"
+projectile_style = &"plasma"
+base_accuracy = 0.88
+
+damage = 60
+range = 18.0
+rof_seconds = 1.2
+use_explicit_air = true
+engages_air_explicit = true
+air_damage_mult = 0.7
+mult_vs_unarmored_v2 = 0.9
+mult_vs_light_v2 = 1.0
+mult_vs_medium_v2 = 1.2
+mult_vs_heavy_v2 = 0.9
+mult_vs_structure_v2 = 0.7
+mult_vs_light_air_v2 = 0.9
+mult_vs_heavy_air_v2 = 0.5
+
+[sub_resource type="Resource" id="weapon_aux_flamer"]
+script = ExtResource("2")
+weapon_name = "Auxiliary Flamethrower"
+role_tag = &"AP"
+damage_tier = &"low"
+range_tier = &"short"
+range_value = 8.0
+rof_tier = &"continuous"
+projectile_style = &"flame"
+base_accuracy = 0.95
+
+damage = 12
+range = 8.0
+rof_seconds = 0.30
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.4
+mult_vs_light_v2 = 1.2
+mult_vs_medium_v2 = 0.7
+mult_vs_heavy_v2 = 0.4
+mult_vs_structure_v2 = 0.6
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
+
+[resource]
+script = ExtResource("1")
+unit_name = "Inquisitor Tank"
+display_name = "Inquisitor Tank"
+unit_class = &"medium"
+hp_total = 1730
+hp_per_unit = 575
+armor_class = &"medium"
+speed_tier = &"moderate"
+sight_tier = &"medium"
+squad_size = 3
+population = 12
+cost_salvage = 360
+cost_fuel = 28
+build_time = 40.0
+built_at = &"headquarters"
+unlock_prerequisite = &"forge_pit"
+primary_weapon = SubResource("weapon_plasma_cannon")
+secondary_weapon = SubResource("weapon_aux_flamer")
+branch_a_stats = ExtResource("3")
+branch_b_stats = ExtResource("4")
+branch_a_name = "Slag Sprayer"
+branch_b_name = "Piercer"
+special_description = "Heliarch medium hover tank — Inquisitor. Plasma Cannon (Universal: AP + AAir) engages ground AND aerial targets (plasma is heat-seeking — Heliarch's primary mobile AA). Auxiliary Flamethrower clears infantry at short range. Hover movement crosses water and rough terrain."
+
+speed = 7.5
+sight_radius = 18.0
+armor_reduction = 0.30
+is_hover_tank = true

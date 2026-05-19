@@ -1,0 +1,26 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Resource" path="res://resources/units/heliarch_condor.tres" id="2"]
+
+[ext_resource type="Resource" path="res://resources/units/heliarch_cremator.tres" id="3"]
+
+[ext_resource type="Resource" path="res://resources/units/heliarch_matador.tres" id="4"]
+
+[resource]
+script = ExtResource("1")
+unit_name = "Combined Air-Ground"
+display_name = "Combined Air-Ground"
+unit_class = &"aircraft"
+armor_class = &"medium"
+squad_size = 1
+population = 32
+cost_salvage = 1000
+cost_fuel = 72
+build_time = 64.0
+built_at = &"militia_camp"
+unlock_prerequisite = &"aerie"
+is_militia_composition = true
+militia_units = [ExtResource("2"), ExtResource("3"), ExtResource("4")]
+special_description = "Pre-defined Heliarch band: 1× Condor + 1× Cremator + 1× Matador. Mixed air-ground force. Requires Aerie."

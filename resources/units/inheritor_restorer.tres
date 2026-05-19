@@ -46,7 +46,7 @@ build_time = 18.0
 built_at = &"headquarters"
 primary_weapon = SubResource("weapon_cutting_laser")
 detection_radius = 100.0
-special_description = "Inheritor engineer — Restorator. Lattice Welder (AS, Moderate, Melee, Continuous) repairs allies OR damages enemies at melee range. Must close to enemies to do damage. Repairs at 12 HP/sec. Built in pairs at HQ. CONCERN: melee engagement + dual-function welder requires code implementation."
+special_description = "Inheritor engineer — Restorator. Lattice Welder (AS, Moderate, Melee, Continuous) repairs allies OR damages enemies at melee range. Must close to enemies to do damage. Repairs at 12 HP/sec. Built in pairs at HQ."
 can_build = true
 repair_rate = 12.0
 

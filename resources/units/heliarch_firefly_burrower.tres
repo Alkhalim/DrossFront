@@ -1,0 +1,59 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_burrower_charge"]
+script = ExtResource("2")
+weapon_name = "Burrower Charge"
+role_tag = &"AS"
+damage_tier = &"high"
+range_tier = &"short"
+range_value = 8.0
+rof_tier = &"slow"
+projectile_style = &"missile"
+base_accuracy = 0.92
+splash_radius = 3.5
+splash_damage_mult = 0.80
+can_damage_trees = true
+
+damage = 90
+range = 8.0
+rof_seconds = 4.0
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.2
+mult_vs_light_v2 = 1.2
+mult_vs_medium_v2 = 1.1
+mult_vs_heavy_v2 = 0.9
+mult_vs_structure_v2 = 1.5
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
+
+[resource]
+script = ExtResource("1")
+unit_name = "Firefly (Burrower)"
+display_name = "Firefly (Burrower)"
+unit_class = &"aircraft"
+hp_total = 540
+hp_per_unit = 90
+armor_class = &"light"
+speed_tier = &"moderate"
+sight_tier = &"medium"
+squad_size = 4
+population = 6
+cost_salvage = 280
+cost_fuel = 18
+build_time = 24.0
+built_at = &"headquarters"
+unlock_prerequisite = &"drone_nest"
+primary_weapon = SubResource("weapon_burrower_charge")
+is_aircraft = true
+flight_altitude = 4.0
+flight_speed = 11.0
+special_description = "Firefly — Burrower. Heavier drones that tunnel underneath the target before detonating (lore — burrowing implementation TBD). 4 drones per squad, fewer but punchier."
+branch_summary = "Squad 6→4, +69% per-shot damage, anti-structure bonus."
+speed = 11.0
+sight_radius = 16.0
+armor_reduction = 0.15

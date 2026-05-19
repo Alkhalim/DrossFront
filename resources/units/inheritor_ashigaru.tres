@@ -44,7 +44,7 @@ cost_fuel = 0
 build_time = 28.0
 built_at = &"headquarters"
 primary_weapon = SubResource("weapon_twin_mg")
-special_description = "Inheritor melee scout — Ashigaru. Restored Katana (AP, High, Melee, Fast) strikes at point-blank on quadruped legs. Very Fast — closes quickly to engage. Pair-produced. CONCERN: melee engagement behavior requires code implementation."
+special_description = "Inheritor melee scout — Ashigaru. Restored Katana (AP, High, Melee, Fast) strikes at point-blank on quadruped legs. Very Fast — closes quickly to engage. Pair-produced."
 
 speed = 10.8
 sight_radius = 26.0

@@ -1,0 +1,54 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_lancer_beam"]
+script = ExtResource("2")
+weapon_name = "Solar Lance"
+role_tag = &"AP"
+damage_tier = &"high"
+range_tier = &"long"
+range_value = 26.0
+rof_tier = &"slow"
+projectile_style = &"beam"
+base_accuracy = 0.95
+
+damage = 55
+range = 26.0
+rof_seconds = 2.4
+use_explicit_air = true
+engages_air_explicit = true
+air_damage_mult = 0.45
+mult_vs_unarmored_v2 = 0.8
+mult_vs_light_v2 = 0.9
+mult_vs_medium_v2 = 1.2
+mult_vs_heavy_v2 = 1.0
+mult_vs_structure_v2 = 0.9
+mult_vs_light_air_v2 = 1.1
+mult_vs_heavy_air_v2 = 0.7
+
+[resource]
+script = ExtResource("1")
+unit_name = "Cremator (Lancer)"
+display_name = "Cremator (Lancer)"
+unit_class = &"medium"
+hp_total = 1800
+hp_per_unit = 600
+armor_class = &"medium"
+speed_tier = &"moderate"
+sight_tier = &"long"
+squad_size = 3
+population = 12
+cost_salvage = 380
+cost_fuel = 30
+build_time = 44.0
+built_at = &"headquarters"
+primary_weapon = SubResource("weapon_lancer_beam")
+special_description = "Heliarch Cremator — Lancer. Replaces the cone flamer with a focused Solar Lance beam: long range, high single-target AP damage, and can elevate to pick aircraft out of the sky. Heliarch's mobile AA answer."
+branch_summary = "Beam range +136%, single-target damage 22 -> 110, slower fire rate, slightly lower HP, gains AA capability."
+
+speed = 7.5
+sight_radius = 24.0
+armor_reduction = 0.30

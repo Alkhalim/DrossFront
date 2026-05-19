@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+building_name = "Advanced Militia Camp"
+building_id = &"advanced_militia_camp"
+hp = 950
+cost_salvage = 520
+cost_fuel = 55
+build_time = 45.0
+power_consumption = 14
+power_production = 0
+producible_units = []
+footprint_size = Vector3(4.5, 3.2, 4.5)
+placeholder_color = Color(0.78, 0.50, 0.22, 1)
+is_advanced = true
+prerequisites = [&"crucible_spire", &"militia_camp"]
+faction_lock = 4
+weapons = []
+is_mobile = true
+provides_population = 35

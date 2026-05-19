@@ -1,0 +1,55 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_martyr_cluster"]
+script = ExtResource("2")
+weapon_name = "Volatile Cluster"
+role_tag = &"AP"
+damage_tier = &"moderate"
+range_tier = &"short"
+range_value = 13.0
+rof_tier = &"medium"
+projectile_style = &"bullet"
+base_accuracy = 0.78
+
+damage = 32
+range = 13.0
+rof_seconds = 0.85
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.4
+mult_vs_light_v2 = 1.1
+mult_vs_medium_v2 = 0.7
+mult_vs_heavy_v2 = 0.35
+mult_vs_structure_v2 = 0.7
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
+
+[resource]
+script = ExtResource("1")
+unit_name = "Matador (Martyr)"
+display_name = "Matador (Martyr)"
+unit_class = &"light"
+hp_total = 705
+hp_per_unit = 175
+armor_class = &"light"
+speed_tier = &"fast"
+sight_tier = &"medium"
+squad_size = 4
+population = 8
+cost_salvage = 175
+cost_fuel = 0
+build_time = 26.0
+built_at = &"headquarters"
+primary_weapon = SubResource("weapon_martyr_cluster")
+special_description = "Heliarch Matador — Martyr. Lighter chassis, faster, and detonates on death dealing AoE damage to nearby enemies (50 dmg, 4u radius)."
+branch_summary = "Speed +10% and a death-detonation kicker; trades chassis HP for kamikaze finish."
+
+speed = 12.5
+sight_radius = 22.0
+armor_reduction = 0.18
+death_detonation_radius = 4.0
+death_detonation_damage = 50

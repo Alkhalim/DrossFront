@@ -1,0 +1,56 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_censer_cloud"]
+script = ExtResource("2")
+weapon_name = "Chemical Cloud Launcher"
+role_tag = &"AP"
+damage_tier = &"high"
+range_tier = &"long"
+range_value = 24.0
+rof_tier = &"slow"
+projectile_style = &"barrel"
+base_accuracy = 0.86
+splash_radius = 5.0
+splash_damage_mult = 0.65
+can_damage_trees = true
+
+damage = 95
+range = 24.0
+rof_seconds = 3.6
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.5
+mult_vs_light_v2 = 1.3
+mult_vs_medium_v2 = 0.9
+mult_vs_heavy_v2 = 0.5
+mult_vs_structure_v2 = 0.6
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
+
+[resource]
+script = ExtResource("1")
+unit_name = "Censer"
+display_name = "Censer"
+unit_class = &"medium"
+hp_total = 1360
+hp_per_unit = 1360
+armor_class = &"medium"
+speed_tier = &"slow"
+sight_tier = &"long"
+squad_size = 1
+population = 22
+cost_salvage = 330
+cost_fuel = 150
+build_time = 95.0
+built_at = &"headquarters"
+unlock_prerequisite = &"crucible_spire"
+primary_weapon = SubResource("weapon_censer_cloud")
+special_description = "Heliarch elite caster — Censer. Chemical Cloud Launcher lobs persistent toxic clouds (AS, High, Long, AoE 5u splash). Lingering chemical-fire DoT mechanic for sustained area denial — code TBD. Requires Crucible Spire."
+
+speed = 4.5
+sight_radius = 26.0
+armor_reduction = 0.40

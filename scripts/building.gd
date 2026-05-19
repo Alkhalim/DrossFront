@@ -5,6 +5,12 @@ extends StaticBody3D
 signal unit_produced(unit_scene: PackedScene, spawn_point: Vector3)
 signal destroyed
 signal construction_complete
+## Fired when the building transitions between PackStates (DEPLOYED /
+## PACKING / PACKED / UNPACKING). HUD listens for this on the currently
+## selected building so the Pack/Unpack/Cancel button re-renders in place
+## without forcing the player to reselect, and so the salvage-yard range
+## ring + worker tasking can hide/resume in step.
+signal pack_state_changed(new_state: int)
 
 @export var stats: BuildingStatResource
 @export var owner_faction: FactionResource
@@ -24,6 +30,44 @@ var is_constructed: bool = false
 ## or be able to attack the foundation -- the structure isn't really
 ## there yet, just a placement intent.
 var construction_started: bool = false
+
+## Pack/unpack state machine — Heliarch faction mechanic per
+## drossfront-docs/docs/11_faction_mechanics.md §"Mobile Infrastructure".
+## Only buildings whose stat resource sets is_mobile = true enter the
+## non-DEPLOYED states. While in PACKING / PACKED / UNPACKING:
+##   - Production / gathering / combat is disabled.
+##   - PACKED buildings can be relocated by right-click (teleport to
+##     target after a short delay — placeholder for the future
+##     "move-as-unit" behaviour the spec describes).
+##   - HP carries through every transition.
+enum PackState { DEPLOYED, PACKING, PACKED, UNPACKING }
+var pack_state: int = PackState.DEPLOYED
+## Seconds remaining on the current PACKING / UNPACKING transition.
+## Fires the state advance from _process when it hits 0.
+var _pack_timer: float = 0.0
+## 5 seconds per transition — tightened from the spec's 12-15 s on
+## playtest feedback (2026-05-18) because the longer window felt
+## obstructive when the player wanted to relocate a single Salvage
+## Caravan to chase a fresh wreck pile.
+const PACK_TRANSITION_SEC: float = 5.0
+## Set by the HUD when the player right-clicks a destination while the
+## building is PACKED. The _tick_pack_state PACKED branch lerps the
+## building toward this point at PACKED_MOVE_SPEED u/s, yawing to face
+## the direction of motion. Clears (set to INF) when within
+## PACKED_ARRIVAL_RADIUS of the destination. Sentinel = Vector3.INF.
+var _packed_relocate_target: Vector3 = Vector3(INF, INF, INF)
+## Slow-mover transit speed for packed Heliarch buildings — spec says
+## "slower than a Bulwark" (Bulwark ≈ 5 u/s). 3 u/s reads as a heavy
+## convoy rolling on improvised wheels.
+const PACKED_MOVE_SPEED: float = 3.0
+## How close the building has to get to its destination before the
+## transit ends. Generous because the player wants a "drop it here"
+## relocate, not surgical positioning.
+const PACKED_ARRIVAL_RADIUS: float = 0.3
+## Per-instance cache of original OmniLight energies — populated the
+## first time _apply_pack_progress runs with t > 0, used to restore
+## brightness when unpacking finishes. Keyed by light instance_id.
+var _pack_light_orig_energy: Dictionary = {}
 ## Per-instance max HP override. -1 = use stats.hp. Bumped above
 ## stats.hp when the Anvil HQ Plating upgrade is bought (the buff
 ## raises both current_hp and the max ceiling so the auto-repair
@@ -166,7 +210,7 @@ void fragment() {
 	// so the edge reads as a glow gradient rather than a painted ring.
 	float world_dist = r_norm * radius;
 	float border = smoothstep(radius - 1.2, radius - 0.4, world_dist)
-	             * (1.0 - smoothstep(radius - 0.5, radius, world_dist));
+				 * (1.0 - smoothstep(radius - 0.5, radius, world_dist));
 
 	// Overlap suppression: if this fragment's world XZ is inside another
 	// provider's disc, suppress the border so rings don't cross.
@@ -424,11 +468,22 @@ func _ready() -> void:
 		_apply_visual_cull_margin(_visual_root, 12.0)
 
 		# Specialized logic components.
-		if stats.building_id == &"salvage_yard":
+		if stats.building_id == &"salvage_yard" or stats.building_id == &"salvage_caravan":
+			# Heliarch Salvage Caravan reuses the same worker-spawn /
+			# harvest logic — it IS a salvage yard, just mobile + with
+			# a shorter range. Attaching here makes the caravan actually
+			# gather salvage instead of sitting inert.
 			var script: GDScript = load("res://scripts/salvage_yard_component.gd") as GDScript
 			var yard: Node = script.new()
 			yard.name = "SalvageYardComponent"
 			add_child(yard)
+			# Caravan tuning per spec: 2 workers (vs 4 standard), shorter
+			# 22u harvest radius (vs 30 standard), slightly faster spawn
+			# to compensate for the smaller worker cap.
+			if stats.building_id == &"salvage_caravan":
+				yard.set("max_workers", 2)
+				yard.set("harvest_radius", 22.0)
+				yard.set("worker_spawn_interval", 20.0)
 		elif stats.building_id == &"gun_emplacement" or stats.building_id == &"gun_emplacement_basic":
 			var turret_script: GDScript = load("res://scripts/turret_component.gd") as GDScript
 			var turret: Node = turret_script.new()
@@ -547,6 +602,34 @@ func _add_building_details() -> void:
 		&"inheritor_construction_site": _detail_inheritor_construction_site()
 		&"reliquary": _detail_reliquary()
 		&"architect_network": _detail_architect_network()
+		# Inheritor authorization buildings — each gates a specific
+		# T2 unit at the HQ / Restorer field-build palette.
+		&"monolith_vault": _detail_monolith_vault()
+		&"architects_choir": _detail_architects_choir()
+		&"choir_sanctum": _detail_choir_sanctum()
+		&"sky_lattice": _detail_sky_lattice()
+		&"heavy_lattice_foundry": _detail_heavy_lattice_foundry()
+		# Heliarch tech building — branch-commit hub for Matador / Cremator,
+		# gates Águila heavy bomber. Tier 2 mobile power building.
+		&"crucible_spire": _detail_crucible_spire()
+		# Heliarch Tier 1 mobile power — Crucible Spire's prerequisite,
+		# vent-gated.
+		&"catalyst_core": _detail_catalyst_core()
+		# Heliarch faction-specific mobile salvage yard.
+		&"salvage_caravan": _detail_salvage_caravan()
+		# Heliarch production (recruits militias).
+		&"militia_camp": _detail_militia_camp()
+		# Heliarch tier-2 militia hub. Same visual silhouette as the
+		# basic camp (it's a larger, more ornate version of the same
+		# building) — the in-game build-menu tint + size difference
+		# carry the "this is the elite version" read.
+		&"advanced_militia_camp": _detail_militia_camp()
+		# Heliarch authorization buildings (gate units + militia comps).
+		&"forge_pit": _detail_forge_pit()
+		&"crucible_foundry": _detail_crucible_foundry()
+		&"pyre_hall": _detail_pyre_hall()
+		&"drone_nest": _detail_drone_nest()
+		&"aerie": _detail_aerie()
 	# Mesh-provider aura ring (V3 §Pillar 2). Drawn after the type
 	# detail layer so the ring sits on top of the ground markings.
 	# Meridian-only visualization. Combine HQ has the field set (so
@@ -594,6 +677,38 @@ const _BUILDING_CLASS_TINT: Dictionary = {
 	&"conveyor_node":                Color(0.60, 0.50, 0.20, 1),
 	&"reliquary":                    Color(0.60, 0.50, 0.20, 1),
 	&"inheritor_construction_site":  Color(0.60, 0.50, 0.20, 1),
+	# --- Heliarch role-coloured palette. Now follows the cross-faction
+	# convention: yellow for energy/power, bronze for economy, warm
+	# orange for production, purple for authorization/tech. Heliarch's
+	# faction-identity warm-glow lives on the actual 3D detail layer
+	# (amber emissives on reactors); the build-menu tints are pure
+	# role-class so players can scan the palette consistently across
+	# Combine / Meridian / Inheritor / Heliarch.
+	# POWER (energy) — yellow, matching Combine's Black Pylon.
+	&"catalyst_core":                Color(0.78, 0.62, 0.20, 1),  # T1 reactor (yellow)
+	&"crucible_spire":               Color(0.92, 0.78, 0.28, 1),  # T2 reactor (bright yellow)
+	# ECONOMY — muted bronze (matches salvage_yard).
+	&"salvage_caravan":              Color(0.60, 0.50, 0.20, 1),
+	# PRODUCTION — warm orange (matches basic_foundry / aerodrome).
+	&"militia_camp":                 Color(0.65, 0.40, 0.15, 1),
+	&"advanced_militia_camp":        Color(0.80, 0.48, 0.18, 1),  # brighter orange (T2 production)
+	# AUTHORIZATION / TECH — purple. Each shade picks up a sub-hue tied
+	# to the unit class it gates so two purple buildings on the menu
+	# still read distinct at a glance.
+	&"forge_pit":                    Color(0.55, 0.35, 0.65, 1),  # ritual violet (heavy hover)
+	&"crucible_foundry":             Color(0.42, 0.28, 0.55, 1),  # deep violet (heavy melee)
+	&"pyre_hall":                    Color(0.70, 0.42, 0.78, 1),  # bright violet (caster)
+	&"drone_nest":                   Color(0.50, 0.40, 0.68, 1),  # cool violet (drone swarm)
+	&"aerie":                        Color(0.62, 0.48, 0.82, 1),  # sky-violet (air)
+	# --- Inheritor advanced authorization buildings ----------------
+	# Each gates a specific tier-2 unit at the Restorer field-build
+	# palette + colours its role on the build menu (deeper violet
+	# for heavy/sniper, softer for caster, sky-blue for air).
+	&"monolith_vault":               Color(0.32, 0.42, 0.58, 1),  # heavy iron-blue
+	&"architects_choir":             Color(0.55, 0.42, 0.68, 1),  # ritual violet
+	&"choir_sanctum":                Color(0.65, 0.45, 0.75, 1),  # bright violet (caster)
+	&"sky_lattice":                  Color(0.55, 0.65, 0.78, 1),  # sky-blue (light air)
+	&"heavy_lattice_foundry":        Color(0.40, 0.52, 0.68, 1),  # deep iron-blue (heavy air)
 }
 
 
@@ -1458,6 +1573,255 @@ func _detail_headquarters() -> void:
 	# domes, an iconostasis-style front panel, brass cornice trim.
 	if _resolve_faction_id() == 0:
 		_add_combine_hq_orthodox_ornaments()
+	# Heliarch HQ — central reactor + brass plating + four corner
+	# floodlights + tarps. Sells the "permanent fortress where the
+	# rest of the base is mobile" anchor identity.
+	elif _resolve_faction_id() == 3:
+		_add_heliarch_hq_reactor_ornaments()
+
+
+func _add_heliarch_hq_reactor_ornaments() -> void:
+	## Heliarch HQ overlay — "central reactor anchor". The spec
+	## (11_faction_mechanics §HQ) calls the HQ the faction's only
+	## non-mobile building: it's the reactor every mobile structure
+	## orbits. Visual cues:
+	##   - Big glowing reactor core mounted on the roof
+	##   - Brass cornice plating around the upper hull
+	##   - Four corner floodlights (the recurring Heliarch lamp motif)
+	##   - Heavy salvaged-metal patches on the front face
+	##   - Brass chain-festoons strung between corner posts
+	## Distinct from every Heliarch mobile building because nothing on
+	## the HQ folds — no tarps, no scaffolding, just a permanent
+	## fortified reactor temple.
+	if not stats:
+		return
+	var fs: Vector3 = stats.footprint_size
+	const HELIARCH_AMBER_HQ: Color = Color(1.00, 0.55, 0.20, 1.0)
+	const HELIARCH_BRASS_HQ: Color = Color(0.55, 0.40, 0.20, 1.0)
+	const SOOTED_HQ: Color = Color(0.20, 0.14, 0.10, 1.0)
+	const FLOOD_WARM_HQ: Color = Color(1.0, 0.78, 0.42, 1.0)
+	const HOT_WHITE_HQ: Color = Color(1.0, 0.88, 0.55, 1.0)
+	# --- Brass cornice plates wrapping the top edge of the hull,
+	# all four sides. Distinct from the Anvil cornice — thicker, with
+	# visible rivets, sells "industrial fortress".
+	for cornice_side: int in 4:
+		var cornice := MeshInstance3D.new()
+		var cb := BoxMesh.new()
+		var c_pos: Vector3
+		match cornice_side:
+			0:
+				cb.size = Vector3(fs.x * 1.06, 0.18, 0.18)
+				c_pos = Vector3(0.0, fs.y - 0.12, -fs.z * 0.5 - 0.08)
+			1:
+				cb.size = Vector3(fs.x * 1.06, 0.18, 0.18)
+				c_pos = Vector3(0.0, fs.y - 0.12, fs.z * 0.5 + 0.08)
+			2:
+				cb.size = Vector3(0.18, 0.18, fs.z * 1.06)
+				c_pos = Vector3(-fs.x * 0.5 - 0.08, fs.y - 0.12, 0.0)
+			_:
+				cb.size = Vector3(0.18, 0.18, fs.z * 1.06)
+				c_pos = Vector3(fs.x * 0.5 + 0.08, fs.y - 0.12, 0.0)
+		cornice.mesh = cb
+		cornice.position = c_pos
+		cornice.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_HQ))
+		_attach_visual(cornice)
+	# Brass rivet rows along the front cornice — 6 rivets spanning
+	# the hull face for the "industrial fortress" read.
+	for rivet_i: int in 6:
+		var rivet := MeshInstance3D.new()
+		var rs := SphereMesh.new()
+		rs.radius = 0.10
+		rs.height = 0.20
+		rivet.mesh = rs
+		var rx: float = -fs.x * 0.42 + float(rivet_i) * (fs.x * 0.16)
+		rivet.position = Vector3(rx, fs.y - 0.12, -fs.z * 0.5 - 0.18)
+		rivet.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_HQ))
+		_attach_visual(rivet)
+	# --- Central reactor on the roof — tall brass-banded cylinder
+	# topped by a hot emissive bulb. The "anchor reactor" the spec
+	# names; gives the HQ a distinct skyline silhouette compared to
+	# the radar dish on Anvil/Sable HQs.
+	var reactor_base_y: float = fs.y * 1.05
+	# Reactor base — short brass ring around the bottom of the column.
+	var reactor_collar := MeshInstance3D.new()
+	var rcr := TorusMesh.new()
+	rcr.inner_radius = fs.x * 0.18
+	rcr.outer_radius = fs.x * 0.24
+	rcr.rings = 16
+	rcr.ring_segments = 6
+	reactor_collar.mesh = rcr
+	reactor_collar.rotation.x = PI * 0.5
+	reactor_collar.position = Vector3(0.0, reactor_base_y + 0.05, 0.0)
+	reactor_collar.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_HQ))
+	_attach_visual(reactor_collar)
+	# Reactor column — tall cylinder with brass + sooted bands.
+	var reactor_col := MeshInstance3D.new()
+	var rc := CylinderMesh.new()
+	rc.top_radius = fs.x * 0.16
+	rc.bottom_radius = fs.x * 0.20
+	rc.height = fs.y * 0.85
+	rc.radial_segments = 14
+	reactor_col.mesh = rc
+	reactor_col.position = Vector3(0.0, reactor_base_y + rc.height * 0.5 + 0.05, 0.0)
+	reactor_col.set_surface_override_material(0, _detail_dark_metal_mat(SOOTED_HQ))
+	_attach_visual(reactor_col)
+	# Three brass banding rings along the column.
+	for band_i: int in 3:
+		var band := MeshInstance3D.new()
+		var bdt := TorusMesh.new()
+		bdt.inner_radius = fs.x * 0.18
+		bdt.outer_radius = fs.x * 0.23
+		bdt.rings = 14
+		bdt.ring_segments = 5
+		band.mesh = bdt
+		band.rotation.x = PI * 0.5
+		band.position = Vector3(0.0, reactor_base_y + 0.20 + float(band_i) * (rc.height * 0.30), 0.0)
+		band.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_HQ))
+		_attach_visual(band)
+	# Hot emissive bulb on top — the actual reactor glow.
+	var reactor_bulb := MeshInstance3D.new()
+	var bb := SphereMesh.new()
+	bb.radius = fs.x * 0.22
+	bb.height = fs.x * 0.44
+	reactor_bulb.mesh = bb
+	reactor_bulb.position = Vector3(0.0, reactor_base_y + rc.height + bb.radius * 0.7, 0.0)
+	var bb_mat := StandardMaterial3D.new()
+	bb_mat.albedo_color = HOT_WHITE_HQ
+	bb_mat.emission_enabled = true
+	bb_mat.emission = HELIARCH_AMBER_HQ
+	bb_mat.emission_energy_multiplier = 4.0
+	bb_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	reactor_bulb.set_surface_override_material(0, bb_mat)
+	_attach_visual(reactor_bulb)
+	# Reactor light — wide, bright, casts amber over the entire HQ
+	# footprint + a wide circle of surrounding ground.
+	var reactor_light := OmniLight3D.new()
+	reactor_light.light_color = HELIARCH_AMBER_HQ
+	reactor_light.light_energy = 1.6
+	reactor_light.omni_range = fs.x * 4.5
+	reactor_light.position = Vector3(0.0, reactor_base_y + rc.height + 0.30, 0.0)
+	_attach_visual(reactor_light)
+	# --- Four heat-vent stacks at the corners of the roof — angled
+	# outward like a fortress's smoke stacks. Differentiates from
+	# the central reactor.
+	for stack_xi: int in 2:
+		for stack_zi: int in 2:
+			var sx: float = -fs.x * 0.36 if stack_xi == 0 else fs.x * 0.36
+			var sz: float = -fs.z * 0.36 if stack_zi == 0 else fs.z * 0.36
+			var stack := MeshInstance3D.new()
+			var sc := CylinderMesh.new()
+			sc.top_radius = 0.11
+			sc.bottom_radius = 0.15
+			sc.height = fs.y * 0.45
+			sc.radial_segments = 10
+			stack.mesh = sc
+			stack.position = Vector3(sx, fs.y + sc.height * 0.5, sz)
+			stack.rotation.x = (-0.10 if sz < 0.0 else 0.10) * 0.5
+			stack.rotation.z = (-0.10 if sx < 0.0 else 0.10) * 0.5
+			stack.set_surface_override_material(0, _detail_dark_metal_mat(SOOTED_HQ))
+			_attach_visual(stack)
+			# Amber glow disc at each stack tip.
+			var glow := MeshInstance3D.new()
+			var gd := CylinderMesh.new()
+			gd.top_radius = 0.10
+			gd.bottom_radius = 0.10
+			gd.height = 0.03
+			gd.radial_segments = 8
+			glow.mesh = gd
+			glow.position = Vector3(sx, fs.y + sc.height + 0.04, sz)
+			var glow_mat := StandardMaterial3D.new()
+			glow_mat.albedo_color = HELIARCH_AMBER_HQ
+			glow_mat.emission_enabled = true
+			glow_mat.emission = HELIARCH_AMBER_HQ
+			glow_mat.emission_energy_multiplier = 2.4
+			glow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			glow.set_surface_override_material(0, glow_mat)
+			_attach_visual(glow)
+	# --- Four floor-level floodlights at the corners. Same lamp
+	# motif as every other Heliarch building, but positioned LOW
+	# so the HQ silhouette reads ground-anchored.
+	for flood_xi: int in 2:
+		for flood_zi: int in 2:
+			var fx: float = -fs.x * 0.42 if flood_xi == 0 else fs.x * 0.42
+			var fz: float = -fs.z * 0.42 if flood_zi == 0 else fs.z * 0.42
+			# Flood post.
+			var post := MeshInstance3D.new()
+			var pc := CylinderMesh.new()
+			pc.top_radius = 0.07
+			pc.bottom_radius = 0.09
+			pc.height = fs.y * 0.55
+			pc.radial_segments = 6
+			post.mesh = pc
+			post.position = Vector3(fx, pc.height * 0.5, fz)
+			post.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_HQ))
+			_attach_visual(post)
+			# Floodlight head — brass housing facing outward.
+			var flood_head := MeshInstance3D.new()
+			var fhc := CylinderMesh.new()
+			fhc.top_radius = 0.14
+			fhc.bottom_radius = 0.12
+			fhc.height = 0.16
+			fhc.radial_segments = 10
+			flood_head.mesh = fhc
+			# Aim outward (away from HQ centre).
+			var out_dir: Vector3 = Vector3(fx, 0.0, fz).normalized()
+			flood_head.position = Vector3(fx, pc.height + 0.08, fz)
+			flood_head.look_at_from_position(flood_head.position, flood_head.position + out_dir, Vector3.UP)
+			flood_head.rotation.x += PI * 0.5
+			flood_head.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_HQ))
+			_attach_visual(flood_head)
+			# Warm bulb on the outward face.
+			var flood_bulb := MeshInstance3D.new()
+			var fbc := CylinderMesh.new()
+			fbc.top_radius = 0.11
+			fbc.bottom_radius = 0.11
+			fbc.height = 0.04
+			fbc.radial_segments = 10
+			flood_bulb.mesh = fbc
+			var bulb_pos: Vector3 = Vector3(fx, pc.height + 0.08, fz) + out_dir * 0.10
+			flood_bulb.position = bulb_pos
+			flood_bulb.look_at_from_position(bulb_pos, bulb_pos + out_dir, Vector3.UP)
+			flood_bulb.rotation.x += PI * 0.5
+			var fb_mat := StandardMaterial3D.new()
+			fb_mat.albedo_color = FLOOD_WARM_HQ
+			fb_mat.emission_enabled = true
+			fb_mat.emission = FLOOD_WARM_HQ
+			fb_mat.emission_energy_multiplier = 3.2
+			fb_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			flood_bulb.set_surface_override_material(0, fb_mat)
+			_attach_visual(flood_bulb)
+			# Per-corner OmniLight so the HQ casts visible pools of
+			# light on the surrounding ground.
+			var flood_light := OmniLight3D.new()
+			flood_light.light_color = FLOOD_WARM_HQ
+			flood_light.light_energy = 0.7
+			flood_light.omni_range = 4.5
+			flood_light.position = bulb_pos
+			_attach_visual(flood_light)
+	# --- Large brass "doctrine plate" embossed on the front face.
+	# Sets the Heliarch HQ apart from the Anvil iconostasis or the
+	# Sable monitor wall.
+	var doctrine := MeshInstance3D.new()
+	var dpb := BoxMesh.new()
+	dpb.size = Vector3(fs.x * 0.55, fs.y * 0.30, 0.08)
+	doctrine.mesh = dpb
+	doctrine.position = Vector3(0.0, fs.y * 0.55, -fs.z * 0.5 - 0.10)
+	doctrine.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_HQ))
+	_attach_visual(doctrine)
+	# Emissive amber emblem in the centre of the plate.
+	var emblem := MeshInstance3D.new()
+	var emb := BoxMesh.new()
+	emb.size = Vector3(fs.x * 0.34, fs.y * 0.18, 0.05)
+	emblem.mesh = emb
+	emblem.position = Vector3(0.0, fs.y * 0.55, -fs.z * 0.5 - 0.16)
+	var em_mat := StandardMaterial3D.new()
+	em_mat.albedo_color = HELIARCH_AMBER_HQ
+	em_mat.emission_enabled = true
+	em_mat.emission = HELIARCH_AMBER_HQ
+	em_mat.emission_energy_multiplier = 2.4
+	em_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	emblem.set_surface_override_material(0, em_mat)
+	_attach_visual(emblem)
 
 
 func _add_combine_hq_orthodox_ornaments() -> void:
@@ -4456,6 +4820,21 @@ func _is_foundation_clear() -> bool:
 		var dx: float = absf(node3d.global_position.x - global_position.x)
 		var dz: float = absf(node3d.global_position.z - global_position.z)
 		if dx < half_x and dz < half_z:
+			# Diagnostic: surface WHICH unit is blocking when the
+			# foundation reports not-clear. Gated on the BuilderComponent
+			# debug flag so this only logs when the build-flow probe is
+			# enabled. Logs once per recheck window (250ms cache) so it
+			# doesn't flood the console.
+			if BuilderComponent.BUILDER_DEBUG_LOG:
+				var blocker_name: String = "?"
+				if node is Unit:
+					var s: UnitStatResource = (node as Unit).get("stats") as UnitStatResource
+					blocker_name = s.unit_name if s else "Unit"
+					blocker_name = "%s#%d" % [blocker_name, node3d.get_instance_id() % 10000]
+				else:
+					blocker_name = "%s#%d" % [node.name, node3d.get_instance_id() % 10000]
+				print("[FOUNDATION %s] blocked by %s at offset (%.2f,%.2f) (half=(%.2f,%.2f))" % [
+					stats.building_name, blocker_name, dx, dz, half_x, half_z])
 			_foundation_clear_cached = false
 			return false
 	_foundation_clear_cached = true
@@ -5091,31 +5470,90 @@ func _faction_producible_list() -> Array[UnitStatResource]:
 				return stats.producible_units
 
 	elif faction_id == 2:
-		# Inheritor — all production flows through the HQ; other buildings
-		# are field-constructed by Restorers (Task 5) and are inert producers.
+		# Inheritor — HQ produces Restorers + the base combat roster
+		# (Ashigaru, Wächter, Schwarm). Restorers ALSO field-build the
+		# same combat units at inheritor_construction_sites (for free
+		# queue space, or as a forward-deploy option). Stahlyokai is
+		# Restorer-only because its built_at is the construction site
+		# AND it gates behind Architect's Network. Originally only
+		# Restorers were on the HQ, which left the AI (no field-build
+		# logic) unable to field any combat unit; mirroring the field-
+		# build palette onto the HQ keeps the lore intact (HQ trains
+		# regulars, Restorer crafts specialists) while making the
+		# faction playable for both human and AI.
 		match stats.building_id:
 			&"headquarters":
-				paths = ["res://resources/units/inheritor_restorer.tres"]
+				# Base roster plus all authorization-gated T2 units. The
+				# units' unlock_prerequisite still hides them behind their
+				# gate building (monolith_vault → Sturmwolf, choir_sanctum →
+				# Kamigeist, sky_lattice → Valkyrie Striker,
+				# heavy_lattice_foundry → Kintsu Wing, architect_network →
+				# Oni Frame + Raijin + Stahlyokai branches). Listing them
+				# on the HQ here is what lets the AI train them once the
+				# corresponding authorization building lands; without this
+				# the unit's queue request would silently faction-reject.
+				paths = [
+					"res://resources/units/inheritor_restorer.tres",
+					"res://resources/units/inheritor_ashigaru.tres",
+					"res://resources/units/inheritor_wachter.tres",
+					"res://resources/units/inheritor_schwarm.tres",
+					"res://resources/units/inheritor_oni_frame.tres",
+					"res://resources/units/inheritor_raijin.tres",
+					"res://resources/units/inheritor_sturmwolf.tres",
+					"res://resources/units/inheritor_kamigeist.tres",
+					"res://resources/units/inheritor_valkyrie_striker.tres",
+					"res://resources/units/inheritor_kintsu_wing.tres",
+				]
 			_:
-				# Reliquary, Architect's Network, etc. are handled in Tasks
-				# 7-12. Until then treat every non-HQ building as a
-				# non-producer so Anvil units don't leak through.
+				# Reliquary, Architect's Network, etc. are field-built
+				# support structures — no direct production from them.
+				# Stahlyokai branches surface through Restorer field-build
+				# UI gated by architect_network's tier state.
 				forced_empty = true
 
 	elif faction_id == 3:
 		# Heliarch — basic-foundry roster lives on the HQ for now.
-		# Stoker (engineer), Matador (light), Cremator (medium) plus the
-		# shared Salvage Crawler so the player can rebuild salvage
-		# infrastructure. Advanced Foundry / Aerodrome rosters land when
-		# their .tres files exist; until then those buildings produce
-		# nothing rather than leaking Anvil units.
+		# Stoker (engineer), Matador (light melee), Cremator (medium
+		# flame+mortar), Inquisitor Tank (medium hover, plasma is the
+		# faction's mobile AA), Conquistador (heavy melee — gated by
+		# Crucible Spire prereq) plus the shared Salvage Crawler.
+		# Advanced Foundry / Aerodrome rosters land when the dedicated
+		# Heliarch production buildings (Militia Camp, Forge Pit etc.)
+		# come online; until then those buildings produce nothing
+		# rather than leaking Anvil units.
 		match stats.building_id:
 			&"headquarters":
+				# Per playtest 2026-05-19 — Heliarch HQ trims to JUST
+				# the engineer + crawler. Combat units are produced at
+				# their respective authorization buildings (Militia
+				# Camp + Advanced Militia Camp + the per-unit
+				# auth-building branch panels).
 				paths = [
 					"res://resources/units/heliarch_stoker.tres",
-					"res://resources/units/heliarch_matador.tres",
-					"res://resources/units/heliarch_cremator.tres",
 					"res://resources/units/anvil_crawler.tres",
+				]
+			&"militia_camp":
+				# Militia Camp recruits pre-defined bands (each "unit" is
+				# a militia composition that spawns 2-4 real units on
+				# completion — see UnitStatResource.is_militia_composition).
+				# Press Gang / Mechanized / Combined Air-Ground were
+				# pulled from the basic camp 2026-05-19 and rolled into
+				# the Advanced Militia Camp's higher-tier roster instead.
+				paths = [
+					"res://resources/militias/militia_skirmish.tres",
+					"res://resources/militias/militia_mixed.tres",
+					"res://resources/militias/militia_heavy.tres",
+					"res://resources/militias/militia_drone_swarm.tres",
+				]
+			&"advanced_militia_camp":
+				# Tier-2 Heliarch militia roster — elite groups featuring
+				# the apex / caster / heavy chassis. Created 2026-05-19
+				# per user request, gated behind Crucible Spire.
+				paths = [
+					"res://resources/militias/militia_air_strike.tres",
+					"res://resources/militias/militia_flame_choir.tres",
+					"res://resources/militias/militia_hover_inquisition.tres",
+					"res://resources/militias/militia_invictus_command.tres",
 				]
 			&"basic_foundry", &"advanced_foundry", &"aerodrome":
 				forced_empty = true
@@ -6762,6 +7200,1173 @@ func _detail_architect_network() -> void:
 	_attach_visual(light)
 
 
+## ---------------------------------------------------------------- Inheritor authorization buildings
+## All five share an "open cathedral courtyard" aesthetic: bronze-rimmed
+## concrete plinth + role-distinctive central feature + corner verdigris
+## obelisks. Each unlocks a specific T2 unit via its building_id matching
+## that unit's unlock_prerequisite (see resources/units/inheritor_*.tres).
+
+func _apply_inheritor_courtyard_base(fs: Vector3) -> void:
+	## Shared plinth + bronze-rim cornice the five authorization
+	## buildings stand on. Keeps the family read consistent without
+	## copy-pasting the same eight nodes into each detail func.
+	var plinth := MeshInstance3D.new()
+	var pb := BoxMesh.new()
+	pb.size = Vector3(fs.x * 0.95, fs.y * 0.18, fs.z * 0.95)
+	plinth.mesh = pb
+	plinth.position = Vector3(0.0, fs.y * 0.09, 0.0)
+	plinth.set_surface_override_material(0, _detail_dark_metal_mat(INHERITOR_CONCRETE))
+	_attach_visual(plinth)
+	# Bronze cornice — a thin band on top of the plinth.
+	var cornice := MeshInstance3D.new()
+	var cb := BoxMesh.new()
+	cb.size = Vector3(fs.x * 0.97, fs.y * 0.04, fs.z * 0.97)
+	cornice.mesh = cb
+	cornice.position = Vector3(0.0, fs.y * 0.20, 0.0)
+	cornice.set_surface_override_material(0, _detail_dark_metal_mat(INHERITOR_BRONZE))
+	_attach_visual(cornice)
+	# Four corner verdigris obelisks. Same imagery on every
+	# authorization building so they read as a set.
+	for xi: int in 2:
+		for zi: int in 2:
+			var ob := MeshInstance3D.new()
+			var om := BoxMesh.new()
+			om.size = Vector3(fs.x * 0.10, fs.y * 0.45, fs.z * 0.10)
+			ob.mesh = om
+			ob.position = Vector3(
+				fs.x * (0.42 if xi == 0 else -0.42),
+				fs.y * 0.42,
+				fs.z * (0.42 if zi == 0 else -0.42),
+			)
+			ob.set_surface_override_material(0, _detail_dark_metal_mat(INHERITOR_VERDIGRIS))
+			_attach_visual(ob)
+
+
+func _detail_monolith_vault() -> void:
+	## Heavy iron-blue vault — gates Sturmwolf. Central feature is a
+	## single massive sealed door with bronze rivets and a violet
+	## status pip. Reads as "where the heavy frames are awakened".
+	if not stats:
+		return
+	var fs: Vector3 = stats.footprint_size
+	_apply_inheritor_courtyard_base(fs)
+	# The vault itself — a tall blocky core with a sealed door front.
+	var vault := MeshInstance3D.new()
+	var vb := BoxMesh.new()
+	vb.size = Vector3(fs.x * 0.62, fs.y * 0.72, fs.z * 0.62)
+	vault.mesh = vb
+	vault.position = Vector3(0.0, fs.y * 0.56, 0.0)
+	vault.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.30, 0.40, 0.55, 1.0)))
+	_attach_visual(vault)
+	# Sealed door — recessed bronze panel on the front face.
+	var door := MeshInstance3D.new()
+	var db := BoxMesh.new()
+	db.size = Vector3(fs.x * 0.38, fs.y * 0.52, 0.10)
+	door.mesh = db
+	door.position = Vector3(0.0, fs.y * 0.46, fs.z * 0.32)
+	door.set_surface_override_material(0, _detail_dark_metal_mat(INHERITOR_BRONZE))
+	_attach_visual(door)
+	# Violet status pip above the door — single glowing dot.
+	var pip := MeshInstance3D.new()
+	var pm := SphereMesh.new()
+	pm.radius = 0.10
+	pm.height = 0.20
+	pip.mesh = pm
+	pip.position = Vector3(0.0, fs.y * 0.84, fs.z * 0.34)
+	pip.set_surface_override_material(0, _detail_emissive_mat(INHERITOR_VIOLET, 2.2))
+	_attach_visual(pip)
+	# Six bronze rivets in a ring on the door.
+	for i: int in 6:
+		var ang: float = float(i) / 6.0 * TAU
+		var rivet := MeshInstance3D.new()
+		var rm := SphereMesh.new()
+		rm.radius = 0.06
+		rm.height = 0.12
+		rivet.mesh = rm
+		rivet.position = Vector3(
+			cos(ang) * fs.x * 0.14,
+			fs.y * 0.46 + sin(ang) * fs.y * 0.18,
+			fs.z * 0.37,
+		)
+		rivet.set_surface_override_material(0, _detail_emissive_mat(Color(0.95, 0.78, 0.35), 0.5))
+		_attach_visual(rivet)
+
+
+func _detail_architects_choir() -> void:
+	## Ritual-violet open colonnade — gates the Heavy Lattice Foundry
+	## (which in turn gates Kintsu Wing). Four columns frame an
+	## elevated dais with a violet-glowing focus crystal. Reads as
+	## "council chamber" rather than "vault" or "factory".
+	if not stats:
+		return
+	var fs: Vector3 = stats.footprint_size
+	_apply_inheritor_courtyard_base(fs)
+	# Four columns at the cardinal positions, slightly inset.
+	for i: int in 4:
+		var ang: float = float(i) / 4.0 * TAU + PI * 0.25
+		var col := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = fs.x * 0.06
+		cm.bottom_radius = fs.x * 0.07
+		cm.height = fs.y * 0.60
+		col.mesh = cm
+		col.position = Vector3(
+			cos(ang) * fs.x * 0.30,
+			fs.y * 0.50,
+			sin(ang) * fs.z * 0.30,
+		)
+		col.set_surface_override_material(0, _detail_dark_metal_mat(INHERITOR_CONCRETE))
+		_attach_visual(col)
+	# Central dais — short fluted drum.
+	var dais := MeshInstance3D.new()
+	var dm := CylinderMesh.new()
+	dm.top_radius = fs.x * 0.22
+	dm.bottom_radius = fs.x * 0.24
+	dm.height = fs.y * 0.20
+	dais.mesh = dm
+	dais.position = Vector3(0.0, fs.y * 0.30, 0.0)
+	dais.set_surface_override_material(0, _detail_dark_metal_mat(INHERITOR_BRONZE))
+	_attach_visual(dais)
+	# Focus crystal on top of the dais — a tall violet prism.
+	var crystal := MeshInstance3D.new()
+	var crm := CylinderMesh.new()
+	crm.top_radius = 0.04
+	crm.bottom_radius = fs.x * 0.10
+	crm.height = fs.y * 0.55
+	crystal.mesh = crm
+	crystal.position = Vector3(0.0, fs.y * 0.68, 0.0)
+	crystal.set_surface_override_material(0, _detail_emissive_mat(INHERITOR_VIOLET, 2.4))
+	_attach_visual(crystal)
+	# Violet point-light at the crystal tip.
+	var lt := OmniLight3D.new()
+	lt.light_color = INHERITOR_VIOLET
+	lt.light_energy = 1.2
+	lt.omni_range = fs.x * 2.0 + 2.0
+	lt.position = Vector3(0.0, fs.y * 1.0, 0.0)
+	_attach_visual(lt)
+
+
+func _detail_choir_sanctum() -> void:
+	## Bright-violet caster shrine — gates Kamigeist. Domed roof
+	## crowning a recessed inner sanctum, with violet light spilling
+	## out of two narrow arched windows on the front face.
+	if not stats:
+		return
+	var fs: Vector3 = stats.footprint_size
+	_apply_inheritor_courtyard_base(fs)
+	# Main body — wider stocky block.
+	var body := MeshInstance3D.new()
+	var bb := BoxMesh.new()
+	bb.size = Vector3(fs.x * 0.66, fs.y * 0.58, fs.z * 0.66)
+	body.mesh = bb
+	body.position = Vector3(0.0, fs.y * 0.48, 0.0)
+	body.set_surface_override_material(0, _detail_dark_metal_mat(INHERITOR_CONCRETE))
+	_attach_visual(body)
+	# Domed roof — flattened sphere on top. The codebase elsewhere
+	# achieves the dome read by setting height < 2*radius so the
+	# sphere clips into a shallow cap (see _detail_anti_air).
+	var dome := MeshInstance3D.new()
+	var domem := SphereMesh.new()
+	domem.radius = fs.x * 0.32
+	domem.height = fs.x * 0.38
+	dome.mesh = domem
+	dome.position = Vector3(0.0, fs.y * 0.78, 0.0)
+	dome.set_surface_override_material(0, _detail_dark_metal_mat(INHERITOR_BRONZE))
+	_attach_visual(dome)
+	# Two arched windows on the front face — tall slim violet rects.
+	for i: int in 2:
+		var win := MeshInstance3D.new()
+		var wm := BoxMesh.new()
+		wm.size = Vector3(fs.x * 0.10, fs.y * 0.38, 0.08)
+		win.mesh = wm
+		var x_off: float = fs.x * (0.14 if i == 0 else -0.14)
+		win.position = Vector3(x_off, fs.y * 0.46, fs.z * 0.34)
+		win.set_surface_override_material(0, _detail_emissive_mat(Color(0.85, 0.60, 1.0, 1.0), 2.4))
+		_attach_visual(win)
+	# Violet light filling the area around the sanctum.
+	var lt := OmniLight3D.new()
+	lt.light_color = Color(0.85, 0.60, 1.0, 1.0)
+	lt.light_energy = 1.4
+	lt.omni_range = fs.x * 2.4 + 2.0
+	lt.position = Vector3(0.0, fs.y * 0.70, 0.0)
+	_attach_visual(lt)
+
+
+func _detail_sky_lattice() -> void:
+	## Sky-blue light-air authorization — gates Valkyrie Striker.
+	## Open framework of cantilevered struts radiating upward with
+	## a glowing apex node. Reads as "flight director / launch
+	## scaffold" rather than a sealed building.
+	if not stats:
+		return
+	var fs: Vector3 = stats.footprint_size
+	_apply_inheritor_courtyard_base(fs)
+	# Central pylon — slim tall cylinder.
+	var pylon := MeshInstance3D.new()
+	var pm := CylinderMesh.new()
+	pm.top_radius = fs.x * 0.06
+	pm.bottom_radius = fs.x * 0.10
+	pm.height = fs.y * 0.85
+	pylon.mesh = pm
+	pylon.position = Vector3(0.0, fs.y * 0.62, 0.0)
+	pylon.set_surface_override_material(0, _detail_dark_metal_mat(INHERITOR_CONCRETE))
+	_attach_visual(pylon)
+	# Six cantilevered struts radiating outward + upward.
+	for i: int in 6:
+		var ang: float = float(i) / 6.0 * TAU
+		var strut := MeshInstance3D.new()
+		var sm := BoxMesh.new()
+		sm.size = Vector3(0.06, fs.y * 0.55, 0.06)
+		strut.mesh = sm
+		strut.position = Vector3(
+			cos(ang) * fs.x * 0.22,
+			fs.y * 0.55,
+			sin(ang) * fs.z * 0.22,
+		)
+		strut.rotation = Vector3(
+			cos(ang) * deg_to_rad(-22.0),
+			0.0,
+			sin(ang) * deg_to_rad(22.0),
+		)
+		strut.set_surface_override_material(0, _detail_dark_metal_mat(INHERITOR_BRONZE))
+		_attach_visual(strut)
+	# Apex node — glowing sky-blue sphere at the top of the pylon.
+	var apex := MeshInstance3D.new()
+	var am := SphereMesh.new()
+	am.radius = fs.x * 0.14
+	am.height = fs.x * 0.28
+	apex.mesh = am
+	apex.position = Vector3(0.0, fs.y * 1.08, 0.0)
+	apex.set_surface_override_material(0, _detail_emissive_mat(Color(0.55, 0.78, 1.0, 1.0), 2.2))
+	_attach_visual(apex)
+	# Apex light — sky blue, broader range than the cathedral lights.
+	var lt := OmniLight3D.new()
+	lt.light_color = Color(0.55, 0.78, 1.0, 1.0)
+	lt.light_energy = 1.4
+	lt.omni_range = fs.x * 2.8 + 2.0
+	lt.position = Vector3(0.0, fs.y * 1.10, 0.0)
+	_attach_visual(lt)
+
+
+func _detail_heavy_lattice_foundry() -> void:
+	## Deep iron-blue heavy-air foundry — gates Kintsu Wing. Massive
+	## bronze-trimmed forge hall with a glowing slag channel running
+	## along the front edge and a tall vent stack at one corner.
+	if not stats:
+		return
+	var fs: Vector3 = stats.footprint_size
+	_apply_inheritor_courtyard_base(fs)
+	# Main hall — wide squat block.
+	var hall := MeshInstance3D.new()
+	var hb := BoxMesh.new()
+	hb.size = Vector3(fs.x * 0.78, fs.y * 0.55, fs.z * 0.66)
+	hall.mesh = hb
+	hall.position = Vector3(0.0, fs.y * 0.47, 0.0)
+	hall.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.30, 0.40, 0.56, 1.0)))
+	_attach_visual(hall)
+	# Bronze ridge cap on top.
+	var cap := MeshInstance3D.new()
+	var capm := BoxMesh.new()
+	capm.size = Vector3(fs.x * 0.82, fs.y * 0.06, fs.z * 0.20)
+	cap.mesh = capm
+	cap.position = Vector3(0.0, fs.y * 0.78, 0.0)
+	cap.set_surface_override_material(0, _detail_dark_metal_mat(INHERITOR_BRONZE))
+	_attach_visual(cap)
+	# Glowing slag channel along the front edge — long thin emissive box.
+	var slag := MeshInstance3D.new()
+	var sm := BoxMesh.new()
+	sm.size = Vector3(fs.x * 0.72, 0.08, 0.10)
+	slag.mesh = sm
+	slag.position = Vector3(0.0, fs.y * 0.22, fs.z * 0.40)
+	slag.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.55, 0.20, 1.0), 2.0))
+	_attach_visual(slag)
+	# Tall vent stack at the back corner — narrow cylinder.
+	var stack := MeshInstance3D.new()
+	var stm := CylinderMesh.new()
+	stm.top_radius = fs.x * 0.08
+	stm.bottom_radius = fs.x * 0.10
+	stm.height = fs.y * 0.80
+	stack.mesh = stm
+	stack.position = Vector3(fs.x * 0.30, fs.y * 0.85, -fs.z * 0.28)
+	stack.set_surface_override_material(0, _detail_dark_metal_mat(INHERITOR_VERDIGRIS))
+	_attach_visual(stack)
+	# Vent glow at the stack mouth.
+	var vent := MeshInstance3D.new()
+	var vm := SphereMesh.new()
+	vm.radius = fs.x * 0.09
+	vm.height = fs.x * 0.18
+	vent.mesh = vm
+	vent.position = Vector3(fs.x * 0.30, fs.y * 1.20, -fs.z * 0.28)
+	vent.set_surface_override_material(0, _detail_emissive_mat(Color(1.0, 0.65, 0.30, 1.0), 1.6))
+	_attach_visual(vent)
+	# Amber-orange point light at the slag channel — sells the "active forge" read.
+	var lt := OmniLight3D.new()
+	lt.light_color = Color(1.0, 0.55, 0.20, 1.0)
+	lt.light_energy = 1.3
+	lt.omni_range = fs.x * 2.2 + 2.0
+	lt.position = Vector3(0.0, fs.y * 0.30, fs.z * 0.40)
+	_attach_visual(lt)
+
+
+func _detail_crucible_spire() -> void:
+	## Heliarch Crucible Spire — vertical column topped with a glowing
+	## crucible bowl that vents reactor heat. Reads as the faction's
+	## fire-temple counterpart to Meridian's Intelligence Network and
+	## Inheritor's Architect Network. The bowl emits an unmistakable
+	## amber glow so the building's role ("heat / pyre tech") is
+	## legible at RTS zoom.
+	if not stats:
+		return
+	var fs: Vector3 = stats.footprint_size
+	const HELIARCH_AMBER: Color = Color(1.00, 0.55, 0.20, 1.0)
+	const HELIARCH_DARK: Color = Color(0.20, 0.14, 0.10, 1.0)
+	# Hexagonal-ish base — short squat block.
+	var base := MeshInstance3D.new()
+	var bb := BoxMesh.new()
+	bb.size = Vector3(fs.x * 0.78, fs.y * 0.30, fs.z * 0.78)
+	base.mesh = bb
+	base.position = Vector3(0.0, fs.y + bb.size.y * 0.5, 0.0)
+	base.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_DARK))
+	_attach_visual(base)
+	# Tall central column.
+	var column := MeshInstance3D.new()
+	var cc := CylinderMesh.new()
+	cc.top_radius = fs.x * 0.16
+	cc.bottom_radius = fs.x * 0.22
+	cc.height = fs.y * 0.95
+	cc.radial_segments = 8
+	column.mesh = cc
+	column.position = Vector3(0.0, fs.y + bb.size.y + cc.height * 0.5, 0.0)
+	column.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.30, 0.22, 0.18)))
+	_attach_visual(column)
+	# Crucible bowl — wider rim at the top of the column.
+	var bowl_y: float = fs.y + bb.size.y + cc.height + 0.05
+	var bowl := MeshInstance3D.new()
+	var bowl_cyl := CylinderMesh.new()
+	bowl_cyl.top_radius = fs.x * 0.40
+	bowl_cyl.bottom_radius = fs.x * 0.22
+	bowl_cyl.height = fs.y * 0.30
+	bowl_cyl.radial_segments = 12
+	bowl_cyl.cap_top = false  # open top — the heat vents through it
+	bowl.mesh = bowl_cyl
+	bowl.position = Vector3(0.0, bowl_y + bowl_cyl.height * 0.5, 0.0)
+	bowl.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.32, 0.22, 0.18)))
+	_attach_visual(bowl)
+	# Glowing core inside the bowl — shallow disc near the rim.
+	var core := MeshInstance3D.new()
+	var core_cyl := CylinderMesh.new()
+	core_cyl.top_radius = fs.x * 0.34
+	core_cyl.bottom_radius = fs.x * 0.34
+	core_cyl.height = 0.10
+	core_cyl.radial_segments = 12
+	core.mesh = core_cyl
+	core.position = Vector3(0.0, bowl_y + bowl_cyl.height * 0.85, 0.0)
+	var core_mat := StandardMaterial3D.new()
+	core_mat.albedo_color = HELIARCH_AMBER
+	core_mat.emission_enabled = true
+	core_mat.emission = HELIARCH_AMBER
+	core_mat.emission_energy_multiplier = 3.2
+	core_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	core.set_surface_override_material(0, core_mat)
+	_attach_visual(core)
+	# Heat-vent fins — four angled blade-fins around the column.
+	for fin_i: int in 4:
+		var ang: float = float(fin_i) / 4.0 * TAU
+		var fx: float = sin(ang) * fs.x * 0.30
+		var fz: float = cos(ang) * fs.x * 0.30
+		var fin := MeshInstance3D.new()
+		var fb := BoxMesh.new()
+		fb.size = Vector3(0.08, fs.y * 0.55, 0.40)
+		fin.mesh = fb
+		fin.position = Vector3(fx, fs.y + bb.size.y + fs.y * 0.40, fz)
+		fin.rotation.y = ang
+		fin.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.22, 0.16, 0.12)))
+		_attach_visual(fin)
+	# Team collar at the column base.
+	_team_collar_ring(cc.bottom_radius * 1.10, 0.08, Vector3(0.0, fs.y + bb.size.y + 0.05, 0.0))
+	# Heliarch floodlight motif — four forward floodlights at compass
+	# points around the base, brass housings + warm bulbs casting onto
+	# the surrounding ground. Repeated from the unit-level lamp aesthetic
+	# the player liked, applied here to make the Crucible Spire read as
+	# a "lit fire-temple" at RTS zoom.
+	const FLOOD_WARM_CR: Color = Color(1.0, 0.78, 0.42, 1.0)
+	for flood_i: int in 4:
+		var fang: float = float(flood_i) / 4.0 * TAU + PI * 0.25
+		var fdx: float = sin(fang) * fs.x * 0.42
+		var fdz: float = cos(fang) * fs.x * 0.42
+		var flood_housing := MeshInstance3D.new()
+		var fh := CylinderMesh.new()
+		fh.top_radius = 0.18
+		fh.bottom_radius = 0.16
+		fh.height = 0.22
+		fh.radial_segments = 12
+		flood_housing.mesh = fh
+		flood_housing.position = Vector3(fdx, fs.y + bb.size.y + 0.55, fdz)
+		flood_housing.rotation = Vector3(0.0, fang + PI, deg_to_rad(-12.0))
+		flood_housing.set_surface_override_material(0, _detail_dark_metal_mat(Color(0.55, 0.40, 0.20)))
+		_attach_visual(flood_housing)
+		var flood_bulb := MeshInstance3D.new()
+		var fb := CylinderMesh.new()
+		fb.top_radius = 0.14
+		fb.bottom_radius = 0.14
+		fb.height = 0.03
+		fb.radial_segments = 12
+		flood_bulb.mesh = fb
+		# Position the bulb on the outer face of the housing.
+		flood_bulb.position = Vector3(fdx + sin(fang) * 0.12, fs.y + bb.size.y + 0.55, fdz + cos(fang) * 0.12)
+		flood_bulb.rotation = Vector3(0.0, fang + PI, deg_to_rad(-12.0))
+		var fb_mat := StandardMaterial3D.new()
+		fb_mat.albedo_color = FLOOD_WARM_CR
+		fb_mat.emission_enabled = true
+		fb_mat.emission = FLOOD_WARM_CR
+		fb_mat.emission_energy_multiplier = 3.0
+		fb_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		flood_bulb.set_surface_override_material(0, fb_mat)
+		_attach_visual(flood_bulb)
+
+
+func _detail_catalyst_core() -> void:
+	## Heliarch Tier 1 power building. Squat reactor housing + four
+	## angled exhaust stacks venting amber heat at the corners +
+	## glowing reactor core visible through the front grille. Smaller
+	## and broader than the Crucible Spire so the two read as paired:
+	## "small ground reactor" (Catalyst) vs "tall ritual spire"
+	## (Crucible). Mobile per spec — same mobility flag as the rest
+	## of the Heliarch base.
+	if not stats:
+		return
+	var fs: Vector3 = stats.footprint_size
+	const HELIARCH_AMBER_CC: Color = Color(1.00, 0.55, 0.20, 1.0)
+	const HELIARCH_BRASS_CC: Color = Color(0.55, 0.40, 0.20, 1.0)
+	const HELIARCH_DARK_CC: Color = Color(0.20, 0.14, 0.10, 1.0)
+	const FLOOD_WARM_CC: Color = Color(1.0, 0.78, 0.42, 1.0)
+	# Squat reactor housing — slightly raised off the ground.
+	var housing := MeshInstance3D.new()
+	var hb := BoxMesh.new()
+	hb.size = Vector3(fs.x * 0.88, fs.y * 0.70, fs.z * 0.88)
+	housing.mesh = hb
+	housing.position = Vector3(0.0, fs.y + hb.size.y * 0.5, 0.0)
+	housing.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_DARK_CC))
+	_attach_visual(housing)
+	# Front grille — emissive amber strip behind brass bars.
+	var grille_back := MeshInstance3D.new()
+	var gb := BoxMesh.new()
+	gb.size = Vector3(fs.x * 0.55, fs.y * 0.50, 0.06)
+	grille_back.mesh = gb
+	grille_back.position = Vector3(0.0, fs.y + hb.size.y * 0.45, -fs.z * 0.44 - 0.04)
+	var gb_mat := StandardMaterial3D.new()
+	gb_mat.albedo_color = HELIARCH_AMBER_CC
+	gb_mat.emission_enabled = true
+	gb_mat.emission = HELIARCH_AMBER_CC
+	gb_mat.emission_energy_multiplier = 2.8
+	gb_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	grille_back.set_surface_override_material(0, gb_mat)
+	_attach_visual(grille_back)
+	# Five brass grille bars across the glow.
+	for bar_i: int in 5:
+		var bar := MeshInstance3D.new()
+		var bbb := BoxMesh.new()
+		bbb.size = Vector3(fs.x * 0.60, 0.06, 0.08)
+		bar.mesh = bbb
+		var by: float = fs.y + hb.size.y * 0.22 + float(bar_i) * fs.y * 0.12
+		bar.position = Vector3(0.0, by, -fs.z * 0.44 - 0.10)
+		bar.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_CC))
+		_attach_visual(bar)
+	# Reactor light so the front grille casts amber.
+	var core_light := OmniLight3D.new()
+	core_light.light_color = HELIARCH_AMBER_CC
+	core_light.light_energy = 0.85
+	core_light.omni_range = fs.x * 2.4
+	core_light.position = Vector3(0.0, fs.y + hb.size.y * 0.45, -fs.z * 0.44 - 0.08)
+	_attach_visual(core_light)
+	# Four angled exhaust stacks at the rear corners.
+	for stack_xi: int in 2:
+		for stack_zi: int in 2:
+			var sx: float = -fs.x * 0.32 if stack_xi == 0 else fs.x * 0.32
+			var sz: float = fs.z * 0.30 if stack_zi == 0 else fs.z * 0.40  # bias both toward rear
+			var stack := MeshInstance3D.new()
+			var sc := CylinderMesh.new()
+			sc.top_radius = 0.10
+			sc.bottom_radius = 0.13
+			sc.height = fs.y * 0.55
+			sc.radial_segments = 10
+			stack.mesh = sc
+			stack.position = Vector3(sx, fs.y + hb.size.y + sc.height * 0.5, sz)
+			stack.rotation.z = (-0.18 if sx < 0.0 else 0.18) * 0.5  # slight outward lean
+			stack.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_DARK_CC))
+			_attach_visual(stack)
+			# Brass collar at the stack base.
+			var collar := MeshInstance3D.new()
+			var cc := TorusMesh.new()
+			cc.inner_radius = 0.13
+			cc.outer_radius = 0.18
+			cc.rings = 10
+			cc.ring_segments = 4
+			collar.mesh = cc
+			collar.rotation.x = PI * 0.5
+			collar.position = Vector3(sx, fs.y + hb.size.y + 0.10, sz)
+			collar.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_CC))
+			_attach_visual(collar)
+			# Amber glow disc at the stack tip.
+			var glow := MeshInstance3D.new()
+			var gd := CylinderMesh.new()
+			gd.top_radius = 0.09
+			gd.bottom_radius = 0.09
+			gd.height = 0.03
+			gd.radial_segments = 10
+			glow.mesh = gd
+			glow.position = Vector3(sx, fs.y + hb.size.y + sc.height, sz)
+			var glow_mat := StandardMaterial3D.new()
+			glow_mat.albedo_color = HELIARCH_AMBER_CC
+			glow_mat.emission_enabled = true
+			glow_mat.emission = HELIARCH_AMBER_CC
+			glow_mat.emission_energy_multiplier = 2.6
+			glow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			glow.set_surface_override_material(0, glow_mat)
+			_attach_visual(glow)
+	# Forward floodlight on the front face — Heliarch lamp motif.
+	var flood_root := MeshInstance3D.new()
+	var fr := CylinderMesh.new()
+	fr.top_radius = 0.16
+	fr.bottom_radius = 0.14
+	fr.height = 0.18
+	fr.radial_segments = 12
+	flood_root.mesh = fr
+	flood_root.rotation.x = PI * 0.5
+	flood_root.position = Vector3(0.0, fs.y + hb.size.y * 0.85, -fs.z * 0.44 - 0.10)
+	flood_root.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_CC))
+	_attach_visual(flood_root)
+	var flood_bulb := MeshInstance3D.new()
+	var fb := CylinderMesh.new()
+	fb.top_radius = 0.12
+	fb.bottom_radius = 0.12
+	fb.height = 0.03
+	fb.radial_segments = 12
+	flood_bulb.mesh = fb
+	flood_bulb.rotation.x = PI * 0.5
+	flood_bulb.position = Vector3(0.0, fs.y + hb.size.y * 0.85, -fs.z * 0.44 - 0.20)
+	var fb_mat := StandardMaterial3D.new()
+	fb_mat.albedo_color = FLOOD_WARM_CC
+	fb_mat.emission_enabled = true
+	fb_mat.emission = FLOOD_WARM_CC
+	fb_mat.emission_energy_multiplier = 3.2
+	fb_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	flood_bulb.set_surface_override_material(0, fb_mat)
+	_attach_visual(flood_bulb)
+	# Team collar at the housing base.
+	_team_collar_ring(fs.x * 0.50, 0.08, Vector3(0.0, fs.y + 0.04, 0.0))
+	# Universal Heliarch camp overlay — scaffolding, tarps, brazier.
+	_apply_heliarch_camp_overlay(fs, fs.y + hb.size.y)
+
+
+## --- Heliarch refugee-camp / construction-site visual overlay -------------
+
+func _apply_heliarch_camp_overlay(fs: Vector3, body_top_y: float) -> void:
+	## Adds the consistent Heliarch refugee-camp flavour to any building:
+	## four corner scaffolding poles, two hung canvas tarps, a small
+	## brazier with amber glow, and a couple of salvaged-metal patches.
+	## Called from every Heliarch _detail_* function so the whole faction
+	## reads as a "nomadic war camp set up over fixed infrastructure"
+	## per playtest 2026-05-18 ("improvised refugee camp / construction
+	## site look"). Cheap — under ~12 meshes per call.
+	const HELIARCH_BRASS_CO: Color = Color(0.55, 0.40, 0.20, 1.0)
+	const SOOTED_CO: Color = Color(0.22, 0.18, 0.14, 1.0)
+	const TARP_AMBER: Color = Color(0.70, 0.42, 0.20, 1.0)
+	const TARP_DARK: Color = Color(0.30, 0.22, 0.16, 1.0)
+	const BRAZIER_GLOW: Color = Color(1.0, 0.55, 0.18, 1.0)
+	var hx: float = fs.x * 0.50
+	var hz: float = fs.z * 0.50
+	# --- Four scaffolding poles, one per corner. Tall thin brass cylinders
+	# extending above the building roof.
+	var pole_h: float = fs.y * 0.45
+	for cx_i: int in 2:
+		for cz_i: int in 2:
+			var px: float = -hx * 1.05 if cx_i == 0 else hx * 1.05
+			var pz: float = -hz * 1.05 if cz_i == 0 else hz * 1.05
+			var pole := MeshInstance3D.new()
+			var pc := CylinderMesh.new()
+			pc.top_radius = 0.06
+			pc.bottom_radius = 0.07
+			pc.height = body_top_y + pole_h - fs.y
+			pc.radial_segments = 6
+			pole.mesh = pc
+			pole.position = Vector3(px, fs.y + pc.height * 0.5, pz)
+			pole.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_CO))
+			_attach_visual(pole)
+	# --- Two canvas tarps stretched between adjacent poles. One amber
+	# (front-right edge), one darker (back-left edge). Drawn as thin
+	# slanted boxes.
+	var tarp_top_y: float = body_top_y + pole_h * 0.65
+	# Tarp 1 — between front-right and back-right poles (along +X side).
+	var tarp1 := MeshInstance3D.new()
+	var t1b := BoxMesh.new()
+	t1b.size = Vector3(0.04, fs.y * 0.40, fs.z * 1.95)
+	tarp1.mesh = t1b
+	tarp1.position = Vector3(hx * 1.05 + 0.04, tarp_top_y - fs.y * 0.10, 0.0)
+	tarp1.rotation.z = deg_to_rad(8.0)
+	var tarp1_mat := StandardMaterial3D.new()
+	tarp1_mat.albedo_color = TARP_AMBER
+	tarp1_mat.metallic = 0.0
+	tarp1_mat.roughness = 0.95
+	tarp1_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	tarp1.set_surface_override_material(0, tarp1_mat)
+	_attach_visual(tarp1)
+	# Tarp 2 — between front-left and back-left poles (along -X side).
+	var tarp2 := MeshInstance3D.new()
+	var t2b := BoxMesh.new()
+	t2b.size = Vector3(0.04, fs.y * 0.34, fs.z * 1.95)
+	tarp2.mesh = t2b
+	tarp2.position = Vector3(-hx * 1.05 - 0.04, tarp_top_y - fs.y * 0.14, 0.0)
+	tarp2.rotation.z = deg_to_rad(-6.0)
+	var tarp2_mat := StandardMaterial3D.new()
+	tarp2_mat.albedo_color = TARP_DARK
+	tarp2_mat.metallic = 0.0
+	tarp2_mat.roughness = 0.95
+	tarp2_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	tarp2.set_surface_override_material(0, tarp2_mat)
+	_attach_visual(tarp2)
+	# --- Brazier near the front-left corner of the footprint. Short
+	# brass cup with amber glow inside + small OmniLight so the
+	# building casts a "campfire" pool of light.
+	var brazier_root_pos: Vector3 = Vector3(-hx * 0.65, fs.y + 0.05, -hz * 0.55)
+	var brazier_cup := MeshInstance3D.new()
+	var bc := CylinderMesh.new()
+	bc.top_radius = 0.16
+	bc.bottom_radius = 0.10
+	bc.height = 0.22
+	bc.radial_segments = 10
+	brazier_cup.mesh = bc
+	brazier_cup.position = brazier_root_pos + Vector3(0.0, 0.11, 0.0)
+	brazier_cup.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_CO))
+	_attach_visual(brazier_cup)
+	var brazier_glow := MeshInstance3D.new()
+	var bg := SphereMesh.new()
+	bg.radius = 0.10
+	bg.height = 0.20
+	brazier_glow.mesh = bg
+	brazier_glow.position = brazier_root_pos + Vector3(0.0, 0.18, 0.0)
+	var bg_mat := StandardMaterial3D.new()
+	bg_mat.albedo_color = BRAZIER_GLOW
+	bg_mat.emission_enabled = true
+	bg_mat.emission = BRAZIER_GLOW
+	bg_mat.emission_energy_multiplier = 2.6
+	bg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	brazier_glow.set_surface_override_material(0, bg_mat)
+	_attach_visual(brazier_glow)
+	var brazier_light := OmniLight3D.new()
+	brazier_light.light_color = BRAZIER_GLOW
+	brazier_light.light_energy = 0.55
+	brazier_light.omni_range = 3.5
+	brazier_light.position = brazier_root_pos + Vector3(0.0, 0.30, 0.0)
+	_attach_visual(brazier_light)
+	# --- Two salvaged-metal patches bolted to the main body — irregular
+	# darker boxes on the +X and -Z faces sell "improvised armor / scrap
+	# repair".
+	var patch_a := MeshInstance3D.new()
+	var pab := BoxMesh.new()
+	pab.size = Vector3(0.06, fs.y * 0.32, fs.z * 0.40)
+	patch_a.mesh = pab
+	patch_a.position = Vector3(hx + 0.03, fs.y + body_top_y * 0.35, hz * 0.20)
+	patch_a.rotation.x = deg_to_rad(randf_range(-6.0, 6.0))
+	patch_a.set_surface_override_material(0, _detail_dark_metal_mat(SOOTED_CO))
+	_attach_visual(patch_a)
+	var patch_b := MeshInstance3D.new()
+	var pbb := BoxMesh.new()
+	pbb.size = Vector3(fs.x * 0.42, fs.y * 0.24, 0.06)
+	patch_b.mesh = pbb
+	patch_b.position = Vector3(-hx * 0.20, fs.y + body_top_y * 0.55, -hz - 0.03)
+	patch_b.set_surface_override_material(0, _detail_dark_metal_mat(SOOTED_CO))
+	_attach_visual(patch_b)
+	# Brass rivets on patch_a edges — 4 rivets vertical.
+	for rivet_i: int in 4:
+		var rivet := MeshInstance3D.new()
+		var rs := SphereMesh.new()
+		rs.radius = 0.04
+		rs.height = 0.08
+		rivet.mesh = rs
+		var rivet_y: float = fs.y + body_top_y * 0.22 + float(rivet_i) * fs.y * 0.10
+		rivet.position = Vector3(hx + 0.07, rivet_y, hz * 0.20)
+		rivet.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_CO))
+		_attach_visual(rivet)
+
+
+func _detail_salvage_caravan() -> void:
+	## Heliarch mobile salvage yard. Squat tracked cart silhouette —
+	## wheels visible on the sides, low salvage bin in the middle, a
+	## short smokestack venting the brazier exhaust. Camp overlay
+	## ties it visually to the rest of the Heliarch base.
+	if not stats:
+		return
+	var fs: Vector3 = stats.footprint_size
+	const HELIARCH_BRASS_PC: Color = Color(0.55, 0.40, 0.20, 1.0)
+	const SOOTED_PC: Color = Color(0.20, 0.17, 0.13, 1.0)
+	const RUSTY: Color = Color(0.42, 0.30, 0.22, 1.0)
+	# Wide low cargo bed — the "wagon" base.
+	var bed := MeshInstance3D.new()
+	var bedb := BoxMesh.new()
+	bedb.size = Vector3(fs.x * 0.82, fs.y * 0.32, fs.z * 0.82)
+	bed.mesh = bedb
+	bed.position = Vector3(0.0, fs.y + bedb.size.y * 0.5, 0.0)
+	bed.set_surface_override_material(0, _detail_dark_metal_mat(SOOTED_PC))
+	_attach_visual(bed)
+	# Open salvage bin on top of the bed — open box, brass rim.
+	var bin := MeshInstance3D.new()
+	var binb := BoxMesh.new()
+	binb.size = Vector3(fs.x * 0.62, fs.y * 0.30, fs.z * 0.62)
+	bin.mesh = binb
+	bin.position = Vector3(0.0, fs.y + bedb.size.y + binb.size.y * 0.5, 0.0)
+	bin.set_surface_override_material(0, _detail_dark_metal_mat(RUSTY))
+	_attach_visual(bin)
+	# Brass rim on the bin edges.
+	var rim := MeshInstance3D.new()
+	var rb := BoxMesh.new()
+	rb.size = Vector3(fs.x * 0.66, 0.06, fs.z * 0.66)
+	rim.mesh = rb
+	rim.position = Vector3(0.0, fs.y + bedb.size.y + binb.size.y + 0.02, 0.0)
+	rim.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_PC))
+	_attach_visual(rim)
+	# Six chunky wheels — three per side. Sells "mobile" without needing
+	# a real rolling animation.
+	for wheel_side: int in 2:
+		var wsx: float = -1.0 if wheel_side == 0 else 1.0
+		for wheel_i: int in 3:
+			var wheel := MeshInstance3D.new()
+			var wc := CylinderMesh.new()
+			wc.top_radius = fs.y * 0.32
+			wc.bottom_radius = fs.y * 0.32
+			wc.height = 0.12
+			wc.radial_segments = 12
+			wheel.mesh = wc
+			wheel.rotation.z = PI * 0.5  # spin axis along X
+			var wz: float = -fs.z * 0.30 + float(wheel_i) * fs.z * 0.30
+			wheel.position = Vector3(wsx * fs.x * 0.46, fs.y * 0.32, wz)
+			wheel.set_surface_override_material(0, _detail_dark_metal_mat(SOOTED_PC))
+			_attach_visual(wheel)
+	# Short smokestack at the back of the bin.
+	var stack := MeshInstance3D.new()
+	var sc := CylinderMesh.new()
+	sc.top_radius = 0.11
+	sc.bottom_radius = 0.13
+	sc.height = fs.y * 0.55
+	sc.radial_segments = 8
+	stack.mesh = sc
+	stack.position = Vector3(0.0, fs.y + bedb.size.y + binb.size.y + sc.height * 0.5, fs.z * 0.32)
+	stack.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_PC))
+	_attach_visual(stack)
+	_team_collar_ring(fs.x * 0.45, 0.08, Vector3(0.0, fs.y + 0.04, 0.0))
+	_apply_heliarch_camp_overlay(fs, fs.y + bedb.size.y + binb.size.y)
+
+
+func _detail_militia_camp() -> void:
+	## Central canvas tent + four short watchtower scaffolds at the
+	## footprint corners + camp overlay. Reads as "recruitment muster
+	## ground / staging post".
+	if not stats:
+		return
+	var fs: Vector3 = stats.footprint_size
+	const HELIARCH_BRASS_MC: Color = Color(0.55, 0.40, 0.20, 1.0)
+	const TENT_AMBER_MC: Color = Color(0.70, 0.42, 0.20, 1.0)
+	const SOOTED_MC: Color = Color(0.20, 0.17, 0.13, 1.0)
+	# Central tent — pyramid-style (triangle prism approximation via two
+	# slanted panels meeting at the apex).
+	var tent_h: float = fs.y * 0.80
+	var tent_apex_y: float = fs.y + tent_h
+	# Two slanted side panels.
+	for tent_side: int in 2:
+		var tsx: float = -1.0 if tent_side == 0 else 1.0
+		var panel := MeshInstance3D.new()
+		var pb := BoxMesh.new()
+		pb.size = Vector3(0.05, tent_h * 1.05, fs.z * 0.70)
+		panel.mesh = pb
+		panel.position = Vector3(tsx * fs.x * 0.20, fs.y + tent_h * 0.5, 0.0)
+		panel.rotation.z = tsx * deg_to_rad(28.0)
+		var p_mat := StandardMaterial3D.new()
+		p_mat.albedo_color = TENT_AMBER_MC
+		p_mat.metallic = 0.0
+		p_mat.roughness = 0.95
+		p_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		panel.set_surface_override_material(0, p_mat)
+		_attach_visual(panel)
+	# Apex ridgepole.
+	var ridge := MeshInstance3D.new()
+	var rb := CylinderMesh.new()
+	rb.top_radius = 0.05
+	rb.bottom_radius = 0.05
+	rb.height = fs.z * 0.72
+	rb.radial_segments = 6
+	ridge.mesh = rb
+	ridge.rotation.x = PI * 0.5
+	ridge.position = Vector3(0.0, tent_apex_y, 0.0)
+	ridge.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_MC))
+	_attach_visual(ridge)
+	# Brass flagstaff at the tent peak.
+	var flagstaff := MeshInstance3D.new()
+	var fc := CylinderMesh.new()
+	fc.top_radius = 0.04
+	fc.bottom_radius = 0.05
+	fc.height = fs.y * 0.55
+	fc.radial_segments = 6
+	flagstaff.mesh = fc
+	flagstaff.position = Vector3(0.0, tent_apex_y + fc.height * 0.5, fs.z * 0.32)
+	flagstaff.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_MC))
+	_attach_visual(flagstaff)
+	# Pennant on the flagstaff — small amber-tarp box.
+	var pennant := MeshInstance3D.new()
+	var pnb := BoxMesh.new()
+	pnb.size = Vector3(0.02, fs.y * 0.18, fs.y * 0.30)
+	pennant.mesh = pnb
+	pennant.position = Vector3(fs.y * 0.14, tent_apex_y + fc.height * 0.75, fs.z * 0.32)
+	var pn_mat := StandardMaterial3D.new()
+	pn_mat.albedo_color = TENT_AMBER_MC
+	pn_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	pennant.set_surface_override_material(0, pn_mat)
+	_attach_visual(pennant)
+	_team_collar_ring(fs.x * 0.40, 0.08, Vector3(0.0, fs.y + 0.04, 0.0))
+	_apply_heliarch_camp_overlay(fs, fs.y)
+
+
+func _detail_forge_pit() -> void:
+	## Open ground-level forge — central glowing pit + brass bellows
+	## frame + low rim. Reads as "field smithy".
+	if not stats:
+		return
+	var fs: Vector3 = stats.footprint_size
+	const HELIARCH_BRASS_FP: Color = Color(0.55, 0.40, 0.20, 1.0)
+	const FORGE_GLOW_FP: Color = Color(1.0, 0.55, 0.18, 1.0)
+	const SOOTED_FP: Color = Color(0.20, 0.17, 0.13, 1.0)
+	# Low rim — circular wall around the pit.
+	for rim_i: int in 12:
+		var ang: float = float(rim_i) / 12.0 * TAU
+		var rx: float = sin(ang) * fs.x * 0.34
+		var rz: float = cos(ang) * fs.x * 0.34
+		var brick := MeshInstance3D.new()
+		var bb := BoxMesh.new()
+		bb.size = Vector3(0.22, fs.y * 0.30, 0.16)
+		brick.mesh = bb
+		brick.position = Vector3(rx, fs.y + bb.size.y * 0.5, rz)
+		brick.rotation.y = ang
+		brick.set_surface_override_material(0, _detail_dark_metal_mat(SOOTED_FP))
+		_attach_visual(brick)
+	# Glowing core inside the pit — emissive disc.
+	var glow := MeshInstance3D.new()
+	var gc := CylinderMesh.new()
+	gc.top_radius = fs.x * 0.28
+	gc.bottom_radius = fs.x * 0.28
+	gc.height = 0.06
+	gc.radial_segments = 14
+	glow.mesh = gc
+	glow.position = Vector3(0.0, fs.y + 0.03, 0.0)
+	var glow_mat := StandardMaterial3D.new()
+	glow_mat.albedo_color = FORGE_GLOW_FP
+	glow_mat.emission_enabled = true
+	glow_mat.emission = FORGE_GLOW_FP
+	glow_mat.emission_energy_multiplier = 3.5
+	glow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	glow.set_surface_override_material(0, glow_mat)
+	_attach_visual(glow)
+	# Bright forge light.
+	var forge_light := OmniLight3D.new()
+	forge_light.light_color = FORGE_GLOW_FP
+	forge_light.light_energy = 1.4
+	forge_light.omni_range = fs.x * 2.5
+	forge_light.position = Vector3(0.0, fs.y + 0.4, 0.0)
+	_attach_visual(forge_light)
+	# Brass bellows arm — angled cylinder reaching over the pit.
+	var bellows := MeshInstance3D.new()
+	var bc := CylinderMesh.new()
+	bc.top_radius = 0.09
+	bc.bottom_radius = 0.11
+	bc.height = fs.x * 0.85
+	bc.radial_segments = 8
+	bellows.mesh = bc
+	bellows.position = Vector3(0.0, fs.y + fs.y * 0.55, fs.z * 0.40)
+	bellows.rotation.x = deg_to_rad(-40.0)
+	bellows.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_FP))
+	_attach_visual(bellows)
+	_team_collar_ring(fs.x * 0.40, 0.08, Vector3(0.0, fs.y + 0.04, 0.0))
+	_apply_heliarch_camp_overlay(fs, fs.y + fs.y * 0.30)
+
+
+func _detail_crucible_foundry() -> void:
+	## Tall furnace stack with brass-banded sides + ceremonial arch over
+	## the front. Heavier-mech authorization building.
+	if not stats:
+		return
+	var fs: Vector3 = stats.footprint_size
+	const HELIARCH_BRASS_CF: Color = Color(0.55, 0.40, 0.20, 1.0)
+	const SOOTED_CF: Color = Color(0.20, 0.17, 0.13, 1.0)
+	const FURNACE_GLOW_CF: Color = Color(1.0, 0.55, 0.18, 1.0)
+	# Tall main furnace body.
+	var furnace := MeshInstance3D.new()
+	var fb := CylinderMesh.new()
+	fb.top_radius = fs.x * 0.32
+	fb.bottom_radius = fs.x * 0.42
+	fb.height = fs.y * 0.90
+	fb.radial_segments = 10
+	furnace.mesh = fb
+	furnace.position = Vector3(0.0, fs.y + fb.height * 0.5, 0.0)
+	furnace.set_surface_override_material(0, _detail_dark_metal_mat(SOOTED_CF))
+	_attach_visual(furnace)
+	# Three brass bands around the furnace.
+	for band_i: int in 3:
+		var band := MeshInstance3D.new()
+		var bd := TorusMesh.new()
+		bd.inner_radius = fs.x * 0.38
+		bd.outer_radius = fs.x * 0.45
+		bd.rings = 14
+		bd.ring_segments = 5
+		band.mesh = bd
+		band.rotation.x = PI * 0.5
+		var by: float = fs.y + fs.y * 0.20 + float(band_i) * fs.y * 0.28
+		band.position = Vector3(0.0, by, 0.0)
+		band.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_CF))
+		_attach_visual(band)
+	# Furnace mouth glow — emissive opening on the front.
+	var mouth := MeshInstance3D.new()
+	var mb := BoxMesh.new()
+	mb.size = Vector3(fs.x * 0.40, fs.y * 0.35, 0.04)
+	mouth.mesh = mb
+	mouth.position = Vector3(0.0, fs.y + fs.y * 0.45, -fs.z * 0.42)
+	var m_mat := StandardMaterial3D.new()
+	m_mat.albedo_color = FURNACE_GLOW_CF
+	m_mat.emission_enabled = true
+	m_mat.emission = FURNACE_GLOW_CF
+	m_mat.emission_energy_multiplier = 3.0
+	m_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mouth.set_surface_override_material(0, m_mat)
+	_attach_visual(mouth)
+	# Light from the furnace mouth.
+	var fl := OmniLight3D.new()
+	fl.light_color = FURNACE_GLOW_CF
+	fl.light_energy = 1.0
+	fl.omni_range = fs.x * 2.6
+	fl.position = Vector3(0.0, fs.y + fs.y * 0.45, -fs.z * 0.45)
+	_attach_visual(fl)
+	# Brass ceremonial arch over the front entrance. Torus default axis
+	# is +Y; rotating 90° around X puts the axis along +Z (perpendicular
+	# to the front face) so the ring is a vertical donut visible from
+	# the front — the proper "arch over a door" silhouette. The
+	# previous double-rotation (+Y too) rotated the arch sideways so
+	# it read as a wheel on the side wall instead of an arch.
+	var arch := MeshInstance3D.new()
+	var ar := TorusMesh.new()
+	ar.inner_radius = fs.x * 0.34
+	ar.outer_radius = fs.x * 0.42
+	ar.rings = 16
+	ar.ring_segments = 5
+	arch.mesh = ar
+	arch.rotation.x = PI * 0.5
+	arch.position = Vector3(0.0, fs.y + fs.y * 0.35, -fs.z * 0.55)
+	arch.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_CF))
+	_attach_visual(arch)
+	_team_collar_ring(fs.x * 0.45, 0.08, Vector3(0.0, fs.y + 0.04, 0.0))
+	_apply_heliarch_camp_overlay(fs, fs.y + fb.height)
+
+
+func _detail_pyre_hall() -> void:
+	## Open ceremonial hall — four corner columns + raised central
+	## brazier altar + flagpole. Authorization for the Herald caster.
+	if not stats:
+		return
+	var fs: Vector3 = stats.footprint_size
+	const HELIARCH_BRASS_PH: Color = Color(0.55, 0.40, 0.20, 1.0)
+	const SOOTED_PH: Color = Color(0.20, 0.17, 0.13, 1.0)
+	const ALTAR_GLOW_PH: Color = Color(1.0, 0.55, 0.18, 1.0)
+	# Four corner columns supporting the hall.
+	for cx_i: int in 2:
+		for cz_i: int in 2:
+			var cx_pos: float = -fs.x * 0.36 if cx_i == 0 else fs.x * 0.36
+			var cz_pos: float = -fs.z * 0.36 if cz_i == 0 else fs.z * 0.36
+			var column := MeshInstance3D.new()
+			var cyl := CylinderMesh.new()
+			cyl.top_radius = 0.14
+			cyl.bottom_radius = 0.18
+			cyl.height = fs.y * 0.85
+			cyl.radial_segments = 10
+			column.mesh = cyl
+			column.position = Vector3(cx_pos, fs.y + cyl.height * 0.5, cz_pos)
+			column.set_surface_override_material(0, _detail_dark_metal_mat(SOOTED_PH))
+			_attach_visual(column)
+			# Brass capital at each column top.
+			var cap := MeshInstance3D.new()
+			var capb := BoxMesh.new()
+			capb.size = Vector3(0.40, 0.10, 0.40)
+			cap.mesh = capb
+			cap.position = Vector3(cx_pos, fs.y + cyl.height + 0.05, cz_pos)
+			cap.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_PH))
+			_attach_visual(cap)
+	# Central altar — raised stone block.
+	var altar := MeshInstance3D.new()
+	var altb := BoxMesh.new()
+	altb.size = Vector3(fs.x * 0.38, fs.y * 0.40, fs.z * 0.38)
+	altar.mesh = altb
+	altar.position = Vector3(0.0, fs.y + altb.size.y * 0.5, 0.0)
+	altar.set_surface_override_material(0, _detail_dark_metal_mat(SOOTED_PH))
+	_attach_visual(altar)
+	# Altar flame — bright emissive sphere.
+	var altar_flame := MeshInstance3D.new()
+	var afs := SphereMesh.new()
+	afs.radius = fs.x * 0.13
+	afs.height = fs.x * 0.26
+	altar_flame.mesh = afs
+	altar_flame.position = Vector3(0.0, fs.y + altb.size.y + afs.radius * 0.7, 0.0)
+	var af_mat := StandardMaterial3D.new()
+	af_mat.albedo_color = ALTAR_GLOW_PH
+	af_mat.emission_enabled = true
+	af_mat.emission = ALTAR_GLOW_PH
+	af_mat.emission_energy_multiplier = 3.4
+	af_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	altar_flame.set_surface_override_material(0, af_mat)
+	_attach_visual(altar_flame)
+	var altar_light := OmniLight3D.new()
+	altar_light.light_color = ALTAR_GLOW_PH
+	altar_light.light_energy = 1.2
+	altar_light.omni_range = fs.x * 2.8
+	altar_light.position = Vector3(0.0, fs.y + altb.size.y + 0.30, 0.0)
+	_attach_visual(altar_light)
+	_team_collar_ring(fs.x * 0.45, 0.08, Vector3(0.0, fs.y + 0.04, 0.0))
+	_apply_heliarch_camp_overlay(fs, fs.y + fs.y * 0.85)
+
+
+func _detail_drone_nest() -> void:
+	## Low landing perch with two amber-lit pads + a central control
+	## kiosk. Authorization for Firefly drones.
+	if not stats:
+		return
+	var fs: Vector3 = stats.footprint_size
+	const HELIARCH_BRASS_DN: Color = Color(0.55, 0.40, 0.20, 1.0)
+	const SOOTED_DN: Color = Color(0.20, 0.17, 0.13, 1.0)
+	const PAD_GLOW_DN: Color = Color(1.0, 0.55, 0.18, 1.0)
+	# Central kiosk.
+	var kiosk := MeshInstance3D.new()
+	var kb := BoxMesh.new()
+	kb.size = Vector3(fs.x * 0.40, fs.y * 0.65, fs.z * 0.40)
+	kiosk.mesh = kb
+	kiosk.position = Vector3(0.0, fs.y + kb.size.y * 0.5, 0.0)
+	kiosk.set_surface_override_material(0, _detail_dark_metal_mat(SOOTED_DN))
+	_attach_visual(kiosk)
+	# Two landing pads — short flat discs flanking the kiosk.
+	for pad_side: int in 2:
+		var psx: float = -1.0 if pad_side == 0 else 1.0
+		var pad := MeshInstance3D.new()
+		var pc := CylinderMesh.new()
+		pc.top_radius = fs.x * 0.22
+		pc.bottom_radius = fs.x * 0.24
+		pc.height = 0.10
+		pc.radial_segments = 14
+		pad.mesh = pc
+		pad.position = Vector3(psx * fs.x * 0.32, fs.y + 0.05, 0.0)
+		pad.set_surface_override_material(0, _detail_dark_metal_mat(SOOTED_DN))
+		_attach_visual(pad)
+		# Pad lighting strip — emissive ring on top of the pad. Torus
+		# default axis is +Y so NO rotation needed for a flat ring lying
+		# on the ground (ring plane = XZ). The previous rotation.x
+		# turned the ring vertical, making it look like a wheel
+		# standing on its edge instead of a landing-pad outline.
+		var pad_glow := MeshInstance3D.new()
+		var pgt := TorusMesh.new()
+		pgt.inner_radius = fs.x * 0.18
+		pgt.outer_radius = fs.x * 0.21
+		pgt.rings = 12
+		pgt.ring_segments = 4
+		pad_glow.mesh = pgt
+		pad_glow.position = Vector3(psx * fs.x * 0.32, fs.y + 0.11, 0.0)
+		var pg_mat := StandardMaterial3D.new()
+		pg_mat.albedo_color = PAD_GLOW_DN
+		pg_mat.emission_enabled = true
+		pg_mat.emission = PAD_GLOW_DN
+		pg_mat.emission_energy_multiplier = 2.4
+		pg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		pad_glow.set_surface_override_material(0, pg_mat)
+		_attach_visual(pad_glow)
+	# Antenna on top of the kiosk.
+	var antenna := MeshInstance3D.new()
+	var ac := CylinderMesh.new()
+	ac.top_radius = 0.04
+	ac.bottom_radius = 0.05
+	ac.height = fs.y * 0.40
+	ac.radial_segments = 6
+	antenna.mesh = ac
+	antenna.position = Vector3(0.0, fs.y + kb.size.y + ac.height * 0.5, 0.0)
+	antenna.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_DN))
+	_attach_visual(antenna)
+	_team_collar_ring(fs.x * 0.40, 0.08, Vector3(0.0, fs.y + 0.04, 0.0))
+	_apply_heliarch_camp_overlay(fs, fs.y + kb.size.y)
+
+
+func _detail_aerie() -> void:
+	## Tall lookout tower with a high landing platform + brass mast.
+	## Authorization for the Condor gunship.
+	if not stats:
+		return
+	var fs: Vector3 = stats.footprint_size
+	const HELIARCH_BRASS_AE: Color = Color(0.55, 0.40, 0.20, 1.0)
+	const SOOTED_AE: Color = Color(0.20, 0.17, 0.13, 1.0)
+	const SIGNAL_AMBER_AE: Color = Color(1.0, 0.55, 0.18, 1.0)
+	# Tall central tower column.
+	var tower := MeshInstance3D.new()
+	var tc := CylinderMesh.new()
+	tc.top_radius = fs.x * 0.22
+	tc.bottom_radius = fs.x * 0.30
+	tc.height = fs.y * 0.95
+	tc.radial_segments = 8
+	tower.mesh = tc
+	tower.position = Vector3(0.0, fs.y + tc.height * 0.5, 0.0)
+	tower.set_surface_override_material(0, _detail_dark_metal_mat(SOOTED_AE))
+	_attach_visual(tower)
+	# High platform — wider disc on top.
+	var platform := MeshInstance3D.new()
+	var pc := CylinderMesh.new()
+	pc.top_radius = fs.x * 0.42
+	pc.bottom_radius = fs.x * 0.38
+	pc.height = 0.16
+	pc.radial_segments = 12
+	platform.mesh = pc
+	platform.position = Vector3(0.0, fs.y + tc.height + pc.height * 0.5, 0.0)
+	platform.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_AE))
+	_attach_visual(platform)
+	# Signal beacon at the platform centre — emissive amber sphere.
+	var beacon := MeshInstance3D.new()
+	var bsph := SphereMesh.new()
+	bsph.radius = fs.x * 0.12
+	bsph.height = fs.x * 0.24
+	beacon.mesh = bsph
+	beacon.position = Vector3(0.0, fs.y + tc.height + pc.height + bsph.radius * 0.7, 0.0)
+	var b_mat := StandardMaterial3D.new()
+	b_mat.albedo_color = SIGNAL_AMBER_AE
+	b_mat.emission_enabled = true
+	b_mat.emission = SIGNAL_AMBER_AE
+	b_mat.emission_energy_multiplier = 3.2
+	b_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	beacon.set_surface_override_material(0, b_mat)
+	_attach_visual(beacon)
+	var beacon_light := OmniLight3D.new()
+	beacon_light.light_color = SIGNAL_AMBER_AE
+	beacon_light.light_energy = 1.4
+	beacon_light.omni_range = fs.x * 3.5
+	beacon_light.position = Vector3(0.0, fs.y + tc.height + pc.height + 0.25, 0.0)
+	_attach_visual(beacon_light)
+	# Brass support struts — four diagonals from base to platform.
+	for strut_i: int in 4:
+		var sang: float = float(strut_i) / 4.0 * TAU + PI / 4.0
+		var s_top: Vector3 = Vector3(sin(sang) * fs.x * 0.40, fs.y + tc.height, cos(sang) * fs.x * 0.40)
+		var s_bot: Vector3 = Vector3(sin(sang) * fs.x * 0.32, fs.y + tc.height * 0.40, cos(sang) * fs.x * 0.32)
+		var strut := MeshInstance3D.new()
+		var scyl := CylinderMesh.new()
+		scyl.top_radius = 0.05
+		scyl.bottom_radius = 0.05
+		scyl.height = s_top.distance_to(s_bot)
+		scyl.radial_segments = 5
+		strut.mesh = scyl
+		strut.position = (s_top + s_bot) * 0.5
+		strut.look_at_from_position((s_top + s_bot) * 0.5, s_top, Vector3.UP)
+		strut.rotation.x += PI * 0.5
+		strut.set_surface_override_material(0, _detail_dark_metal_mat(HELIARCH_BRASS_AE))
+		_attach_visual(strut)
+	_team_collar_ring(fs.x * 0.40, 0.08, Vector3(0.0, fs.y + 0.04, 0.0))
+	_apply_heliarch_camp_overlay(fs, fs.y + tc.height + pc.height)
+
+
 func _add_mesh_aura_disc(radius: float) -> void:
 	## Full-disc Mesh-aura visualization replacing the old TorusMesh ring.
 	## Uses a PlaneMesh sized to the coverage diameter + a custom shader
@@ -6952,7 +8557,240 @@ func _scrappy_neutral_building_tint(c: Color) -> Color:
 	return mixed
 
 
+## --- Pack/unpack API (Heliarch mobile buildings) --------------------------
+
+func is_mobile_building() -> bool:
+	return stats != null and "is_mobile" in stats and (stats.get("is_mobile") as bool)
+
+
+func can_pack() -> bool:
+	## Player-visible "Pack Up" gate. Only DEPLOYED, fully-constructed,
+	## mobile buildings can begin packing.
+	return is_mobile_building() and is_constructed and pack_state == PackState.DEPLOYED
+
+
+func can_unpack() -> bool:
+	return is_mobile_building() and pack_state == PackState.PACKED
+
+
+func can_cancel_pack() -> bool:
+	## Cancel the in-flight transition. Snaps PACKING → DEPLOYED or
+	## UNPACKING → PACKED instantly (HP unchanged).
+	return is_mobile_building() and (pack_state == PackState.PACKING or pack_state == PackState.UNPACKING)
+
+
+func begin_pack() -> bool:
+	if not can_pack():
+		return false
+	_set_pack_state(PackState.PACKING)
+	_pack_timer = PACK_TRANSITION_SEC
+	return true
+
+
+func begin_unpack() -> bool:
+	if not can_unpack():
+		return false
+	_set_pack_state(PackState.UNPACKING)
+	_pack_timer = PACK_TRANSITION_SEC
+	return true
+
+
+func cancel_pack_transition() -> bool:
+	if pack_state == PackState.PACKING:
+		_set_pack_state(PackState.DEPLOYED)
+		_pack_timer = 0.0
+		_apply_pack_visual_state()
+		return true
+	if pack_state == PackState.UNPACKING:
+		_set_pack_state(PackState.PACKED)
+		_pack_timer = 0.0
+		_apply_pack_visual_state()
+		return true
+	return false
+
+
+func _set_pack_state(new_state: int) -> void:
+	## Centralised pack_state transition. Hides the salvage-yard
+	## harvest-range visual the moment the building leaves DEPLOYED so
+	## a packed Salvage Caravan no longer paints its old footprint on
+	## the ground, and emits the pack_state_changed signal so HUD can
+	## refresh the Pack/Unpack/Cancel toggle in place. Workers attached
+	## to the building check pack_state themselves before
+	## gathering/depositing (see SalvageWorker._is_yard_deployed).
+	if pack_state == new_state:
+		return
+	pack_state = new_state
+	# Visual range ring belongs to the salvage_yard_component child if
+	# this building has one. Hide it whenever we leave DEPLOYED; the
+	# selection_manager re-shows it via the normal show_range hook when
+	# the player reselects the unpacked building.
+	var range_should_show: bool = (new_state == PackState.DEPLOYED)
+	for child: Node in get_children():
+		if child is SalvageYardComponent:
+			var syc: SalvageYardComponent = child as SalvageYardComponent
+			if range_should_show:
+				# Don't auto-show — selection_manager owns that hook.
+				# We only force-hide on leave so the ring doesn't trail
+				# behind the packed building.
+				pass
+			else:
+				if syc.has_method("hide_range"):
+					syc.hide_range()
+	pack_state_changed.emit(new_state)
+
+
+func request_packed_relocate(target_pos: Vector3) -> bool:
+	## Player right-click on a destination while the building is PACKED.
+	## Stored for the next tick to handle (so visual state can settle
+	## first). Returns false if the building isn't currently packed.
+	if pack_state != PackState.PACKED:
+		return false
+	_packed_relocate_target = target_pos
+	return true
+
+
+func _tick_pack_state(delta: float) -> void:
+	## Drives the pack/unpack timer + state transitions, animates the
+	## per-frame visual progress, and handles "relocate on right-click"
+	## teleport when PACKED. Functionality gating (production, harvest,
+	## combat) is enforced at each subsystem's tick by checking
+	## pack_state != PackState.DEPLOYED.
+	if pack_state == PackState.PACKING:
+		_pack_timer -= delta
+		# Compute 0.0 (just started) → 1.0 (fully packed) progress and
+		# drive the visual. Stages: 0–33% shrink only (legs folding
+		# inward), 33–66% tilt + further shrink (canvas collapses),
+		# 66–100% near-flat profile (caravan sits low on the ground).
+		var packing_t: float = clampf(1.0 - (_pack_timer / PACK_TRANSITION_SEC), 0.0, 1.0)
+		_apply_pack_progress(packing_t)
+		if _pack_timer <= 0.0:
+			_set_pack_state(PackState.PACKED)
+			_pack_timer = 0.0
+			_apply_pack_progress(1.0)
+	elif pack_state == PackState.UNPACKING:
+		_pack_timer -= delta
+		# Progress reverses — 1.0 (fully packed at start) → 0.0
+		# (fully unpacked at end). Same _apply_pack_progress drives
+		# the visual but going the other direction.
+		var unpacking_t: float = clampf(_pack_timer / PACK_TRANSITION_SEC, 0.0, 1.0)
+		_apply_pack_progress(unpacking_t)
+		if _pack_timer <= 0.0:
+			_set_pack_state(PackState.DEPLOYED)
+			_pack_timer = 0.0
+			_apply_pack_progress(0.0)
+	elif pack_state == PackState.PACKED:
+		# Slow-transit movement when relocate target is set. Lerp the
+		# building's position toward the destination at PACKED_MOVE_SPEED
+		# and yaw the body to face the direction of motion. Stops once
+		# inside PACKED_ARRIVAL_RADIUS and clears the target. Match
+		# spec §"Mobile Infrastructure" line 364 — slower than a
+		# Bulwark, visible transit, no teleport.
+		if _packed_relocate_target.x != INF:
+			var to_dest: Vector3 = _packed_relocate_target - global_position
+			to_dest.y = 0.0
+			var dist: float = to_dest.length()
+			if dist <= PACKED_ARRIVAL_RADIUS:
+				# Arrived — snap to exact target, clear, stop.
+				global_position.x = _packed_relocate_target.x
+				global_position.z = _packed_relocate_target.z
+				_packed_relocate_target = Vector3(INF, INF, INF)
+			else:
+				var step: float = min(PACKED_MOVE_SPEED * delta, dist)
+				var dir: Vector3 = to_dest / dist
+				global_position += dir * step
+				# Yaw the chassis so it faces the direction of motion.
+				# atan2(x, z) gives the angle around +Y aligning -Z (default
+				# forward) with the dir vector. Snap-rotate for the packed
+				# transit — it's a brief move + the building is already
+				# tilted 18° on Z, so the snap reads "convoy turns".
+				rotation.y = atan2(dir.x, dir.z) + PI
+
+
+func _apply_pack_progress(t: float) -> void:
+	## Continuous packed-progress visual. t=0 is fully deployed, t=1
+	## is fully packed. Three visible "stages" emerge naturally from
+	## the staged lerps:
+	##   STAGE 1 (0–33%) — chassis sinks slightly, slim XZ shrink
+	##                     (legs / scaffolding fold inward first)
+	##   STAGE 2 (33–66%) — Y compression accelerates, lateral tilt
+	##                      begins (canvas tarps collapse over the body)
+	##   STAGE 3 (66–100%) — full squat profile, forward+lateral tilt
+	##                       (vehicle is "loaded onto the convoy")
+	## Each stage produces a distinct silhouette so the player can read
+	## the pack progress at a glance instead of seeing one smooth
+	## interpolation.
+	# --- Per-stage timing curves -----------------------------------------
+	# Stage-1 anchor — sink/shrink dominates this third.
+	var stage1_t: float = clampf(t / 0.33, 0.0, 1.0)
+	# Stage-2 anchor — Y compression + lateral tilt ramp here.
+	var stage2_t: float = clampf((t - 0.33) / 0.33, 0.0, 1.0)
+	# Stage-3 anchor — final flattening + forward tilt.
+	var stage3_t: float = clampf((t - 0.66) / 0.34, 0.0, 1.0)
+	# --- Scale: separated XZ vs Y so the building visibly flattens.
+	# XZ shrinks moderately in stage 1 + 2 (legs fold), Y squashes
+	# aggressively in stages 2 + 3 (chassis collapses down).
+	var sx: float = lerp(1.0, 0.55, lerp(stage1_t * 0.45, 1.0, stage2_t * 0.8 + stage3_t * 0.2))
+	var sy: float = lerp(1.0, 0.32, lerp(stage1_t * 0.20, 1.0, stage2_t * 0.6 + stage3_t * 0.4))
+	var sz: float = sx
+	scale = Vector3(sx, sy, sz)
+	# --- Position sink: building drops ~0.4 u into the ground over
+	# the full pack. Sells "sitting low on improvised treads".
+	# Applied via local-transform offset to avoid clobbering
+	# global_position which the packed-mover updates.
+	position.y = lerp(0.0, -0.40, lerp(stage1_t * 0.4, 1.0, stage2_t * 0.4 + stage3_t * 0.2))
+	# --- Tilts: lateral Z tilt in stage 2 (building leans), forward
+	# X tilt in stage 3 (final fold). Max ~18° on each.
+	rotation.z = lerp(0.0, deg_to_rad(18.0), stage2_t * 0.6 + stage3_t * 0.4)
+	rotation.x = lerp(0.0, deg_to_rad(10.0), stage3_t)
+	# --- Light fade: dim every OmniLight on the building as it folds
+	# down, restoring brightness on unpack. Reads as "reactor powering
+	# down for transit" → "reactor lighting back up at the new spot".
+	# Cache original energy on first call so the lerp has a baseline
+	# to restore to.
+	_apply_pack_light_fade(t)
+
+
+func _apply_pack_light_fade(t: float) -> void:
+	## Per-tick light energy lerp keyed off pack progress. Walks the
+	## building's child tree once (cheap — buildings have a handful of
+	## lights at most). First time t > 0 fires we cache each light's
+	## original energy so the lerp has a baseline; on full unpack the
+	## cache stays warm so the next pack cycle skips the populate step.
+	# At t=0 (DEPLOYED), restore each cached light to its original
+	# energy and return. Cache is preserved for the next pack cycle.
+	# At t=1 (PACKED), every light is dimmed to 0.05 × original.
+	# Intermediate values lerp linearly.
+	for child: Node in get_children():
+		_pack_light_fade_recurse(child, t)
+
+
+func _pack_light_fade_recurse(node: Node, t: float) -> void:
+	if node is OmniLight3D:
+		var light: OmniLight3D = node as OmniLight3D
+		var iid: int = light.get_instance_id()
+		if not _pack_light_orig_energy.has(iid):
+			_pack_light_orig_energy[iid] = light.light_energy
+		var orig: float = _pack_light_orig_energy[iid] as float
+		light.light_energy = lerp(orig, orig * 0.05, t)
+	# Recurse through containers (Node3D pivots, Marker3D, etc.) so
+	# nested lights (corner floodlights on the HQ, brazier lights
+	# inside the camp overlay) all dim.
+	for sub: Node in node.get_children():
+		_pack_light_fade_recurse(sub, t)
+
+
+func _apply_pack_visual_state() -> void:
+	## Compatibility shim for callers that snapped to discrete states
+	## (cancel_pack_transition still uses these). Delegates to the
+	## continuous progress applier with 0.0 or 1.0.
+	_apply_pack_progress(1.0 if pack_state == PackState.PACKED else 0.0)
+
+
 func _process(delta: float) -> void:
+	# Pack/unpack state tick (Heliarch mobile buildings).
+	if pack_state != PackState.DEPLOYED:
+		_tick_pack_state(delta)
+
 	# Drone Bay respawn-over-time tick — runs even while unselected so
 	# the bay rebuilds its patrol drone trio independently of the HUD.
 	if is_constructed and stats != null and stats.building_id == &"drone_bay":
@@ -7233,11 +9071,31 @@ func _count_adjacent_restorers() -> int:
 
 
 func _spawn_unit(unit_stats: UnitStatResource) -> void:
-	# Check if a branch commit exists for this unit type → use upgraded stats
+	# Heliarch militia composition: when a militia "unit" finishes the
+	# build queue, it's actually a recruitment template. Iterate the
+	# embedded militia_units list and spawn each one separately —
+	# multiple real units pop out simultaneously, sells the "improvised
+	# mixed band" identity per drossfront-docs §"Militia Production".
+	# The per-entry spawn re-enters this function with the real unit's
+	# stats so all the normal spawn logic (BCM commits, formation,
+	# aircraft routing, rally orientation) applies uniformly.
+	if "is_militia_composition" in unit_stats and (unit_stats.get("is_militia_composition") as bool):
+		var roster_v: Variant = unit_stats.get("militia_units") if "militia_units" in unit_stats else null
+		if roster_v is Array:
+			var roster: Array = roster_v as Array
+			for entry: Variant in roster:
+				var entry_stats: UnitStatResource = entry as UnitStatResource
+				if entry_stats != null:
+					_spawn_unit(entry_stats)
+		return
+
+	# Check if a branch commit exists for this unit type → use upgraded
+	# stats. Owner-scoped: only this building's owner sees their own
+	# commits applied; opponents keep base stats.
 	var actual_stats: UnitStatResource = unit_stats
 	var bcm: Node = get_tree().current_scene.get_node_or_null("BranchCommitManager")
 	if bcm and bcm.has_method("get_committed_stats"):
-		var committed: UnitStatResource = bcm.get_committed_stats(unit_stats.unit_name)
+		var committed: UnitStatResource = bcm.call("get_committed_stats", unit_stats.unit_name, owner_id) as UnitStatResource
 		if committed:
 			actual_stats = committed
 
@@ -7787,7 +9645,7 @@ func _is_producing_or_researching() -> bool:
 		_resolve_research_managers()
 		if _cached_research_manager and _cached_research_manager.has_method("is_in_progress") and _cached_research_manager.call("is_in_progress"):
 			return true
-		if _cached_branch_commit_manager and _cached_branch_commit_manager.has_method("is_committing") and _cached_branch_commit_manager.call("is_committing"):
+		if _cached_branch_commit_manager and _cached_branch_commit_manager.has_method("is_committing") and _cached_branch_commit_manager.call("is_committing", owner_id):
 			return true
 	# Salvage Yard busy = next worker still being built (count < max).
 	var yard: Node = get_node_or_null("SalvageYardComponent")
@@ -7812,9 +9670,9 @@ func _current_production_progress() -> float:
 		if _cached_research_manager and _cached_research_manager.has_method("is_in_progress") and _cached_research_manager.call("is_in_progress"):
 			if _cached_research_manager.has_method("get_progress"):
 				return clampf(_cached_research_manager.call("get_progress") as float, 0.0, 1.0)
-		if _cached_branch_commit_manager and _cached_branch_commit_manager.has_method("is_committing") and _cached_branch_commit_manager.call("is_committing"):
+		if _cached_branch_commit_manager and _cached_branch_commit_manager.has_method("is_committing") and _cached_branch_commit_manager.call("is_committing", owner_id):
 			if _cached_branch_commit_manager.has_method("get_commit_progress"):
-				return clampf(_cached_branch_commit_manager.call("get_commit_progress") as float, 0.0, 1.0)
+				return clampf(_cached_branch_commit_manager.call("get_commit_progress", "", owner_id) as float, 0.0, 1.0)
 	# Salvage Yard worker spawn progress -- so the world-space
 	# production bar fills as the next gatherer is being built,
 	# matching the HUD-panel readout.

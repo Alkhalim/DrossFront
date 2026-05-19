@@ -29,6 +29,13 @@ public:
     void mark_soft_cost(godot::AABB aabb, int cost);
     void set_cell_y_at(godot::Vector3 world_pos, float y);
 
+    // Diagnostic read-back of the cost grid. get_cell_cost_at returns the
+    // raw cost byte (0 = open, 255 = blocked) for the given agent class,
+    // or -1 if the position is off-grid / class invalid. get_cell_y_at
+    // returns the stored per-cell elevation (0.0 if off-grid).
+    int get_cell_cost_at(godot::Vector3 world_pos, int agent_class) const;
+    float get_cell_y_at(godot::Vector3 world_pos) const;
+
     int field_count() const { return static_cast<int>(fields_.size()); }
     bool field_exists(FieldId id) const { return fields_.count(id) > 0; }
 

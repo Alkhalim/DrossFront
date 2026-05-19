@@ -130,4 +130,19 @@ void FlowFieldServerImpl::set_cell_y_at(godot::Vector3 world_pos, float y) {
     for (auto &kv : fields_) kv.second.dirty = true;
 }
 
+int FlowFieldServerImpl::get_cell_cost_at(godot::Vector3 world_pos, int agent_class) const {
+    if (agent_class < 0 || agent_class >= AGENT_CLASS_COUNT) return -1;
+    if (!cost_grids_[agent_class]) return -1;
+    int idx = cost_grids_[agent_class]->cell_of(world_pos.x, world_pos.z);
+    if (idx < 0) return -1;
+    return static_cast<int>(cost_grids_[agent_class]->get(idx));
+}
+
+float FlowFieldServerImpl::get_cell_y_at(godot::Vector3 world_pos) const {
+    if (!cost_grids_[0]) return 0.0f;
+    int idx = cost_grids_[0]->cell_of(world_pos.x, world_pos.z);
+    if (idx < 0) return 0.0f;
+    return cost_grids_[0]->get_cell_y(idx);
+}
+
 } // namespace drossfront

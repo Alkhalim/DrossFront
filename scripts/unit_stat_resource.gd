@@ -243,6 +243,13 @@ func can_target_air() -> bool:
 ## Max flight speed (units / second). Independent of `speed_tier` since
 ## aircraft don't share the ground-unit speed tiers.
 @export var flight_speed: float = 14.0
+## RTB-after-attack flag. Aircraft that set this fly back to the nearest
+## friendly HQ to "rearm" after each primary-weapon discharge. While
+## returning they ignore player commands and can't be reselected (the
+## selection manager filters them). Used by the Heliarch Condor heavy
+## bomber so a single thermobaric drop commits the airframe to a long
+## visible return trip rather than just looping back to fire again.
+@export var rtb_after_attack: bool = false
 
 @export_group("Mesh")
 ## V3 §"Pillar 2 — Neural Mesh" — when > 0, this unit emits a Mesh
@@ -364,3 +371,43 @@ func can_target_air() -> bool:
 ## Damage multiplier applied to all weapon hits while the unit is deployed.
 ## Default 1.5 = +50% damage. Read by CombatComponent.get_damage_buff_mult.
 @export_range(1.0, 3.0, 0.05) var deployed_damage_mult: float = 1.5
+
+## Nanite / self-repair regen rate, total HP / sec across the squad,
+## applied ONLY while out of combat. Combat = "took damage in the
+## last OUT_OF_COMBAT_SEC seconds" (Unit-side constant). Distributed
+## across alive members via apply_heal. Set on the Stahlyokai
+## Predator branch (4 HP/sec) so a damaged Predator that
+## disengages slowly recovers but never out-heals incoming fire.
+@export_range(0.0, 30.0, 0.5) var nanite_regen_per_sec: float = 0.0
+
+## Death-detonation AoE — when alive_count drops to 0 the unit's
+## position becomes the centre of a hostile-damage AoE. Used by
+## Matador Martyr (50 dmg, 4u radius). Damage uses the unit's
+## armor_class to pick a sensible role mult against each victim:
+## treated as "AS" (anti-structure) for cluster-spray flavour, so
+## it bites unarmored/light hardest and structures take a chip.
+@export_range(0.0, 12.0, 0.5) var death_detonation_radius: float = 0.0
+@export_range(0, 500, 5) var death_detonation_damage: int = 0
+
+## Hover-tank visual flag. When true, the visual root bobs up and
+## down on a slow sine wave (sells the "antigrav hover" identity)
+## and banks left/right with horizontal velocity (chassis leans
+## into turns). Movement rules are unchanged — this is purely
+## cosmetic. Used by Inquisitor Tank.
+@export var is_hover_tank: bool = false
+
+## Militia composition flag (Heliarch faction mechanic per
+## drossfront-docs/docs/11_faction_mechanics.md §"Militia Production").
+## When true this "unit" is actually a recruitment template: the build
+## queue pays its cost and timer, and on completion Building._spawn_unit
+## spawns EVERY entry in militia_units simultaneously instead of one
+## unit. Used by Militia Camp production to recruit pre-defined mixed
+## bands (Skirmish, Mixed, Press Gang, etc.) per spec line 410.
+@export var is_militia_composition: bool = false
+
+## The actual unit roster spawned when a militia composition completes.
+## Read by Building._spawn_unit when is_militia_composition is true.
+## Each entry is a real UnitStatResource (e.g. Matador, Cremator, Stoker)
+## — the spawn loop iterates the array and places each unit with a small
+## formation offset. Empty for non-militia entries.
+@export var militia_units: Array[UnitStatResource] = []

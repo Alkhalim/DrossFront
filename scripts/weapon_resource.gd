@@ -59,6 +59,23 @@ extends Resource
 ## DPS is unchanged whether stagger is 0 or 0.20s.
 @export_range(0.0, 0.6, 0.01) var salvo_stagger_sec: float = 0.0
 
+## Sustained-beam mechanic. When `is_sustained_beam` is true the
+## weapon CHANNELS for `sustain_duration_sec` instead of firing a
+## single instant shot. Damage + visual intensity scale from 0% at
+## the start of the channel to 100% near the end (quadratic ramp),
+## then a final burst lands at completion. The total damage delivered
+## by a full channel is `damage` × (0.5 + ramp integral) — a clean
+## ~1.0× of the weapon's listed damage so the data fields still
+## describe the weapon's per-shot output as the player expects.
+## Cancels:
+##   - target dies or becomes invalid
+##   - shooter's combat target changes
+##   - shooter receives a move command (has_move_order goes true)
+## Cancelled channels go straight to the standard rof_seconds
+## cooldown — no per-tick refund.
+@export var is_sustained_beam: bool = false
+@export_range(0.5, 15.0, 0.1) var sustain_duration_sec: float = 5.0
+
 ## Splash radius in world units. Default 0 = no splash (single-
 ## target only). When > 0 every shot that lands deals
 ## `splash_damage_mult` of the per-shot damage to every other
@@ -174,6 +191,20 @@ extends Resource
 ## flag is more robust against branch renames + lets a "scattergun"
 ## variant qualify without forcing the word into its name.
 @export var is_shotgun: bool = false
+
+
+## Sustain rampup — when true, this weapon's effective fire rate
+## ramps UP the longer it engages the SAME target. CombatComponent
+## divides rof by a multiplier that lerps from 1.0 to
+## sustain_rampup_max_mult over sustain_rampup_time_sec seconds of
+## continuous engagement. Resetting target (target dies, moves out
+## of range, or unit retargets) resets the ramp. Used by the Boyar
+## Salvo (Multi-Rocket Thrower) to read as "rocket battery spins up"
+## — distinct from the per-hit `rof_ramp_per_hit` on UnitStatResource,
+## which scales with successful hits instead of wall-clock dwell.
+@export var sustain_rampup: bool = false
+@export_range(1.0, 4.0, 0.05) var sustain_rampup_max_mult: float = 1.0
+@export_range(0.5, 30.0, 0.5) var sustain_rampup_time_sec: float = 5.0
 
 
 @export_group("Direct numeric stats (post-refactor)")

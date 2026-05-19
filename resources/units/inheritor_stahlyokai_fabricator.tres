@@ -1,0 +1,54 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_fabricator_ap_pylon"]
+script = ExtResource("2")
+weapon_name = "Pylon Lance"
+role_tag = &"AP"
+damage_tier = &"high"
+range_tier = &"long"
+range_value = 24.0
+rof_tier = &"slow"
+projectile_style = &"missile"
+base_accuracy = 0.90
+
+damage = 70
+range = 24.0
+rof_seconds = 1.8
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 0.6
+mult_vs_light_v2 = 0.8
+mult_vs_medium_v2 = 1.0
+mult_vs_heavy_v2 = 1.2
+mult_vs_structure_v2 = 1.0
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
+
+[resource]
+script = ExtResource("1")
+unit_name = "Stahlyokai (Fabricator)"
+display_name = "Stahlyokai (Fabricator)"
+unit_class = &"medium"
+hp_total = 1700
+hp_per_unit = 850
+armor_class = &"medium"
+speed_tier = &"moderate"
+sight_tier = &"medium"
+squad_size = 2
+population = 14
+cost_salvage = 510
+cost_fuel = 25
+build_time = 40.0
+built_at = &"inheritor_construction_site"
+unlock_prerequisite = &"architect_network"
+primary_weapon = SubResource("weapon_fabricator_ap_pylon")
+special_description = "Stahlyokai (Fabricator) — trades the chaingun array for a Pylon Lance: high single-target AP damage and the ability to deploy short-lived AP turret pylons that auto-fire on enemies in range. CONCERN: deployable pylons require code implementation."
+branch_summary = "Chainguns -> AP Pylon Lance (range 18u -> 24u, single-target 14 -> 70 dmg). Deployable AP turret pylons (code TBD)."
+
+speed = 6.5
+sight_radius = 22.0
+armor_reduction = 0.30

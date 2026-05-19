@@ -1,0 +1,61 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_thermobaric_bomb"]
+script = ExtResource("2")
+weapon_name = "Thermobaric Bomb"
+role_tag = &"AS"
+damage_tier = &"extreme"
+range_tier = &"long"
+range_value = 24.0
+rof_tier = &"single"
+projectile_style = &"thermobaric"
+base_accuracy = 0.86
+splash_radius = 7.0
+splash_damage_mult = 0.70
+can_damage_trees = true
+bomb_drop = true
+
+damage = 280
+range = 24.0
+rof_seconds = 12.0
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.5
+mult_vs_light_v2 = 1.4
+mult_vs_medium_v2 = 1.2
+mult_vs_heavy_v2 = 1.0
+mult_vs_structure_v2 = 1.5
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
+
+[resource]
+script = ExtResource("1")
+unit_name = "Condor"
+display_name = "Condor"
+unit_class = &"aircraft"
+hp_total = 1360
+hp_per_unit = 1360
+armor_class = &"heavy"
+speed_tier = &"slow"
+sight_tier = &"long"
+squad_size = 1
+population = 18
+cost_salvage = 475
+cost_fuel = 120
+build_time = 80.0
+built_at = &"headquarters"
+unlock_prerequisite = &"crucible_spire"
+primary_weapon = SubResource("weapon_thermobaric_bomb")
+is_aircraft = true
+flight_altitude = 12.0
+flight_speed = 10.0
+rtb_after_attack = true
+special_description = "Heliarch heavy bomber — Condor. Thermobaric Bomb — single fuel-air explosive that creates a massive thermal AoE. After dropping its payload the Condor flies back to the nearest HQ to rearm; during the return trip it can't be selected or commanded. Requires Crucible Spire."
+
+speed = 10.0
+sight_radius = 30.0
+armor_reduction = 0.45

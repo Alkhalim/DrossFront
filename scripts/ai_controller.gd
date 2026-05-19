@@ -159,6 +159,17 @@ var _building_offsets: Dictionary = {}
 ## scene directly from the editor).
 var _econ_mul: float = 1.0
 var _agg_mul: float = 1.0
+## Reaction-speed knob. Scales the AI's decision-tick cadence:
+## a smaller value means more frequent state ticks, so the AI
+## reacts to threats / placement opportunities faster. Easy AIs
+## think slowly (longer interval), Hard AIs think fast.
+##   EASY:   1.6 → ~0.32 s/tick → 3.1 Hz
+##   NORMAL: 1.0 → ~0.20 s/tick → 5.0 Hz (baseline)
+##   HARD:   0.6 → ~0.12 s/tick → 8.3 Hz
+## Bumping the cadence on Hard tightens threat-response latency
+## without rewriting any individual heuristic. Floor in
+## _effective_tick_interval clamps to a sane range.
+var _reaction_mul: float = 1.0
 ## Turret resource path picked at startup based on the AI's faction.
 ## Anvil AI gets the specialised emplacement; Sable AI gets the basic
 ## ground-only variant. Resolved here so every _try_place(turret_*)
@@ -223,9 +234,11 @@ func _enter_tree() -> void:
 			var d: int = settings.get_ai_difficulty(owner_id)
 			_econ_mul = _econ_mul_for_difficulty(d)
 			_agg_mul = _agg_mul_for_difficulty(d)
+			_reaction_mul = _reaction_mul_for_difficulty(d)
 		else:
 			_econ_mul = settings.get_ai_economy_multiplier()
 			_agg_mul = settings.get_ai_aggression_multiplier()
+			_reaction_mul = 1.0
 		# Sable AI picks the basic ground turret; Anvil keeps the
 		# specialised one. Faction id 1 = Sable (per MatchSettings.FactionId).
 		_my_faction = _resolve_my_faction(settings)
@@ -264,31 +277,28 @@ func _resolve_my_faction(settings: Node) -> int:
 
 
 func _engineer_path() -> String:
-	## Per-faction engineer resource. Sable's HQ producible list does NOT
-	## contain anvil_ratchet, so a hardcoded Anvil path silently fails the
-	## queue and bleeds salvage every tick.
-	if _my_faction == 1:
-		return "res://resources/units/sable_rigger.tres"
-	return "res://resources/units/anvil_ratchet.tres"
+	## Per-faction engineer resource. Each faction's HQ producible list
+	## ONLY contains its own engineer; a hardcoded Anvil path silently
+	## fails the queue (faction_lock-rejected unit_name match) and
+	## bleeds salvage every kick.
+	match _my_faction:
+		1: return "res://resources/units/sable_rigger.tres"
+		2: return "res://resources/units/inheritor_restorer.tres"
+		3: return "res://resources/units/heliarch_stoker.tres"
+		_: return "res://resources/units/anvil_ratchet.tres"
 
 
-func _basic_foundry_unit_paths() -> Array[String]:
-	## Per-faction roster the AI can queue at basic_foundry. Mirrors the
-	## Sable producibility list in Building._faction_producible_list. Order
-	## here is { light, medium, heavy } so callers can index the same way
-	## across factions even though Sable basic has no heavy (returns ""
-	## for the heavy slot — caller must handle).
-	if _my_faction == 1:
-		return ["res://resources/units/sable_specter.tres", "res://resources/units/sable_jackal.tres", ""]
-	return ["res://resources/units/anvil_rook.tres", "res://resources/units/anvil_hound.tres", "res://resources/units/anvil_bulwark.tres"]
-
-
-func _adv_foundry_heavy_path() -> String:
-	## Per-faction heavy unit path used at advanced_foundry. Sable's
-	## Harbinger sits in the adv list, not basic — same role as Bulwark.
-	if _my_faction == 1:
-		return "res://resources/units/sable_harbinger.tres"
-	return "res://resources/units/anvil_bulwark.tres"
+func _crawler_path() -> String:
+	## Per-faction Salvage Crawler resource. queue_unit filters by
+	## object identity against get_producible_units(), so a Sable
+	## HQ rejects anvil_crawler.tres (its list contains sable_crawler
+	## .tres only). Inheritor has no crawler in its roster; callers
+	## that hit this branch must early-return before queueing.
+	## Heliarch shares the Anvil crawler — its HQ producible list
+	## includes anvil_crawler.tres explicitly.
+	match _my_faction:
+		1: return "res://resources/units/sable_crawler.tres"
+		_: return "res://resources/units/anvil_crawler.tres"
 
 
 func _econ_mul_for_difficulty(d: int) -> float:
@@ -310,6 +320,18 @@ func _agg_mul_for_difficulty(d: int) -> float:
 		0: return 0.75
 		2: return 1.8
 		_: return 1.15
+
+
+func _reaction_mul_for_difficulty(d: int) -> float:
+	## Reaction-speed multiplier. Smaller = quicker decisions.
+	## Easy AIs feel sluggish; Hard AIs feel snappy. The actual
+	## cadence ceiling comes from _effective_tick_interval's
+	## clamp so a future Insane tier can't degenerate into a
+	## 60 Hz controller.
+	match d:
+		0: return 1.6   # EASY — slower reactions
+		2: return 0.6   # HARD — quicker reactions
+		_: return 1.0   # NORMAL — baseline
 
 
 func _resolve_strategy_from_settings() -> int:
@@ -468,7 +490,17 @@ func _find_nearest_enemy_hq_pos(buildings: Array[Node]) -> Vector3:
 ## meaningfully. 5Hz is fast enough that any in-flight transition
 ## still feels reactive.
 const AI_TICK_INTERVAL: float = 0.20
+## Hard ceiling / floor on the per-difficulty cadence. 0.08 s
+## (12.5 Hz) keeps Hard from monopolising frame budget; 0.40 s
+## (2.5 Hz) keeps Easy reactive enough to still feel like an
+## opponent rather than a punching bag.
+const AI_TICK_MIN: float = 0.08
+const AI_TICK_MAX: float = 0.40
 var _ai_tick_accum: float = 0.0
+
+
+func _effective_tick_interval() -> float:
+	return clampf(AI_TICK_INTERVAL * _reaction_mul, AI_TICK_MIN, AI_TICK_MAX)
 
 
 func _process(delta: float) -> void:
@@ -498,7 +530,7 @@ func _process(delta: float) -> void:
 	# accumulated delta since the last tick, NOT the per-frame
 	# delta, so any per-second math stays correct.
 	_ai_tick_accum += delta
-	if _ai_tick_accum < AI_TICK_INTERVAL:
+	if _ai_tick_accum < _effective_tick_interval():
 		return
 	delta = _ai_tick_accum
 	_ai_tick_accum = 0.0
@@ -568,8 +600,16 @@ func _process(delta: float) -> void:
 	# the late-game expansion keeps adding production / power
 	# even while the AI is mid-attack or rebuilding. Calls early-
 	# out on already-placed keys so the cost is just a counter
-	# scan when the targets are met.
-	if _difficulty_is_hard() and _state != AIState.SETUP:
+	# scan when the targets are met. Pad targets are Combine /
+	# Meridian buildings (basic_foundry / adv_foundry / aerodrome
+	# + basic_generator / advanced_generator) — Inheritor + Heliarch
+	# use a different palette (architect_network / catalyst_core
+	# etc.) so the pad would queue faction-locked structures the
+	# engineer can never finish. Their static economy paths
+	# already over-provision for late game.
+	if _difficulty_is_hard() \
+			and _state != AIState.SETUP \
+			and (_my_faction == 0 or _my_faction == 1):
 		_try_hard_target_composition()
 	# Salvage-cap dump: any AI that piles up resources beyond SALVAGE_DUMP_CAP
 	# must spend the surplus on a combat unit at the first idle foundry /
@@ -642,9 +682,24 @@ func _train_kick_tick() -> void:
 		if cur_pop >= cap_pop - 5 and cap_pop < 250:
 			if _match_clock_sec - _train_kick_pop_build_clock >= TRAIN_KICK_POP_BUILD_COOLDOWN:
 				_train_kick_pop_build_clock = _match_clock_sec
-				var key: String = "kick_pop_%d" % int(_match_clock_sec)
-				_try_place(key, "res://resources/buildings/basic_foundry.tres",
-					_offset_for("kick_pop_building", Vector3(18, 0, -8)))
+				# Pick a faction-appropriate pop-providing building. The
+				# bandaid previously hardcoded basic_foundry, which is
+				# Combine-only — for Meridian/Inheritor/Heliarch the
+				# placement would be silently rejected by faction_lock.
+				# Each faction has its own pop building per the design.
+				var ai_faction: int = 0
+				if _hq != null and _hq.has_method("_resolve_faction_id"):
+					ai_faction = _hq.call("_resolve_faction_id") as int
+				var pop_path: String = ""
+				match ai_faction:
+					0: pop_path = "res://resources/buildings/basic_foundry.tres"
+					1: pop_path = "res://resources/buildings/sensor_spine.tres"  # +25 pop, gates Light/Medium
+					2: pop_path = "res://resources/buildings/architect_network.tres"  # tech hub
+					3: pop_path = "res://resources/buildings/crucible_spire.tres"  # Heliarch tech building
+				if pop_path != "":
+					var key: String = "kick_pop_%d" % int(_match_clock_sec)
+					_try_place(key, pop_path,
+						_offset_for("kick_pop_building", Vector3(18, 0, -8)))
 	# Reset timer regardless so we don't re-walk every tick.
 	_train_kick_last_clock = _match_clock_sec
 
@@ -718,10 +773,19 @@ func _process_economy() -> void:
 	# Queue and pilot a Crawler.
 	_maintain_crawlers()
 
-	# Meridian faction uses a separate build plan. Early-return so the
-	# Combine sequence below is never reached by a Meridian AI.
+	# Per-faction build plans. Each faction has its own building palette
+	# (faction_lock filters out the wrong ones at _try_place anyway, but
+	# falling through to the Anvil sequence wastes salvage attempts on
+	# rejected placements). Early-return so the Combine sequence below
+	# is never reached by a non-Combine AI.
 	if _my_faction == 1:
 		_process_economy_meridian()
+		return
+	if _my_faction == 2:
+		_process_economy_inheritor()
+		return
+	if _my_faction == 3:
+		_process_economy_heliarch()
 		return
 
 	# Phase 1 — resource trio (generator + foundry + salvage yard). Always
@@ -966,6 +1030,126 @@ func _process_economy_meridian() -> void:
 			_offset_for("echo_array", Vector3(0, 0, 30)))
 
 	# Dormant-attack safety net + state transition — same as Combine path.
+	if _force_attack_if_dormant():
+		return
+	if _state_timer >= ECONOMY_DURATION:
+		_state = AIState.ARMY
+		_state_timer = 0.0
+
+
+func _process_economy_inheritor() -> void:
+	## Inheritor (faction 2) build plan. Faction-locked palette is HQ
+	## (already placed), reliquary, architect_network, and the ephemeral
+	## inheritor_construction_site (not part of the static plan — placed
+	## ad hoc by Restorers). Generic buildings (basic_generator,
+	## salvage_yard, sam_site, basic_armory) have no faction_lock and
+	## are open to Inheritor. The AI mirrors the Combine BALANCED order
+	## with substitutions: basic_armory -> architect_network as the
+	## branch host, no foundry / aerodrome / advanced_armory (Inheritor
+	## has no foundry roster), reliquary as the late-game power add-on.
+	_try_place("generator", "res://resources/buildings/basic_generator.tres",
+			_offset_for("generator", Vector3(15, 0, 10)))
+	_try_place_salvage_yard("salvage_yard", _offset_for("salvage_yard", Vector3(0, 0, 22)))
+	_try_place("architect_network", "res://resources/buildings/architect_network.tres",
+			_offset_for("architect_network", Vector3(-15, 0, 10)))
+	_place_next_power_building("generator2", _offset_for("generator2", Vector3(22, 0, 18)))
+	_try_place("turret", _turret_path, _offset_for("turret", Vector3(0, 0, -14)))
+	_try_place_salvage_yard("salvage_yard_2", _offset_for("salvage_yard_2", Vector3(-12, 0, 28)))
+	_try_place("reliquary", "res://resources/buildings/reliquary.tres",
+			_offset_for("reliquary", Vector3(20, 0, -4)))
+	_try_place("sam_site", "res://resources/buildings/sam_site.tres",
+			_offset_for("sam_site", Vector3(0, 0, -22)))
+	_try_place_salvage_yard("salvage_yard_3", _offset_for("salvage_yard_3", Vector3(12, 0, 28)))
+	_place_next_power_building("generator3", _offset_for("generator3", Vector3(28, 0, 8)))
+	# Authorization buildings — each unlocks a T2 unit at the HQ /
+	# Restorer field-build palette. Without these the AI is stuck
+	# fielding Ashigaru / Wächter / Schwarm + Restorers forever.
+	# Opportunistic placement; each gates on architect_network's
+	# completion via its prerequisites (heavy_lattice_foundry stacks
+	# on architects_choir's completion in turn). Built in priority
+	# order: heavy ground first (Sturmwolf), then air (Valkyrie),
+	# then caster (Kamigeist) and heavy air (Kintsu Wing).
+	_try_place("monolith_vault", "res://resources/buildings/monolith_vault.tres",
+			_offset_for("monolith_vault", Vector3(-22, 0, -4)))
+	_try_place("sky_lattice", "res://resources/buildings/sky_lattice.tres",
+			_offset_for("sky_lattice", Vector3(24, 0, 4)))
+	_try_place("architects_choir", "res://resources/buildings/architects_choir.tres",
+			_offset_for("architects_choir", Vector3(-24, 0, 4)))
+	_try_place("choir_sanctum", "res://resources/buildings/choir_sanctum.tres",
+			_offset_for("choir_sanctum", Vector3(8, 0, -22)))
+	_try_place("heavy_lattice_foundry", "res://resources/buildings/heavy_lattice_foundry.tres",
+			_offset_for("heavy_lattice_foundry", Vector3(-8, 0, -22)))
+
+	# Same dormant + state transition tail as the other plans.
+	if _force_attack_if_dormant():
+		return
+	if _state_timer >= ECONOMY_DURATION:
+		_state = AIState.ARMY
+		_state_timer = 0.0
+
+
+func _process_economy_heliarch() -> void:
+	## Heliarch (faction 3) build plan. Faction-locked palette is HQ +
+	## crucible_spire; basic_foundry / advanced_foundry / aerodrome /
+	## basic_armory all faction-pass but their producible rosters are
+	## forced_empty for Heliarch (Building._faction_producible_list).
+	## Static plan therefore sticks to: generator, salvage, crucible
+	## spire (branch host for Matador / Cremator), sam_site for AA,
+	## second salvage/power tier — and skips the foundry/armory chain
+	## entirely.
+	# Pyre Caravan — Heliarch's mobile salvage yard. Available from start,
+	# no prereq, so it can deploy alongside the first Catalyst Core.
+	_try_place("salvage_caravan", "res://resources/buildings/salvage_caravan.tres",
+			_offset_for("salvage_caravan", Vector3(0, 0, 22)))
+	# Heliarch's faction-locked T1 power building. Vent-gated per spec.
+	# Acts as primary power AND as the prerequisite for Forge Pit, which
+	# is in turn the prereq for Crucible Spire.
+	_try_place("catalyst_core", "res://resources/buildings/catalyst_core.tres",
+			_offset_for("catalyst_core", Vector3(15, 0, 10)))
+	# Crucible Spire — Tier 2 power + Águila gate + branch panel host.
+	# Requires catalyst_core (set on the .tres prereq list).
+	_try_place("crucible_spire", "res://resources/buildings/crucible_spire.tres",
+			_offset_for("crucible_spire", Vector3(-15, 0, 10)))
+	# Heliarch power is faction-locked to Catalyst Core + Crucible Spire.
+	# Generic basic_generator + advanced_generator are excluded from the
+	# Heliarch palette (see test_arena_controller _HELIARCH_OBSOLETE), so
+	# the generic _place_next_power_building call would silently fail.
+	# Skipped — power expansion happens via the second Catalyst Core
+	# placed further down.
+	_try_place("turret", _turret_path, _offset_for("turret", Vector3(0, 0, -14)))
+	_try_place("salvage_caravan_2", "res://resources/buildings/salvage_caravan.tres",
+			_offset_for("salvage_caravan_2", Vector3(-12, 0, 28)))
+	_try_place("sam_site", "res://resources/buildings/sam_site.tres",
+			_offset_for("sam_site", Vector3(0, 0, -22)))
+	_try_place("salvage_caravan_3", "res://resources/buildings/salvage_caravan.tres",
+			_offset_for("salvage_caravan_3", Vector3(12, 0, 28)))
+	# Second Catalyst Core as a power expansion (mobile per spec, so
+	# placement geometry is flexible — uses an offset away from the
+	# first to keep the explosion radius from clipping both).
+	_try_place("catalyst_core_2", "res://resources/buildings/catalyst_core.tres",
+			_offset_for("catalyst_core_2", Vector3(28, 0, 8)))
+	# Militia Camp — Heliarch's bespoke production building. Without
+	# it the AI is stuck training one unit at a time from the HQ, while
+	# the human player can field whole bands from the Camp. Placing it
+	# here makes the AI competitive with the militia tempo.
+	_try_place("militia_camp", "res://resources/buildings/militia_camp.tres",
+			_offset_for("militia_camp", Vector3(-22, 0, -4)))
+	# Two authorization buildings opportunistically — Forge Pit + Aerie
+	# unlock Inquisitor Tank + Condor respectively (and the matching
+	# militia compositions: Mechanized + Combined Air-Ground). Picked
+	# as the highest-impact pair for a balanced army; Crucible Foundry
+	# + the others can land in late-game when the wave count climbs.
+	_try_place("forge_pit", "res://resources/buildings/forge_pit.tres",
+			_offset_for("forge_pit", Vector3(18, 0, -4)))
+	_try_place("aerie", "res://resources/buildings/aerie.tres",
+			_offset_for("aerie", Vector3(-18, 0, -4)))
+	# Drone Nest is now a BASIC Heliarch building (no prereqs) — drop
+	# it in early so the AI gets Firefly drone-swarm + Drone Swarm
+	# militia comp on the cheap. Mirrors the Heliarch player getting
+	# the same chassis-light early-air option.
+	_try_place("drone_nest", "res://resources/buildings/drone_nest.tres",
+			_offset_for("drone_nest", Vector3(22, 0, -16)))
+
 	if _force_attack_if_dormant():
 		return
 	if _state_timer >= ECONOMY_DURATION:
@@ -1307,13 +1491,31 @@ func _offset_for(key: String, fallback: Vector3) -> Vector3:
 
 
 func _ai_faction_substitute_prereq(prereq: StringName) -> StringName:
-	## Meridian AI maps cross-faction prerequisite IDs to their equivalents.
-	## Mirrors hud._faction_substitute_prereq for Meridian (faction_id == 1).
+	## Per-faction AI substitution for cross-faction prerequisite IDs.
+	## Mirrors hud._faction_substitute_prereq.
 	if _my_faction == 1:
+		# Meridian
 		match prereq:
 			&"basic_armory":    return &"sensor_spine"
 			&"advanced_armory": return &"intelligence_network"
 			&"basic_generator": return &"mesh_relay"
+			_: return prereq
+	elif _my_faction == 2:
+		# Inheritor — tech building is Architect's Network. No Adv
+		# Armory equivalent yet (Apex/Elite gating is tier-based on
+		# the network itself). basic_generator uses the shared
+		# basic_generator resource so no substitution needed there.
+		match prereq:
+			&"basic_armory":    return &"architect_network"
+			&"advanced_armory": return &"architect_network"
+			_: return prereq
+	elif _my_faction == 3:
+		# Heliarch — tech building is Crucible Spire. Power tier 1 is
+		# Catalyst Core (faction-locked variant of basic_generator).
+		match prereq:
+			&"basic_armory":     return &"crucible_spire"
+			&"advanced_armory":  return &"crucible_spire"
+			&"basic_generator":  return &"catalyst_core"
 			_: return prereq
 	return prereq
 
@@ -1761,6 +1963,15 @@ func _try_place(key: String, stats_path: String, offset: Vector3) -> void:
 	if not bstats:
 		_record_blocker(key, BuildBlocker.RESOURCE_LOAD_FAIL)
 		return
+	# Faction-lock guard. Pattern is lock = faction_id + 1; 0 = open.
+	# Without this an Inheritor / Heliarch AI calling into a Combine
+	# pad path would build a faction-locked structure that just sits
+	# inert, burning engineer cycles. Treated as a permanent block so
+	# the key never retries.
+	if bstats.faction_lock != 0 and bstats.faction_lock - 1 != _my_faction:
+		_buildings_placed[key] = true
+		_record_blocker(key, BuildBlocker.PREREQ_NOT_MET)
+		return
 	# Tech-tree gate: skip if any prerequisite isn't yet constructed.
 	# Same rule the player follows, so the AI naturally chains through
 	# basic_foundry → advanced_foundry → aerodrome instead of teleporting
@@ -2068,6 +2279,11 @@ func _maintain_crawlers() -> void:
 		return
 	if not _ai_resource_manager:
 		return
+	# Inheritor has no Crawler in its HQ roster (Restorers handle the
+	# salvage role via field-build / repair). queue_unit would reject
+	# the request every 5 Hz tick — bail early.
+	if _my_faction == 2:
+		return
 
 	# Count alive AI-owned Crawlers + any in queue.
 	var crawler_count: int = 0
@@ -2083,7 +2299,7 @@ func _maintain_crawlers() -> void:
 		_command_idle_crawler_to_wreck()
 		return
 
-	var crawler_stats: UnitStatResource = load("res://resources/units/anvil_crawler.tres") as UnitStatResource
+	var crawler_stats: UnitStatResource = load(_crawler_path()) as UnitStatResource
 	if not crawler_stats:
 		return
 	# Don't spam queue — wait for production to finish.
@@ -3342,17 +3558,21 @@ func _is_placement_clear(pos: Vector3, footprint: Vector3, vent_keepout: float =
 
 
 func _all_friendly_foundries() -> Array[Node]:
-	## Returns every constructed basic_foundry / advanced_foundry /
-	## aerodrome owned by us. Replaces the legacy _foundry +
-	## _adv_foundry singleton tracking so a third / fourth foundry
-	## the AI builds on bigger maps actually contributes to the
-	## production budget instead of sitting idle while salvage piles
-	## up. Aerodromes also produce units, so they queue through the
-	## same path -- their producible list resolves to the aircraft
-	## roster in Building._faction_producible_list, which our
-	## faction-correct unit picker then queues from.
+	## Returns every constructed production building owned by us.
+	## Combine: basic_foundry + advanced_foundry + aerodrome (legacy
+	## roster). Meridian / Inheritor / Heliarch route combat production
+	## through the HQ — including it here lets _dump_excess_salvage_into_units
+	## and _process_army actually queue units for those factions, which
+	## was previously a silent gap (salvage piled up because the dump
+	## scan found zero targets).
+	## Aerodromes are still included for Combine's air roster; their
+	## producible list resolves to the aircraft roster in
+	## Building._faction_producible_list.
 	var out: Array[Node] = []
 	var production_ids: Array[StringName] = [&"basic_foundry", &"advanced_foundry", &"aerodrome"]
+	# Factions whose HQ holds the primary combat roster — include the HQ
+	# itself as a production target.
+	var hq_is_producer: bool = _my_faction == 1 or _my_faction == 2 or _my_faction == 3
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(node):
 			continue
@@ -3364,6 +3584,8 @@ func _all_friendly_foundries() -> Array[Node]:
 		if not bstats:
 			continue
 		if bstats.building_id in production_ids:
+			out.append(node)
+		elif hq_is_producer and bstats.building_id == &"headquarters":
 			out.append(node)
 	return out
 
@@ -3530,13 +3752,36 @@ func _pick_unit_for_foundry(roster: Array, foundry_id: StringName) -> UnitStatRe
 	# Drop locked entries (tech-gated units the AI hasn't unlocked
 	# yet would queue-reject and waste the tick). get_producible_units
 	# already filters these in the building, but be defensive.
+	# ALSO drop engineer-class entries (can_build=true) — engineers are
+	# maintained on their own cadence via _maintain_engineers, and the
+	# strategy-weighted picker would otherwise spam Restorers from an
+	# Inheritor HQ that lists Restorer as its slot-0 unit.
 	var available: Array[UnitStatResource] = []
 	for r: Variant in roster:
 		var u: UnitStatResource = r as UnitStatResource
-		if u:
-			available.append(u)
+		if u == null:
+			continue
+		if "can_build" in u and (u.get("can_build") as bool):
+			continue
+		available.append(u)
 	if available.is_empty():
 		return null
+	# Crawler cap — the AI's foundry roster includes the Salvage Crawler
+	# (it lives at the HQ slot), and without a cap _pick_unit_for_foundry
+	# can keep selecting it via the strategy-weighted bucket pick,
+	# producing 5+ idle crawlers in a base (playtest 2026-05-15). Cap at
+	# 2 by filtering crawler entries out once the AI already owns 2.
+	var crawler_count_ai: int = 0
+	for cn: Node in get_tree().get_nodes_in_group("crawlers"):
+		if is_instance_valid(cn) and cn.get("owner_id") == owner_id:
+			crawler_count_ai += 1
+	if crawler_count_ai >= 2:
+		var without_crawler: Array[UnitStatResource] = []
+		for u2: UnitStatResource in available:
+			if u2 != null and u2.unit_class != &"crawler":
+				without_crawler.append(u2)
+		if not without_crawler.is_empty():
+			available = without_crawler
 	# Counter-training: when the enemy army is dominated by one
 	# armor class, with COUNTER_FOCUS_PROB chance pick the roster
 	# entry whose primary weapon scores best vs that class. Falls

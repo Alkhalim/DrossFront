@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Resource" path="res://resources/units/heliarch_sol_invictus.tres" id="2"]
+
+[ext_resource type="Resource" path="res://resources/units/heliarch_inquisitor_tank.tres" id="3"]
+
+[ext_resource type="Resource" path="res://resources/units/heliarch_cremator.tres" id="4"]
+
+[resource]
+script = ExtResource("1")
+unit_name = "Invictus Command"
+display_name = "Invictus Command"
+unit_class = &"apex"
+armor_class = &"heavy"
+squad_size = 1
+population = 60
+cost_salvage = 1330
+cost_fuel = 220
+build_time = 140.0
+built_at = &"advanced_militia_camp"
+is_militia_composition = true
+militia_units = [ExtResource("2"), ExtResource("3"), ExtResource("4")]
+special_description = "Heliarch apex militia: 1× Sol Invictus + 1× Inquisitor Tank + 1× Cremator. The walking sun marches with a screen of hover plasma and a Cremator burn-line. The big swing."

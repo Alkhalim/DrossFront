@@ -35,6 +35,11 @@ var _hq_tab_defense: Button = null
 
 ## Track what we're showing to avoid rebuilding buttons every frame.
 var _last_building_id: int = -1
+## Pack-state listener — for the currently-selected Heliarch mobile
+## building, we listen for `pack_state_changed` so the Pack/Unpack/
+## Cancel button rebuilds in place when the timer flips the state.
+## Otherwise the player has to click off / on to see the new ability.
+var _pack_signal_building: Building = null
 var _last_unit_ids: Array[int] = []
 var _showing_build_buttons: bool = false
 
@@ -682,10 +687,22 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _toggle_pause() -> void:
+	# Escape is a step-back: if the settings sub-dialog is open INSIDE
+	# the pause overlay, close that first instead of unpausing. Without
+	# this short-circuit the dialog stayed visible over running gameplay
+	# when the player hit Escape while it was open (playtest 2026-05-15).
+	if _pause_settings_dialog and _pause_settings_dialog.visible:
+		_pause_settings_dialog.visible = false
+		return
 	var tree: SceneTree = get_tree()
 	tree.paused = not tree.paused
 	if _pause_overlay:
 		_pause_overlay.visible = tree.paused
+	# When unpausing, make sure the settings dialog is hidden too — covers
+	# the case where the dialog got opened without going through the
+	# pause-overlay button (e.g. external trigger).
+	if not tree.paused and _pause_settings_dialog:
+		_pause_settings_dialog.visible = false
 
 
 func _build_pause_overlay() -> void:
@@ -1551,11 +1568,12 @@ func _update_building_panel(building: Building) -> void:
 		building.stats.building_id == &"basic_armory"
 		or building.stats.building_id == &"advanced_armory"
 	)
-	var is_meridian_branch_panel: bool = _is_meridian_branch_panel_building(building)
+	var is_faction_branch_panel: bool = _is_faction_branch_panel_building(building)
 	# Live-refresh while a commit is in flight covers both the Armory
-	# panels (Anvil/Combine) and the Meridian branch buildings, so the
-	# countdown / percent label stays live on the active row.
-	var armory_in_progress: bool = (is_armory or is_meridian_branch_panel) and (
+	# panels (Anvil/Combine) and the per-faction branch buildings
+	# (Meridian / Heliarch / Inheritor), so the countdown / percent label
+	# stays live on the active row.
+	var armory_in_progress: bool = (is_armory or is_faction_branch_panel) and (
 		(rm and rm.is_in_progress())
 		or (bcm_for_refresh and bcm_for_refresh.has_method("is_committing") and bcm_for_refresh.is_committing())
 	)
@@ -1607,6 +1625,10 @@ func _update_building_panel(building: Building) -> void:
 		# changes) so an actively browsed Advanced tab stays put.
 		if bid != _last_building_id:
 			_hq_tab = "train"
+			# Re-bind the pack-state listener to the newly selected
+			# building. Drop any prior subscription so we don't double-
+			# fire on the old selection.
+			_bind_pack_signal(building)
 		_last_building_id = bid
 		_last_unit_ids.clear()
 		_showing_build_buttons = false
@@ -1615,12 +1637,12 @@ func _update_building_panel(building: Building) -> void:
 			_building_panel_prereq_hash = new_prereq_hash
 		if is_armory:
 			_rebuild_armory_buttons(building)
-		elif _is_meridian_branch_panel_building(building):
-			# Meridian routes branch upgrades to the unlocking buildings
-			# (Sensor Spine / Drone Bay / Black Pylon) rather than to an
-			# Armory. Faction-gated so Combine's Black Pylon stays on the
-			# default turret/production fallback.
-			_rebuild_meridian_branch_panel(building)
+		elif _is_faction_branch_panel_building(building):
+			# Per-faction branch panel — Meridian routes through Sensor
+			# Spine / Drone Bay / Intel Network; Heliarch through Crucible
+			# Spire; Inheritor through Architect's Network. The router
+			# pulls the appropriate unit list via _branch_panel_paths_for_building.
+			_rebuild_faction_branch_panel(building)
 		elif has_production:
 			_rebuild_production_buttons(building)
 		elif building.has_node("TurretComponent"):
@@ -2731,8 +2753,76 @@ func _on_attack_move_button() -> void:
 
 ## --- Production / Build buttons ---
 
+func _bind_pack_signal(building: Building) -> void:
+	## Wire the HUD's pack-state listener to the currently selected
+	## building. When the building's pack_state flips
+	## (PACKING → PACKED / UNPACKING → DEPLOYED), the HUD rebuilds the
+	## bottom-panel buttons in place so the player doesn't have to
+	## deselect / reselect to swap from "Cancel" → "Unpack" etc.
+	if _pack_signal_building and is_instance_valid(_pack_signal_building):
+		if _pack_signal_building.is_connected("pack_state_changed", _on_selected_pack_state_changed):
+			_pack_signal_building.pack_state_changed.disconnect(_on_selected_pack_state_changed)
+	_pack_signal_building = null
+	if building and building.has_signal("pack_state_changed"):
+		building.pack_state_changed.connect(_on_selected_pack_state_changed)
+		_pack_signal_building = building
+
+
+func _on_selected_pack_state_changed(_new_state: int) -> void:
+	## Flag the panel for a rebuild on the next _update_building_panel
+	## tick. The flag is the same one used by the prereq / refresh
+	## paths so the rebuild lands through the same code path.
+	_panel_rebuild_pending = true
+
+
+func _append_pack_button(building: Building) -> void:
+	## Heliarch pack/unpack button. Renders one of:
+	##   - "Pack Up" when DEPLOYED → starts the 13 s pack timer
+	##   - "Cancel Pack" while PACKING / UNPACKING → snaps to the
+	##     adjacent stable state instantly
+	##   - "Unpack" when PACKED → starts the 13 s unpack timer
+	## Player still uses normal selection-panel right-click on a
+	## destination to relocate while PACKED — _command_move forwards
+	## to request_packed_relocate() via the selection manager.
+	if not building or not building.has_method("can_pack"):
+		return
+	var btn := Button.new()
+	btn.custom_minimum_size = Vector2(160, 60)
+	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var label: String
+	var on_pressed: Callable
+	var ps: int = building.get("pack_state") as int
+	# State 0=DEPLOYED, 1=PACKING, 2=PACKED, 3=UNPACKING (Building.PackState).
+	if ps == 1 or ps == 3:
+		var remaining: float = (building.get("_pack_timer") as float)
+		label = "Cancel (%.0fs)" % maxf(remaining, 0.0)
+		on_pressed = func() -> void:
+			building.cancel_pack_transition()
+	elif ps == 2:
+		label = "Unpack (%ds)" % int(round(building.get("PACK_TRANSITION_SEC") as float))
+		on_pressed = func() -> void:
+			building.begin_unpack()
+	else:
+		# DEPLOYED — show Pack Up.
+		label = "Pack Up (%ds)" % int(round(building.get("PACK_TRANSITION_SEC") as float))
+		on_pressed = func() -> void:
+			building.begin_pack()
+	_set_label_button(btn, "", label)
+	btn.tooltip_text = "Heliarch mobile-building toggle. Packed buildings can be right-clicked to a new spot and unpacked there."
+	btn.pressed.connect(on_pressed)
+	_button_grid.add_child(btn)
+	_action_buttons.append({"button": btn, "kind": "pack_toggle"})
+
+
 func _rebuild_production_buttons(building: Building) -> void:
 	_clear_buttons()
+
+	# Heliarch mobile-building pack/unpack button — surfaces at the top
+	# of the panel for any building whose stat resource sets is_mobile.
+	# Locally-owned only; the button drives Building.begin_pack /
+	# begin_unpack / cancel_pack_transition.
+	if building and building.owner_id == 0 and building.has_method("is_mobile_building") and building.call("is_mobile_building"):
+		_append_pack_button(building)
 
 	# Faction-aware producible list. Pull the FULL roster (including
 	# tech-gated entries) so locked units still render as greyed-out
@@ -3056,6 +3146,14 @@ const HQ_PLATING_COST_FUEL: int = 50
 const HQ_BATTERY_COST_SALVAGE: int = 200
 const HQ_BATTERY_COST_FUEL: int = 80
 const HQ_PLATING_HP_MULT: float = 1.25
+## HQ upgrades now use ResearchManager (same pattern as Anchor Mode +
+## Intel Network tiers) so they take real time and surface a progress
+## bar + cancel-with-refund row, instead of completing instantly the
+## moment the player clicks (playtest 2026-05-15: the old instant-buy
+## buttons felt like a bug). Research IDs are global per player; once
+## researched, ALL friendly HQs receive the upgrade.
+const HQ_PLATING_RESEARCH_TIME: float = 25.0
+const HQ_BATTERY_RESEARCH_TIME: float = 30.0
 
 
 func _meridian_unit_is_advanced(unit_stat: UnitStatResource) -> bool:
@@ -3084,28 +3182,31 @@ func _append_hq_upgrade_buttons(building: Building) -> void:
 	var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
 	if rm and hq_owner_faction == 0:
 		_button_grid.add_child(_make_anchor_research_row(rm, ""))
-	# Anvil-only HQ upgrades.
+	# Anvil-only HQ upgrades. Both now route through ResearchManager so
+	# the player sees a real progress bar + cancel-with-refund window
+	# instead of an instant-complete button.
 	var settings: Node = get_node_or_null("/root/MatchSettings")
 	var is_anvil: bool = settings and "player_faction" in settings and (settings.get("player_faction") as int) == 0
-	if is_anvil:
-		if not bool(building.get("hq_plating_active")):
-			_button_grid.add_child(_make_hq_upgrade_button(
-				building,
-				"HQ Plating",
-				"+%d%% HP — heavier ablative plating on the command building." % int((HQ_PLATING_HP_MULT - 1.0) * 100.0),
-				HQ_PLATING_COST_SALVAGE,
-				HQ_PLATING_COST_FUEL,
-				Callable(self, "_apply_hq_plating"),
-			))
-		if not bool(building.get("hq_battery_active")):
-			_button_grid.add_child(_make_hq_upgrade_button(
-				building,
-				"HQ Battery",
-				"+50%% damage / +4u range on the HQ defensive turret.",
-				HQ_BATTERY_COST_SALVAGE,
-				HQ_BATTERY_COST_FUEL,
-				Callable(self, "_apply_hq_battery"),
-			))
+	if is_anvil and rm:
+		_connect_hq_research_signals(rm)
+		_button_grid.add_child(_make_hq_research_row(
+			rm,
+			"HQ Plating",
+			"+%d%% HP — heavier ablative plating on the command building." % int((HQ_PLATING_HP_MULT - 1.0) * 100.0),
+			&"hq_plating",
+			HQ_PLATING_COST_SALVAGE,
+			HQ_PLATING_COST_FUEL,
+			HQ_PLATING_RESEARCH_TIME,
+		))
+		_button_grid.add_child(_make_hq_research_row(
+			rm,
+			"HQ Battery",
+			"+50%% damage / +4u range on the HQ defensive turret.",
+			&"hq_battery",
+			HQ_BATTERY_COST_SALVAGE,
+			HQ_BATTERY_COST_FUEL,
+			HQ_BATTERY_RESEARCH_TIME,
+		))
 
 
 ## --- Intel Network tier upgrade panel -----------------------------------
@@ -3339,52 +3440,140 @@ func _on_architect_upgrade_pressed(building: Building, target_tier: int, cost_s:
 	_last_building_id = -1
 
 
-func _make_hq_upgrade_button(building: Building, title: String, blurb: String, cost_s: int, cost_f: int, apply_cb: Callable) -> Button:
+func _make_hq_research_row(rm: Node, title: String, blurb: String, research_id: StringName, cost_s: int, cost_f: int, time_sec: float) -> Control:
+	## Mirrors _make_anchor_research_row but parameterized — used by both
+	## HQ Plating and HQ Battery. Renders three possible states:
+	##   - already researched (disabled label)
+	##   - in progress for THIS id (cancel-with-refund button)
+	##   - available (buy button)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var lbl := Label.new()
+	lbl.text = title
+	lbl.custom_minimum_size = Vector2(110, 0)
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.add_theme_color_override("font_color", Color(0.85, 0.82, 0.70, 1.0))
+	row.add_child(lbl)
+
 	var btn := _StyledTooltipButton.new()
-	btn.custom_minimum_size = Vector2(124, 80)
-	btn.size_flags_horizontal = Control.SIZE_FILL
-	btn.size_flags_vertical = Control.SIZE_FILL
-	_set_label_button(btn, "", title)
-	# Plain tooltip_text triggers Godot's tooltip; the styled
-	# popup is built by _make_custom_tooltip on the subclass.
-	btn.tooltip_text = title
-	# Defense red accent matches the role colour the building
-	# tooltip uses for emplacements.
-	btn.tooltip_builder = func() -> Control:
-		return make_styled_upgrade_tooltip(title, blurb, cost_s, cost_f, _ROLE_COLOR_DEFENSE)
-	btn.pressed.connect(_on_hq_upgrade_pressed.bind(building, cost_s, cost_f, apply_cb))
-	var chip_refs: Dictionary = _attach_cost_widget(btn, cost_s, cost_f, 0)
-	_action_buttons.append({ "button": btn, "kind": "hq_upgrade", "cost_s": cost_s, "cost_f": cost_f, "chips": chip_refs })
-	return btn
+	btn.custom_minimum_size = Vector2(180, 50)
+	if rm.is_researched(research_id):
+		btn.text = "%s\nResearched" % title
+		btn.disabled = true
+	elif rm.is_in_progress() and rm.current_id == research_id:
+		btn.text = "Cancel %s (%d%%) — refund" % [title, int(rm.get_progress() * 100.0)]
+		btn.add_theme_color_override("font_color", Color(1.0, 0.78, 0.32, 1.0))
+		btn.tooltip_text = "Cancel the in-progress research. Salvage + fuel spent are refunded."
+		btn.pressed.connect(_on_cancel_hq_research.bind(cost_s, cost_f))
+	else:
+		btn.text = title
+		btn.tooltip_text = title
+		var captured_blurb: String = blurb
+		var captured_title: String = title
+		var captured_time: float = time_sec
+		btn.tooltip_builder = func() -> Control:
+			var extra: PackedStringArray = PackedStringArray()
+			extra.append("")
+			extra.append("Research time: %.0fs" % captured_time)
+			return make_styled_upgrade_tooltip(captured_title, captured_blurb, cost_s, cost_f, _ROLE_COLOR_DEFENSE, extra)
+		btn.pressed.connect(_on_hq_research_pressed.bind(research_id, title, cost_s, cost_f, time_sec))
+		var chip_refs: Dictionary = _attach_cost_widget(btn, cost_s, cost_f, 0)
+		_action_buttons.append({ "button": btn, "kind": "hq_research", "cost_s": cost_s, "cost_f": cost_f, "chips": chip_refs })
+	row.add_child(btn)
+	return row
 
 
-func _on_hq_upgrade_pressed(building: Building, cost_s: int, cost_f: int, apply_cb: Callable) -> void:
-	if not is_instance_valid(building) or not _resource_manager:
+func _on_hq_research_pressed(research_id: StringName, title: String, cost_s: int, cost_f: int, time_sec: float) -> void:
+	var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
+	if not rm or rm.is_researched(research_id) or rm.is_in_progress():
+		return
+	if not _resource_manager:
 		return
 	if not _resource_manager.can_afford(cost_s, cost_f):
+		var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
+		if audio and audio.has_method("play_error"):
+			audio.play_error()
 		return
 	if not _resource_manager.spend(cost_s, cost_f):
 		return
-	apply_cb.call(building)
-	_last_building_id = -1  # force panel rebuild so the bought button hides
+	rm.start_research(research_id, title, time_sec)
+	# Force a panel rebuild so the button immediately swaps to the
+	# "in progress / cancel" state.
+	_last_building_id = -1
 
 
-func _apply_hq_plating(building: Building) -> void:
-	if not is_instance_valid(building) or not building.stats:
+func _on_cancel_hq_research(cost_s: int, cost_f: int) -> void:
+	var rm: Node = get_tree().current_scene.get_node_or_null("ResearchManager")
+	if not rm or not rm.has_method("cancel_current"):
 		return
-	building.hq_plating_active = true
-	var new_max: int = int(round(float(building.stats.hp) * HQ_PLATING_HP_MULT))
-	building.hp_max_override = new_max
-	# Pour the fresh HP delta into current_hp too so the upgrade
-	# reads as a real bulwark immediately (vs leaving the HQ at its
-	# old current_hp under a higher ceiling).
-	building.current_hp = mini(new_max, int(round(float(building.current_hp) * HQ_PLATING_HP_MULT)))
-
-
-func _apply_hq_battery(building: Building) -> void:
-	if not is_instance_valid(building):
+	if not rm.cancel_current():
 		return
-	building.hq_battery_active = true
+	if _resource_manager:
+		if _resource_manager.has_method("add_salvage") and cost_s > 0:
+			_resource_manager.add_salvage(cost_s)
+		if _resource_manager.has_method("add_fuel") and cost_f > 0:
+			_resource_manager.add_fuel(cost_f)
+	if _selection_manager and _selection_manager._audio:
+		_selection_manager._audio.play_command()
+	_last_building_id = -1
+
+
+func _connect_hq_research_signals(rm: Node) -> void:
+	## Idempotent — connects the HQ-research finished dispatcher exactly
+	## once. ResearchManager.research_finished is a single signal that
+	## fires with the upgrade_id for whatever completed; _on_hq_research_finished
+	## gates on the HQ-specific IDs and ignores everything else (Anchor
+	## Mode, Intel Network tiers, etc.).
+	if rm == null:
+		return
+	if not rm.is_connected("research_finished", _on_hq_research_finished):
+		rm.research_finished.connect(_on_hq_research_finished)
+
+
+func _on_hq_research_finished(upgrade_id: StringName) -> void:
+	if upgrade_id == &"hq_plating":
+		_apply_hq_plating_to_all_friendly_hqs()
+	elif upgrade_id == &"hq_battery":
+		_apply_hq_battery_to_all_friendly_hqs()
+	# Force panel rebuild so the button reflects the new researched state.
+	_last_building_id = -1
+
+
+func _apply_hq_plating_to_all_friendly_hqs() -> void:
+	## Global apply — walks every owner_id=0 headquarters and bumps its
+	## HP cap by HQ_PLATING_HP_MULT. Idempotent per-building.
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var b: Building = node as Building
+		if b == null or b.owner_id != 0:
+			continue
+		if b.stats == null or b.stats.building_id != &"headquarters":
+			continue
+		if bool(b.get("hq_plating_active")):
+			continue
+		b.hq_plating_active = true
+		var new_max: int = int(round(float(b.stats.hp) * HQ_PLATING_HP_MULT))
+		b.hp_max_override = new_max
+		# Pour the fresh HP delta into current_hp too so the upgrade
+		# reads as a real bulwark immediately.
+		b.current_hp = mini(new_max, int(round(float(b.current_hp) * HQ_PLATING_HP_MULT)))
+
+
+func _apply_hq_battery_to_all_friendly_hqs() -> void:
+	## Global apply — sets hq_battery_active on every owner_id=0
+	## headquarters so all HQ defensive turrets get the damage/range buff.
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node):
+			continue
+		var b: Building = node as Building
+		if b == null or b.owner_id != 0:
+			continue
+		if b.stats == null or b.stats.building_id != &"headquarters":
+			continue
+		b.hq_battery_active = true
 
 
 func _on_production_button(index: int) -> void:
@@ -4090,6 +4279,63 @@ const MERIDIAN_BRANCH_PANEL_BUILDINGS: Dictionary = {
 	],
 }
 
+## Heliarch branch panel — each authorization building hosts the
+## branch upgrades for the units it gates. Units without
+## branch_a_stats / branch_b_stats on their resource are silently
+## skipped by _make_armory_row, so listing a unit here BEFORE its
+## branch .tres files exist is forward-compatible — the row just
+## appears as soon as the wiring lands. Per drossfront-docs §3.3:
+##   Crucible Spire → Matador, Cremator, Conquistador, Sol Invictus
+##   Forge Pit → Inquisitor Tank
+##   Crucible Foundry → (future heavy melee branches)
+##   Pyre Hall → Herald
+##   Drone Nest → Firefly
+##   Aerie → Águila (post-swap gunship)
+const HELIARCH_BRANCH_PANEL_BUILDINGS: Dictionary = {
+	&"crucible_spire": [
+		"res://resources/units/heliarch_matador.tres",
+		"res://resources/units/heliarch_cremator.tres",
+		"res://resources/units/heliarch_conquistador.tres",
+		"res://resources/units/heliarch_sol_invictus.tres",
+	],
+	&"forge_pit": [
+		"res://resources/units/heliarch_inquisitor_tank.tres",
+	],
+	&"pyre_hall": [
+		"res://resources/units/heliarch_herald.tres",
+		"res://resources/units/heliarch_censer.tres",
+	],
+	&"drone_nest": [
+		"res://resources/units/heliarch_firefly.tres",
+	],
+	&"aerie": [
+		"res://resources/units/heliarch_condor.tres",
+	],
+}
+
+## Inheritor branch panel — Architect's Network hosts Stahlyokai branch
+## commits AND tier upgrades. _rebuild_faction_branch_panel appends the
+## tier upgrade button on top of the branch rows for buildings whose ID
+## appears in _BRANCH_PANEL_TIER_UPGRADE_HOSTS, so a single selection
+## surfaces both UIs at once.
+const INHERITOR_BRANCH_PANEL_BUILDINGS: Dictionary = {
+	&"architect_network": [
+		"res://resources/units/inheritor_stahlyokai.tres",
+	],
+}
+
+## Buildings that route through the branch panel AND own a tier-upgrade
+## UI. _rebuild_faction_branch_panel calls the matching append helper
+## before adding branch rows, so tier upgrades aren't hidden when a
+## building hosts both. Routing previously favoured the branch panel
+## exclusively, which silently shadowed the tier UI on intelligence_network
+## (Meridian) and would have done the same for architect_network if we
+## added Inheritor branches to its panel.
+const _BRANCH_PANEL_TIER_UPGRADE_HOSTS: Array[StringName] = [
+	&"intelligence_network",
+	&"architect_network",
+]
+
 
 func _is_meridian_branch_panel_building(building: Building) -> bool:
 	## True when this building hosts Meridian unit-branch upgrades.
@@ -4102,17 +4348,63 @@ func _is_meridian_branch_panel_building(building: Building) -> bool:
 	return MERIDIAN_BRANCH_PANEL_BUILDINGS.has(building.stats.building_id)
 
 
-func _rebuild_meridian_branch_panel(building: Building) -> void:
-	## Meridian branch-upgrade panel — mirrors _rebuild_armory_buttons but
-	## reads the per-building roster (Sensor Spine = Light/Medium, Drone
-	## Bay = Air, Intelligence Network = Heavy/Caster).
+func _is_heliarch_branch_panel_building(building: Building) -> bool:
+	## Heliarch equivalent — Crucible Spire hosts the branch panel for
+	## Matador/Cremator (and future Heliarch-only units).
+	if not building or not building.stats:
+		return false
+	if _local_player_faction() != 3:
+		return false
+	return HELIARCH_BRANCH_PANEL_BUILDINGS.has(building.stats.building_id)
+
+
+func _is_inheritor_branch_panel_building(building: Building) -> bool:
+	## Inheritor equivalent — Architect's Network hosts unit branch
+	## upgrades alongside the existing tier-upgrade UI.
+	if not building or not building.stats:
+		return false
+	if _local_player_faction() != 2:
+		return false
+	return INHERITOR_BRANCH_PANEL_BUILDINGS.has(building.stats.building_id)
+
+
+func _is_faction_branch_panel_building(building: Building) -> bool:
+	## Single entry point used by the panel router. Returns true if any
+	## faction-specific branch panel claims this building.
+	return (
+		_is_meridian_branch_panel_building(building)
+		or _is_heliarch_branch_panel_building(building)
+		or _is_inheritor_branch_panel_building(building)
+	)
+
+
+func _branch_panel_paths_for_building(building: Building) -> Array:
+	## Resolves which unit-resource list to render in the branch panel.
+	if not building or not building.stats:
+		return []
+	var bid: StringName = building.stats.building_id
+	if MERIDIAN_BRANCH_PANEL_BUILDINGS.has(bid):
+		return MERIDIAN_BRANCH_PANEL_BUILDINGS[bid] as Array
+	if HELIARCH_BRANCH_PANEL_BUILDINGS.has(bid):
+		return HELIARCH_BRANCH_PANEL_BUILDINGS[bid] as Array
+	if INHERITOR_BRANCH_PANEL_BUILDINGS.has(bid):
+		return INHERITOR_BRANCH_PANEL_BUILDINGS[bid] as Array
+	return []
+
+
+func _rebuild_faction_branch_panel(building: Building) -> void:
+	## Faction branch-upgrade panel — mirrors _rebuild_armory_buttons but
+	## reads the per-building roster from the faction-specific branch
+	## panel dicts (Meridian / Heliarch / Inheritor). Buildings listed in
+	## _BRANCH_PANEL_TIER_UPGRADE_HOSTS additionally get their tier-upgrade
+	## button rendered on top of the branch rows so a single selection
+	## surfaces both UIs.
 	_clear_buttons()
 	var bcm: Node = get_tree().current_scene.get_node_or_null("BranchCommitManager")
 	if not bcm:
 		_action_label.text = "No commit manager"
 		return
-	var paths_v: Variant = MERIDIAN_BRANCH_PANEL_BUILDINGS.get(building.stats.building_id, [])
-	var paths: Array = paths_v as Array if paths_v is Array else []
+	var paths: Array = _branch_panel_paths_for_building(building)
 	if bcm.is_committing():
 		var keys: Array[String] = bcm.get_active_commit_keys() if bcm.has_method("get_active_commit_keys") else [] as Array[String]
 		var n_active: int = keys.size()
@@ -4128,6 +4420,16 @@ func _rebuild_meridian_branch_panel(building: Building) -> void:
 		BranchCommitManager.COMMIT_COST_SALVAGE,
 	]
 	_button_grid.columns = 1
+	# Tier upgrades render first when this building is dual-host (Intel
+	# Network for Meridian, Architect's Network for Inheritor). Helpers
+	# bail silently if the building's faction doesn't match, so the same
+	# call is safe regardless of who owns the selection.
+	if _BRANCH_PANEL_TIER_UPGRADE_HOSTS.has(building.stats.building_id):
+		match building.stats.building_id:
+			&"intelligence_network":
+				_append_intel_upgrade_buttons(building)
+			&"architect_network":
+				_append_architect_upgrade_buttons(building)
 	for path: String in paths:
 		var base_stats: UnitStatResource = load(path) as UnitStatResource
 		if not base_stats or not base_stats.branch_a_stats or not base_stats.branch_b_stats:
@@ -5699,22 +6001,33 @@ func _on_build_tab_pressed(tab: String) -> void:
 ## Inheritor and an engineer (Restorer) is selected. Ashigaru is always
 ## available; Wächter + Schwarm require Architect's Network Tier 1.
 
-const _RESTORER_UNIT_HOTKEYS: Array[String] = ["Q", "W", "E"]
+const _RESTORER_UNIT_HOTKEYS: Array[String] = ["Q", "W", "E", "R"]
 
 
 func _restorer_unit_paths() -> Array[String]:
 	## Returns the list of unit resource paths buildable by the Restorer,
-	## gated by Architect's Network tier. Ashigaru is always included;
-	## Wächter + Schwarm unlock at Tier 1.
-	var paths: Array[String] = ["res://resources/units/inheritor_ashigaru.tres"]
+	## partially gated by Architect's Network tier.
+	## Baseline (no network):  Ashigaru, Wächter, Schwarm — base roster
+	##                         the player needs from match start to be
+	##                         viable. Their .tres files carry no
+	##                         unlock_prerequisite, so previously gating
+	##                         them on Tier 1 left Inheritor unable to
+	##                         field Wächter / Schwarm until they had
+	##                         already built Architect's Network.
+	## Tier 1 (Architect Net): Stahlyokai (unlock_prerequisite on .tres
+	##                         is &"architect_network").
+	## Tier 2 / 3: evolution buildings, Apex / Elite (Phase 4/5).
+	var paths: Array[String] = [
+		"res://resources/units/inheritor_ashigaru.tres",
+		"res://resources/units/inheritor_wachter.tres",
+		"res://resources/units/inheritor_schwarm.tres",
+	]
 	var scene_root: Node = get_tree().current_scene if get_tree() else null
 	var ibm: InheritorBuildingManager = null
 	if scene_root != null:
 		ibm = scene_root.get_node_or_null("InheritorBuildingManager") as InheritorBuildingManager
 	var tier: int = 0
 	if ibm != null:
-		# Owner id 0 = local player (Inheritor faction always plays as player 0
-		# in single-player; the Restorer's actual owner_id is queried below).
 		var restorer_owner: int = 0
 		for unit: Node3D in _selection_manager.get_selected_units() if _selection_manager and _selection_manager.has_method("get_selected_units") else []:
 			if unit.has_method("get_builder") and unit.get_builder():
@@ -5722,9 +6035,21 @@ func _restorer_unit_paths() -> Array[String]:
 				break
 		tier = ibm.get_architect_tier(restorer_owner)
 	if tier >= 1:
-		paths.append("res://resources/units/inheritor_wachter.tres")
-		paths.append("res://resources/units/inheritor_schwarm.tres")
-	# Tier 2/3 unlocks (evolution buildings, Apex/Elite) come in Phase 4/5.
+		# Tier-1 unlocks: baseline Stahlyokai + mid-tier roster gated
+		# by the specific authorization buildings (each unit's own
+		# unlock_prerequisite handles the gate — locked entries render
+		# as greyed buttons in the build menu).
+		paths.append("res://resources/units/inheritor_stahlyokai.tres")
+		paths.append("res://resources/units/inheritor_sturmwolf.tres")        # needs Monolith Vault
+		paths.append("res://resources/units/inheritor_kamigeist.tres")        # needs Choir Sanctum
+		paths.append("res://resources/units/inheritor_valkyrie_striker.tres") # needs Sky Lattice
+		paths.append("res://resources/units/inheritor_kintsu_wing.tres")      # needs Heavy Lattice Foundry
+		# Tier-2/3 elites (Oni Frame, Raijin) live behind Architect's
+		# Network — surfaced here too so the gating is shown via the
+		# usual locked-row treatment. Their unlock_prerequisite is
+		# architect_network for now until tier 3 lands.
+		paths.append("res://resources/units/inheritor_oni_frame.tres")
+		paths.append("res://resources/units/inheritor_raijin.tres")
 	return paths
 
 
@@ -6477,6 +6802,7 @@ func _building_role_hint(stat: BuildingStatResource) -> String:
 		&"sensor_spine": return "Authorization"
 		&"drone_bay": return "Authorization"
 		&"intelligence_network": return "Tech"
+		&"crucible_spire": return "Power"
 		&"sensor_array": return "Defense"
 		&"resonance_pylon": return "Defense"
 		&"mesh_relay": return "Power"
@@ -6485,6 +6811,10 @@ func _building_role_hint(stat: BuildingStatResource) -> String:
 		&"aerodrome": return "Production"
 		&"sam_site": return "Defense"
 		&"black_pylon": return "Power"
+		# --- Heliarch buildings ---
+		&"catalyst_core": return "Power"
+		&"militia_camp": return "Production"
+		&"advanced_militia_camp": return "Production"
 	return "Structure"
 
 
@@ -6647,6 +6977,8 @@ func _building_description(id: StringName) -> String:
 			return "Authorizes the HQ to train Air units (Switchblade, Fang). Spawns 3 patrol drones tied to the building. +25 population cap. Requires Dispatch Spire."
 		&"intelligence_network":
 			return "Meridian tech hub. Authorizes the HQ to train Harbinger, Pulsefont, and Wraith. Tier upgrades scale the HQ's concurrent build slots."
+		&"crucible_spire":
+			return "Heliarch tech building. Vents reactor heat and hosts branch upgrades for Matador and Cremator (and future Heliarch advanced units)."
 		&"sensor_array":
 			return "Surveillance and defense. Projects a 22u Mesh aura and fires a weak anti-ground turret (10 dmg / 16u) to deter infantry."
 		&"mesh_relay":
@@ -6665,6 +6997,23 @@ func _building_description(id: StringName) -> String:
 			return "Late-tier power source (+90 Power) with a 35u Mesh aura. Requires a geothermic vent."
 		&"resonance_pylon":
 			return "Anti-air defense. Emits an area wave every 2.5s that damages all enemy aircraft within 18u. Projects an 8u Mesh aura. Requires Intelligence Network."
+		# --- Heliarch buildings ---
+		&"salvage_caravan":
+			return "Heliarch mobile salvage yard. Two workers harvest wrecks within a 22u radius. Costs +50 over the generic yard but folds up + relocates to chase wreck fields. Unlocked from start."
+		&"catalyst_core":
+			return "Heliarch Tier 1 power building. Vent-gated reactor that anchors the Heliarch tech chain — prereq for Forge Pit. Mobile per Heliarch doctrine."
+		&"militia_camp":
+			return "Heliarch production. Recruits pre-defined mixed-unit bands (militias) rather than single units. Multiple Camps produce in parallel. Mobile."
+		&"forge_pit":
+			return "Authorization building. Unlocks Inquisitor Tank at the HQ and the Mechanized Militia at the Camp. Prereq for Crucible Spire."
+		&"crucible_foundry":
+			return "Authorization building. Unlocks Conquistador at the HQ and the Heavy Militia at the Camp. Requires Catalyst Core."
+		&"pyre_hall":
+			return "Authorization building. Hosts the Herald caster slot and the Channeled Militia at the Camp (Herald roster pending). Requires Catalyst Core."
+		&"drone_nest":
+			return "Authorization building. Unlocks Firefly drone packs at the HQ and the Drone Swarm Militia at the Camp. Requires Catalyst Core."
+		&"aerie":
+			return "Authorization building. Unlocks Condor gunship at the HQ and the Combined Air-Ground Militia at the Camp. Requires Catalyst Core."
 	return ""
 
 

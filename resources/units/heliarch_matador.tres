@@ -1,30 +1,34 @@
-[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
 
 [ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
 
-[sub_resource type="Resource" id="weapon_incendiary_cluster"]
-script = ExtResource("2")
-weapon_name = "Incendiary Cluster"
-role_tag = &"AS"
-damage_tier = &"moderate"
-range_tier = &"short"
-range_value = 14.0
-rof_tier = &"medium"
-projectile_style = &"bullet"
-base_accuracy = 0.78
+[ext_resource type="Resource" path="res://resources/units/heliarch_matador_firestarter.tres" id="3"]
 
-damage = 32
-range = 14.0
-rof_seconds = 0.9
+[ext_resource type="Resource" path="res://resources/units/heliarch_matador_martyr.tres" id="4"]
+
+[sub_resource type="Resource" id="weapon_flame_daggers"]
+script = ExtResource("2")
+weapon_name = "Dual Flame Daggers"
+role_tag = &"AP"
+damage_tier = &"moderate"
+range_tier = &"melee"
+range_value = 2.2
+rof_tier = &"fast"
+projectile_style = &"melee"
+base_accuracy = 0.95
+
+damage = 24
+range = 3.0
+rof_seconds = 0.55
 use_explicit_air = true
 engages_air_explicit = false
 mult_vs_unarmored_v2 = 1.4
 mult_vs_light_v2 = 1.1
 mult_vs_medium_v2 = 0.7
-mult_vs_heavy_v2 = 0.35
-mult_vs_structure_v2 = 0.6
+mult_vs_heavy_v2 = 0.4
+mult_vs_structure_v2 = 0.5
 mult_vs_light_air_v2 = 0.0
 mult_vs_heavy_air_v2 = 0.0
 
@@ -33,20 +37,24 @@ script = ExtResource("1")
 unit_name = "Matador"
 display_name = "Matador"
 unit_class = &"light"
-hp_total = 1080
-hp_per_unit = 270
+hp_total = 780
+hp_per_unit = 195
 armor_class = &"light"
-speed_tier = &"fast"
+speed_tier = &"very_fast"
 sight_tier = &"medium"
 squad_size = 4
 population = 8
-cost_salvage = 175
+cost_salvage = 130
 cost_fuel = 0
-build_time = 26.0
+build_time = 19.0
 built_at = &"headquarters"
-primary_weapon = SubResource("weapon_incendiary_cluster")
-special_description = "Heliarch light harasser — Matador. Incendiary Cluster (AS, Moderate, Short) tosses burn-canisters that light terrain on fire. Branch A: Firestarter (burning ground). Branch B: Martyr (death detonation, +speed). CONCERN: branches + ground-fire DOT require code implementation."
+primary_weapon = SubResource("weapon_flame_daggers")
+branch_a_stats = ExtResource("3")
+branch_b_stats = ExtResource("4")
+branch_a_name = "Firestarter"
+branch_b_name = "Martyr"
+special_description = "Heliarch light skirmisher — Matador. Twin Flame Daggers (AP, Moderate, Melee, Fast) — closes fast and burns at point-blank. Vulnerable while approaching; thrives once daggers are in. Heat Gauge applies normally. Branch A: Firestarter (incendiary trail). Branch B: Martyr (+speed, death detonation)."
 
-speed = 11.0
+speed = 12.5
 sight_radius = 22.0
 armor_reduction = 0.20

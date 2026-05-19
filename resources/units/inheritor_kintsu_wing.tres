@@ -1,0 +1,84 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_heavy_railgun_battery"]
+script = ExtResource("2")
+weapon_name = "Heavy Railgun Battery"
+role_tag = &"AP"
+damage_tier = &"extreme"
+range_tier = &"very_long"
+range_value = 44.0
+rof_tier = &"slow"
+projectile_style = &"beam"
+base_accuracy = 0.95
+
+damage = 240
+range = 44.0
+rof_seconds = 4.5
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 1.0
+mult_vs_medium_v2 = 1.3
+mult_vs_heavy_v2 = 1.4
+mult_vs_structure_v2 = 1.2
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
+
+[sub_resource type="Resource" id="weapon_defensive_pdw"]
+script = ExtResource("2")
+weapon_name = "Defensive PDW"
+role_tag = &"AAir_Light"
+damage_tier = &"low"
+range_tier = &"medium"
+range_value = 18.0
+rof_tier = &"fast"
+projectile_style = &"bullet"
+base_accuracy = 0.85
+salvo_count = 3
+
+damage = 12
+range = 18.0
+rof_seconds = 0.40
+use_explicit_air = true
+engages_air_explicit = true
+air_damage_mult = 1.0
+hits_ground = false
+mult_vs_unarmored_v2 = 0.0
+mult_vs_light_v2 = 0.0
+mult_vs_medium_v2 = 0.0
+mult_vs_heavy_v2 = 0.0
+mult_vs_structure_v2 = 0.0
+mult_vs_light_air_v2 = 1.2
+mult_vs_heavy_air_v2 = 0.6
+
+[resource]
+script = ExtResource("1")
+unit_name = "Kintsu Wing"
+display_name = "Kintsu Wing"
+unit_class = &"aircraft"
+hp_total = 1600
+hp_per_unit = 1600
+armor_class = &"heavy"
+speed_tier = &"slow"
+sight_tier = &"very_long"
+squad_size = 1
+population = 16
+cost_salvage = 920
+cost_fuel = 115
+build_time = 82.0
+built_at = &"inheritor_construction_site"
+unlock_prerequisite = &"heavy_lattice_foundry"
+primary_weapon = SubResource("weapon_heavy_railgun_battery")
+secondary_weapon = SubResource("weapon_defensive_pdw")
+is_aircraft = true
+flight_altitude = 14.0
+flight_speed = 9.0
+special_description = "Inheritor heavy air — Kintsu Wing. Heavy Railgun Battery (AP, Extreme, Very Long, hitscan) snipes from beyond enemy AA range. Defensive PDW (AAir light) covers close engagements. Vulnerable when caught up close. Requires Architect's Network."
+
+speed = 9.0
+sight_radius = 44.0
+armor_reduction = 0.45

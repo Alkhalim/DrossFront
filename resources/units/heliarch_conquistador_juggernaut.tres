@@ -1,0 +1,55 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_juggernaut_hammer"]
+script = ExtResource("2")
+weapon_name = "Heat Hammer (Juggernaut)"
+role_tag = &"AS"
+damage_tier = &"very_high"
+range_tier = &"melee"
+range_value = 3.5
+rof_tier = &"slow"
+projectile_style = &"melee"
+base_accuracy = 0.95
+splash_radius = 2.5
+splash_damage_mult = 0.55
+can_damage_trees = true
+
+damage = 320
+range = 3.5
+rof_seconds = 2.8
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 1.0
+mult_vs_medium_v2 = 1.3
+mult_vs_heavy_v2 = 1.4
+mult_vs_structure_v2 = 1.8
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
+
+[resource]
+script = ExtResource("1")
+unit_name = "Conquistador (Juggernaut)"
+display_name = "Conquistador (Juggernaut)"
+unit_class = &"heavy"
+hp_total = 2880
+hp_per_unit = 1440
+armor_class = &"heavy"
+speed_tier = &"moderate"
+sight_tier = &"medium"
+squad_size = 2
+population = 18
+cost_salvage = 440
+cost_fuel = 95
+build_time = 66.0
+built_at = &"headquarters"
+primary_weapon = SubResource("weapon_juggernaut_hammer")
+special_description = "Conquistador — Juggernaut. Reinforced chassis (+20% HP) + breach hammer optimised for structures. Slower swing, single massive strike per cycle. Unstoppable charger against fortifications."
+branch_summary = "+20% HP, anti-structure damage, charges through. Building cracker."
+speed = 6.5
+sight_radius = 14.0
+armor_reduction = 0.55

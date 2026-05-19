@@ -16,7 +16,7 @@ var tech_craze: bool = false
 
 ## Multiplies build / production speed (engineer construction +
 ## HQ/Foundry unit training) for the local player. 1.0 = normal.
-## Set to 5.0 by the geschwindigkeit cheat.
+## Set to 10.0 by the geschwindigkeit cheat.
 var build_speed_mult: float = 1.0
 
 ## When true, every building's power-efficiency lookup returns 1.0
@@ -33,7 +33,7 @@ func cheat_catalogue() -> Array:
 	return [
 		{"code": "techcraze", "desc": "Unlock every unit + building tech gate for the rest of the match."},
 		{"code": "cashmoneten", "desc": "Fill salvage / fuel / microchips / contracts to cap + infinite Power."},
-		{"code": "geschwindigkeit", "desc": "5x build + train speed for the rest of the match."},
+		{"code": "geschwindigkeit", "desc": "10x build + train speed for the rest of the match."},
 		{"code": "einfachturbo", "desc": "Applies cashmoneten + geschwindigkeit + techcraze in one go."},
 		{"code": "nofog", "desc": "Disable fog of war for the local player."},
 	]
@@ -57,15 +57,15 @@ func apply_code(raw: String) -> String:
 			infinite_power = true
 			return "Cheat: max resources + contracts + infinite Power."
 		"geschwindigkeit":
-			build_speed_mult = 5.0
-			return "Cheat: build / train speed x5."
+			build_speed_mult = 10.0
+			return "Cheat: build / train speed x10."
 		"einfachturbo":
 			tech_craze = true
 			_max_resources_for_local_player()
 			_max_contracts_for_local_player()
 			infinite_power = true
-			build_speed_mult = 5.0
-			return "Cheat: einfachturbo — tech, resources, contracts, power, x5 speed."
+			build_speed_mult = 10.0
+			return "Cheat: einfachturbo — tech, resources, contracts, power, x10 speed."
 		"nofog":
 			if _set_omniscient_local():
 				return "Cheat: fog of war disabled."

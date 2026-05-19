@@ -1,0 +1,54 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_storm_conduit"]
+script = ExtResource("2")
+weapon_name = "Storm Conduit"
+role_tag = &"AP"
+damage_tier = &"high"
+range_tier = &"extreme"
+range_value = 60.0
+rof_tier = &"continuous"
+projectile_style = &"tesla"
+base_accuracy = 0.95
+
+damage = 80
+range = 60.0
+rof_seconds = 1.5
+use_explicit_air = true
+engages_air_explicit = true
+air_damage_mult = 0.8
+mult_vs_unarmored_v2 = 1.0
+mult_vs_light_v2 = 1.1
+mult_vs_medium_v2 = 1.2
+mult_vs_heavy_v2 = 1.0
+mult_vs_structure_v2 = 1.0
+mult_vs_light_air_v2 = 0.9
+mult_vs_heavy_air_v2 = 0.5
+
+[resource]
+script = ExtResource("1")
+unit_name = "Raijin"
+display_name = "Raijin"
+unit_class = &"heavy"
+hp_total = 1700
+hp_per_unit = 1700
+armor_class = &"heavy"
+speed_tier = &"slow"
+sight_tier = &"very_long"
+squad_size = 1
+population = 22
+cost_salvage = 1750
+cost_fuel = 165
+build_time = 100.0
+built_at = &"headquarters"
+unlock_prerequisite = &"architect_network"
+primary_weapon = SubResource("weapon_storm_conduit")
+special_description = "Inheritor elite caster — Raijin. Storm Conduit designates a target zone; lightning strikes random hostiles in radius for 20s. Designate-then-channel mechanic + chain-strike passive — code TBD. Operates from anywhere on the map (no LOS required for designation). Requires Architect's Network Tier 3."
+
+speed = 4.5
+sight_radius = 44.0
+armor_reduction = 0.45

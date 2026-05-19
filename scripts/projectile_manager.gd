@@ -229,6 +229,35 @@ func _build_mesh_for_style(style: String, color: Color) -> Mesh:
 			mat.emission_energy_multiplier = 0.4
 			cyl.material = mat
 			return cyl
+		"phosphorus":
+			# White-hot bright sphere — reads as a phosphorus pellet
+			# rather than a metal shell. The arc + dust-trail (white
+			# instead of brown smoke) does the rest of the visual work.
+			var sph := SphereMesh.new()
+			sph.radius = 0.18
+			sph.height = 0.36
+			sph.radial_segments = 10
+			sph.rings = 6
+			mat.albedo_color = Color(1.0, 1.0, 1.0, 1.0)
+			mat.emission = Color(1.0, 1.0, 1.0, 1.0)
+			mat.emission_energy_multiplier = 3.2
+			sph.material = mat
+			return sph
+		"thermobaric":
+			# Visible payload in flight — fat amber-glowing cylinder
+			# slightly bigger than a regular bomb so the player can
+			# see it drop. Real fireworks happen at impact (see
+			# _apply_pending_damage's thermobaric branch).
+			var tcyl := CylinderMesh.new()
+			tcyl.top_radius = 0.10
+			tcyl.bottom_radius = 0.30
+			tcyl.height = 0.95
+			tcyl.radial_segments = 14
+			mat.albedo_color = Color(0.95, 0.55, 0.18, 1.0)
+			mat.emission = Color(1.0, 0.65, 0.22, 1.0)
+			mat.emission_energy_multiplier = 1.4
+			tcyl.material = mat
+			return tcyl
 		_:
 			# Unknown style — fall back to bullet visual.
 			var cyl := CylinderMesh.new()
@@ -298,6 +327,18 @@ func fire(
 		"mortar":
 			_state_total_flight[idx] = maxf(dist_to_target / 11.0, 0.6)
 			_state_arc_height[idx] = clampf(dist_to_target * 0.55, 6.0, 14.0)
+		"phosphorus":
+			# Same arc profile as mortar — high lob, slow flight. The
+			# visual + trail are what distinguish it from a standard
+			# mortar shell in flight.
+			_state_total_flight[idx] = maxf(dist_to_target / 11.0, 0.6)
+			_state_arc_height[idx] = clampf(dist_to_target * 0.50, 5.5, 12.0)
+		"thermobaric":
+			# Same arc profile as bomb — flat low parabola, slow flight.
+			# Impact triggers ThermobaricExplosion via the special branch
+			# in _apply_pending_damage.
+			_state_total_flight[idx] = maxf(dist_to_target / 9.0, 0.7)
+			_state_arc_height[idx] = clampf(dist_to_target * 0.10, 0.5, 3.0)
 		"shell":
 			# Slower than bullet but straight-line.
 			if speed <= 0.0:
@@ -321,6 +362,8 @@ func _style_to_int(style: String) -> int:
 		"shell": return 2
 		"mortar": return 3
 		"bomb": return 4
+		"phosphorus": return 5  # arc-like mortar, white dust trail
+		"thermobaric": return 6  # bomb arc + ThermobaricExplosion on impact
 		_: return 0
 
 
@@ -357,7 +400,7 @@ func _process(delta: float) -> void:
 		var style_int: int = _state_style[i]
 		match style_int:
 			0: _update_bullet(i, delta)
-			1, 3, 4: _update_arc(i, delta)  # missile, mortar, bomb
+			1, 3, 4, 5, 6: _update_arc(i, delta)  # missile, mortar, bomb, phosphorus, thermobaric
 			2: _update_shell(i, delta)
 		i += 1
 
@@ -412,15 +455,20 @@ func _update_arc(idx: int, delta: float) -> void:
 	var pos := Vector3(xz.x, xz.y + arc_y, xz.z)
 	_state_pos[idx] = pos
 	_write_transform(idx)
-	# Smoke trail — missiles only (not bombs / mortars). Spawn one puff
-	# every MISSILE_TRAIL_INTERVAL seconds via integer-bucket compare
-	# so we don't need per-projectile timer state. Mirrors the legacy
-	# Projectile._spawn_trail_puff cadence (~14 puffs/sec).
-	if _state_style[idx] == 1:  # missile
+	# Smoke trail — missiles + phosphorus (not bombs / mortars). Spawn
+	# one puff every MISSILE_TRAIL_INTERVAL seconds via integer-bucket
+	# compare so we don't need per-projectile timer state. Phosphorus
+	# uses a white powdery puff palette to read as burning chemical
+	# rather than missile exhaust.
+	var trail_style: int = _state_style[idx]
+	if trail_style == 1 or trail_style == 5:
 		var prev_bucket: int = int(prev_life / MISSILE_TRAIL_INTERVAL)
 		var curr_bucket: int = int(_state_life[idx] / MISSILE_TRAIL_INTERVAL)
 		if curr_bucket > prev_bucket:
-			_spawn_trail_puff_at(pos)
+			if trail_style == 5:
+				_spawn_phosphorus_puff_at(pos)
+			else:
+				_spawn_trail_puff_at(pos)
 	if t_norm >= 1.0:
 		_apply_pending_damage(idx)
 		_spawn_impact_vfx(idx)
@@ -485,7 +533,73 @@ func _spawn_trail_puff_at(pos: Vector3) -> void:
 	tween.chain().tween_callback(Callable(ProjectileManager, "_release_trail_puff").bind(puff))
 
 
+func _spawn_phosphorus_puff_at(pos: Vector3) -> void:
+	## White powdery dust puff for phosphorus shells. Mirrors the
+	## missile-exhaust puff cadence but white + slightly finer so the
+	## trail reads as burning chemical dust rather than smoke. Same
+	## MAX_TRAIL_PUFFS budget shared with the brown missile puffs.
+	if _alive_trail_puffs >= MAX_TRAIL_PUFFS:
+		return
+	var scene: Node = get_tree().current_scene if get_tree() else null
+	if scene == null:
+		return
+	_alive_trail_puffs += 1
+	var puff := MeshInstance3D.new()
+	puff.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var sphere := SphereMesh.new()
+	# Slightly smaller than missile smoke — phosphorus is fine particulate.
+	sphere.radius = 0.14
+	sphere.height = 0.28
+	sphere.radial_segments = 8
+	sphere.rings = 4
+	puff.mesh = sphere
+	var mat := StandardMaterial3D.new()
+	# Bright off-white, partly translucent — sits on top of dark
+	# backgrounds without blowing out highlights.
+	mat.albedo_color = Color(0.96, 0.96, 0.92, 0.72)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 1.0, 0.95, 1.0)
+	mat.emission_energy_multiplier = 0.6
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	puff.set_surface_override_material(0, mat)
+	scene.add_child(puff)
+	puff.global_position = pos + Vector3(
+		randf_range(-0.12, 0.12),
+		randf_range(-0.04, 0.04),
+		randf_range(-0.12, 0.12),
+	)
+	# Drift downward slightly + outward — phosphorus dust falls as it
+	# burns rather than rising on heat (the burn is fast, not hot enough
+	# to convect a column).
+	var drift: Vector3 = puff.global_position + Vector3(
+		randf_range(-0.20, 0.20),
+		randf_range(-0.20, 0.10),
+		randf_range(-0.20, 0.20),
+	)
+	var tween: Tween = puff.create_tween().set_parallel(true)
+	tween.tween_property(puff, "global_position", drift, 0.85)
+	tween.tween_property(puff, "scale", Vector3(2.8, 2.8, 2.8), 0.85)
+	tween.tween_property(mat, "albedo_color:a", 0.0, 0.85)
+	tween.chain().tween_callback(Callable(ProjectileManager, "_release_trail_puff").bind(puff))
+
+
 func _apply_pending_damage(idx: int) -> void:
+	# Thermobaric special-case (style_int 6): spawn the
+	# ThermobaricExplosion at impact instead of applying single-shot
+	# damage. The explosion owns its own damage aura (lingering
+	# AoE pulses for several seconds), so we DON'T fall through to
+	# the standard damage / splash code below for this style.
+	if _state_style[idx] == 6:
+		var pos: Vector3 = _state_pos[idx]
+		var shooter_t: Node3D = _state_pending_shooter[idx]
+		var owner_oid: int = _state_pending_shooter_owner_id[idx]
+		var scene_root: Node = get_tree().current_scene if get_tree() else null
+		if scene_root != null:
+			ThermobaricExplosion.spawn_at(scene_root, pos, shooter_t, owner_oid)
+		return
+
 	# Deferred damage — missile/shell/mortar/bomb apply on impact (not
 	# at fire-tick like bullets). Mirrors Projectile._spawn_impact's
 	# pending_damage path.

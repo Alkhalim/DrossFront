@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+building_name = "Drone Nest"
+building_id = &"drone_nest"
+hp = 480
+cost_salvage = 200
+cost_fuel = 20
+build_time = 22.0
+power_consumption = 8
+power_production = 0
+producible_units = []
+footprint_size = Vector3(3.0, 2.6, 3.0)
+placeholder_color = Color(0.65, 0.40, 0.22, 1)
+is_advanced = false
+prerequisites = []
+faction_lock = 4
+weapons = []
+is_mobile = true

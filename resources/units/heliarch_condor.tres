@@ -1,0 +1,96 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[ext_resource type="Resource" path="res://resources/units/heliarch_condor_purifier.tres" id="3"]
+
+[ext_resource type="Resource" path="res://resources/units/heliarch_condor_beacon.tres" id="4"]
+
+[sub_resource type="Resource" id="weapon_napalm_tanks"]
+script = ExtResource("2")
+weapon_name = "Underwing Napalm Tanks"
+role_tag = &"AP"
+damage_tier = &"high"
+range_tier = &"short"
+range_value = 10.0
+rof_tier = &"slow"
+projectile_style = &"bomb"
+base_accuracy = 0.82
+splash_radius = 4.5
+splash_damage_mult = 0.60
+can_damage_trees = true
+bomb_drop = true
+
+damage = 95
+range = 10.0
+rof_seconds = 4.5
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.4
+mult_vs_light_v2 = 1.2
+mult_vs_medium_v2 = 1.0
+mult_vs_heavy_v2 = 0.65
+mult_vs_structure_v2 = 1.0
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
+
+[sub_resource type="Resource" id="weapon_aa_chaingun"]
+script = ExtResource("2")
+weapon_name = "Light AA Chaingun"
+role_tag = &"AAir_Light"
+damage_tier = &"low"
+range_tier = &"medium"
+range_value = 16.0
+rof_tier = &"fast"
+projectile_style = &"bullet"
+base_accuracy = 0.85
+salvo_count = 2
+
+damage = 14
+range = 16.0
+rof_seconds = 0.45
+use_explicit_air = true
+engages_air_explicit = true
+air_damage_mult = 0.9
+hits_ground = false
+mult_vs_unarmored_v2 = 0.0
+mult_vs_light_v2 = 0.0
+mult_vs_medium_v2 = 0.0
+mult_vs_heavy_v2 = 0.0
+mult_vs_structure_v2 = 0.0
+mult_vs_light_air_v2 = 1.1
+mult_vs_heavy_air_v2 = 0.6
+
+[resource]
+script = ExtResource("1")
+unit_name = "Águila"
+display_name = "Águila"
+unit_class = &"aircraft"
+hp_total = 800
+hp_per_unit = 800
+armor_class = &"medium"
+speed_tier = &"fast"
+sight_tier = &"long"
+squad_size = 1
+population = 12
+cost_salvage = 310
+cost_fuel = 50
+build_time = 48.0
+built_at = &"headquarters"
+unlock_prerequisite = &"aerie"
+primary_weapon = SubResource("weapon_napalm_tanks")
+secondary_weapon = SubResource("weapon_aa_chaingun")
+branch_a_stats = ExtResource("3")
+branch_b_stats = ExtResource("4")
+branch_a_name = "Purifier"
+branch_b_name = "Beacon"
+is_aircraft = true
+flight_altitude = 8.0
+flight_speed = 14.0
+special_description = "Heliarch light gunship — Águila. Underwing Napalm Tanks drop persistent fire strips on the ground. Light AA Chaingun gives a defensive answer to other aircraft. The scavenger: circles, drops fire, disengages. Requires Aerie."
+
+speed = 14.0
+sight_radius = 26.0
+armor_reduction = 0.25

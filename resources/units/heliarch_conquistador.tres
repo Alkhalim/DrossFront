@@ -1,0 +1,90 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[ext_resource type="Resource" path="res://resources/units/heliarch_conquistador_inferno.tres" id="3"]
+
+[ext_resource type="Resource" path="res://resources/units/heliarch_conquistador_juggernaut.tres" id="4"]
+
+[sub_resource type="Resource" id="weapon_heat_hammer"]
+script = ExtResource("2")
+weapon_name = "Heat Hammer"
+role_tag = &"AP"
+damage_tier = &"very_high"
+range_tier = &"melee"
+range_value = 2.6
+rof_tier = &"moderate"
+projectile_style = &"melee"
+base_accuracy = 0.95
+splash_radius = 3.5
+splash_damage_mult = 0.55
+
+damage = 120
+range = 2.6
+rof_seconds = 1.4
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.3
+mult_vs_light_v2 = 1.3
+mult_vs_medium_v2 = 1.2
+mult_vs_heavy_v2 = 1.1
+mult_vs_structure_v2 = 1.4
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
+
+[sub_resource type="Resource" id="weapon_shoulder_plasma"]
+script = ExtResource("2")
+weapon_name = "Shoulder Plasma Cannons"
+role_tag = &"AP"
+damage_tier = &"high"
+range_tier = &"medium"
+range_value = 16.0
+rof_tier = &"moderate"
+projectile_style = &"plasma"
+base_accuracy = 0.85
+salvo_count = 2
+salvo_stagger_sec = 0.10
+
+damage = 45
+range = 16.0
+rof_seconds = 1.5
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 0.8
+mult_vs_light_v2 = 1.0
+mult_vs_medium_v2 = 1.2
+mult_vs_heavy_v2 = 1.0
+mult_vs_structure_v2 = 0.9
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
+
+[resource]
+script = ExtResource("1")
+unit_name = "Conquistador"
+display_name = "Conquistador"
+unit_class = &"heavy"
+hp_total = 2400
+hp_per_unit = 1200
+armor_class = &"heavy"
+speed_tier = &"slow"
+sight_tier = &"medium"
+squad_size = 2
+population = 18
+cost_salvage = 360
+cost_fuel = 80
+build_time = 62.0
+built_at = &"headquarters"
+unlock_prerequisite = &"crucible_foundry"
+primary_weapon = SubResource("weapon_heat_hammer")
+secondary_weapon = SubResource("weapon_shoulder_plasma")
+branch_a_stats = ExtResource("3")
+branch_b_stats = ExtResource("4")
+branch_a_name = "Inferno"
+branch_b_name = "Juggernaut"
+special_description = "Heliarch heavy brawler — Conquistador. Heat Hammer (AP, Very High, Melee, AoE 3.5u on impact) obliterates anything in swing range; Shoulder Plasma Cannons cover the approach. Closes and burns. Requires Crucible Spire."
+
+speed = 4.5
+sight_radius = 18.0
+armor_reduction = 0.55

@@ -1,0 +1,53 @@
+[gd_resource type="Resource" script_class="UnitStatResource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/unit_stat_resource.gd" id="1"]
+
+[ext_resource type="Script" path="res://scripts/weapon_resource.gd" id="2"]
+
+[sub_resource type="Resource" id="weapon_scorcher_napalm"]
+script = ExtResource("2")
+weapon_name = "Napalm Lance"
+role_tag = &"AP"
+damage_tier = &"moderate"
+range_tier = &"medium"
+range_value = 15.0
+rof_tier = &"continuous"
+projectile_style = &"flame"
+base_accuracy = 0.95
+
+damage = 11
+range = 15.0
+rof_seconds = 0.30
+use_explicit_air = true
+engages_air_explicit = false
+mult_vs_unarmored_v2 = 1.4
+mult_vs_light_v2 = 1.2
+mult_vs_medium_v2 = 0.9
+mult_vs_heavy_v2 = 0.5
+mult_vs_structure_v2 = 0.8
+mult_vs_light_air_v2 = 0.0
+mult_vs_heavy_air_v2 = 0.0
+
+[resource]
+script = ExtResource("1")
+unit_name = "Cremator (Scorcher)"
+display_name = "Cremator (Scorcher)"
+unit_class = &"medium"
+hp_total = 1920
+hp_per_unit = 640
+armor_class = &"medium"
+speed_tier = &"moderate"
+sight_tier = &"medium"
+squad_size = 3
+population = 12
+cost_salvage = 360
+cost_fuel = 25
+build_time = 42.0
+built_at = &"headquarters"
+primary_weapon = SubResource("weapon_scorcher_napalm")
+special_description = "Heliarch Cremator — Scorcher. Extended-range Napalm Lance trades focused damage for a longer reach and a short burning-ground trail behind impacts. CONCERN: burning-ground trail requires code implementation."
+branch_summary = "Flame range +36% and a burning trail behind impacts (code TBD)."
+
+speed = 7.5
+sight_radius = 18.0
+armor_reduction = 0.30

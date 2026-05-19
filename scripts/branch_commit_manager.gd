@@ -1,23 +1,27 @@
 class_name BranchCommitManager
 extends Node
 ## Manages branch commit state. Tracks which unit types have been committed
-## and applies upgrades globally to all existing units. Multiple commits
-## (one per base unit type) can run in parallel so a player with two or
-## more armories can research distinct branches concurrently. The
-## per-base-unit lock still prevents committing the same unit's branch
-## from two armories at once.
+## and applies upgrades to existing units belonging to the COMMITTING PLAYER.
+## Multiple commits (one per base unit type per owner) can run in parallel
+## so a player with two or more armories can research distinct branches
+## concurrently. The per-(owner, base unit) lock prevents committing the
+## same unit's branch from two of an owner's armories at once.
+##
+## Owner-scoped: when the player commits Tracker on Borzoi, only the
+## PLAYER's existing + future Borzois receive the upgrade — the enemy
+## AI's Borzois keep the base stats. Was previously a single global
+## map keyed by unit_name only, which leaked branch upgrades to opponents
+## (playtest 2026-05-15).
 
-## Emitted when a branch commit completes.
-signal branch_committed(base_unit_name: String, branch_name: String)
+## Emitted when a branch commit completes. owner_id is the player who
+## owns the commit.
+signal branch_committed(owner_id: int, base_unit_name: String, branch_name: String)
 
-## Map of base unit name → committed branch stats resource.
-## Empty = no branch committed yet for that unit type.
+## Per-owner committed branches: { owner_id: { base_unit_name: branch_stats } }.
 var _committed_branches: Dictionary = {}
 
-## Map of base_unit_name -> commit dict { "base_stats": Resource,
-## "branch_stats": Resource, "branch_name": String, "timer": float,
-## "duration": float }. Multiple entries = multiple parallel commits
-## (one per base unit type, capped by the player's armory count).
+## Per-owner active commits: { owner_id: { base_unit_name: commit_dict } }.
+## commit_dict = { base_stats, branch_stats, branch_name, timer, duration }.
 var _active_commits: Dictionary = {}
 
 const COMMIT_DURATION: float = 20.0
@@ -35,51 +39,61 @@ const COMMIT_COST_FUEL: int = 60
 const COMMIT_COST_SALVAGE: int = 30
 
 
+func _owner_active(owner_id: int) -> Dictionary:
+	return _active_commits.get(owner_id, {}) as Dictionary
+
+
+func _owner_committed(owner_id: int) -> Dictionary:
+	return _committed_branches.get(owner_id, {}) as Dictionary
+
+
 func _process(delta: float) -> void:
 	if _active_commits.is_empty():
 		return
 	# Walk a snapshot so a finish() call removing the entry mid-loop
-	# doesn't trip the iterator.
-	var keys: Array = _active_commits.keys()
-	for key_v: Variant in keys:
-		var key: String = key_v as String
-		if not _active_commits.has(key):
-			continue
-		var commit: Dictionary = _active_commits[key] as Dictionary
-		commit["timer"] = (commit["timer"] as float) + delta
-		_active_commits[key] = commit
-		if (commit["timer"] as float) >= (commit["duration"] as float):
-			_finish_commit(key)
+	# doesn't trip the iterator. Two-level walk: owner_id -> unit_name.
+	var owner_keys: Array = _active_commits.keys()
+	for owner_v: Variant in owner_keys:
+		var owner_id: int = owner_v as int
+		var per_owner: Dictionary = _active_commits.get(owner_id, {}) as Dictionary
+		var keys: Array = per_owner.keys()
+		for key_v: Variant in keys:
+			var key: String = key_v as String
+			if not per_owner.has(key):
+				continue
+			var commit: Dictionary = per_owner[key] as Dictionary
+			commit["timer"] = (commit["timer"] as float) + delta
+			per_owner[key] = commit
+			if (commit["timer"] as float) >= (commit["duration"] as float):
+				_finish_commit(owner_id, key)
 
 
-func is_committing() -> bool:
-	## True when ANY branch commit is in flight. Kept as a global
-	## predicate for the HUD's match-wide "research line".
-	return not _active_commits.is_empty()
+func is_committing(owner_id: int = 0) -> bool:
+	## True when this owner has ANY branch commit in flight. Kept as a
+	## per-owner predicate for the HUD's match-wide "research line".
+	return not _owner_active(owner_id).is_empty()
 
 
-func is_committing_unit(base_unit_name: String) -> bool:
-	## True when THIS specific base unit's branch commit is in flight.
-	## The armory row uses this to decide whether to render its branch
-	## buttons or the cancel-with-progress button.
-	return _active_commits.has(base_unit_name)
+func is_committing_unit(base_unit_name: String, owner_id: int = 0) -> bool:
+	## True when THIS owner has an in-flight commit for this base unit.
+	return _owner_active(owner_id).has(base_unit_name)
 
 
-func get_active_commit_keys() -> Array[String]:
-	## Snapshot of base_unit_names currently mid-commit. Used by the
-	## HUD global-queue line to render one progress chip per active
-	## commit instead of squashing them into a single line.
+func get_active_commit_keys(owner_id: int = 0) -> Array[String]:
+	## Snapshot of this owner's base_unit_names currently mid-commit.
+	## Used by the HUD global-queue line to render one progress chip per
+	## active commit instead of squashing them into a single line.
 	var out: Array[String] = []
-	for k_v: Variant in _active_commits.keys():
+	for k_v: Variant in _owner_active(owner_id).keys():
 		out.append(k_v as String)
 	return out
 
 
-func get_commit_progress(base_unit_name: String = "") -> float:
+func get_commit_progress(base_unit_name: String = "", owner_id: int = 0) -> float:
 	## Without an argument, returns the FIRST active commit's progress
 	## so older callers that only ran one commit at a time still work.
 	## With a name, returns that specific commit's progress (0..1).
-	var commit: Dictionary = _resolve_commit(base_unit_name)
+	var commit: Dictionary = _resolve_commit(base_unit_name, owner_id)
 	if commit.is_empty():
 		return 0.0
 	var timer: float = commit["timer"] as float
@@ -87,59 +101,62 @@ func get_commit_progress(base_unit_name: String = "") -> float:
 	return clampf(timer / duration, 0.0, 1.0)
 
 
-func get_commit_branch_name(base_unit_name: String = "") -> String:
-	var commit: Dictionary = _resolve_commit(base_unit_name)
+func get_commit_branch_name(base_unit_name: String = "", owner_id: int = 0) -> String:
+	var commit: Dictionary = _resolve_commit(base_unit_name, owner_id)
 	if commit.is_empty():
 		return ""
 	return commit["branch_name"] as String
 
 
-func get_commit_base_stats(base_unit_name: String = "") -> UnitStatResource:
+func get_commit_base_stats(base_unit_name: String = "", owner_id: int = 0) -> UnitStatResource:
 	## Active commit's BASE unit stats — the row owner. Lets the HUD
 	## show a cancel button on the matching armory row instead of all
 	## of them. Without an argument, returns the first active commit
 	## (legacy single-commit behaviour).
-	var commit: Dictionary = _resolve_commit(base_unit_name)
+	var commit: Dictionary = _resolve_commit(base_unit_name, owner_id)
 	if commit.is_empty():
 		return null
 	return commit["base_stats"] as UnitStatResource
 
 
-func _resolve_commit(base_unit_name: String) -> Dictionary:
+func _resolve_commit(base_unit_name: String, owner_id: int) -> Dictionary:
+	var per_owner: Dictionary = _owner_active(owner_id)
 	if base_unit_name != "":
-		return _active_commits.get(base_unit_name, {}) as Dictionary
-	if _active_commits.is_empty():
+		return per_owner.get(base_unit_name, {}) as Dictionary
+	if per_owner.is_empty():
 		return {}
 	# Pick the alphabetically-first key for determinism so callers
 	# that pass "" twice in the same frame see the same data.
-	var keys: Array = _active_commits.keys()
+	var keys: Array = per_owner.keys()
 	keys.sort()
-	return _active_commits[keys[0]] as Dictionary
+	return per_owner[keys[0]] as Dictionary
 
 
-func has_committed(base_unit_name: String) -> bool:
-	return _committed_branches.has(base_unit_name)
+func has_committed(base_unit_name: String, owner_id: int = 0) -> bool:
+	return _owner_committed(owner_id).has(base_unit_name)
 
 
-func get_committed_stats(base_unit_name: String) -> UnitStatResource:
-	if _committed_branches.has(base_unit_name):
-		return _committed_branches[base_unit_name] as UnitStatResource
+func get_committed_stats(base_unit_name: String, owner_id: int = 0) -> UnitStatResource:
+	var per_owner: Dictionary = _owner_committed(owner_id)
+	if per_owner.has(base_unit_name):
+		return per_owner[base_unit_name] as UnitStatResource
 	return null
 
 
-func start_commit(base_stats: UnitStatResource, branch_stats: UnitStatResource, branch_name: String) -> bool:
-	## Per-base-unit lock: rejects if this base already has an active
-	## commit (so two armories can't double-commit the same unit) or
-	## if the branch is already finalised. Distinct base units run in
-	## parallel without contention.
+func start_commit(base_stats: UnitStatResource, branch_stats: UnitStatResource, branch_name: String, owner_id: int = 0) -> bool:
+	## Per-(owner, base unit) lock: rejects if this owner already has an
+	## active commit for the base, or already finalised it. Distinct
+	## base units (or distinct owners) run in parallel without contention.
 	if not base_stats:
 		return false
-	if is_committing_unit(base_stats.unit_name):
+	if is_committing_unit(base_stats.unit_name, owner_id):
 		return false
-	if has_committed(base_stats.unit_name):
+	if has_committed(base_stats.unit_name, owner_id):
 		return false
 
-	_active_commits[base_stats.unit_name] = {
+	if not _active_commits.has(owner_id):
+		_active_commits[owner_id] = {}
+	(_active_commits[owner_id] as Dictionary)[base_stats.unit_name] = {
 		"base_stats": base_stats,
 		"branch_stats": branch_stats,
 		"branch_name": branch_name,
@@ -154,48 +171,65 @@ func start_commit(base_stats: UnitStatResource, branch_stats: UnitStatResource, 
 	return true
 
 
-func cancel_commit(base_unit_name: String = "") -> bool:
-	## Aborts a specific in-flight commit. With an empty name, cancels
-	## the first active commit (matches the legacy single-commit
-	## behaviour). Caller refunds the cost via its ResourceManager.
-	if _active_commits.is_empty():
+func cancel_commit(base_unit_name: String = "", owner_id: int = 0) -> bool:
+	## Aborts a specific in-flight commit for this owner. Empty name =
+	## first active commit (legacy single-commit behaviour). Caller
+	## refunds the cost via its ResourceManager.
+	var per_owner: Dictionary = _owner_active(owner_id)
+	if per_owner.is_empty():
 		return false
 	var key: String = base_unit_name
 	if key == "":
-		var keys: Array = _active_commits.keys()
+		var keys: Array = per_owner.keys()
 		keys.sort()
 		key = keys[0] as String
-	if not _active_commits.has(key):
+	if not per_owner.has(key):
 		return false
-	_active_commits.erase(key)
+	per_owner.erase(key)
+	# Clean up empty owner slot.
+	if per_owner.is_empty():
+		_active_commits.erase(owner_id)
 	return true
 
 
-func _finish_commit(base_unit_name: String) -> void:
-	if not _active_commits.has(base_unit_name):
+func _finish_commit(owner_id: int, base_unit_name: String) -> void:
+	var per_owner_active: Dictionary = _owner_active(owner_id)
+	if not per_owner_active.has(base_unit_name):
 		return
-	var commit: Dictionary = _active_commits[base_unit_name] as Dictionary
+	var commit: Dictionary = per_owner_active[base_unit_name] as Dictionary
 	var base_stats: UnitStatResource = commit["base_stats"] as UnitStatResource
 	var branch_stats: UnitStatResource = commit["branch_stats"] as UnitStatResource
 	var branch_name: String = commit["branch_name"] as String
 
-	_committed_branches[base_stats.unit_name] = branch_stats
-	_active_commits.erase(base_unit_name)
+	if not _committed_branches.has(owner_id):
+		_committed_branches[owner_id] = {}
+	(_committed_branches[owner_id] as Dictionary)[base_stats.unit_name] = branch_stats
+	per_owner_active.erase(base_unit_name)
+	if per_owner_active.is_empty():
+		_active_commits.erase(owner_id)
 
-	# Upgrade all existing units of this type
-	_upgrade_existing_units(base_stats, branch_stats)
+	# Upgrade only this owner's existing units of this type — opponents
+	# keep base stats.
+	_upgrade_existing_units(base_stats, branch_stats, owner_id)
 
-	branch_committed.emit(base_stats.unit_name, branch_name)
+	branch_committed.emit(owner_id, base_stats.unit_name, branch_name)
 
 	var audio: Node = get_tree().current_scene.get_node_or_null("AudioManager")
 	if audio and audio.has_method("play_construction_complete"):
 		audio.play_construction_complete()
 
 
-func _upgrade_existing_units(base_stats: UnitStatResource, branch_stats: UnitStatResource) -> void:
+func _upgrade_existing_units(base_stats: UnitStatResource, branch_stats: UnitStatResource, owner_id: int) -> void:
 	var units: Array[Node] = get_tree().get_nodes_in_group("units")
 	for node: Node in units:
 		if not ("stats" in node):
+			continue
+		if not ("owner_id" in node):
+			continue
+		# Owner-scope: only upgrade units belonging to the committing
+		# player. Was previously unfiltered — a player's commit
+		# upgraded enemy units of the same unit_name too.
+		if (node.get("owner_id") as int) != owner_id:
 			continue
 		var unit_stats: UnitStatResource = node.get("stats") as UnitStatResource
 		if not unit_stats:
@@ -207,7 +241,5 @@ func _upgrade_existing_units(base_stats: UnitStatResource, branch_stats: UnitSta
 			if node.has_method("_init_hp"):
 				node._init_hp()
 			# Rebuild visuals so the upgrade reads on existing squads.
-			# Unit uses `_build_squad_visuals`, not the Building-only
-			# `_apply_placeholder_shape` we used to call here.
 			if node.has_method("_build_squad_visuals"):
 				node._build_squad_visuals()

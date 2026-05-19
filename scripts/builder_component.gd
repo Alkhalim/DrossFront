@@ -18,6 +18,41 @@ signal construction_finished(building: Building)
 ## minor separation-force nudges without re-issuing the approach.
 const BUILD_BUFFER: float = 4.8
 
+## --- Engineer build-flow diagnostics ----------------------------------------
+## Set BUILDER_DEBUG_LOG = true to surface state transitions, periodic
+## snapshots, and reasons the engineer isn't building. Tagged with
+## [ENG name=<unit>] so it's easy to filter in the Godot console.
+## Disabled now that engineer-build investigation has wound down —
+## flip back on if a future engineer regression needs the trace.
+const BUILDER_DEBUG_LOG: bool = false
+const BUILDER_DEBUG_SNAPSHOT_SEC: float = 2.0
+enum _DbgState {IDLE, APPROACH, DOCKED}
+var _dbg_state: _DbgState = _DbgState.IDLE
+var _dbg_last_foundation_clear: bool = true
+var _dbg_snapshot_accum: float = 0.0
+var _dbg_advance_tick_logged: bool = false
+
+
+func _dbg(msg: String) -> void:
+	if not BUILDER_DEBUG_LOG:
+		return
+	var uname: String = "?"
+	if _unit and is_instance_valid(_unit):
+		var stats: UnitStatResource = _unit.get("stats") as UnitStatResource
+		uname = stats.unit_name if stats else "?"
+		uname = "%s#%d" % [uname, _unit.get_instance_id() % 10000]
+	print("[ENG %s] %s" % [uname, msg])
+
+
+func _dbg_target_name() -> String:
+	if not _target_building or not is_instance_valid(_target_building):
+		return "(none)"
+	var bs: BuildingStatResource = _target_building.stats
+	if bs == null:
+		return "?"
+	return "%s#%d" % [bs.building_name, _target_building.get_instance_id() % 10000]
+
+
 var _target_building: Building = null
 ## Damaged friendly node (Building or Unit) the engineer is currently
 ## walking to / repairing. Independent from `_target_building` because
@@ -33,6 +68,14 @@ var _approach_stuck_timer: float = 0.0
 var _approach_last_dist: float = INF
 const APPROACH_GIVEUP_SEC: float = 20.0
 const APPROACH_PROGRESS_EPSILON: float = 0.5
+## Soft escalation before the giveup timer: if the engineer hasn't made
+## progress for this long, force a slot rotation. Catches the "stuck
+## behind a peer engineer that already docked" case where no
+## path_unreachable signal ever fires — the kernel just reports the
+## unit as arrived at its repelled position. Tight enough that 3
+## retries finish in ~6 s, well before a player would grow impatient
+## and right-click the engineer somewhere else.
+const APPROACH_ROTATE_SEC: float = 2.0
 
 ## Hysteresis on the "in build range" check. Once the engineer has
 ## docked, allow it to drift this much past build_max before re-issuing
@@ -44,6 +87,17 @@ const APPROACH_PROGRESS_EPSILON: float = 0.5
 const BUILD_RANGE_HYSTERESIS: float = 1.5
 var _was_in_build_range: bool = false
 
+## When at least one peer engineer already shares this target, allow
+## docking from a wider orbit. Two engineers queued on the same small
+## foundation can't both fit in the tight inner ring — the rear one
+## ends up frozen ~1 u outside build_max while peer-separation force
+## pushes them apart. With this bonus the second-in-line engineer
+## docks from up to build_max + 2.5 u and joins construction from the
+## periphery instead of pathing in circles. Slot rotation still
+## triggers if neither engineer is making progress, so genuinely
+## unreachable sites still escalate to the giveup branch.
+const PEER_DOCK_BONUS: float = 2.5
+
 ## Cached approach point so we don't re-issue the same command_move every
 ## physics frame. command_move's idempotency check only fires when the
 ## caller passes clear_combat=true; BuilderComponent passes false (so the
@@ -54,10 +108,84 @@ var _last_command_move_dest: Vector3 = Vector3.INF
 const COMMAND_MOVE_REISSUE_DIST: float = 0.5
 
 
+## Bumped each time the MovementComponent reports path_unreachable while
+## this builder has an active target. Offsets the approach-angle picker
+## so the next attempt picks a DIFFERENT slot around the foundation —
+## fixes the case where one engineer docks at slot A and a second
+## engineer's path to slot B fails (foundation collision activated, or
+## the docked engineer's body sits across the route), leaving the
+## second engineer frozen 1-2u outside build range forever.
+## Resets to 0 on dock or target change.
+var _approach_retry_count: int = 0
+
+
 func _ready() -> void:
 	_unit = get_parent() as Unit
 	if not _unit:
 		push_error("BuilderComponent must be a child of a Unit node.")
+		return
+	# Hook path_unreachable on the unit's MovementComponent so a failed
+	# approach immediately re-picks a slot instead of waiting for the
+	# 20 s stuck-timer fallback.
+	var mc: Node = _unit.get_node_or_null("MovementComponent")
+	if mc and mc.has_signal("path_unreachable"):
+		if not mc.path_unreachable.is_connected(_on_path_unreachable):
+			mc.path_unreachable.connect(_on_path_unreachable)
+
+
+## Max approach-slot retries before we give up on a target. Playtest
+## 2026-05-15: the kernel doesn't always re-emit path_unreachable on the
+## NEXT failed path, so the retry loop can silently freeze after one
+## attempt. Capping at 3 means after the first failure and two rotated
+## retries the engineer drops the target and falls back to IDLE — which
+## immediately auto-assists a reachable building elsewhere instead of
+## sitting idle until someone else finishes the unreachable one.
+const APPROACH_MAX_RETRIES: int = 3
+
+
+func _force_idle_scan_now() -> void:
+	## Reset the IDLE-scan throttles so the very next physics tick runs
+	## _try_auto_assist immediately, regardless of the periodic gate.
+	## Used after a target drop (retry-exceeded, stuck-giveup) so the
+	## engineer doesn't sit idle next to obvious work waiting for the
+	## throttle window to expire.
+	_idle_scan_frame = IDLE_SCAN_FRAME_INTERVAL
+	_next_idle_scan_msec = 0
+
+
+func _on_path_unreachable(_reason: int) -> void:
+	## Forward the kernel's "I can't path there" event to the builder
+	## state machine: invalidate the cached approach slot + bump the
+	## retry index so _pick_approach_angle starts from a rotated base
+	## angle on the next physics tick. After APPROACH_MAX_RETRIES the
+	## engineer gives up on this target entirely.
+	if not _target_building or not is_instance_valid(_target_building):
+		return
+	_approach_retry_count += 1
+	if _approach_retry_count > APPROACH_MAX_RETRIES:
+		_dbg("path_unreachable -> exceeded %d retries, dropping target %s" % [
+			APPROACH_MAX_RETRIES, _dbg_target_name()])
+		_target_building = null
+		_dbg_state = _DbgState.IDLE
+		_approach_retry_count = 0
+		_approach_stuck_timer = 0.0
+		_approach_last_dist = INF
+		_last_command_move_dest = Vector3.INF
+		_unit.stop()
+		_set_build_anim(false)
+		# Force the next tick's IDLE branch to immediately scan for a
+		# new auto-assist target, instead of waiting for the throttle.
+		# Otherwise the engineer can sit idle next to obvious work for
+		# the throttle window (250 ms+) before noticing it.
+		_force_idle_scan_now()
+		return
+	_cached_approach_for = null
+	_last_command_move_dest = Vector3.INF
+	# Reset progress-tracking so the new path gets a fresh shot at
+	# making progress before the 20 s stuck-timer fires.
+	_approach_last_dist = INF
+	_approach_stuck_timer = 0.0
+	_dbg("path_unreachable -> re-picking approach slot (retry #%d)" % _approach_retry_count)
 
 
 ## Radius in which a freshly-idle engineer will automatically pitch in on a
@@ -95,7 +223,7 @@ var _idle_scan_frame: int = 0
 ## where build_time is multi-second and repair patients don't appear
 ## faster than ~2s. Wall-clock gating makes the cadence physics-rate
 ## independent so future physics retunes don't reintroduce the issue.
-const IDLE_SCAN_MIN_INTERVAL_MSEC: int = 500
+const IDLE_SCAN_MIN_INTERVAL_MSEC: int = 250
 var _next_idle_scan_msec: int = 0
 
 
@@ -120,8 +248,15 @@ func _physics_process(delta: float) -> void:
 	if "_move_priority_until_ms" in _unit:
 		var prio_until: int = _unit.get("_move_priority_until_ms") as int
 		if prio_until > 0 and Time.get_ticks_msec() < prio_until:
+			if _target_building and _dbg_state != _DbgState.IDLE:
+				_dbg("priority-window blocks tick (target=%s, %dms remaining)" % [
+					_dbg_target_name(), prio_until - Time.get_ticks_msec()])
 			return
 	if not _target_building or not is_instance_valid(_target_building):
+		if _dbg_state != _DbgState.IDLE:
+			_dbg("target freed/invalid -> IDLE")
+			_dbg_state = _DbgState.IDLE
+			_dbg_advance_tick_logged = false
 		_target_building = null
 		_set_build_anim(false)
 		# No construction in progress — auto-assist construction
@@ -162,7 +297,10 @@ func _physics_process(delta: float) -> void:
 	_idle_scan_frame = 0
 
 	if _target_building.is_constructed:
+		_dbg("target %s reports is_constructed -> dropping target" % _dbg_target_name())
 		_target_building = null
+		_dbg_state = _DbgState.IDLE
+		_dbg_advance_tick_logged = false
 		_unit.stop()
 		_set_build_anim(false)
 		# Same priority order on the just-finished branch -- look
@@ -180,9 +318,34 @@ func _physics_process(delta: float) -> void:
 	# Hysteresis: once we've docked, require a larger drift before going
 	# back to approach. Stops the "bounce in and out of build range" loop
 	# when separation force nudges a docked engineer ~1 u outward.
-	var range_threshold: float = build_max + (BUILD_RANGE_HYSTERESIS if _was_in_build_range else 0.0)
+	# Peer dock bonus: if another engineer already shares this target,
+	# accept docking from a wider orbit (PEER_DOCK_BONUS). The rear
+	# engineer in a queue can't push past the front engineer's collider
+	# to reach the tight inner ring; without this they freeze at
+	# dist ≈ build_max + 1 forever (playtest 2026-05-15, eng#6915
+	# stuck behind eng#8171 at the same Foundry).
+	var peer_bonus: float = PEER_DOCK_BONUS if _count_peer_engineers_at_target() > 0 else 0.0
+	var range_threshold: float = build_max + peer_bonus + (BUILD_RANGE_HYSTERESIS if _was_in_build_range else 0.0)
+
+	# Periodic snapshot so slow drift / pacing without a state change is
+	# visible. Limited to every BUILDER_DEBUG_SNAPSHOT_SEC seconds so the
+	# console doesn't flood.
+	if BUILDER_DEBUG_LOG:
+		_dbg_snapshot_accum += delta
+		if _dbg_snapshot_accum >= BUILDER_DEBUG_SNAPSHOT_SEC:
+			_dbg_snapshot_accum = 0.0
+			_dbg("snapshot target=%s dist=%.2f build_max=%.2f thresh=%.2f in_range=%s state=%s" % [
+				_dbg_target_name(), dist, build_max, range_threshold,
+				str(_was_in_build_range), _DbgState.keys()[_dbg_state]])
 
 	if dist > range_threshold:
+		if _was_in_build_range:
+			_dbg("DOCKED -> APPROACH (drifted out: dist=%.2f > thresh=%.2f)" % [dist, range_threshold])
+		elif _dbg_state != _DbgState.APPROACH:
+			_dbg("IDLE -> APPROACH target=%s dist=%.2f build_max=%.2f" % [
+				_dbg_target_name(), dist, build_max])
+		_dbg_state = _DbgState.APPROACH
+		_dbg_advance_tick_logged = false
 		_was_in_build_range = false
 		# Move toward an approach point just outside the building edge facing us,
 		# rather than the building center (which sits inside its nav obstacle and
@@ -199,31 +362,69 @@ func _physics_process(delta: float) -> void:
 		# stutter on approach.
 		var approach_pt: Vector3 = _approach_point()
 		if approach_pt.distance_squared_to(_last_command_move_dest) > COMMAND_MOVE_REISSUE_DIST * COMMAND_MOVE_REISSUE_DIST:
+			_dbg("re-issuing command_move approach_pt=(%.1f,%.1f) was=(%.1f,%.1f)" % [
+				approach_pt.x, approach_pt.z, _last_command_move_dest.x, _last_command_move_dest.z])
 			_unit.command_move(approach_pt, false)
 			_last_command_move_dest = approach_pt
 		_set_build_anim(false)
 		# Track progress — if we don't shrink the distance for too long
 		# the build site is probably unreachable (e.g. the player placed
-		# it behind their HQ in a corner the navmesh can't connect to).
-		# Drop the assignment so the engineer can take other work.
+		# it behind their HQ in a corner the navmesh can't connect to)
+		# OR another engineer is parked at our slot, repelling us via
+		# separation force without ever firing path_unreachable.
+		# Three-phase escalation:
+		#   - APPROACH_ROTATE_SEC of no progress: rotate to the next slot
+		#     (cheaper than the full target drop; handles the "stuck
+		#     behind a peer engineer" case observed 2026-05-15).
+		#   - APPROACH_GIVEUP_SEC of cumulative no-progress: drop the
+		#     target (long-running fallback for genuinely unreachable
+		#     sites).
 		if dist + APPROACH_PROGRESS_EPSILON < _approach_last_dist:
 			_approach_last_dist = dist
 			_approach_stuck_timer = 0.0
 		else:
 			_approach_stuck_timer += delta
-			if _approach_stuck_timer >= APPROACH_GIVEUP_SEC:
+			if _approach_stuck_timer >= APPROACH_ROTATE_SEC \
+					and _approach_retry_count < APPROACH_MAX_RETRIES:
+				# Force a slot rotation. Mirrors the path_unreachable
+				# response since we never get the explicit signal in
+				# the peer-repel case: the kernel reports the unit as
+				# arrived at its current position, just outside the
+				# build perimeter, and never re-pathfinds.
+				_approach_retry_count += 1
+				_cached_approach_for = null
+				_last_command_move_dest = Vector3.INF
+				_approach_stuck_timer = 0.0
+				_approach_last_dist = INF
+				_dbg("no-progress for %.1fs at dist=%.2f -> rotating approach slot (retry #%d)" % [
+					APPROACH_ROTATE_SEC, dist, _approach_retry_count])
+			elif _approach_stuck_timer >= APPROACH_GIVEUP_SEC:
+				_dbg("stuck timer expired (%.1fs no progress, dist=%.2f) -> dropping target %s" % [
+					APPROACH_GIVEUP_SEC, dist, _dbg_target_name()])
 				_target_building = null
+				_dbg_state = _DbgState.IDLE
 				_approach_stuck_timer = 0.0
 				_approach_last_dist = INF
 				_last_command_move_dest = Vector3.INF
+				_approach_retry_count = 0
 				_unit.stop()
+				# Drop -> immediate auto-assist scan next tick (see
+				# _force_idle_scan_now). Stops idle pacing next to
+				# obvious work after the giveup fires.
+				_force_idle_scan_now()
 		return
 
 	# Reset the stuck tracker once we're inside the build perimeter.
+	if _dbg_state != _DbgState.DOCKED:
+		_dbg("APPROACH -> DOCKED dist=%.2f build_max=%.2f" % [dist, build_max])
+	_dbg_state = _DbgState.DOCKED
 	_was_in_build_range = true
 	_approach_stuck_timer = 0.0
 	_approach_last_dist = INF
 	_last_command_move_dest = Vector3.INF
+	# Cleared the retry counter — we successfully reached an approach
+	# slot, so the next target starts fresh.
+	_approach_retry_count = 0
 
 	# Foundation-block self-rescue was the workaround for "engineer
 	# inside the foundation footprint blocks its own construction".
@@ -244,14 +445,24 @@ func _physics_process(delta: float) -> void:
 		# n_peers = number of OTHER Restorers also on this target.
 		# Total = n_peers + self → index into [1.0, 1.0, 1.4, 1.8], capped at 3.
 		collab_mult = ([1.0, 1.0, 1.4, 1.8] as Array)[mini(n_peers + 1, 3)]
+	var foundation_clear: bool = _target_building._is_foundation_clear()
+	if BUILDER_DEBUG_LOG and foundation_clear != _dbg_last_foundation_clear:
+		_dbg("foundation_clear=%s (target=%s)" % [str(foundation_clear), _dbg_target_name()])
+		_dbg_last_foundation_clear = foundation_clear
 	_target_building.advance_construction(build_rate * delta * collab_mult, _unit)
+	if BUILDER_DEBUG_LOG and not _dbg_advance_tick_logged and foundation_clear:
+		_dbg("construction advancing on %s (collab_mult=%.2f)" % [_dbg_target_name(), collab_mult])
+		_dbg_advance_tick_logged = true
 	# Only animate when the foundation is actually progressing (it can be
 	# blocked by units standing inside the footprint).
-	_set_build_anim(not _target_building.is_constructed and _target_building._is_foundation_clear())
+	_set_build_anim(not _target_building.is_constructed and foundation_clear)
 
 	if _target_building.is_constructed:
+		_dbg("construction_finished -> %s" % _dbg_target_name())
 		construction_finished.emit(_target_building)
 		_target_building = null
+		_dbg_state = _DbgState.IDLE
+		_dbg_advance_tick_logged = false
 		_set_build_anim(false)
 
 
@@ -378,6 +589,17 @@ func start_building(building: Building) -> void:
 	_approach_last_dist = INF
 	_was_in_build_range = false
 	_last_command_move_dest = Vector3.INF
+	_approach_retry_count = 0
+	_dbg_state = _DbgState.APPROACH
+	_dbg_last_foundation_clear = true
+	_dbg_snapshot_accum = 0.0
+	_dbg_advance_tick_logged = false
+	if BUILDER_DEBUG_LOG and building and is_instance_valid(building):
+		var bs: BuildingStatResource = building.stats
+		var bname: String = bs.building_name if bs else "?"
+		var bdist: float = _unit.global_position.distance_to(building.global_position) if _unit else -1.0
+		_dbg("start_building target=%s#%d dist=%.2f build_max=%.2f" % [
+			bname, building.get_instance_id() % 10000, bdist, _build_max_distance()])
 	# Player just explicitly assigned this engineer to a build site.
 	# Clear any prior priority window — if the player had right-clicked
 	# the engineer somewhere else seconds ago and it set _move_priority_
@@ -526,7 +748,14 @@ func _pick_approach_angle() -> float:
 	to_unit.y = 0.0
 	if to_unit.length_squared() < 0.01:
 		to_unit = Vector3(1, 0, 0)
-	var base_angle: float = atan2(to_unit.z, to_unit.x)
+	# Rotate the base angle by 45° per failed path attempt so each retry
+	# starts the alternating slot scan from a fresh position around the
+	# foundation. Without this offset, _pick_approach_angle would keep
+	# selecting the same nearest-to-engineer slot — which is exactly the
+	# slot whose path just failed — and the engineer would never reach
+	# the foundation (snapshot captured 2026-05-15: engineer #641 frozen
+	# at dist=9.29 for 15+ ticks after path_unreachable).
+	var base_angle: float = atan2(to_unit.z, to_unit.x) + (TAU / 8.0) * float(_approach_retry_count)
 	for i in 8:
 		var sign_val: int = (1 if i % 2 == 0 else -1)
 		var step: int = (i + 1) / 2
@@ -687,8 +916,14 @@ func cancel_build() -> void:
 	## Called by the player issuing a non-build command (move/attack) so the
 	## builder doesn't immediately drag the unit back to the construction
 	## site or repair patient.
+	if _target_building or _repair_target:
+		_dbg("cancel_build (was target=%s, repair=%s)" % [
+			_dbg_target_name(),
+			str(_repair_target.name) if _repair_target and is_instance_valid(_repair_target) else "none"])
 	_target_building = null
 	_repair_target = null
+	_dbg_state = _DbgState.IDLE
+	_dbg_advance_tick_logged = false
 
 
 func _try_auto_assist() -> void:

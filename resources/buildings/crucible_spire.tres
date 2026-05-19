@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="BuildingStatResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_stat_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+building_name = "Crucible Spire"
+building_id = &"crucible_spire"
+hp = 950
+cost_salvage = 380
+cost_fuel = 60
+build_time = 38.0
+power_consumption = 0
+power_production = 60
+producible_units = []
+footprint_size = Vector3(3.5, 5.5, 3.5)
+placeholder_color = Color(0.55, 0.32, 0.18, 1)
+is_advanced = true
+prerequisites = [&"forge_pit"]
+faction_lock = 4
+weapons = []
+is_mobile = true
+requires_geothermic_vent = true

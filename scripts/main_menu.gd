@@ -715,9 +715,10 @@ func _build_ai_row(player_id: int, label_text: String, team: int) -> void:
 	for pers_entry: Dictionary in [
 		{"label": "Random", "value": MatchSettingsClass.AiPersonality.RANDOM},
 		{"label": "Balanced", "value": MatchSettingsClass.AiPersonality.BALANCED},
-		{"label": "Turret-Heavy", "value": MatchSettingsClass.AiPersonality.TURRET_HEAVY},
-		{"label": "Economy-Heavy", "value": MatchSettingsClass.AiPersonality.ECONOMY_HEAVY},
-		{"label": "Rush", "value": MatchSettingsClass.AiPersonality.RUSH},
+		{"label": "Turtle (Turret-Heavy)", "value": MatchSettingsClass.AiPersonality.TURRET_HEAVY},
+		{"label": "Booming (Economy-Heavy)", "value": MatchSettingsClass.AiPersonality.ECONOMY_HEAVY},
+		{"label": "Aggressive (Rush)", "value": MatchSettingsClass.AiPersonality.RUSH},
+		{"label": "Air Doctrine", "value": MatchSettingsClass.AiPersonality.AIR},
 	]:
 		pers_dropdown.add_item(pers_entry["label"] as String, pers_entry["value"] as int)
 	pers_dropdown.selected = 0  # default Random
